@@ -47,7 +47,7 @@ struct Inner {
     /// Last seen values of nondecreasing expressions, buffered to periodically produce watermarks.
     last_nondec_expr_values: Vec<Option<ScalarImpl>>,
 
-    /// the selectivity threshold which should be in [0,1]. for the chunk with selectivity less
+    /// the selectivity threshold which should be in `[0,1]`. for the chunk with selectivity less
     /// than the threshold, the Project executor will construct a new chunk before expr evaluation,
     materialize_selectivity_threshold: f64,
 

@@ -555,12 +555,16 @@ impl PlanRoot {
         definition: String,
         properties: WithOptions,
         emit_on_window_close: bool,
+        db_name: String,
+        sink_from_table_name: String,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
         StreamSink::create(
             stream_plan,
             sink_name,
+            db_name,
+            sink_from_table_name,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),

@@ -38,6 +38,7 @@ pub use schema_registry::name_strategy_from_str;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
+pub use self::mysql::mysql_row_to_datums;
 use self::plain_parser::PlainParser;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
 use self::unified::AccessImpl;
@@ -58,6 +59,7 @@ mod csv_parser;
 mod debezium;
 mod json_parser;
 mod maxwell;
+mod mysql;
 mod plain_parser;
 mod protobuf;
 mod schema_registry;
@@ -134,7 +136,7 @@ pub struct SourceStreamChunkRowWriter<'a> {
 
 /// `WriteGuard` can't be constructed directly in other mods due to a private field, so it can be
 /// used to ensure that all methods on [`SourceStreamChunkRowWriter`] are called at least once in
-/// the [`SourceParser::parse`] implementation.
+/// the `SourceParser::parse` implementation.
 #[derive(Debug)]
 pub struct WriteGuard(());
 
@@ -169,7 +171,7 @@ impl OpAction for OpActionInsert {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::Insert)
+        writer.op_builder.push(Op::Insert);
     }
 }
 
@@ -192,7 +194,7 @@ impl OpAction for OpActionDelete {
 
     #[inline(always)]
     fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.op_builder.push(Op::Delete)
+        writer.op_builder.push(Op::Delete);
     }
 }
 
@@ -237,10 +239,10 @@ impl SourceStreamChunkRowWriter<'_> {
             .zip_eq(self.builders.iter_mut())
             .enumerate()
             .try_for_each(|(idx, (desc, builder))| -> Result<()> {
-                if desc.is_meta {
+                if desc.is_meta() || desc.is_offset() {
                     return Ok(());
                 }
-                let output = if desc.is_row_id {
+                let output = if desc.is_row_id() {
                     A::DEFAULT_OUTPUT
                 } else {
                     f(desc)?
@@ -277,11 +279,11 @@ impl SourceStreamChunkRowWriter<'_> {
 
     /// For other op like 'insert', 'update', 'delete', we will leave the hollow for the meta column
     /// builder. e.g after insert
-    /// `data_builder` = [1], `meta_column_builder` = [], `op` = [insert]
+    /// `data_builder = [1], meta_column_builder = [], op = [insert]`
     ///
     /// This function is used to fulfill this hollow in `meta_column_builder`.
     /// e.g after fulfill
-    /// `data_builder` = [1], `meta_column_builder` = [1], `op` = [insert]
+    /// `data_builder = [1], meta_column_builder = [1], op = [insert]`
     pub fn fulfill_meta_column(
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Option<Datum>,
@@ -371,7 +373,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     ///
     /// # Returns
     ///
-    /// A [`BoxSourceWithStateStream`] which is a stream of parsed msgs.
+    /// A [`crate::source::BoxSourceWithStateStream`] which is a stream of parsed msgs.
     fn into_stream(self, data_stream: BoxSourceStream) -> impl SourceWithStateStream {
         into_chunk_stream(self, data_stream)
     }
@@ -435,10 +437,10 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 continue;
             }
 
-            split_offset_mapping.insert(msg.split_id, msg.offset);
+            let msg_offset = msg.offset;
+            split_offset_mapping.insert(msg.split_id, msg_offset.clone());
 
             let old_op_num = builder.op_num();
-
             match parser
                 .parse_one_with_txn(msg.key, msg.payload, builder.row_writer())
                 .await
@@ -452,26 +454,36 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         *len += new_op_num - old_op_num;
                     }
 
+                    // fill in meta column for specific source and offset column if needed
                     for _ in old_op_num..new_op_num {
-                        // TODO: support more kinds of SourceMeta
-                        if let SourceMeta::Kafka(kafka_meta) = &msg.meta {
-                            let f = |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
-                        if !desc.is_meta {
-                            return None;
-                        }
-                        match desc.name.as_str() {
-                            KAFKA_TIMESTAMP_COLUMN_NAME => Some(kafka_meta.timestamp.map(|ts| {
-                                risingwave_common::cast::i64_to_timestamptz(ts)
-                                    .unwrap()
-                                    .into()
-                            })),
-                            _ => {
-                                unreachable!("kafka will not have this meta column: {}", desc.name)
-                            }
-                        }
-                    };
-                            builder.row_writer().fulfill_meta_column(f)?;
-                        }
+                        let f =
+                            |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
+                                if desc.is_meta() && let SourceMeta::Kafka(kafka_meta) = &msg.meta {
+                                    match desc.name.as_str() {
+                                        KAFKA_TIMESTAMP_COLUMN_NAME => {
+                                            Some(kafka_meta.timestamp.map(|ts| {
+                                                risingwave_common::cast::i64_to_timestamptz(ts)
+                                                    .unwrap()
+                                                    .into()
+                                            }))
+                                        }
+                                        _ => {
+                                            unreachable!(
+                                                "kafka will not have this meta column: {}",
+                                                desc.name
+                                            )
+                                        }
+                                    }
+                                } else if desc.is_offset() {
+                                    Some(Some(msg_offset.as_str().into()))
+                                } else {
+                                    // None will be ignored by `fulfill_meta_column`
+                                    None
+                                }
+                            };
+
+                        // fill in meta or offset column if any
+                        builder.row_writer().fulfill_meta_column(f)?;
                     }
                 }
 
@@ -505,8 +517,8 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
                 Err(error) => {
                     tracing::warn!(%error, "message parsing failed, skipping");
-                    // This will throw an error for batch
-                    parser.source_ctx().report_user_source_error(error)?;
+                    // Skip for batch
+                    parser.source_ctx().report_user_source_error(error);
                     continue;
                 }
             }
@@ -557,7 +569,9 @@ impl AccessBuilderImpl {
             EncodingProperties::Bytes(_) => {
                 AccessBuilderImpl::Bytes(BytesAccessBuilder::new(config)?)
             }
-            EncodingProperties::Json(_) => AccessBuilderImpl::Json(JsonAccessBuilder::new()?),
+            EncodingProperties::Json(config) => {
+                AccessBuilderImpl::Json(JsonAccessBuilder::new(config.use_schema_registry)?)
+            }
             _ => unreachable!(),
         };
         Ok(accessor)
@@ -615,7 +629,7 @@ impl ByteStreamSourceParserImpl {
         let encode = &parser_config.specific.encoding_config;
         match (protocol, encode) {
             (ProtocolProperties::Plain, EncodingProperties::Json(_)) => {
-                JsonParser::new(rw_columns, source_ctx).map(Self::Json)
+                JsonParser::new(parser_config.specific, rw_columns, source_ctx).map(Self::Json)
             }
             (ProtocolProperties::Plain, EncodingProperties::Csv(config)) => {
                 CsvParser::new(rw_columns, *config, source_ctx).map(Self::Csv)
@@ -623,8 +637,8 @@ impl ByteStreamSourceParserImpl {
             (ProtocolProperties::DebeziumMongo, EncodingProperties::Json(_)) => {
                 DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
             }
-            (ProtocolProperties::Canal, EncodingProperties::Json(_)) => {
-                CanalJsonParser::new(rw_columns, source_ctx).map(Self::CanalJson)
+            (ProtocolProperties::Canal, EncodingProperties::Json(config)) => {
+                CanalJsonParser::new(rw_columns, source_ctx, config).map(Self::CanalJson)
             }
             (ProtocolProperties::Native, _) => unreachable!("Native parser should not be created"),
             (ProtocolProperties::Upsert, _) => {
@@ -674,6 +688,17 @@ pub struct SpecificParserConfig {
     pub key_encoding_config: Option<EncodingProperties>,
     pub encoding_config: EncodingProperties,
     pub protocol_config: ProtocolProperties,
+}
+
+impl SpecificParserConfig {
+    // for test only
+    pub const DEFAULT_PLAIN_JSON: SpecificParserConfig = SpecificParserConfig {
+        key_encoding_config: None,
+        encoding_config: EncodingProperties::Json(JsonProperties {
+            use_schema_registry: false,
+        }),
+        protocol_config: ProtocolProperties::Plain,
+    };
 }
 
 #[derive(Debug, Clone, Default)]
@@ -728,7 +753,9 @@ pub struct CsvProperties {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct JsonProperties {}
+pub struct JsonProperties {
+    pub use_schema_registry: bool,
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct BytesProperties {
@@ -885,14 +912,20 @@ impl SpecificParserConfig {
                 })
             }
             (
-                SourceFormat::Debezium
-                | SourceFormat::DebeziumMongo
+                SourceFormat::Plain
+                | SourceFormat::Debezium
                 | SourceFormat::Maxwell
                 | SourceFormat::Canal
-                | SourceFormat::Plain
                 | SourceFormat::Upsert,
                 SourceEncode::Json,
-            ) => EncodingProperties::Json(JsonProperties {}),
+            ) => EncodingProperties::Json(JsonProperties {
+                use_schema_registry: info.use_schema_registry,
+            }),
+            (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
+                EncodingProperties::Json(JsonProperties {
+                    use_schema_registry: false,
+                })
+            }
             (SourceFormat::Plain, SourceEncode::Bytes) => {
                 EncodingProperties::Bytes(BytesProperties { column_name: None })
             }

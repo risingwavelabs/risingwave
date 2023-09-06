@@ -422,6 +422,8 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
         };
 
         let epoch1 = 233;
@@ -593,6 +595,8 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
         };
 
         let (manager, (_join_handle, _stop_tx)) = SinkCoordinatorManager::start_worker(None);
@@ -629,6 +633,8 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
         };
 
         let epoch = 233;
@@ -709,6 +715,8 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
         };
 
         let epoch = 233;

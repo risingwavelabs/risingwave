@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
+use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
 use risingwave_pb::connector_service::sink_coordinator_stream_request::{
     CommitMetadata, StartCoordinator,
@@ -159,7 +160,6 @@ impl ConnectorClient {
             })?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .tcp_nodelay(true)
             .connect_timeout(Duration::from_secs(5));
 
         let channel = {
@@ -169,7 +169,13 @@ impl ConnectorClient {
             }
             #[cfg(not(madsim))]
             {
-                endpoint.connect_lazy()
+                endpoint.monitored_connect_lazy(
+                    "grpc-connector-client",
+                    TcpConfig {
+                        tcp_nodelay: true,
+                        keepalive_duration: None,
+                    },
+                )
             }
         };
         Ok(Self {

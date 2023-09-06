@@ -42,6 +42,7 @@
 #![feature(result_option_inspect)]
 #![feature(map_entry_replace)]
 #![feature(negative_impls)]
+#![feature(async_fn_in_trait)]
 
 #[macro_use]
 pub mod jemalloc;

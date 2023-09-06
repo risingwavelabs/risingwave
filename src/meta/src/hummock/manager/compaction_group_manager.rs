@@ -50,9 +50,9 @@ use crate::model::{
 };
 use crate::storage::{MetaStore, Transaction};
 
-impl<S: MetaStore> HummockManager<S> {
+impl HummockManager {
     pub(super) async fn build_compaction_group_manager(
-        env: &MetaSrvEnv<S>,
+        env: &MetaSrvEnv,
     ) -> Result<RwLock<CompactionGroupManager>> {
         let default_config = match env.opts.compaction_config.as_ref() {
             None => CompactionConfigBuilder::new().build(),
@@ -62,7 +62,7 @@ impl<S: MetaStore> HummockManager<S> {
     }
 
     pub(super) async fn build_compaction_group_manager_with_config(
-        env: &MetaSrvEnv<S>,
+        env: &MetaSrvEnv,
         default_config: CompactionConfig,
     ) -> Result<RwLock<CompactionGroupManager>> {
         let compaction_group_manager = RwLock::new(CompactionGroupManager {
@@ -149,8 +149,8 @@ impl<S: MetaStore> HummockManager<S> {
     }
 
     /// Unregisters stale members and groups
-    /// The caller should ensure [`table_fragments_list`] remain unchanged during [`purge`].
-    /// Currently [`purge`] is only called during meta service start ups.
+    /// The caller should ensure `table_fragments_list` remain unchanged during `purge`.
+    /// Currently `purge` is only called during meta service start ups.
     #[named]
     pub async fn purge(&self, valid_ids: &[u32]) -> Result<()> {
         let registered_members =
@@ -165,8 +165,8 @@ impl<S: MetaStore> HummockManager<S> {
         Ok(())
     }
 
-    /// Prefer using [`register_table_fragments`].
-    /// Use [`register_table_ids`] only when [`TableFragments`] is unavailable.
+    /// Prefer using `register_table_fragments`.
+    /// Use `register_table_ids` only when [`TableFragments`] is unavailable.
     /// The implementation acquires `versioning` lock.
     #[named]
     pub async fn register_table_ids(
@@ -265,8 +265,8 @@ impl<S: MetaStore> HummockManager<S> {
         Ok(())
     }
 
-    /// Prefer using [`unregister_table_fragments_vec`].
-    /// Only Use [`unregister_table_ids`] only when [`TableFragments`] is unavailable.
+    /// Prefer using `unregister_table_fragments_vec`.
+    /// Only use `unregister_table_ids` when [`TableFragments`] is unavailable.
     /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
     #[named]
     pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {

@@ -46,14 +46,9 @@ impl MonitoredHummockMetaClient {
 #[async_trait]
 impl HummockMetaClient for MonitoredHummockMetaClient {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
-        self.stats.unpin_version_before_counts.inc();
-        let timer = self.stats.unpin_version_before_latency.start_timer();
-        let res = self
-            .meta_client
+        self.meta_client
             .unpin_version_before(unpin_version_before)
-            .await;
-        timer.observe_duration();
-        res
+            .await
     }
 
     async fn get_current_version(&self) -> Result<HummockVersion> {
@@ -61,27 +56,15 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     }
 
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
-        self.stats.pin_snapshot_counts.inc();
-        let timer = self.stats.pin_snapshot_latency.start_timer();
-        let res = self.meta_client.pin_snapshot().await;
-        timer.observe_duration();
-        res
+        self.meta_client.pin_snapshot().await
     }
 
     async fn get_snapshot(&self) -> Result<HummockSnapshot> {
-        self.stats.pin_snapshot_counts.inc();
-        let timer = self.stats.pin_snapshot_latency.start_timer();
-        let res = self.meta_client.get_snapshot().await;
-        timer.observe_duration();
-        res
+        self.meta_client.get_snapshot().await
     }
 
     async fn unpin_snapshot(&self) -> Result<()> {
-        self.stats.unpin_snapshot_counts.inc();
-        let timer = self.stats.unpin_snapshot_latency.start_timer();
-        let res = self.meta_client.unpin_snapshot().await;
-        timer.observe_duration();
-        res
+        self.meta_client.unpin_snapshot().await
     }
 
     async fn unpin_snapshot_before(&self, _min_epoch: HummockEpoch) -> Result<()> {

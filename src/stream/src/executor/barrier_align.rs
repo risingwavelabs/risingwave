@@ -25,7 +25,7 @@ use risingwave_common::bail;
 use super::error::StreamExecutorError;
 use super::{Barrier, BoxedMessageStream, Message, StreamChunk, StreamExecutorResult, Watermark};
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::ActorId;
+use crate::task::{ActorId, FragmentId};
 
 pub type AlignedMessageStreamItem = StreamExecutorResult<AlignedMessage>;
 pub trait AlignedMessageStream = futures::Stream<Item = AlignedMessageStreamItem> + Send;
@@ -44,9 +44,11 @@ pub async fn barrier_align(
     mut left: BoxedMessageStream,
     mut right: BoxedMessageStream,
     actor_id: ActorId,
+    fragment_id: FragmentId,
     metrics: Arc<StreamingMetrics>,
 ) {
     let actor_id = actor_id.to_string();
+    let fragment_id = fragment_id.to_string();
     loop {
         let prefer_left: bool = rand::random();
         let select_result = if prefer_left {
@@ -107,7 +109,7 @@ pub async fn barrier_align(
                             yield AlignedMessage::Barrier(barrier);
                             metrics
                                 .join_barrier_align_duration
-                                .with_label_values(&[&actor_id, "right"])
+                                .with_label_values(&[&actor_id, &fragment_id, "right"])
                                 .observe(start_time.elapsed().as_secs_f64());
                             break;
                         }
@@ -133,7 +135,7 @@ pub async fn barrier_align(
                             yield AlignedMessage::Barrier(barrier);
                             metrics
                                 .join_barrier_align_duration
-                                .with_label_values(&[&actor_id, "left"])
+                                .with_label_values(&[&actor_id, &fragment_id, "left"])
                                 .observe(start_time.elapsed().as_secs_f64());
                             break;
                         }
@@ -159,7 +161,7 @@ mod tests {
         left: BoxedMessageStream,
         right: BoxedMessageStream,
     ) -> impl Stream<Item = Result<AlignedMessage, StreamExecutorError>> {
-        barrier_align(left, right, 0, Arc::new(StreamingMetrics::unused()))
+        barrier_align(left, right, 0, 0, Arc::new(StreamingMetrics::unused()))
     }
 
     #[tokio::test]

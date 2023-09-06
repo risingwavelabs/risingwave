@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use prometheus::core::{AtomicF64, GenericGaugeVec};
@@ -25,8 +25,11 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
-use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_object_store::object::object_metrics::{
+    ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
+};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_plan::stream_node::NodeBody::Sink;
 use tokio::sync::oneshot::Sender;
@@ -35,11 +38,9 @@ use tokio::task::JoinHandle;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::rpc::server::ElectionClientRef;
-use crate::storage::MetaStore;
 
+#[derive(Clone)]
 pub struct MetaMetrics {
-    pub registry: Registry,
-
     /// ********************************** Meta ************************************
     /// The number of workers in the cluster.
     pub worker_num: IntGaugeVec,
@@ -139,7 +140,7 @@ pub struct MetaMetrics {
     pub compact_level_compression_ratio: GenericGaugeVec<AtomicF64>,
     /// Per level number of running compaction task
     pub level_compact_task_cnt: IntGaugeVec,
-    pub time_after_last_observation: AtomicU64,
+    pub time_after_last_observation: Arc<AtomicU64>,
     pub l0_compact_level_count: HistogramVec,
     pub compact_task_size: HistogramVec,
     pub compact_task_file_count: HistogramVec,
@@ -171,9 +172,11 @@ pub struct MetaMetrics {
     pub table_write_throughput: IntCounterVec,
 }
 
+pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
+    LazyLock::new(|| MetaMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
 impl MetaMetrics {
-    pub fn new() -> Self {
-        let registry = prometheus::Registry::new();
+    fn new(registry: &Registry) -> Self {
         let opts = histogram_opts!(
             "meta_grpc_duration_seconds",
             "gRPC latency of meta services",
@@ -483,7 +486,7 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
-        let object_store_metric = Arc::new(ObjectStoreMetrics::new(registry.clone()));
+        let object_store_metric = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
 
         let recovery_failure_cnt = register_int_counter_with_registry!(
             "recovery_failure_cnt",
@@ -505,7 +508,7 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
-        let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::new(registry.clone()));
+        let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::default());
 
         let actor_info = register_int_gauge_vec_with_registry!(
             "actor_info",
@@ -611,7 +614,6 @@ impl MetaMetrics {
             register_histogram_with_registry!(opts, registry).unwrap();
 
         Self {
-            registry,
             grpc_latency,
             barrier_latency,
             barrier_wait_commit_latency,
@@ -653,7 +655,7 @@ impl MetaMetrics {
             full_gc_selected_object_count,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
-            time_after_last_observation: AtomicU64::new(0),
+            time_after_last_observation: Arc::new(AtomicU64::new(0)),
             worker_num,
             meta_type,
             compact_pending_bytes,
@@ -677,18 +679,19 @@ impl MetaMetrics {
         }
     }
 
-    pub fn registry(&self) -> &Registry {
-        &self.registry
+    #[cfg(test)]
+    pub fn for_test(registry: &Registry) -> Self {
+        Self::new(registry)
     }
 }
 impl Default for MetaMetrics {
     fn default() -> Self {
-        Self::new()
+        GLOBAL_META_METRICS.clone()
     }
 }
 
-pub async fn start_worker_info_monitor<S: MetaStore>(
-    cluster_manager: ClusterManagerRef<S>,
+pub async fn start_worker_info_monitor(
+    cluster_manager: ClusterManagerRef,
     election_client: Option<ElectionClientRef>,
     interval: Duration,
     meta_metrics: Arc<MetaMetrics>,
@@ -735,11 +738,11 @@ pub async fn start_worker_info_monitor<S: MetaStore>(
     (join_handle, shutdown_tx)
 }
 
-pub async fn start_fragment_info_monitor<S: MetaStore>(
-    cluster_manager: ClusterManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
-    hummock_manager: HummockManagerRef<S>,
+pub async fn start_fragment_info_monitor(
+    cluster_manager: ClusterManagerRef,
+    catalog_manager: CatalogManagerRef,
+    fragment_manager: FragmentManagerRef,
+    hummock_manager: HummockManagerRef,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
     const COLLECT_INTERVAL_SECONDS: u64 = 60;

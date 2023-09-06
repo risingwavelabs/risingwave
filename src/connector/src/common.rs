@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Ok;
+use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
 use clickhouse::Client;
 use rdkafka::ClientConfig;
@@ -143,15 +144,30 @@ pub struct RdKafkaPropertiesCommon {
     #[serde(rename = "properties.receive.message.max.bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub receive_message_max_bytes: Option<usize>,
+
+    #[serde(rename = "properties.statistics.interval.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub statistics_interval_ms: Option<usize>,
+
+    /// Client identifier
+    #[serde(rename = "properties.client.id")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub client_id: Option<String>,
 }
 
 impl RdKafkaPropertiesCommon {
     pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        if let Some(v) = self.statistics_interval_ms {
+            c.set("statistics.interval.ms", v.to_string());
+        }
         if let Some(v) = self.message_max_bytes {
             c.set("message.max.bytes", v.to_string());
         }
         if let Some(v) = self.message_max_bytes {
             c.set("receive.message.max.bytes", v.to_string());
+        }
+        if let Some(v) = self.client_id.as_ref() {
+            c.set("client.id", v);
         }
     }
 }
@@ -292,12 +308,22 @@ pub struct ClickHouseCommon {
     pub table: String,
 }
 
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+
 impl ClickHouseCommon {
     pub(crate) fn build_client(&self) -> anyhow::Result<Client> {
-        let client = Client::default()
+        use hyper_tls::HttpsConnector;
+
+        let https = HttpsConnector::new();
+        let client = hyper::Client::builder()
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+            .build::<_, hyper::Body>(https);
+
+        let client = Client::with_http_client(client)
             .with_url(&self.url)
             .with_user(&self.user)
-            .with_password(&self.password);
+            .with_password(&self.password)
+            .with_database(&self.database);
         Ok(client)
     }
 }
@@ -308,4 +334,83 @@ pub struct UpsertMessage<'a> {
     pub primary_key: Cow<'a, [u8]>,
     #[serde(borrow)]
     pub record: Cow<'a, [u8]>,
+}
+
+#[serde_as]
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct NatsCommon {
+    #[serde(rename = "nats.server_url")]
+    pub server_url: String,
+    #[serde(rename = "nats.subject")]
+    pub subject: String,
+    #[serde(rename = "nats.user")]
+    pub user: Option<String>,
+    #[serde(rename = "nats.password")]
+    pub password: Option<String>,
+    #[serde(rename = "nats.max_bytes")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_bytes: Option<i64>,
+    #[serde(rename = "nats.max_messages")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_messages: Option<i64>,
+    #[serde(rename = "nats.max_messages_per_subject")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_messages_per_subject: Option<i64>,
+    #[serde(rename = "nats.max_consumers")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_consumers: Option<i32>,
+    #[serde(rename = "nats.max_message_size")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub max_message_size: Option<i32>,
+}
+
+impl NatsCommon {
+    pub(crate) async fn build_client(&self) -> anyhow::Result<async_nats::Client> {
+        let mut connect_options = async_nats::ConnectOptions::new();
+        if let (Some(v_user), Some(v_password)) = (self.user.as_ref(), self.password.as_ref()) {
+            connect_options = connect_options.user_and_password(v_user.into(), v_password.into());
+        }
+        let client = connect_options.connect(self.server_url.clone()).await?;
+        Ok(client)
+    }
+
+    pub(crate) async fn build_context(&self) -> anyhow::Result<jetstream::Context> {
+        let client = self.build_client().await?;
+        let jetstream = async_nats::jetstream::new(client);
+        Ok(jetstream)
+    }
+
+    pub(crate) async fn build_subscriber(&self) -> anyhow::Result<async_nats::Subscriber> {
+        let client = self.build_client().await?;
+        let subscription = client.subscribe(self.subject.clone()).await?;
+        Ok(subscription)
+    }
+
+    pub(crate) async fn build_or_get_stream(
+        &self,
+        jetstream: jetstream::Context,
+    ) -> anyhow::Result<jetstream::stream::Stream> {
+        let mut config = jetstream::stream::Config {
+            // the subject default use name value
+            name: self.subject.clone(),
+            ..Default::default()
+        };
+        if let Some(v) = self.max_bytes {
+            config.max_bytes = v;
+        }
+        if let Some(v) = self.max_messages {
+            config.max_messages = v;
+        }
+        if let Some(v) = self.max_messages_per_subject {
+            config.max_messages_per_subject = v;
+        }
+        if let Some(v) = self.max_consumers {
+            config.max_consumers = v;
+        }
+        if let Some(v) = self.max_message_size {
+            config.max_message_size = v;
+        }
+        let stream = jetstream.get_or_create_stream(config).await?;
+        Ok(stream)
+    }
 }

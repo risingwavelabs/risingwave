@@ -41,7 +41,7 @@ use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
     ValTransaction,
 };
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::Transaction;
 use crate::stream::{SplitAssignment, TableRevision};
 use crate::MetaResult;
 
@@ -103,8 +103,8 @@ impl FragmentManagerCore {
 }
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
-pub struct FragmentManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct FragmentManager {
+    env: MetaSrvEnv,
 
     core: RwLock<FragmentManagerCore>,
 }
@@ -117,13 +117,10 @@ pub struct ActorInfos {
     pub barrier_inject_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 }
 
-pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
+pub type FragmentManagerRef = Arc<FragmentManager>;
 
-impl<S: MetaStore> FragmentManager<S>
-where
-    S: MetaStore,
-{
-    pub async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+impl FragmentManager {
+    pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let table_fragments = TableFragments::list(env.meta_store()).await?;
 
         let table_fragments = table_fragments
@@ -337,10 +334,14 @@ where
     /// of this table, and updates the downstream Merge to have the new upstream fragments.
     pub async fn post_replace_table(
         &self,
-        table_id: TableId,
-        dummy_table_id: TableId,
+        old_table_fragments: &TableFragments,
+        new_table_fragments: &TableFragments,
         merge_updates: &[MergeUpdate],
+        dispatchers: &HashMap<ActorId, Vec<Dispatcher>>,
     ) -> MetaResult<()> {
+        let table_id = old_table_fragments.table_id();
+        let dummy_table_id = new_table_fragments.table_id();
+
         let mut guard = self.core.write().await;
         let current_revision = guard.table_revision;
         let map = &mut guard.table_fragments;
@@ -373,7 +374,7 @@ where
             .map(|update| (update.actor_id, update))
             .collect();
 
-        let to_update_table_ids = table_fragments
+        let to_update_merge_table_ids = table_fragments
             .tree_ref()
             .iter()
             .filter(|(_, v)| {
@@ -384,7 +385,7 @@ where
             .map(|(k, _)| *k)
             .collect::<Vec<_>>();
 
-        for table_id in to_update_table_ids {
+        for table_id in to_update_merge_table_ids {
             let mut table_fragment = table_fragments
                 .get_mut(table_id)
                 .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
@@ -412,6 +413,51 @@ where
         }
 
         assert!(merge_updates.is_empty());
+
+        let dropped_actor_ids = old_table_fragments
+            .actor_ids()
+            .into_iter()
+            .collect::<HashSet<_>>();
+
+        let mut dispatchers = dispatchers.to_owned();
+
+        let to_update_dispatcher_table_ids = table_fragments
+            .tree_ref()
+            .iter()
+            .filter(|(_, v)| {
+                v.actor_ids()
+                    .iter()
+                    .any(|&actor_id| dispatchers.contains_key(&actor_id))
+            })
+            .map(|(k, _)| *k)
+            .collect::<Vec<_>>();
+
+        for table_id in to_update_dispatcher_table_ids {
+            let mut table_fragment = table_fragments
+                .get_mut(table_id)
+                .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
+
+            for actor in table_fragment
+                .fragments
+                .values_mut()
+                .flat_map(|f| &mut f.actors)
+            {
+                for dispatcher in &mut actor.dispatcher {
+                    dispatcher
+                        .downstream_actor_id
+                        .retain(|actor_id| !dropped_actor_ids.contains(actor_id))
+                }
+                actor
+                    .dispatcher
+                    .retain(|d| !d.downstream_actor_id.is_empty());
+
+                if let Some(new_dispatchers) = dispatchers.remove(&actor.actor_id) {
+                    actor.dispatcher.extend(new_dispatchers);
+                }
+            }
+        }
+
+        assert!(dispatchers.is_empty());
 
         // Commit changes and notify about the changes.
         let mut trx = Transaction::default();

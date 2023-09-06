@@ -27,6 +27,8 @@ use super::{BoxedExpression, Expression};
 use crate::vector_op::conjunction::{and, or};
 use crate::Result;
 
+/// This is just an implementation detail. The semantic is not guaranteed at SQL level because
+/// optimizer may have rearranged the boolean expressions. #6202
 #[derive(Debug)]
 pub struct BinaryShortCircuitExpression {
     expr_ia1: BoxedExpression,

@@ -83,7 +83,7 @@ use crate::model::{
     VarTransaction,
 };
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::{MetaStore, MetaStoreRef, Transaction};
 
 mod compaction_group_manager;
 mod context;
@@ -107,12 +107,12 @@ const HISTORY_TABLE_INFO_STATISTIC_TIME: usize = 240;
 // - Make changes on the ValTransaction.
 // - Call `commit_multi_var` to commit the changes via meta store transaction. If transaction
 //   succeeds, the in-mem state will be updated by the way.
-pub struct HummockManager<S: MetaStore> {
-    pub env: MetaSrvEnv<S>,
-    pub cluster_manager: ClusterManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
+pub struct HummockManager {
+    pub env: MetaSrvEnv,
+    pub cluster_manager: ClusterManagerRef,
+    catalog_manager: CatalogManagerRef,
 
-    fragment_manager: FragmentManagerRef<S>,
+    fragment_manager: FragmentManagerRef,
     // `CompactionGroupManager` manages `CompactionGroup`'s members.
     // Note that all hummock state store user should register to `CompactionGroupManager`. It
     // includes all state tables of streaming jobs except sink.
@@ -143,7 +143,7 @@ pub struct HummockManager<S: MetaStore> {
     pub compaction_state: CompactionState,
 }
 
-pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
+pub type HummockManagerRef = Arc<HummockManager>;
 
 /// Commit multiple `ValTransaction`s to state store and upon success update the local in-mem state
 /// by the way
@@ -252,22 +252,19 @@ pub enum CompactionResumeTrigger {
     TaskReport { original_task_num: usize },
 }
 
-impl<S> HummockManager<S>
-where
-    S: MetaStore,
-{
+impl HummockManager {
     pub(crate) async fn new(
-        env: MetaSrvEnv<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        env: MetaSrvEnv,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
-        catalog_manager: CatalogManagerRef<S>,
+        catalog_manager: CatalogManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
-    ) -> Result<HummockManagerRef<S>> {
+    ) -> Result<HummockManagerRef> {
         let compaction_group_manager = Self::build_compaction_group_manager(&env).await?;
         Self::new_impl(
             env,
@@ -284,9 +281,9 @@ where
 
     #[cfg(any(test, feature = "test"))]
     pub(super) async fn with_config(
-        env: MetaSrvEnv<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        env: MetaSrvEnv,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         config: CompactionConfig,
@@ -294,7 +291,7 @@ where
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
-    ) -> HummockManagerRef<S> {
+    ) -> HummockManagerRef {
         use crate::manager::CatalogManager;
         let compaction_group_manager =
             Self::build_compaction_group_manager_with_config(&env, config)
@@ -316,18 +313,18 @@ where
     }
 
     async fn new_impl(
-        env: MetaSrvEnv<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        env: MetaSrvEnv,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
-        catalog_manager: CatalogManagerRef<S>,
+        catalog_manager: CatalogManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
-    ) -> Result<HummockManagerRef<S>> {
+    ) -> Result<HummockManagerRef> {
         let sys_params_manager = env.system_params_manager();
         let sys_params = sys_params_manager.get_params().await;
         let state_store_url = sys_params.state_store();
@@ -540,7 +537,7 @@ where
     /// call `release_contexts` even if it has removed `context_id` from cluster manager.
     async fn commit_trx(
         &self,
-        meta_store: &S,
+        meta_store: &MetaStoreRef,
         trx: Transaction,
         context_id: Option<HummockContextId>,
     ) -> Result<()> {
@@ -1664,9 +1661,19 @@ where
 
     /// Gets current version without pinning it.
     /// Should not be called inside [`HummockManager`], because it requests locks internally.
+    ///
+    /// Note: this method can hurt performance because it will clone a large object.
     #[named]
     pub async fn get_current_version(&self) -> HummockVersion {
         read_lock!(self, versioning).await.current_version.clone()
+    }
+
+    #[named]
+    pub async fn get_current_max_committed_epoch(&self) -> HummockEpoch {
+        read_lock!(self, versioning)
+            .await
+            .current_version
+            .max_committed_epoch
     }
 
     /// Gets branched sstable infos
@@ -1916,7 +1923,7 @@ where
         assignment_ref.get(&task_id).cloned()
     }
 
-    pub fn cluster_manager(&self) -> &ClusterManagerRef<S> {
+    pub fn cluster_manager(&self) -> &ClusterManagerRef {
         &self.cluster_manager
     }
 
