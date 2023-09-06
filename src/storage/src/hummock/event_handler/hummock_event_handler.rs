@@ -132,7 +132,7 @@ pub struct HummockEventHandler {
 async fn flush_imms(
     payload: UploadTaskPayload,
     task_info: UploadTaskInfo,
-    compactor_context: Arc<crate::hummock::compactor::CompactorContext>,
+    compactor_context: CompactorContext,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     for epoch in &task_info.epochs {
@@ -158,7 +158,7 @@ impl HummockEventHandler {
         hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
         pinned_version: PinnedVersion,
-        compactor_context: Arc<CompactorContext>,
+        compactor_context: CompactorContext,
         sstable_object_id_manager: Arc<SstableObjectIdManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         cache_refill_config: CacheRefillConfig,
