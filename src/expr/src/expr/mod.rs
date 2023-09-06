@@ -32,7 +32,6 @@
 //! [`eval`]: Expression::eval
 
 // These modules define concrete expression structures.
-mod expr_array_concat;
 mod expr_array_transform;
 mod expr_binary_nonnull;
 mod expr_binary_nullable;

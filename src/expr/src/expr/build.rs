@@ -19,7 +19,6 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
-use super::expr_array_concat::ArrayConcatExpression;
 use super::expr_array_transform::ArrayTransformExpression;
 use super::expr_case::CaseExpression;
 use super::expr_coalesce::CoalesceExpression;
@@ -61,12 +60,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         E::Field => FieldExpression::try_from_boxed(prost),
         E::Array => NestedConstructExpression::try_from_boxed(prost),
         E::Row => NestedConstructExpression::try_from_boxed(prost),
-        E::ArrayCat | E::ArrayAppend | E::ArrayPrepend => {
-            // Now we implement these three functions as a single expression for the
-            // sake of simplicity. If performance matters at some time, we can split
-            // the implementation to improve performance.
-            ArrayConcatExpression::try_from_boxed(prost)
-        }
         E::Vnode => VnodeExpression::try_from_boxed(prost),
 
         _ => {
