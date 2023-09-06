@@ -12,9 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod parser;
-pub use parser::*;
-mod schema_resolver;
+fn main() {
+    let proto_dir = "./src/test_data/proto_recursive";
 
-#[cfg(test)]
-mod recursive;
+    println!("cargo:rerun-if-changed={}", proto_dir);
+
+    let proto_files = vec!["recursive"];
+    let protos: Vec<String> = proto_files
+        .iter()
+        .map(|f| format!("{}/{}.proto", proto_dir, f))
+        .collect();
+    prost_build::Config::new()
+        .out_dir("./src/parser/protobuf")
+        .compile_protos(&protos, &Vec::<String>::new())
+        .unwrap();
+}

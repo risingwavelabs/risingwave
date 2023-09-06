@@ -63,8 +63,8 @@ num-bigint = "0.4"
 opendal = "0.39"
 parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
-prost = { version = "0.11.9", features = ["no-recursion-limit"] }
-prost-reflect = "0.11.5"
+prost = { version = "0.11", features = ["no-recursion-limit"] }
+prost-reflect = "0.11"
 protobuf-native = "0.2.1"
 pulsar = { version = "6.0", default-features = false, features = [
     "tokio-runtime",
@@ -113,8 +113,12 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "async"] }
+prost-types = "0.11"
 rand = "0.8"
 tempfile = "3"
+
+[build-dependencies]
+prost-build = "0.11"
 
 [[bench]]
 name = "parser"
