@@ -542,7 +542,7 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
-        assert!(set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone()));
+        set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
 
         let data_file_cache = if opts.data_file_cache_dir.is_empty() {
             FileCache::none()
