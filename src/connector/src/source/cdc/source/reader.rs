@@ -99,7 +99,7 @@ impl SplitReader for CdcSplitReader {
 }
 
 impl CommonSplitReader for CdcSplitReader {
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
         // rewrite the hostname and port for the split
         let mut properties = self.conn_props.props.clone();
@@ -120,7 +120,6 @@ impl CommonSplitReader for CdcSplitReader {
         }
 
         let (tx, mut rx) = mpsc::channel(1024);
-
         let tx: Box<GetEventStreamJniSender> = Box::new(tx);
 
         JVM.as_ref()
