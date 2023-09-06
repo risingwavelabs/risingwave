@@ -23,7 +23,7 @@ use foyer::common::code::{Key, Value};
 use foyer::storage::admission::rated_random::RatedRandomAdmissionPolicy;
 use foyer::storage::admission::AdmissionPolicy;
 use foyer::storage::event::EventListener;
-pub use foyer::storage::metrics::set_metrics_registry;
+pub use foyer::storage::metrics::set_metrics_registry as set_foyer_metrics_registry;
 use foyer::storage::store::FetchValueFuture;
 use foyer::storage::LfuFsStoreConfig;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;

@@ -29,7 +29,7 @@ use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    set_metrics_registry, FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError,
+    set_foyer_metrics_registry, FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError,
     HummockStorage, MemoryLimiter, SstableObjectIdManagerRef, SstableStore,
 };
 use crate::memory::sled::SledStateStore;
@@ -542,7 +542,7 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
-        assert!(set_metrics_registry(GLOBAL_METRICS_REGISTRY.clone()));
+        assert!(set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone()));
 
         let data_file_cache = if opts.data_file_cache_dir.is_empty() {
             FileCache::none()
