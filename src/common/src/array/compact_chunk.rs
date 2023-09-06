@@ -37,7 +37,7 @@ struct OpRowMutRefTuple<'a> {
 impl<'a> OpRowMutRefTuple<'a> {
     /// return true if no row left
     fn push(&mut self, mut op_row: OpRowMutRef<'a>) -> bool {
-        debug_assert_eq!(self.latest.vis(), true);
+        debug_assert!(self.latest.vis());
         match (self.latest.op(), op_row.op()) {
             (Op::Insert, Op::Insert) => panic!("receive duplicated insert on the stream"),
             (Op::Delete, Op::Delete) => panic!("receive duplicated delete on the stream"),
@@ -64,10 +64,10 @@ impl<'a> OpRowMutRefTuple<'a> {
     }
 
     fn as_update_op(&mut self) -> Option<(&mut OpRowMutRef<'a>, &mut OpRowMutRef<'a>)> {
-        self.previous.as_mut().and_then(|prev| {
+        self.previous.as_mut().map(|prev| {
             debug_assert_eq!(prev.op(), Op::Delete);
             debug_assert_eq!(self.latest.op(), Op::Insert);
-            Some((prev, &mut self.latest))
+            (prev, &mut self.latest)
         })
     }
 }
@@ -136,7 +136,7 @@ impl StreamChunkCompactor {
                 }
             }
         }
-        for (_, tuple) in &mut op_row_map {
+        for tuple in op_row_map.values_mut() {
             if let Some((prev, latest)) = tuple.as_update_op() {
                 if prev.row_ref() == latest.row_ref() {
                     prev.set_vis(false);

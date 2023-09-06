@@ -597,7 +597,7 @@ mod tests {
                 ColumnDesc::unnamed(ColumnId::new(3), DataType::Varchar),
                 ColumnDesc::unnamed(ColumnId::new(4), DataType::Date),
             ],
-            pk_indices: vec![0],
+            downstream_pk: vec![0],
             sink_type: SinkType::AppendOnly,
             db_name: "db".into(),
             sink_from_name: "table".into(),

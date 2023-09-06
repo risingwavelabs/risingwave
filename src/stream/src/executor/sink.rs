@@ -413,6 +413,7 @@ mod test {
             columns.clone(),
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
+            pk,
         )
         .await
         .unwrap();
@@ -510,6 +511,7 @@ mod test {
             columns,
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
+            pk,
         )
         .await
         .unwrap();
