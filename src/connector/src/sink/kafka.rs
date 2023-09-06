@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -342,7 +342,7 @@ pub struct KafkaSinkWriter {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
-    future_delivery_buffer: Vec<DeliveryFuture>,
+    future_delivery_buffer: VecDeque<DeliveryFuture>,
     db_name: String,
     sink_from_name: String,
 }
@@ -390,7 +390,7 @@ impl KafkaSinkWriter {
             schema,
             pk_indices,
             is_append_only,
-            future_delivery_buffer: Vec::new(),
+            future_delivery_buffer: VecDeque::new(),
             db_name,
             sink_from_name,
         })
@@ -419,9 +419,6 @@ impl KafkaSinkWriter {
         K: ToBytes + ?Sized,
         P: ToBytes + ?Sized,
     {
-        // The error to be returned
-        let mut err = KafkaError::Canceled;
-
         // First take the ownership of the exist buffer
         let mut future_buffer = std::mem::take(&mut self.future_delivery_buffer);
 
@@ -431,76 +428,61 @@ impl KafkaSinkWriter {
             "future delivery buffer must be empty"
         );
 
-        // The flag represents whether to commit
-        // This will happen when the size of buffering futures
-        // is greater than preset limit
-        let mut commit_flag = false;
+        let mut success_flag = false;
 
-        // To make borrow checker happy :)
-        let mut push_flag = false;
+        let mut ret = Ok(());
 
         for _ in 0..self.config.max_retry_num {
             match self.send_result_inner(record) {
-                // Add the future to the buffer
                 Ok(delivery_future) => {
-                    // Push the future into the buffer
-                    future_buffer.push(delivery_future);
-                    push_flag = true;
-
-                    // First see if the size is greater than the limit
-                    if future_buffer.len() > KAFKA_WRITER_MAX_QUEUE_SIZE {
-                        commit_flag = true;
-                        break;
+                    // First check if the current length is
+                    // greater than the preset limit
+                    while future_buffer.len() >= KAFKA_WRITER_MAX_QUEUE_SIZE {
+                        if let Some(delivery_future) = future_buffer.pop_front() {
+                            Self::await_once(delivery_future).await?;
+                        } else {
+                            panic!("Expect the future not to be None");
+                        };
                     }
+
+                    future_buffer.push_back(delivery_future);
+                    success_flag = true;
                     break;
                 }
                 // The enqueue buffer is full, `send_result` will immediately return
                 // We can retry for another round after sleeping for sometime
                 Err((e, rec)) => {
-                    err = e;
                     record = rec;
-                    match err {
+                    match e {
                         KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
                             tokio::time::sleep(self.config.retry_interval).await;
                             continue;
                         }
-                        _ => break,
+                        _ => {
+                            ret = Err(e);
+                            break;
+                        }
                     }
                 }
             }
         }
 
-        if commit_flag {
-            // Give the buffer back to the origin
-            std::mem::swap(&mut future_buffer, &mut self.future_delivery_buffer);
-
-            // Sanity check
-            debug_assert!(
-                future_buffer.is_empty(),
-                "future buffer must be empty after swapping"
-            );
-
-            match self.commit().await {
-                // FIXME: Is this error handling enough?
-                Ok(_) => return Ok(()),
-                Err(_) => return Err(err),
-            }
+        if !success_flag {
+            // In this case, after trying `max_retry_num`
+            // The enqueue buffer is still full
+            ret = Err(KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull));
         }
 
-        if push_flag {
-            // Indicates success
-            std::mem::swap(&mut future_buffer, &mut self.future_delivery_buffer);
+        // Reset the buffer
+        std::mem::swap(&mut future_buffer, &mut self.future_delivery_buffer);
 
-            // Sanity check
-            debug_assert!(
-                future_buffer.is_empty(),
-                "future buffer must be empty after swapping"
-            );
+        // Sanity check
+        debug_assert!(
+            future_buffer.is_empty(),
+            "future delivery buffer must be empty"
+        );
 
-            return Ok(());
-        }
-
-        Err(err)
+        ret
     }
 
     async fn write_json_objects(
@@ -524,64 +506,54 @@ impl KafkaSinkWriter {
         Ok(())
     }
 
-    async fn commit(&mut self) -> Result<()> {
-        // Get the ownership first
-        // The buffer will automatically become an empty vector
-        let delivery_futures = std::mem::take(&mut self.future_delivery_buffer);
+    async fn await_once(delivery_future: DeliveryFuture) -> KafkaResult<()> {
+        match delivery_future.await {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err((k_err, _msg))) => Err(k_err),
+            Err(_) => Err(KafkaError::Canceled),
+        }
+    }
+
+    async fn commit_inner(&mut self) -> Result<()> {
+        let _v = try_join_all(
+            self.future_delivery_buffer
+                .drain(..)
+                .map(|delivery_future| {
+                    delivery_future.map(|delivery_future_result| {
+                        match delivery_future_result {
+                            // Successfully sent the record
+                            // Will return the partition and offset of the message (i32, i64)
+                            Ok(Ok(val)) => Ok(val),
+                            // If the message failed to be delivered. (i.e., flush)
+                            // The error & the copy of the original message will be returned
+                            // i.e., (KafkaError, OwnedMessage)
+                            // We will just stop the loop, and return the error
+                            // The sink executor will back to the latest checkpoint
+                            Ok(Err((k_err, _msg))) => Err(SinkError::Kafka(k_err)),
+                            // This represents the producer is dropped
+                            // before the delivery status is received
+                            // Return `KafkaError::Canceled`
+                            Err(_) => Err(SinkError::Kafka(KafkaError::Canceled)),
+                        }
+                    })
+                })
+        )
+        .await?;
 
         // Sanity check
         debug_assert!(
             self.future_delivery_buffer.is_empty(),
-            "The buffer must be empty"
+            "The buffer after `commit_inner` must be empty"
         );
-
-        // Commit all together
-        // FIXME: At present we could not retry, do we actually need to?
-        for delivery_future in delivery_futures {
-            match delivery_future.await {
-                Ok(delivery_future_result) => match delivery_future_result {
-                    // Successfully sent the record
-                    // Will return the partition and offset of the message (i32, i64)
-                    Ok(_) => continue,
-                    // If the message failed to be delivered. (i.e., flush)
-                    // The error & the copy of the original message will be returned
-                    // i.e., (KafkaError, OwnedMessage)
-                    // We will just stop the loop, and return the error
-                    // The sink executor will back to the latest checkpoint
-                    Err((k_err, _msg)) => return Err(SinkError::Kafka(k_err)),
-                },
-                // This represents the producer is dropped
-                // before the delivery status is received
-                // Return `KafkaError::Canceled`
-                Err(_) => return Err(SinkError::Kafka(KafkaError::Canceled)),
-            }
-        }
 
         Ok(())
     }
 
-    // async fn commit_inner(&mut self) -> Result<()> {
-    //     let _v = try_join_all(
-    //         self.future_delivery_buffer
-    //             .drain(..)
-    //             .map(|x| {
-    //                 x.map(|f| {
-    //                     match f {
-    //                         Ok(Ok(val)) => Ok(val),
-    //                         Ok(Err((k_err, _msg))) => Err(SinkError::Kafka(k_err)),
-    //                         Err(_) => Err(SinkError::Kafka(KafkaError::Canceled)),
-    //                     }
-    //                 })
-    //             })
-    //     )
-    //     .await?;
-
-    //     Ok(())
-    // }
-
     async fn debezium_update(&mut self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
         let schema = self.schema.clone();
         let pk_indices = self.pk_indices.clone();
+        let db_name = self.db_name.clone();
+        let sink_from_name = self.sink_from_name.clone();
 
         // Initialize the dbz_stream
         let dbz_stream = gen_debezium_message_stream(
@@ -590,8 +562,8 @@ impl KafkaSinkWriter {
             chunk,
             ts_ms,
             DebeziumAdapterOpts::default(),
-            &self.db_name,
-            &self.sink_from_name,
+            &db_name,
+            &sink_from_name,
         );
 
         #[for_await]
@@ -678,7 +650,7 @@ impl SinkWriterV1 for KafkaSinkWriter {
 
     async fn commit(&mut self) -> Result<()> {
         // Group delivery (await the `FutureRecord`) here
-        self.commit().await?;
+        self.commit_inner().await?;
         Ok(())
     }
 
