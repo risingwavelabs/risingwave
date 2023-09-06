@@ -1,3 +1,26 @@
+# Rerun Original validation
+query I
+SELECT count(*) FROM t;
+----
+10000
+
+query I
+SELECT sum(v1), sum(v2) FROM t;
+----
+50005000 100015000
+
+query I
+SELECT count(*) FROM m;
+----
+10000
+
+query I
+SELECT sum(v1), sum(v2) FROM m;
+----
+50005000 100015000
+
+# Test updates and deletes
+
 statement ok
 SET RW_IMPLICIT_FLUSH=true;
 

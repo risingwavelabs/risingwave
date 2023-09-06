@@ -110,6 +110,9 @@ seed_old_cluster() {
   cp -r e2e_test/streaming/nexmark $TEST_DIR
   cp -r e2e_test/nexmark/* $TEST_DIR/nexmark
 
+  cp -r e2e_test/batch/tpch $TEST_DIR
+  cp -r e2e_test/tpch/* $TEST_DIR/tpch
+
   OLD_TAG=$1
   ./risedev clean-data
   ./risedev d full-without-monitoring && rm .risingwave/log/*
@@ -127,6 +130,12 @@ seed_old_cluster() {
 #
 #  echo "--- NEXMARK TEST: Validating old cluster"
 #  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/validate_on_ddl.slt"
+
+  echo "--- TPCH TEST: Seeding old cluster with data"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/tpch-backwards-compat/seed.slt"
+
+  echo "--- TPCH TEST: Validating old cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/tpch-backwards-compat/validate_original.slt"
 
   echo "--- KAFKA TEST: Seeding old cluster with data"
   create_kafka_topic
@@ -155,7 +164,6 @@ validate_new_cluster() {
   check_version "$NEW_TAG"
 
   echo "--- BASIC TEST: Validating new cluster"
-  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/validate_original.slt"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/validate_restart.slt"
 
 #  echo "--- NEXMARK TEST: Validating new cluster"
@@ -163,6 +171,9 @@ validate_new_cluster() {
 #
 #  echo "--- NEXMARK TEST: Drop DDLs"
 #  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/drop_on_ddl.slt"
+
+  echo "--- TPCH TEST: Validating new cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/tpch-backwards-compat/validate_restart.slt"
 
   echo "--- KAFKA TEST: Seeding new cluster with data"
   seed_json_kafka
