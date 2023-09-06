@@ -1,4 +1,4 @@
-# Demo: Sinking to Cassandra
+# Demo: Sinking to Cassandra/Scylladb
 
 In this demo, we want to showcase how RisingWave is able to sink data to Cassandra.
 

@@ -5,8 +5,6 @@ services:
     image: cassandra:4.0
     ports:
       - 9042:9042
-    volumes:
-      - ./cassandra-sql:/cassandra-sql
     environment:
       - CASSANDRA_CLUSTER_NAME=cloudinfra
     profiles:
@@ -15,8 +13,6 @@ services:
     image: scylladb/scylla:5.1
     ports:
       - 9042:9042
-    volumes:
-      - ./cassandra-sql:/cassandra-sql
     environment:
       - CASSANDRA_CLUSTER_NAME=cloudinfra
     profiles:
