@@ -1284,3 +1284,8 @@ cat << EOF > src/config/example.toml
 EOF
 cargo run -p risingwave_common --bin example-config >> src/config/example.toml
 '''
+
+[tasks.backwards-compat-test]
+category = "RiseDev - Backwards Compatibility Test"
+description = "Run backwards compatibility test"
+script = "./backwards-compat-test/scripts/run_local.sh"
