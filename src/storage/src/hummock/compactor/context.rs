@@ -18,7 +18,6 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 
 use super::task_progress::TaskProgressManagerRef;
-use crate::filter_key_extractor::FilterKeyExtractorManager;
 use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::MemoryLimiter;

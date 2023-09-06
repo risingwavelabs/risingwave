@@ -45,8 +45,8 @@ pub(crate) mod tests {
     use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::filter_key_extractor::{
-        FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
-        FixedLengthFilterKeyExtractor, FullKeyFilterKeyExtractor,
+        FilterKeyExtractorImpl, FilterKeyExtractorManager, FixedLengthFilterKeyExtractor,
+        FullKeyFilterKeyExtractor,
     };
     use risingwave_storage::hummock::compactor::compactor_runner::compact;
     use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
@@ -164,21 +164,13 @@ pub(crate) mod tests {
         }
     }
 
-    fn get_compactor_context_with_filter_key_extractor_manager(
-        storage: &HummockStorage,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-    ) -> CompactorContext {
-        get_compactor_context_with_filter_key_extractor_manager_impl(
-            storage.storage_opts().clone(),
-            storage.sstable_store(),
-            filter_key_extractor_manager,
-        )
+    fn get_compactor_context(storage: &HummockStorage) -> CompactorContext {
+        get_compactor_context_impl(storage.storage_opts().clone(), storage.sstable_store())
     }
 
-    fn get_compactor_context_with_filter_key_extractor_manager_impl(
+    fn get_compactor_context_impl(
         options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
         CompactorContext {
             storage_opts: options,
@@ -187,9 +179,6 @@ pub(crate) mod tests {
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
             memory_limiter: MemoryLimiter::unlimit(),
-            filter_key_extractor_manager: FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                filter_key_extractor_manager,
-            ),
             task_progress_manager: Default::default(),
             await_tree_reg: None,
             running_task_count: Arc::new(AtomicU32::new(0)),
@@ -229,10 +218,10 @@ pub(crate) mod tests {
             ) => rpc_filter_key_extractor_manager,
             FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
         };
-        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
-            &storage,
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
             rpc_filter_key_extractor_manager,
         );
+        let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
@@ -290,6 +279,7 @@ pub(crate) mod tests {
                 compact_task.clone(),
                 rx,
                 Box::new(sstable_object_id_manager.clone()),
+                filter_key_extractor_manager.clone(),
             )
             .await;
 
@@ -392,10 +382,10 @@ pub(crate) mod tests {
             ) => rpc_filter_key_extractor_manager,
             FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
         };
-        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
-            &storage,
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
             rpc_filter_key_extractor_manager,
         );
+        let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
@@ -452,6 +442,7 @@ pub(crate) mod tests {
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
+            filter_key_extractor_manager,
         )
         .await;
 
@@ -564,7 +555,7 @@ pub(crate) mod tests {
     pub(crate) fn prepare_compactor_and_filter(
         storage: &HummockStorage,
         existing_table_id: u32,
-    ) -> CompactorContext {
+    ) -> (CompactorContext, FilterKeyExtractorManager) {
         let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
         {
             FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
@@ -577,10 +568,11 @@ pub(crate) mod tests {
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
 
-        get_compactor_context_with_filter_key_extractor_manager(
-            storage,
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
             rpc_filter_key_extractor_manager,
-        )
+        );
+
+        (get_compactor_context(storage), filter_key_extractor_manager)
     }
 
     #[tokio::test]
@@ -688,11 +680,12 @@ pub(crate) mod tests {
             2,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
-
-        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager_impl(
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            rpc_filter_key_extractor_manager,
+        );
+        let compact_ctx = get_compactor_context_impl(
             global_storage.storage_opts().clone(),
             global_storage.sstable_store(),
-            rpc_filter_key_extractor_manager,
         );
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
@@ -783,6 +776,7 @@ pub(crate) mod tests {
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
+            filter_key_extractor_manager,
         )
         .await;
 
@@ -876,10 +870,7 @@ pub(crate) mod tests {
             FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
         };
 
-        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
-            &storage,
-            rpc_filter_key_extractor_manager.clone(),
-        );
+        let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
@@ -891,7 +882,9 @@ pub(crate) mod tests {
             2,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
-
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            rpc_filter_key_extractor_manager,
+        );
         // 1. add sstables
         let val = Bytes::from(b"0"[..].to_vec()); // 1 Byte value
 
@@ -971,6 +964,7 @@ pub(crate) mod tests {
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
+            filter_key_extractor_manager,
         )
         .await;
 
@@ -1075,10 +1069,10 @@ pub(crate) mod tests {
                 FixedLengthFilterKeyExtractor::new(TABLE_PREFIX_LEN + key_prefix.len()),
             )),
         );
-        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
-            &storage,
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
             rpc_filter_key_extractor_manager,
         );
+        let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
@@ -1156,6 +1150,7 @@ pub(crate) mod tests {
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
+            filter_key_extractor_manager,
         )
         .await;
 
@@ -1253,7 +1248,8 @@ pub(crate) mod tests {
             TableId::from(existing_table_id),
         )
         .await;
-        let compact_ctx = prepare_compactor_and_filter(&storage, existing_table_id);
+        let (compact_ctx, filter_key_extractor_manager) =
+            prepare_compactor_and_filter(&storage, existing_table_id);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
@@ -1314,6 +1310,7 @@ pub(crate) mod tests {
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
+            filter_key_extractor_manager,
         )
         .await;
 

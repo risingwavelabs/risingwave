@@ -31,7 +31,7 @@ use tracing::{error, info, trace, warn};
 
 use super::cache_refill_policy::CacheRefillPolicyConfig;
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
-use crate::filter_key_extractor::{self, FilterKeyExtractor, FilterKeyExtractorManager};
+use crate::filter_key_extractor::FilterKeyExtractorManager;
 use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::cache_refill_policy::CacheRefillPolicy;

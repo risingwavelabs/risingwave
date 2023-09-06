@@ -15,20 +15,22 @@
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;
-use risingwave_pb::compactor::dispatch_compaction_task_request;
+use risingwave_pb::compactor::{dispatch_compaction_task_request, DispatchCompactionTaskRequest};
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
     ReportTask as ReportSharedTask,
 };
 use risingwave_pb::hummock::{ReportFullScanTaskRequest, ReportVacuumTaskRequest};
+use tokio::sync::mpsc;
+use tonic::Request;
 pub mod compactor_runner;
 mod context;
 mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
 use std::ops::Div;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -71,14 +73,17 @@ use super::{
     CompactionDeleteRanges, GetObjectId, HummockResult, SstableBuilderOptions,
     SstableObjectIdManager, Xor16FilterBuilder,
 };
-use crate::filter_key_extractor::{self, FilterKeyExtractorImpl, FilterKeyExtractorManager};
+use crate::filter_key_extractor::{
+    FilterKeyExtractorImpl, FilterKeyExtractorManager, StaticFilterKeyExtractorManager,
+};
 use crate::hummock::compactor::compactor_runner::compact_and_build_sst;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
     validate_ssts, BatchSstableWriterFactory, BlockedXor16FilterBuilder, FilterBuilder,
-    HummockError, SstableWriterFactory, StreamingSstableWriterFactory,
+    HummockError, SharedComapctorObjectIdManager, SstableWriterFactory,
+    StreamingSstableWriterFactory,
 };
 
 /// Implementation of Hummock compaction.
@@ -645,10 +650,8 @@ pub fn start_compactor(
 #[allow(clippy::too_many_arguments)]
 pub fn start_shared_compactor(
     mut client: HummockManagerServiceClient<tonic::transport::Channel>,
-    dispatch_task: dispatch_compaction_task_request::Task,
+    mut receiver: mpsc::UnboundedReceiver<Request<DispatchCompactionTaskRequest>>,
     context: CompactorContext,
-    object_id_getter: Box<dyn GetObjectId>,
-    filter_key_extractor_manager: FilterKeyExtractorManager,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let task_progress = context.task_progress_manager.clone();
@@ -659,140 +662,167 @@ pub fn start_shared_compactor(
         let shutdown_map = CompactionShutdownMap::default();
         let shutdown = shutdown_map.clone();
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
-
-        tokio::select! {
-            _ = periodic_event_interval.tick() => {
-                let mut progress_list = Vec::new();
-                for (&task_id, progress) in task_progress.lock().iter() {
-                    progress_list.push(CompactTaskProgress {
-                        task_id,
-                        num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
-                        num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
-                        num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
-                        num_pending_read_io: progress.num_pending_read_io.load(Ordering::Relaxed) as u64,
-                        num_pending_write_io: progress.num_pending_write_io.load(Ordering::Relaxed) as u64,
-                    });
-                }
-
-                let report_compaction_task_request = ReportCompactionTaskRequest{
-                    event: Some(ReportCompactionTaskEvent::HeartBeat(
-                        SharedHeartBeat {
-                            progress: progress_list
-                        }
-                    )),
-                 };
-
-                 match client.report_compaction_task(report_compaction_task_request).await{
-                    Ok(_) => {},
-                    Err(_) => tracing::warn!("Failed to report heartbeat"),
-                }
-            }
-
-
-            _ = &mut shutdown_rx => {
-                tracing::info!("Compactor is shutting down");
-                return
-            }
-        };
-
-        match dispatch_task {
-            dispatch_compaction_task_request::Task::CompactTask(compact_task) => {
-                context.running_task_count.fetch_add(1, Ordering::SeqCst);
-                let (tx, rx) = tokio::sync::oneshot::channel();
-                let task_id = compact_task.task_id;
-                shutdown.lock().unwrap().insert(task_id, tx);
-
-                let (compact_task, table_stats) = compactor_runner::compact(
-                    context.clone(),
-                    compact_task,
-                    rx,
-                    object_id_getter,
-                    filter_key_extractor_manager.clone(),
-                )
-                .await;
-                shutdown.lock().unwrap().remove(&task_id);
-                context.running_task_count.fetch_sub(1, Ordering::SeqCst);
-                let report_compaction_task_request = ReportCompactionTaskRequest {
-                    event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
-                        compact_task: Some(compact_task),
-                        table_stats_change: to_prost_table_stats_map(table_stats),
-                    })),
-                };
-
-                match client
-                    .report_compaction_task(report_compaction_task_request)
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => tracing::warn!("Failed to report task {task_id:?} . {e:?}"),
-                }
-            }
-            dispatch_compaction_task_request::Task::VacuumTask(vacuum_task) => {
-                match Vacuum::handle_vacuum_task(
-                    context.sstable_store.clone(),
-                    &vacuum_task.sstable_object_ids,
-                )
-                .await
-                {
-                    Ok(_) => {
-                        let report_vacuum_task_request = ReportVacuumTaskRequest {
-                            vacuum_task: Some(vacuum_task),
-                        };
-                        match client.report_vacuum_task(report_vacuum_task_request).await {
-                            Ok(_) => tracing::info!("Finished vacuuming SSTs"),
-                            Err(e) => tracing::warn!("Failed to report vacuum task: {:#?}", e),
-                        }
+        loop {
+            tokio::select! {
+                _ = periodic_event_interval.tick() => {
+                    let mut progress_list = Vec::new();
+                    for (&task_id, progress) in task_progress.lock().iter() {
+                        progress_list.push(CompactTaskProgress {
+                            task_id,
+                            num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
+                            num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
+                            num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
+                            num_pending_read_io: progress.num_pending_read_io.load(Ordering::Relaxed) as u64,
+                            num_pending_write_io: progress.num_pending_write_io.load(Ordering::Relaxed) as u64,
+                        });
                     }
-                    Err(e) => {
-                        tracing::warn!("Failed to vacuum task: {:#?}", e)
+
+                    let report_compaction_task_request = ReportCompactionTaskRequest{
+                        event: Some(ReportCompactionTaskEvent::HeartBeat(
+                            SharedHeartBeat {
+                                progress: progress_list
+                            }
+                        )),
+                     };
+
+                     match client.report_compaction_task(report_compaction_task_request).await{
+                        Ok(_) => {},
+                        Err(_) => tracing::warn!("Failed to report heartbeat"),
                     }
                 }
-            }
-            dispatch_compaction_task_request::Task::FullScanTask(full_scan_task) => {
-                match Vacuum::handle_full_scan_task(full_scan_task, context.sstable_store.clone())
-                    .await
-                {
-                    Ok((object_ids, total_object_count, total_object_size)) => {
-                        let report_full_scan_task_request = ReportFullScanTaskRequest {
-                            object_ids,
-                            total_object_count,
-                            total_object_size,
-                        };
-                        match client
-                            .report_full_scan_task(report_full_scan_task_request)
-                            .await
-                        {
-                            Ok(_) => tracing::info!("Finished full scan SSTs"),
-                            Err(e) => tracing::warn!("Failed to report full scan task: {:#?}", e),
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to iter object: {:#?}", e);
+
+
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Compactor is shutting down");
+                    return
+                }
+
+                request = receiver.recv() => {
+                    if let Some(request) = request {
+                        let DispatchCompactionTaskRequest {
+                            tables,
+                            output_object_ids,
+                            task: dispatch_task,
+                        } = request.into_inner();
+                        let id_to_tables = tables.into_iter().fold(HashMap::new(), |mut acc, table| {
+                            acc.insert(table.id, table);
+                            acc
+                        });
+                        let static_filter_key_extractor_manager: Arc<StaticFilterKeyExtractorManager> =
+                            Arc::new(StaticFilterKeyExtractorManager::new(id_to_tables));
+                        let filter_key_extractor_manager =
+                            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(
+                                static_filter_key_extractor_manager,
+                            );
+
+                        let mut output_object_ids_deque: VecDeque<_> = VecDeque::new();
+                        output_object_ids_deque.extend(output_object_ids);
+                        let shared_compactor_object_id_manager =
+                            SharedComapctorObjectIdManager::new(output_object_ids_deque);
+                            match dispatch_task.unwrap() {
+                                dispatch_compaction_task_request::Task::CompactTask(compact_task) => {
+                                    context.running_task_count.fetch_add(1, Ordering::SeqCst);
+                                    let (tx, rx) = tokio::sync::oneshot::channel();
+                                    let task_id = compact_task.task_id;
+                                    shutdown.lock().unwrap().insert(task_id, tx);
+
+                                    let (compact_task, table_stats) = compactor_runner::compact(
+                                        context.clone(),
+                                        compact_task,
+                                        rx,
+                                        Box::new(shared_compactor_object_id_manager),
+                                        filter_key_extractor_manager.clone(),
+                                    )
+                                    .await;
+                                    shutdown.lock().unwrap().remove(&task_id);
+                                    context.running_task_count.fetch_sub(1, Ordering::SeqCst);
+                                    let report_compaction_task_request = ReportCompactionTaskRequest {
+                                        event: Some(ReportCompactionTaskEvent::ReportTask(ReportSharedTask {
+                                            compact_task: Some(compact_task),
+                                            table_stats_change: to_prost_table_stats_map(table_stats),
+                                        })),
+                                    };
+
+                                    match client
+                                        .report_compaction_task(report_compaction_task_request)
+                                        .await
+                                    {
+                                        Ok(_) => {}
+                                        Err(e) => tracing::warn!("Failed to report task {task_id:?} . {e:?}"),
+                                    }
+                                }
+                                dispatch_compaction_task_request::Task::VacuumTask(vacuum_task) => {
+                                    match Vacuum::handle_vacuum_task(
+                                        context.sstable_store.clone(),
+                                        &vacuum_task.sstable_object_ids,
+                                    )
+                                    .await
+                                    {
+                                        Ok(_) => {
+                                            let report_vacuum_task_request = ReportVacuumTaskRequest {
+                                                vacuum_task: Some(vacuum_task),
+                                            };
+                                            match client.report_vacuum_task(report_vacuum_task_request).await {
+                                                Ok(_) => tracing::info!("Finished vacuuming SSTs"),
+                                                Err(e) => tracing::warn!("Failed to report vacuum task: {:#?}", e),
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!("Failed to vacuum task: {:#?}", e)
+                                        }
+                                    }
+                                }
+                                dispatch_compaction_task_request::Task::FullScanTask(full_scan_task) => {
+                                    match Vacuum::handle_full_scan_task(full_scan_task, context.sstable_store.clone())
+                                        .await
+                                    {
+                                        Ok((object_ids, total_object_count, total_object_size)) => {
+                                            let report_full_scan_task_request = ReportFullScanTaskRequest {
+                                                object_ids,
+                                                total_object_count,
+                                                total_object_size,
+                                            };
+                                            match client
+                                                .report_full_scan_task(report_full_scan_task_request)
+                                                .await
+                                            {
+                                                Ok(_) => tracing::info!("Finished full scan SSTs"),
+                                                Err(e) => tracing::warn!("Failed to report full scan task: {:#?}", e),
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!("Failed to iter object: {:#?}", e);
+                                        }
+                                    }
+                                }
+                                dispatch_compaction_task_request::Task::ValidationTask(validation_task) => {
+                                    validate_ssts(validation_task, context.sstable_store.clone()).await;
+                                }
+                                dispatch_compaction_task_request::Task::CancelCompactTask(cancel_compact_task) => {
+                                    if let Some(tx) = shutdown
+                                        .lock()
+                                        .unwrap()
+                                        .remove(&cancel_compact_task.task_id)
+                                    {
+                                        if tx.send(()).is_err() {
+                                            tracing::warn!(
+                                                "Cancellation of compaction task failed. task_id: {}",
+                                                cancel_compact_task.task_id
+                                            );
+                                        }
+                                    } else {
+                                        tracing::warn!(
+                                            "Attempting to cancel non-existent compaction task. task_id: {}",
+                                            cancel_compact_task.task_id
+                                        );
+                                    }
+                                }
+                            }
+                    } else {
+                        continue;
                     }
                 }
-            }
-            dispatch_compaction_task_request::Task::ValidationTask(validation_task) => {
-                validate_ssts(validation_task, context.sstable_store.clone()).await;
-            }
-            dispatch_compaction_task_request::Task::CancelCompactTask(cancel_compact_task) => {
-                if let Some(tx) = shutdown
-                    .lock()
-                    .unwrap()
-                    .remove(&cancel_compact_task.task_id)
-                {
-                    if tx.send(()).is_err() {
-                        tracing::warn!(
-                            "Cancellation of compaction task failed. task_id: {}",
-                            cancel_compact_task.task_id
-                        );
-                    }
-                } else {
-                    tracing::warn!(
-                        "Attempting to cancel non-existent compaction task. task_id: {}",
-                        cancel_compact_task.task_id
-                    );
-                }
-            }
+            };
         }
     });
     (join_handle, shutdown_tx)

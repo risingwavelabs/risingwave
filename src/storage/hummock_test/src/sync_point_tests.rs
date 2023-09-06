@@ -37,6 +37,7 @@ use risingwave_meta::manager::LocalNotification;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::filter_key_extractor::{self, FilterKeyExtractorManager};
 use risingwave_storage::hummock::compactor::compactor_runner::compact;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::{CachePolicy, GetObjectId, SstableObjectIdManager};
@@ -230,6 +231,7 @@ async fn test_syncpoints_test_local_notification_receiver() {
 pub async fn compact_once(
     hummock_manager_ref: HummockManagerRef<MemStore>,
     compact_ctx: CompactorContext,
+    filter_key_extractor_manager: FilterKeyExtractorManager,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) {
     // 2. get compact task
@@ -257,6 +259,7 @@ pub async fn compact_once(
         compact_task.clone(),
         rx,
         Box::new(sstable_object_id_manager),
+        filter_key_extractor_manager.clone(),
     )
     .await;
 
@@ -289,7 +292,8 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         TableId::from(existing_table_id),
     )
     .await;
-    let compact_ctx = prepare_compactor_and_filter(&storage, existing_table_id);
+    let (compact_ctx, filter_key_extractor_manager) =
+        prepare_compactor_and_filter(&storage, existing_table_id);
 
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
@@ -334,6 +338,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
+        filter_key_extractor_manager.clone(),
         sstable_object_id_manager.clone(),
     )
     .await;
@@ -356,6 +361,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
+        filter_key_extractor_manager.clone(),
         sstable_object_id_manager.clone(),
     )
     .await;
@@ -379,6 +385,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
+        filter_key_extractor_manager.clone(),
         sstable_object_id_manager.clone(),
     )
     .await;
@@ -396,6 +403,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
+        filter_key_extractor_manager.clone(),
         sstable_object_id_manager.clone(),
     )
     .await;
