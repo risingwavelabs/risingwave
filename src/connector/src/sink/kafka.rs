@@ -18,8 +18,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
-use futures::FutureExt;
 use futures::future::try_join_all;
+use futures::FutureExt;
 use futures_async_stream::for_await;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
@@ -396,19 +396,6 @@ impl KafkaSinkWriter {
         })
     }
 
-    /// The wrapper function for the actual `FutureProducer::send_result`
-    /// Just for better error handling purpose
-    fn send_result_inner<'a, K, P>(
-        &'a self,
-        record: FutureRecord<'a, K, P>,
-    ) -> core::result::Result<DeliveryFuture, (KafkaError, FutureRecord<'a, K, P>)>
-    where
-        K: ToBytes + ?Sized,
-        P: ToBytes + ?Sized,
-    {
-        self.inner.send_result(record)
-    }
-
     /// The actual `send_result` function, will be called when the `KafkaSinkWriter` needs to sink
     /// messages
     async fn send_result<'a, K, P>(
@@ -433,7 +420,7 @@ impl KafkaSinkWriter {
         let mut ret = Ok(());
 
         for _ in 0..self.config.max_retry_num {
-            match self.send_result_inner(record) {
+            match self.inner.send_result(record) {
                 Ok(delivery_future) => {
                     // First check if the current length is
                     // greater than the preset limit
@@ -537,7 +524,7 @@ impl KafkaSinkWriter {
                             Err(_) => Err(SinkError::Kafka(KafkaError::Canceled)),
                         }
                     })
-                })
+                }),
         )
         .await?;
 
