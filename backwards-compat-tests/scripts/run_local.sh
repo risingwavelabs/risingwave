@@ -46,7 +46,7 @@ EOF
 
 setup_old_cluster() {
   echo "--- Setting up old cluster"
-  git checkout "v${OLD_TAG}"
+  git checkout "v${OLD_VERSION}"
 }
 
 setup_new_cluster() {
@@ -60,11 +60,11 @@ main() {
   get_rw_version_tag
   setup_old_cluster
   configure_rw
-  seed_old_cluster $OLD_TAG
+  seed_old_cluster "$OLD_VERSION"
 
   setup_new_cluster
   configure_rw
-  validate_new_cluster $NEW_TAG
+  validate_new_cluster "$NEW_VERSION"
 }
 
 main
