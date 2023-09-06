@@ -371,7 +371,15 @@ impl NatsCommon {
         if let (Some(v_user), Some(v_password)) = (self.user.as_ref(), self.password.as_ref()) {
             connect_options = connect_options.user_and_password(v_user.into(), v_password.into());
         }
-        let client = connect_options.connect(self.server_url.clone()).await?;
+        let servers = self.server_url.split(',').collect::<Vec<&str>>();
+        let client = connect_options
+            .connect(
+                servers
+                    .iter()
+                    .map(|url| url.parse())
+                    .collect::<Result<Vec<async_nats::ServerAddr>, _>>()?,
+            )
+            .await?;
         Ok(client)
     }
 
@@ -379,12 +387,6 @@ impl NatsCommon {
         let client = self.build_client().await?;
         let jetstream = async_nats::jetstream::new(client);
         Ok(jetstream)
-    }
-
-    pub(crate) async fn build_subscriber(&self) -> anyhow::Result<async_nats::Subscriber> {
-        let client = self.build_client().await?;
-        let subscription = client.subscribe(self.subject.clone()).await?;
-        Ok(subscription)
     }
 
     pub(crate) async fn build_consumer(
