@@ -338,7 +338,7 @@ pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_descriptor(&user_fn, false)?);
+            tokens.extend(attr.generate_function_descriptor(&user_fn, false)?);
         }
         Ok(tokens)
     }
@@ -356,7 +356,7 @@ pub fn build_function(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_descriptor(&user_fn, true)?);
+            tokens.extend(attr.generate_function_descriptor(&user_fn, true)?);
         }
         Ok(tokens)
     }
@@ -374,7 +374,7 @@ pub fn aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_agg_descriptor(&user_fn, false)?);
+            tokens.extend(attr.generate_aggregate_descriptor(&user_fn, false)?);
         }
         Ok(tokens)
     }
@@ -392,7 +392,7 @@ pub fn build_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_agg_descriptor(&user_fn, true)?);
+            tokens.extend(attr.generate_aggregate_descriptor(&user_fn, true)?);
         }
         Ok(tokens)
     }

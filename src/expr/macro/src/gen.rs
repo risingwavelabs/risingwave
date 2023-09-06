@@ -15,7 +15,7 @@
 //! Generate code for the functions.
 
 use itertools::Itertools;
-use proc_macro2::Span;
+use proc_macro2::{Ident, Span};
 use quote::{format_ident, quote};
 
 use super::*;
@@ -47,10 +47,10 @@ impl FunctionAttr {
         attrs
     }
 
-    /// Generate a descriptor of the function.
+    /// Generate a descriptor of the scalar or table function.
     ///
     /// The types of arguments and return value should not contain wildcard.
-    pub fn generate_descriptor(
+    pub fn generate_function_descriptor(
         &self,
         user_fn: &UserFunctionAttr,
         build_fn: bool,
@@ -72,7 +72,7 @@ impl FunctionAttr {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
         } else {
-            self.generate_build_fn(user_fn)?
+            self.generate_build_scalar_function(user_fn, false)?
         };
         let deprecated = self.deprecated;
         Ok(quote! {
@@ -90,31 +90,72 @@ impl FunctionAttr {
         })
     }
 
-    fn generate_build_fn(&self, user_fn: &UserFunctionAttr) -> Result<TokenStream2> {
+    /// Generate a build function for the scalar function.
+    ///
+    /// If `optimize_const` is true, the function will be optimized for constant arguments,
+    /// and fallback to the general version if any argument is not constant.
+    fn generate_build_scalar_function(
+        &self,
+        user_fn: &UserFunctionAttr,
+        optimize_const: bool,
+    ) -> Result<TokenStream2> {
         let num_args = self.args.len();
         let fn_name = format_ident!("{}", user_fn.name);
-        let struct_name = format_ident!("{}", self.ident_name());
-        let arg_ids = (0..num_args)
-            .filter(|i| match &self.prebuild {
-                Some(s) => !s.contains(&format!("${i}")),
-                None => true,
-            })
-            .collect_vec();
-        let const_ids = (0..num_args).filter(|i| match &self.prebuild {
-            Some(s) => s.contains(&format!("${i}")),
-            None => false,
-        });
-        let inputs: Vec<_> = arg_ids.iter().map(|i| format_ident!("i{i}")).collect();
-        let all_child: Vec<_> = (0..num_args).map(|i| format_ident!("child{i}")).collect();
-        let const_child: Vec<_> = const_ids.map(|i| format_ident!("child{i}")).collect();
-        let child: Vec<_> = arg_ids.iter().map(|i| format_ident!("child{i}")).collect();
-        let array_refs: Vec<_> = arg_ids.iter().map(|i| format_ident!("array{i}")).collect();
-        let arrays: Vec<_> = arg_ids.iter().map(|i| format_ident!("a{i}")).collect();
-        let datums: Vec<_> = arg_ids.iter().map(|i| format_ident!("v{i}")).collect();
-        let arg_arrays = arg_ids
+        let struct_name = match optimize_const {
+            true => format_ident!("{}OptimizeConst", utils::to_camel_case(&self.ident_name())),
+            false => format_ident!("{}", utils::to_camel_case(&self.ident_name())),
+        };
+
+        // we divide all arguments into two groups: prebuilt and non-prebuilt.
+        // prebuilt arguments are collected from the "prebuild" field.
+        // let's say we have a function with 3 arguments: [0, 1, 2]
+        // and the prebuild field contains "$1".
+        // then we have:
+        //     prebuilt_indices = [1]
+        //     non_prebuilt_indices = [0, 2]
+        //
+        // if the const argument optimization is enabled, prebuilt arguments are
+        // evaluated at build time, thus the children only contain non-prebuilt arguments:
+        //     children_indices = [0, 2]
+        // otherwise, the children contain all arguments:
+        //     children_indices = [0, 1, 2]
+
+        let prebuilt_indices = match &self.prebuild {
+            Some(s) => (0..num_args)
+                .filter(|i| s.contains(&format!("${i}")))
+                .collect_vec(),
+            None => vec![],
+        };
+        let non_prebuilt_indices = match &self.prebuild {
+            Some(s) => (0..num_args)
+                .filter(|i| !s.contains(&format!("${i}")))
+                .collect_vec(),
+            _ => (0..num_args).collect_vec(),
+        };
+        let children_indices = match optimize_const {
+            true => non_prebuilt_indices.clone(),
+            false => (0..num_args).collect_vec(),
+        };
+
+        /// Return a list of identifiers with the given prefix and indices.
+        fn idents(prefix: &str, indices: &[usize]) -> Vec<Ident> {
+            indices
+                .iter()
+                .map(|i| format_ident!("{prefix}{i}"))
+                .collect()
+        }
+        let inputs = idents("i", &children_indices);
+        let prebuilt_inputs = idents("i", &prebuilt_indices);
+        let non_prebuilt_inputs = idents("i", &non_prebuilt_indices);
+        let all_child = idents("child", &(0..num_args).collect_vec());
+        let child = idents("child", &children_indices);
+        let array_refs = idents("array", &children_indices);
+        let arrays = idents("a", &children_indices);
+        let datums = idents("v", &children_indices);
+        let arg_arrays = children_indices
             .iter()
             .map(|i| format_ident!("{}", types::array_type(&self.args[*i])));
-        let arg_types = arg_ids.iter().map(|i| {
+        let arg_types = children_indices.iter().map(|i| {
             types::ref_type(&self.args[*i])
                 .parse::<TokenStream2>()
                 .unwrap()
@@ -128,16 +169,45 @@ impl FunctionAttr {
         };
         let ret_array_type = format_ident!("{}", types::array_type(&self.ret));
         let builder_type = format_ident!("{}Builder", types::array_type(&self.ret));
-        let const_arg_type = match &self.prebuild {
-            Some(s) => s.split("::").next().unwrap().parse().unwrap(),
-            None => quote! { () },
+        let prebuilt_arg_type = match &self.prebuild {
+            Some(s) if optimize_const => s.split("::").next().unwrap().parse().unwrap(),
+            _ => quote! { () },
         };
-        let const_arg_value = match &self.prebuild {
+        let prebuilt_arg_value = match &self.prebuild {
+            // example:
+            // prebuild = "RegexContext::new($1)"
+            // return = "RegexContext::new(i1)"
             Some(s) => s
-                .replace('$', "child")
+                .replace('$', "i")
                 .parse()
                 .expect("invalid prebuild syntax"),
             None => quote! { () },
+        };
+        let prebuild_const = if self.prebuild.is_some() && optimize_const {
+            let build_general = self.generate_build_scalar_function(user_fn, false)?;
+            quote! {{
+                let build_general = #build_general;
+                #(
+                    // try to evaluate constant for prebuilt arguments
+                    let #prebuilt_inputs = match children[#prebuilt_indices].eval_const() {
+                        Ok(s) => s,
+                        // prebuilt argument is not constant, fallback to general
+                        Err(_) => build_general(return_type, children),
+                    };
+                    // get reference to the constant value
+                    let #prebuilt_inputs = match &#prebuilt_inputs {
+                        Some(s) => s.as_scalar_ref_impl().try_into()?,
+                        // the function should always return null if any const argument is null
+                        None => return Ok(Box::new(crate::expr::LiteralExpression::new(
+                            return_type,
+                            None,
+                        ))),
+                    };
+                )*
+                #prebuilt_arg_value
+            }}
+        } else {
+            quote! { () }
         };
         let generic = if self.ret == "boolean" && user_fn.generic == 3 {
             // XXX: for generic compare functions, we need to specify the compatible type
@@ -148,9 +218,13 @@ impl FunctionAttr {
         } else {
             quote! {}
         };
-        let const_arg = match &self.prebuild {
-            Some(_) => quote! { &self.const_arg, },
-            None => quote! {},
+        let prebuilt_arg = match (&self.prebuild, optimize_const) {
+            // use the prebuilt argument
+            (Some(_), true) => quote! { &self.prebuilt_arg, },
+            // build the argument on site
+            (Some(_), false) => quote! { &#prebuilt_arg_value, },
+            // no prebuilt argument
+            (None, _) => quote! {},
         };
         let context = match user_fn.context {
             true => quote! { &self.context, },
@@ -160,14 +234,18 @@ impl FunctionAttr {
             true => quote! { &mut writer, },
             false => quote! {},
         };
+        // call the user defined function
         // inputs: [ Option<impl ScalarRef> ]
-        let mut output = quote! { #fn_name #generic(#(#inputs,)* #const_arg #context #writer) };
+        let mut output =
+            quote! { #fn_name #generic(#(#non_prebuilt_inputs,)* #prebuilt_arg #context #writer) };
         output = match user_fn.return_type_kind {
             ReturnTypeKind::T => quote! { Some(#output) },
             ReturnTypeKind::Option => output,
             ReturnTypeKind::Result => quote! { Some(#output?) },
             ReturnTypeKind::ResultOption => quote! { #output? },
         };
+        // if user function accepts non-option arguments, we assume the function
+        // returns null on null input, so we need to unwrap the inputs before calling.
         if !user_fn.arg_option {
             output = quote! {
                 match (#(#inputs,)*) {
@@ -195,6 +273,7 @@ impl FunctionAttr {
                 builder.append(output.as_ref().map(|s| s.as_scalar_ref()));
             },
         };
+        // the output expression in `eval_row`
         let row_output = match user_fn.write {
             true => quote! {{
                 let mut writer = String::new();
@@ -208,6 +287,7 @@ impl FunctionAttr {
                 output.map(|s| s.into())
             }},
         };
+        // the main body in `eval`
         let eval = if let Some(batch_fn) = &self.batch_fn {
             // user defined batch function
             let fn_name = format_ident!("{}", batch_fn);
@@ -284,30 +364,19 @@ impl FunctionAttr {
                 use crate::Result;
 
                 crate::ensure!(children.len() == #num_args);
+                let prebuilt_arg = #prebuild_const;
                 let context = Context {
                     return_type,
                     arg_types: children.iter().map(|c| c.return_type()).collect(),
                 };
                 let mut iter = children.into_iter();
                 #(let #all_child = iter.next().unwrap();)*
-                // evaluate const arguments
-                #(
-                    let #const_child = #const_child.eval_const()?;
-                    let #const_child = match &#const_child {
-                        Some(s) => s.as_scalar_ref_impl().try_into()?,
-                        // the function should always return null if any const argument is null
-                        None => return Ok(Box::new(crate::expr::LiteralExpression::new(
-                            context.return_type,
-                            None,
-                        ))),
-                    };
-                )*
 
                 #[derive(Debug)]
                 struct #struct_name {
                     context: Context,
                     #(#child: BoxedExpression,)*
-                    const_arg: #const_arg_type,
+                    prebuilt_arg: #prebuilt_arg_type,
                 }
                 #[async_trait::async_trait]
                 impl crate::expr::Expression for #struct_name {
@@ -334,7 +403,7 @@ impl FunctionAttr {
                 Ok(Box::new(#struct_name {
                     context,
                     #(#child,)*
-                    const_arg: #const_arg_value,
+                    prebuilt_arg,
                 }))
             }
         })
@@ -343,7 +412,7 @@ impl FunctionAttr {
     /// Generate a descriptor of the aggregate function.
     ///
     /// The types of arguments and return value should not contain wildcard.
-    pub fn generate_agg_descriptor(
+    pub fn generate_aggregate_descriptor(
         &self,
         user_fn: &UserFunctionAttr,
         build_fn: bool,
@@ -624,7 +693,7 @@ impl FunctionAttr {
         let num_args = self.args.len();
         let return_types = output_types(&self.ret);
         let fn_name = format_ident!("{}", user_fn.name);
-        let struct_name = format_ident!("{}", self.ident_name());
+        let struct_name = format_ident!("{}", utils::to_camel_case(&self.ident_name()));
         let arg_ids = (0..num_args)
             .filter(|i| match &self.prebuild {
                 Some(s) => !s.contains(&format!("${i}")),
@@ -674,15 +743,15 @@ impl FunctionAttr {
                 ).into_ref();
             }
         };
-        let const_arg = match &self.prebuild {
-            Some(_) => quote! { &self.const_arg },
+        let prebuilt_arg = match &self.prebuild {
+            Some(_) => quote! { &self.prebuilt_arg },
             None => quote! {},
         };
-        let const_arg_type = match &self.prebuild {
+        let prebuilt_arg_type = match &self.prebuild {
             Some(s) => s.split("::").next().unwrap().parse().unwrap(),
             None => quote! { () },
         };
-        let const_arg_value = match &self.prebuild {
+        let prebuilt_arg_value = match &self.prebuild {
             Some(s) => s
                 .replace('$', "child")
                 .parse()
@@ -734,7 +803,7 @@ impl FunctionAttr {
                     return_type: DataType,
                     chunk_size: usize,
                     #(#child: BoxedExpression,)*
-                    const_arg: #const_arg_type,
+                    prebuilt_arg: #prebuilt_arg_type,
                 }
                 #[async_trait::async_trait]
                 impl crate::table_function::TableFunction for #struct_name {
@@ -758,7 +827,7 @@ impl FunctionAttr {
 
                         for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()).enumerate() {
                             if let (#(Some(#inputs),)*) = row && visible {
-                                let iter = #fn_name(#(#inputs,)* #const_arg);
+                                let iter = #fn_name(#(#inputs,)* #prebuilt_arg);
                                 for output in #iter {
                                     index_builder.append(Some(i as i32));
                                     match #output {
@@ -790,7 +859,7 @@ impl FunctionAttr {
                     return_type,
                     chunk_size,
                     #(#child,)*
-                    const_arg: #const_arg_value,
+                    prebuilt_arg: #prebuilt_arg_value,
                 }))
             }
         })
