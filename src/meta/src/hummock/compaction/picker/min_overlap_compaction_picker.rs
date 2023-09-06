@@ -144,6 +144,7 @@ impl CompactionPicker for MinOverlappingPicker {
             ],
             target_level: self.target_level,
             target_sub_level_id: 0,
+            ..Default::default()
         })
     }
 }
