@@ -205,9 +205,7 @@ impl<S: StateStore> SortBuffer<S> {
                 buffer_table.iter_row_with_pk_range(
                     &pk_range,
                     vnode,
-                    PrefetchOptions {
-                        exhaust_iter: filler.capacity().is_none(),
-                    },
+                    PrefetchOptions::new_with_exhaust_iter(filler.capacity().is_none()),
                 )
             }))
             .await?

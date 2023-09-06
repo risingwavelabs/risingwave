@@ -32,6 +32,9 @@ pub mod rpc;
 pub mod server;
 pub mod telemetry;
 
+use std::future::Future;
+use std::pin::Pin;
+
 use clap::{Parser, ValueEnum};
 use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
@@ -185,9 +188,6 @@ fn validate_opts(opts: &ComputeNodeOpts) {
         tracing::warn!(error_msg);
     }
 }
-
-use std::future::Future;
-use std::pin::Pin;
 
 use crate::server::compute_node_serve;
 

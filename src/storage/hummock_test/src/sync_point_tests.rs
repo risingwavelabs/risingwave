@@ -48,6 +48,7 @@ use super::compactor_tests::tests::{
     flush_and_commit, get_hummock_storage, prepare_compactor_and_filter,
 };
 use crate::get_notification_client_for_test;
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 
 #[tokio::test]
 #[cfg(feature = "sync_point")]
@@ -229,7 +230,7 @@ async fn test_syncpoints_test_local_notification_receiver() {
 
 pub async fn compact_once(
     hummock_manager_ref: HummockManagerRef<MemStore>,
-    compact_ctx: Arc<CompactorContext>,
+    compact_ctx: CompactorContext,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) {
     // 2. get compact task
@@ -289,11 +290,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         TableId::from(existing_table_id),
     )
     .await;
-    let compact_ctx = Arc::new(prepare_compactor_and_filter(
-        &storage,
-        &hummock_meta_client,
-        existing_table_id,
-    ));
+    let compact_ctx = prepare_compactor_and_filter(&storage, existing_table_id);
 
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
@@ -311,7 +308,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let val0 = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
     let val1 = Bytes::from(b"1"[..].repeat(1 << 10)); // 1024 Byte value
 
-    local.init(100);
+    local.init_for_test(100).await.unwrap();
     let mut start_key = b"\0\0aaa".to_vec();
     for _ in 0..10 {
         local
