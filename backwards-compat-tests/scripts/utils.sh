@@ -146,7 +146,7 @@ get_rw_version_tag() {
 
   # Then we assert that `$OLD_VERSION` < `$NEW_VERSION`.
   local TOP=$(echo -e "$OLD_VERSION\n$NEW_VERSION" | sort -t '.' -n | tail -1)
-  if [[ "$TOP" != "$OLD_VERSION" ]]
+  if [[ "$TOP" == "$OLD_VERSION" ]]
   then
     echo "ERROR: $OLD_VERSION > $NEW_VERSION"
     exit 1
