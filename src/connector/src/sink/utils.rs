@@ -425,12 +425,15 @@ pub async fn gen_upsert_message_stream<'a>(
     _opts: UpsertAdapterOpts,
 ) {
     for (op, row) in chunk.rows() {
-        let event_key_object = gen_event_object(
-            schema,
-            Value::Object(pk_to_json(row, &schema.fields, pk_indices)?),
-            enable_schema,
-            &schema_name,
-        );
+        let event_key_object_inner = Value::Object(pk_to_json(row, &schema.fields, pk_indices)?);
+        let event_key_object = if enable_schema {
+            Some(json!({
+                "schema": generate_json_converter_schema_with_indices(&schema.fields, schema_name.as_ref().unwrap(), pk_indices),
+                "payload": event_key_object_inner,
+            }))
+        } else {
+            Some(event_key_object_inner)
+        };
 
         let event_object = match op {
             Op::Insert => gen_event_object(
@@ -542,6 +545,21 @@ fn generate_json_converter_schema(fields: &[Field], name: &str) -> Value {
     json!({
         "type": "struct",
         "fields": fields.iter().map(json_converter_field_to_json).collect::<Vec<_>>(),
+        "optional": "false",
+        "name": name,
+    })
+}
+
+/// Generate schema for Kafka's `JsonConverter` when `schema.enable` is true according
+/// to indices
+fn generate_json_converter_schema_with_indices(
+    fields: &[Field],
+    name: &str,
+    indices: &[usize],
+) -> Value {
+    json!({
+        "type": "struct",
+        "fields": indices.iter().map(|i| json_converter_field_to_json(&fields[*i])).collect::<Vec<_>>(),
         "optional": "false",
         "name": name,
     })
