@@ -72,7 +72,7 @@ impl Op {
             Op::Insert => Op::Insert,
             Op::Delete => Op::Delete,
             Op::UpdateDelete => Op::Delete,
-            Op::UpdateInsert => todo!(),
+            Op::UpdateInsert => Op::Insert,
         }
     }
 }
@@ -429,6 +429,10 @@ impl OpRowMutRef<'_> {
 
     pub fn set_op(&mut self, val: Op) {
         self.c.set_op(self.i, val);
+    }
+
+    pub fn row_ref(&self) -> RowRef<'_> {
+        RowRef::with_columns(self.c.columns(), self.i)
     }
 }
 

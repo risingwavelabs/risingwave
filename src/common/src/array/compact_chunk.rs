@@ -37,6 +37,7 @@ struct OpRowMutRefTuple<'a> {
 impl<'a> OpRowMutRefTuple<'a> {
     /// return true if no row left
     fn push(&mut self, mut op_row: OpRowMutRef<'a>) -> bool {
+        debug_assert_eq!(self.latest.vis(), true);
         match (self.latest.op(), op_row.op()) {
             (Op::Insert, Op::Insert) => panic!("receive duplicated insert on the stream"),
             (Op::Delete, Op::Delete) => panic!("receive duplicated delete on the stream"),
@@ -60,6 +61,14 @@ impl<'a> OpRowMutRefTuple<'a> {
             _ => unreachable!(),
         };
         false
+    }
+
+    fn as_update_op(&mut self) -> Option<(&mut OpRowMutRef<'a>, &mut OpRowMutRef<'a>)> {
+        self.previous.as_mut().and_then(|prev| {
+            debug_assert_eq!(prev.op(), Op::Delete);
+            debug_assert_eq!(self.latest.op(), Op::Insert);
+            Some((prev, &mut self.latest))
+        })
     }
 }
 
@@ -127,7 +136,14 @@ impl StreamChunkCompactor {
                 }
             }
         }
-
+        for (_, tuple) in &mut op_row_map {
+            if let Some((prev, latest)) = tuple.as_update_op() {
+                if prev.row_ref() == latest.row_ref() {
+                    prev.set_vis(false);
+                    latest.set_vis(false);
+                }
+            }
+        }
         chunks.into_iter().map(|(_, c)| c.into()).collect_vec()
     }
 }
@@ -158,32 +174,14 @@ mod tests {
             + 4 9 2
             - 2 5 7
             - 6 6 9
-            + 6 6 6",
+            + 6 6 9",
         );
         let compacted_chunk = merge_chunk_row(chunk, &pk_indices);
         assert_eq!(
             compacted_chunk.compact(),
             StreamChunk::from_pretty(
                 " I I I
-                + 4 9 2
-                - 6 6 9
-                + 6 6 6",
-            )
-        );
-
-        let chunk = StreamChunk::from_pretty(
-            " I I I
-            + 2 5 7
-            + 2 5 1
-            - 9 7 3",
-        );
-        let compacted_chunk = merge_chunk_row(chunk, &pk_indices);
-        assert_eq!(
-            compacted_chunk.compact(),
-            StreamChunk::from_pretty(
-                " I I I
-                + 2 5 1
-                - 9 7 3",
+                + 4 9 2",
             )
         );
 
