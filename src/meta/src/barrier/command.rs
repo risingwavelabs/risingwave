@@ -38,7 +38,6 @@ use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::storage::MetaStore;
 use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
 use crate::MetaResult;
 
@@ -215,8 +214,8 @@ impl Command {
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
-pub struct CommandContext<S: MetaStore> {
-    fragment_manager: FragmentManagerRef<S>,
+pub struct CommandContext {
+    fragment_manager: FragmentManagerRef,
 
     client_pool: StreamClientPoolRef,
 
@@ -233,7 +232,7 @@ pub struct CommandContext<S: MetaStore> {
 
     pub kind: BarrierKind,
 
-    source_manager: SourceManagerRef<S>,
+    source_manager: SourceManagerRef,
 
     /// The tracing span of this command.
     ///
@@ -243,10 +242,10 @@ pub struct CommandContext<S: MetaStore> {
     pub span: tracing::Span,
 }
 
-impl<S: MetaStore> CommandContext<S> {
+impl CommandContext {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
-        fragment_manager: FragmentManagerRef<S>,
+        fragment_manager: FragmentManagerRef,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
         prev_epoch: TracedEpoch,
@@ -254,7 +253,7 @@ impl<S: MetaStore> CommandContext<S> {
         current_paused_reason: Option<PausedReason>,
         command: Command,
         kind: BarrierKind,
-        source_manager: SourceManagerRef<S>,
+        source_manager: SourceManagerRef,
         span: tracing::Span,
     ) -> Self {
         Self {
@@ -272,10 +271,7 @@ impl<S: MetaStore> CommandContext<S> {
     }
 }
 
-impl<S> CommandContext<S>
-where
-    S: MetaStore,
-{
+impl CommandContext {
     /// Generate a mutation for the given command.
     pub async fn to_mutation(&self) -> MetaResult<Option<Mutation>> {
         let mutation = match &self.command {

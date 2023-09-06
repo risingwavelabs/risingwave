@@ -24,31 +24,27 @@ use tonic::{Request, Response, Status};
 use crate::barrier::BarrierManagerRef;
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::model::MetadataModel;
-use crate::storage::MetaStore;
 use crate::stream::{
     GlobalStreamManagerRef, ParallelUnitReschedule, RescheduleOptions, SourceManagerRef,
 };
 
-pub struct ScaleServiceImpl<S: MetaStore> {
-    fragment_manager: FragmentManagerRef<S>,
-    cluster_manager: ClusterManagerRef<S>,
-    source_manager: SourceManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
-    stream_manager: GlobalStreamManagerRef<S>,
-    barrier_manager: BarrierManagerRef<S>,
+pub struct ScaleServiceImpl {
+    fragment_manager: FragmentManagerRef,
+    cluster_manager: ClusterManagerRef,
+    source_manager: SourceManagerRef,
+    catalog_manager: CatalogManagerRef,
+    stream_manager: GlobalStreamManagerRef,
+    barrier_manager: BarrierManagerRef,
 }
 
-impl<S> ScaleServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl ScaleServiceImpl {
     pub fn new(
-        fragment_manager: FragmentManagerRef<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        source_manager: SourceManagerRef<S>,
-        catalog_manager: CatalogManagerRef<S>,
-        stream_manager: GlobalStreamManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        fragment_manager: FragmentManagerRef,
+        cluster_manager: ClusterManagerRef,
+        source_manager: SourceManagerRef,
+        catalog_manager: CatalogManagerRef,
+        stream_manager: GlobalStreamManagerRef,
+        barrier_manager: BarrierManagerRef,
     ) -> Self {
         Self {
             fragment_manager,
@@ -62,10 +58,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> ScaleService for ScaleServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl ScaleService for ScaleServiceImpl {
     #[cfg_attr(coverage, no_coverage)]
     async fn get_cluster_info(
         &self,

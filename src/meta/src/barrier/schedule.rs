@@ -28,7 +28,6 @@ use super::notifier::{BarrierInfo, Notifier};
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
 
 /// A queue for scheduling barriers.
@@ -122,18 +121,18 @@ impl Inner {
 /// The sender side of the barrier scheduling queue.
 /// Can be cloned and held by other managers to schedule and run barriers.
 #[derive(Clone)]
-pub struct BarrierScheduler<S: MetaStore> {
+pub struct BarrierScheduler {
     inner: Arc<Inner>,
 
     /// Used for getting the latest snapshot after `FLUSH`.
-    hummock_manager: HummockManagerRef<S>,
+    hummock_manager: HummockManagerRef,
 }
 
-impl<S: MetaStore> BarrierScheduler<S> {
+impl BarrierScheduler {
     /// Create a pair of [`BarrierScheduler`] and [`ScheduledBarriers`], for scheduling barriers
     /// from different managers, and executing them in the barrier manager, respectively.
     pub fn new_pair(
-        hummock_manager: HummockManagerRef<S>,
+        hummock_manager: HummockManagerRef,
         metrics: Arc<MetaMetrics>,
         checkpoint_frequency: usize,
     ) -> (Self, ScheduledBarriers) {
