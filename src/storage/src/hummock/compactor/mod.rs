@@ -50,6 +50,7 @@ use risingwave_pb::hummock::{
     CompactTaskProgress, CompactorWorkload, SubscribeCompactionEventRequest,
     SubscribeCompactionEventResponse,
 };
+use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::{compact, merge_imms_in_memory};
 use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::sync::oneshot::Sender;
@@ -76,7 +77,7 @@ use crate::hummock::{
 /// Implementation of Hummock compaction.
 pub struct Compactor {
     /// The context of the compactor.
-    context: Arc<CompactorContext>,
+    context: CompactorContext,
     object_id_getter: Box<dyn GetObjectId>,
     task_config: TaskConfig,
     options: SstableBuilderOptions,
@@ -88,7 +89,7 @@ pub type CompactOutput = (usize, Vec<LocalSstableInfo>, CompactionStatistics);
 impl Compactor {
     /// Create a new compactor.
     pub fn new(
-        context: Arc<CompactorContext>,
+        context: CompactorContext,
         options: SstableBuilderOptions,
         task_config: TaskConfig,
         object_id_getter: Box<dyn GetObjectId>,
@@ -310,10 +311,10 @@ impl Compactor {
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, no_coverage)]
 pub fn start_compactor(
-    compactor_context: Arc<CompactorContext>,
+    compactor_context: CompactorContext,
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) -> (JoinHandle<()>, Sender<()>) {
-    let hummock_meta_client = compactor_context.hummock_meta_client.clone();
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let stream_retry_interval = Duration::from_secs(30);

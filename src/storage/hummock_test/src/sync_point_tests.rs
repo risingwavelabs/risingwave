@@ -182,7 +182,7 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
 
 pub async fn compact_once(
     hummock_manager_ref: HummockManagerRef<MemStore>,
-    compact_ctx: Arc<CompactorContext>,
+    compact_ctx: CompactorContext,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) {
     // 2. get compact task
@@ -250,11 +250,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         TableId::from(existing_table_id),
     )
     .await;
-    let compact_ctx = Arc::new(prepare_compactor_and_filter(
-        &storage,
-        &hummock_meta_client,
-        existing_table_id,
-    ));
+    let compact_ctx = prepare_compactor_and_filter(&storage, existing_table_id);
 
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),

@@ -168,13 +168,11 @@ pub(crate) mod tests {
 
     fn get_compactor_context_with_filter_key_extractor_manager(
         storage: &HummockStorage,
-        hummock_meta_client: &Arc<dyn HummockMetaClient>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
         get_compactor_context_with_filter_key_extractor_manager_impl(
             storage.storage_opts().clone(),
             storage.sstable_store(),
-            hummock_meta_client,
             filter_key_extractor_manager,
         )
     }
@@ -182,13 +180,11 @@ pub(crate) mod tests {
     fn get_compactor_context_with_filter_key_extractor_manager_impl(
         options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
-        hummock_meta_client: &Arc<dyn HummockMetaClient>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
         CompactorContext {
             storage_opts: options,
             sstable_store,
-            hummock_meta_client: hummock_meta_client.clone(),
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
@@ -237,7 +233,6 @@ pub(crate) mod tests {
         };
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
-            &hummock_meta_client,
             rpc_filter_key_extractor_manager,
         );
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
@@ -296,7 +291,7 @@ pub(crate) mod tests {
 
             let (_tx, rx) = tokio::sync::oneshot::channel();
             let (result_task, task_stats) = compact(
-                Arc::new(compact_ctx.clone()),
+                compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
                 Box::new(sstable_object_id_manager.clone()),
@@ -409,7 +404,6 @@ pub(crate) mod tests {
         };
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
-            &hummock_meta_client,
             rpc_filter_key_extractor_manager,
         );
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
@@ -467,7 +461,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (result_task, task_stats) = compact(
-            Arc::new(compact_ctx),
+            compact_ctx,
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
@@ -587,7 +581,6 @@ pub(crate) mod tests {
 
     pub(crate) fn prepare_compactor_and_filter(
         storage: &HummockStorage,
-        hummock_meta_client: &Arc<dyn HummockMetaClient>,
         existing_table_id: u32,
     ) -> CompactorContext {
         let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
@@ -604,7 +597,6 @@ pub(crate) mod tests {
 
         get_compactor_context_with_filter_key_extractor_manager(
             storage,
-            hummock_meta_client,
             rpc_filter_key_extractor_manager,
         )
     }
@@ -718,7 +710,6 @@ pub(crate) mod tests {
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager_impl(
             global_storage.storage_opts().clone(),
             global_storage.sstable_store(),
-            &hummock_meta_client,
             rpc_filter_key_extractor_manager,
         );
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
@@ -809,7 +800,7 @@ pub(crate) mod tests {
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (result_task, task_stats) = compact(
-            Arc::new(compact_ctx),
+            compact_ctx,
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
@@ -913,7 +904,6 @@ pub(crate) mod tests {
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
-            &hummock_meta_client,
             rpc_filter_key_extractor_manager.clone(),
         );
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
@@ -1006,7 +996,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (result_task, task_stats) = compact(
-            Arc::new(compact_ctx),
+            compact_ctx,
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
@@ -1121,7 +1111,6 @@ pub(crate) mod tests {
         );
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
-            &hummock_meta_client,
             rpc_filter_key_extractor_manager,
         );
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
@@ -1200,7 +1189,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (result_task, task_stats) = compact(
-            Arc::new(compact_ctx),
+            compact_ctx,
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
@@ -1306,8 +1295,7 @@ pub(crate) mod tests {
             TableId::from(existing_table_id),
         )
         .await;
-        let compact_ctx =
-            prepare_compactor_and_filter(&storage, &hummock_meta_client, existing_table_id);
+        let compact_ctx = prepare_compactor_and_filter(&storage, existing_table_id);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
@@ -1367,7 +1355,7 @@ pub(crate) mod tests {
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
         let (result_task, task_stats) = compact(
-            Arc::new(compact_ctx),
+            compact_ctx,
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
