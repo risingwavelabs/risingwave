@@ -107,7 +107,7 @@ impl Drop for HummockStorageShutdownGuard {
 pub struct HummockStorage {
     hummock_event_sender: UnboundedSender<HummockEvent>,
 
-    context: Arc<CompactorContext>,
+    context: CompactorContext,
 
     sstable_object_id_manager: SstableObjectIdManagerRef,
 
@@ -182,15 +182,14 @@ impl HummockStorage {
             hummock_meta_client.clone(),
         ));
 
-        let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
+        let compactor_context = CompactorContext::new_local_compact_context(
             options.clone(),
             sstable_store.clone(),
-            hummock_meta_client.clone(),
             compactor_metrics.clone(),
             FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
                 filter_key_extractor_manager.clone(),
             ),
-        ));
+        );
 
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
         let min_current_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
@@ -249,6 +248,7 @@ impl HummockStorage {
             .unwrap();
 
         let (basic_read_version, instance_guard) = rx.await.unwrap();
+        let version_update_notifier_tx = self.version_update_notifier_tx.clone();
         LocalHummockStorage::new(
             instance_guard,
             basic_read_version,
@@ -257,6 +257,7 @@ impl HummockStorage {
             self.buffer_tracker.get_memory_limiter().clone(),
             self.write_limiter.clone(),
             option,
+            version_update_notifier_tx,
         )
     }
 
