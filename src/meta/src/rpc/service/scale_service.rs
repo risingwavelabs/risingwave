@@ -25,33 +25,29 @@ use tonic::{Request, Response, Status};
 use crate::barrier::{BarrierManagerRef, BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::model::{MetadataModel, PausedReason};
-use crate::storage::MetaStore;
 use crate::stream::{
     GlobalStreamManagerRef, ParallelUnitReschedule, RescheduleOptions, SourceManagerRef,
 };
 
-pub struct ScaleServiceImpl<S: MetaStore> {
-    barrier_scheduler: BarrierScheduler<S>,
-    fragment_manager: FragmentManagerRef<S>,
-    cluster_manager: ClusterManagerRef<S>,
-    source_manager: SourceManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
-    stream_manager: GlobalStreamManagerRef<S>,
-    barrier_manager: BarrierManagerRef<S>,
+pub struct ScaleServiceImpl {
+    barrier_scheduler: BarrierScheduler,
+    fragment_manager: FragmentManagerRef,
+    cluster_manager: ClusterManagerRef,
+    source_manager: SourceManagerRef,
+    catalog_manager: CatalogManagerRef,
+    stream_manager: GlobalStreamManagerRef,
+    barrier_manager: BarrierManagerRef,
 }
 
-impl<S> ScaleServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl ScaleServiceImpl {
     pub fn new(
-        barrier_scheduler: BarrierScheduler<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        source_manager: SourceManagerRef<S>,
-        catalog_manager: CatalogManagerRef<S>,
-        stream_manager: GlobalStreamManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        barrier_scheduler: BarrierScheduler,
+        fragment_manager: FragmentManagerRef,
+        cluster_manager: ClusterManagerRef,
+        source_manager: SourceManagerRef,
+        catalog_manager: CatalogManagerRef,
+        stream_manager: GlobalStreamManagerRef,
+        barrier_manager: BarrierManagerRef,
     ) -> Self {
         Self {
             barrier_scheduler,
@@ -66,10 +62,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> ScaleService for ScaleServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl ScaleService for ScaleServiceImpl {
     #[cfg_attr(coverage, no_coverage)]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
         // TODO: move this out of the scale service, as scaling actually executes `pause` and

@@ -30,12 +30,9 @@ use crate::hummock::manager::{
 use crate::hummock::HummockManager;
 use crate::manager::META_NODE_ID;
 use crate::model::{BTreeMapTransaction, ValTransaction};
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::Transaction;
 
-impl<S> HummockManager<S>
-where
-    S: MetaStore,
-{
+impl HummockManager {
     /// Release resources pinned by these contexts, including:
     /// - Version
     /// - Snapshot
