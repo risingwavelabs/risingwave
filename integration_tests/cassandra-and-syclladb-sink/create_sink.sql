@@ -5,7 +5,7 @@ FROM
     type = 'append-only',
     force_append_only='true',
     cassandra.url = 'cassandra:9042',
-    cassandra.keyspace  = 'my_keyspace',
-    cassandra.table = 'demo_test',
+    cassandra.keyspace  = 'demo',
+    cassandra.table = 'demo_bhv_table',
     cassandra.datacenter = 'datacenter1',
 );

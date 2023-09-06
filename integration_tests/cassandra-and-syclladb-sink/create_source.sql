@@ -14,5 +14,5 @@ CREATE table user_behaviors (
     fields.user_id.end = '1000',
     fields.user_name.kind = 'random',
     fields.user_name.length = '10',
-    datagen.rows.per.second = '500'
+    datagen.rows.per.second = '10'
 ) FORMAT PLAIN ENCODE JSON;

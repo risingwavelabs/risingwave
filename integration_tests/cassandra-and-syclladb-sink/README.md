@@ -2,27 +2,45 @@
 
 In this demo, we want to showcase how RisingWave is able to sink data to Cassandra.
 
-1. Launch the cluster:
+1. Set the compose profile accordingly:
+Demo with Apache Cassandra:
+```
+export COMPOSE_PROFILES=cassandra
+```
+
+Demo with Scylladb
+```
+export COMPOSE_PROFILES=scylladb
+```
+
+2. Launch the cluster:
 
 ```sh
-docker-compose -f docker-compose-cassandra.yml up -d
-```
-If we use syclladb.
-```sh
-docker-compose -f docker-compose-syclladb.yml up -d
+docker-compose up -d
 ```
 
 The cluster contains a RisingWave cluster and its necessary dependencies, a datagen that generates the data, a Cassandra for sink.
 
 
-2. Create the Cassandra table:
+3. Create the Cassandra table via cqlsh:
 
+Login to cqlsh
 ```sh
-docker compose exec cassandra bash /opt/cassandra/cassandra-sql/run-sql-file.sh create_cassandra_table
+# cqlsh into cassandra
+docker compose exec cassandra cqlsh
+# cqlsh into scylladb
+docker compose exec scylladb cqlsh
 ```
-If we use syclladb.
-```sh
-docker compose exec syclladb bash /opt/scylladb/scylladb-sql/run-sql-file-syclladb.sh create_cassandra_table
+
+Run the following queries to create keyspace and table.
+```sql
+CREATE KEYSPACE demo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+use demo;
+CREATE table demo_bhv_table(
+    user_id int primary key,
+    target_id text,
+    event_timestamp timestamp,
+);
 ```
 
 3. Execute the SQL queries in sequence:
@@ -31,16 +49,17 @@ docker compose exec syclladb bash /opt/scylladb/scylladb-sql/run-sql-file-syclla
 - create_mv.sql
 - create_sink.sql
 
-4. Execute a simple query:
+4. Execute a simple query to check the sink results via csqlsh:
 
+Login to cqlsh
 ```sh
-docker compose exec cassandra bash /opt/cassandra/cassandra-sql/run-sql-file.sh cassandra_query
-```
-If we use syclladb.
-```sh
-docker compose exec syclladb bash /opt/scylladb/scylladb-sql/run-sql-file-syclladb.sh cassandra_query
+# cqlsh into cassandra
+docker compose exec cassandra cqlsh
+# cqlsh into scylladb
+docker compose exec scylladb cqlsh
 ```
 
+Run the following query
 ```sql
-select user_id, count(*) from my_keyspace.demo_test group by user_id
+select user_id, count(*) from my_keyspace.demo_test group by user_id;
 ```
