@@ -73,7 +73,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # test upsert kafka sink with schema after update
-echo "testing upsert kafka sink with schema"
+echo "testing upsert kafka sink with schema after updating data"
 diff ./e2e_test/sink/kafka/upsert_schema2.result \
 <((./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert-schema --from-beginning --property print.key=true --max-messages 11 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
@@ -107,7 +107,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # test upsert kafka sink with schema after delete
-echo "testing upsert kafka sink with schema"
+echo "testing upsert kafka sink with schema after deleting data"
 diff ./e2e_test/sink/kafka/upsert_schema3.result \
 <((./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert-schema --from-beginning --property print.key=true --max-messages 12 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
