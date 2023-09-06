@@ -735,16 +735,16 @@ impl MetaClient {
         Ok(resp.states)
     }
 
-    pub async fn pause(&self) -> Result<()> {
+    pub async fn pause(&self) -> Result<PauseResponse> {
         let request = PauseRequest {};
-        let _resp = self.inner.pause(request).await?;
-        Ok(())
+        let resp = self.inner.pause(request).await?;
+        Ok(resp)
     }
 
-    pub async fn resume(&self) -> Result<()> {
+    pub async fn resume(&self) -> Result<ResumeResponse> {
         let request = ResumeRequest {};
-        let _resp = self.inner.resume(request).await?;
-        Ok(())
+        let resp = self.inner.resume(request).await?;
+        Ok(resp)
     }
 
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
