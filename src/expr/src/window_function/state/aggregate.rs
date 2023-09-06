@@ -24,7 +24,7 @@ use smallvec::SmallVec;
 
 use super::buffer::WindowBuffer;
 use super::{StateEvictHint, StateKey, StatePos, WindowState};
-use crate::agg::{build as builg_agg, AggArgs, AggCall};
+use crate::agg::{build as builg_agg, AggArgs, AggCall, BoxedAggregateFunction};
 use crate::function::window::{WindowFuncCall, WindowFuncKind};
 use crate::Result;
 
@@ -86,7 +86,7 @@ impl WindowState for AggregateState {
 
     fn curr_output(&self) -> Result<Datum> {
         let wrapper = AggregatorWrapper {
-            agg_call: &self.agg_call,
+            agg: builg_agg(&self.agg_call)?,
             arg_data_types: &self.arg_data_types,
         };
         wrapper.aggregate(self.buffer.curr_window_values().map(SmallVec::as_slice))
@@ -126,7 +126,7 @@ impl EstimateSize for AggregateState {
 }
 
 struct AggregatorWrapper<'a> {
-    agg_call: &'a AggCall,
+    agg: BoxedAggregateFunction,
     arg_data_types: &'a [DataType],
 }
 
@@ -153,12 +153,15 @@ impl AggregatorWrapper<'_> {
             .collect::<Vec<_>>();
         let chunk = StreamChunk::from(DataChunk::new(columns, n_values));
 
-        let mut aggregator = builg_agg(self.agg_call)?;
-        aggregator
-            .update(&chunk)
+        let mut state = self.agg.create_state();
+        self.agg
+            .update(&mut state, &chunk)
             .now_or_never()
             .expect("we don't support UDAF currently, so the function should return immediately")?;
-        aggregator.output()
+        self.agg
+            .get_result(&state)
+            .now_or_never()
+            .expect("we don't support UDAF currently, so the function should return immediately")
     }
 }
 

@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Debug;
 use std::ops::Range;
 
-use dyn_clone::DynClone;
+use downcast_rs::{impl_downcast, Downcast};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{DataType, DataTypeName, Datum};
@@ -25,7 +26,7 @@ use crate::{ExprError, Result};
 // aggregate definition
 mod def;
 
-// concrete aggregators
+// concrete AggregateFunctions
 mod approx_count_distinct;
 mod array_agg;
 mod general;
@@ -37,51 +38,91 @@ mod string_agg;
 
 pub use self::def::*;
 
-/// An `Aggregator` supports `update` data and `output` result.
+/// A trait over all aggregate functions.
 #[async_trait::async_trait]
-pub trait Aggregator: Send + Sync + DynClone + 'static {
+pub trait AggregateFunction: Send + Sync + 'static {
+    /// Returns the return type of the aggregate function.
     fn return_type(&self) -> DataType;
 
-    /// Update the aggregator with multiple rows.
-    async fn update(&mut self, input: &StreamChunk) -> Result<()>;
+    /// Creates an initial state of the aggregate function.
+    fn create_state(&self) -> AggregateState {
+        AggregateState::Datum(None)
+    }
 
-    /// Update the aggregator with a range of rows.
-    async fn update_range(&mut self, input: &StreamChunk, range: Range<usize>) -> Result<()>;
+    /// Update the state with multiple rows.
+    async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()>;
 
-    /// Get the output value.
-    fn get_output(&self) -> Result<Datum>;
+    /// Update the state with a range of rows.
+    async fn update_range(
+        &self,
+        state: &mut AggregateState,
+        input: &StreamChunk,
+        range: Range<usize>,
+    ) -> Result<()>;
 
-    /// Output the aggregate state and reset to initial state.
-    fn output(&mut self) -> Result<Datum>;
-
-    /// Reset the state.
-    fn reset(&mut self);
-
-    /// Get the current value state.
-    fn get_state(&self) -> Datum;
-
-    /// Set the current value state.
-    fn set_state(&mut self, state: Datum);
-
-    /// The estimated size of the state.
-    fn estimated_size(&self) -> usize;
+    /// Get aggregate result from the state.
+    async fn get_result(&self, state: &AggregateState) -> Result<Datum>;
 }
 
-dyn_clone::clone_trait_object!(Aggregator);
+/// Intermediate state of an aggregate function.
+#[derive(Debug)]
+pub enum AggregateState {
+    /// A scalar value.
+    Datum(Datum),
+    /// A state of any type.
+    Any(Box<dyn AggStateDyn>),
+}
 
-pub type BoxedAggState = Box<dyn Aggregator>;
-
-impl EstimateSize for BoxedAggState {
+impl EstimateSize for AggregateState {
     fn estimated_heap_size(&self) -> usize {
-        self.as_ref().estimated_size()
+        match self {
+            Self::Datum(d) => d.estimated_heap_size(),
+            Self::Any(a) => std::mem::size_of_val(&**a) + a.estimated_heap_size(),
+        }
     }
 }
 
-/// Build an `Aggregator` from `AggCall`.
+pub trait AggStateDyn: Send + Sync + Debug + EstimateSize + Downcast {}
+
+impl_downcast!(AggStateDyn);
+
+impl AggregateState {
+    pub fn as_datum(&self) -> &Datum {
+        match self {
+            Self::Datum(d) => d,
+            Self::Any(_) => panic!("not datum"),
+        }
+    }
+
+    pub fn as_datum_mut(&mut self) -> &mut Datum {
+        match self {
+            Self::Datum(d) => d,
+            Self::Any(_) => panic!("not datum"),
+        }
+    }
+
+    pub fn downcast_ref<T: AggStateDyn>(&self) -> &T {
+        match self {
+            Self::Datum(_) => panic!("cannot downcast scalar"),
+            Self::Any(a) => a.downcast_ref::<T>().expect("cannot downcast"),
+        }
+    }
+
+    pub fn downcast_mut<T: AggStateDyn>(&mut self) -> &mut T {
+        match self {
+            Self::Datum(_) => panic!("cannot downcast scalar"),
+            Self::Any(a) => a.downcast_mut::<T>().expect("cannot downcast"),
+        }
+    }
+}
+
+pub type BoxedAggregateFunction = Box<dyn AggregateFunction>;
+
+/// Build an `AggregateFunction` from `AggCall`.
 ///
 /// NOTE: This function ignores argument indices, `column_orders`, `filter` and `distinct` in
 /// `AggCall`. Such operations should be done in batch or streaming executors.
-pub fn build(agg: &AggCall) -> Result<BoxedAggState> {
+pub fn build(agg: &AggCall) -> Result<BoxedAggregateFunction> {
     // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
 
     let args = (agg.args.arg_types().iter())

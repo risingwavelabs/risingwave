@@ -207,12 +207,13 @@ fn infer_dummy_view_sql(columns: &[SystemCatalogColumnsDef<'_>]) -> String {
 /// get acl items of `object` in string, ignore public.
 fn get_acl_items(
     object: &Object,
+    for_dml_table: bool,
     users: &Vec<UserInfo>,
     username_map: &HashMap<UserId, String>,
 ) -> String {
     let mut res = String::from("{");
     let mut empty_flag = true;
-    let super_privilege = available_prost_privilege(object.clone());
+    let super_privilege = available_prost_privilege(object.clone(), for_dml_table);
     for user in users {
         let privileges = if user.get_is_super() {
             vec![&super_privilege]
@@ -376,6 +377,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::View(&PG_DEPEND) },
     { BuiltinCatalog::View(&INFORMATION_SCHEMA_COLUMNS) },
     { BuiltinCatalog::View(&INFORMATION_SCHEMA_TABLES) },
+    { BuiltinCatalog::View(&INFORMATION_SCHEMA_VIEWS) },
     { BuiltinCatalog::Table(&RW_DATABASES), read_rw_database_info },
     { BuiltinCatalog::Table(&RW_SCHEMAS), read_rw_schema_info },
     { BuiltinCatalog::Table(&RW_USERS), read_rw_user_info },

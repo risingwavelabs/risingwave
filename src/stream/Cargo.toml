@@ -27,6 +27,7 @@ either = "1"
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+governor = { version = "0.6", default-features = false, features = ["std", "dashmap", "jitter"] }
 hytra = "0.1.2"
 iter-chunks = "0.1"
 itertools = "0.11"
@@ -37,6 +38,7 @@ memcomparable = "0.2"
 multimap = "0.8"
 num-traits = "0.2"
 parking_lot = "0.12"
+parse-display = "0.8"
 pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
@@ -64,7 +66,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tokio-metrics = "0.2.2"
+tokio-metrics = "0.3.0"
 tokio-stream = "0.1"
 tonic = { workspace = true }
 tracing = "0.1"

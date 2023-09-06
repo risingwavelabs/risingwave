@@ -46,8 +46,10 @@ end
 
 if ${is_all_in_one_enabled}
   set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd_all"
+  set_env RISEDEV_CTL_RUN_CMD "-- risectl"
 else
   set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd"
+  set_env RISEDEV_CTL_RUN_CMD "--bin risectl --"
 end
 
 if ${is_hdfs_backend}
@@ -251,10 +253,12 @@ rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
 rm -f "${PREFIX_BIN}/frontend"
 rm -f "${PREFIX_BIN}/compactor"
+rm -f "${PREFIX_BIN}/risectl"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/frontend" "${PREFIX_BIN}/frontend"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compactor" "${PREFIX_BIN}/compactor"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risectl" "${PREFIX_BIN}/risectl"
 '''
 
 [tasks.link-all-in-one-binaries]
@@ -274,6 +278,7 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/compactor"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/risectl"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/playground"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/standalone"
 '''
 
 [tasks.link-user-bin]
@@ -473,6 +478,43 @@ dependencies = [
   "download-redis",
 ]
 
+[tasks.check-risedev-env-file]
+private = true
+category = "RiseDev - Prepare"
+description = "Check if risedev-env file exists"
+script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+RC_ENV_FILE="${PREFIX_CONFIG}/risedev-env"
+
+if [ ! -f "${RC_ENV_FILE}" ]; then
+  echo "risedev-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0) or $(tput setaf 4)\`./risedev p\`$(tput sgr0)?"
+  exit 1
+fi
+'''
+
+[tasks.psql]
+category = "RiseDev - Start/Stop"
+description = "Run local psql client with default connection parameters. You can pass extra arguments to psql."
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+script = '''
+#!/usr/bin/env bash
+psql -h $RW_FRONTEND_LISTEN_ADDRESS -p $RW_FRONTEND_PORT -U root -d dev "$@"
+'''
+
+[tasks.ctl]
+category = "RiseDev - Start/Stop"
+description = "Start RiseCtl"
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+script = '''
+#!/usr/bin/env bash
+cargo run -p ${RISEDEV_CARGO_BUILD_CRATE} --profile "${RISINGWAVE_BUILD_PROFILE}" ${RISEDEV_CTL_RUN_CMD} "$@"
+test $? -eq 0 || exit 1
+'''
+
 [tasks.p]
 alias = "playground"
 
@@ -492,24 +534,35 @@ cargo run -p risingwave_cmd_all \
           -- playground
 '''
 
-[tasks.ctl]
+[tasks.standalone]
 category = "RiseDev - Start/Stop"
-description = "Start RiseCtl"
+description = "🌟 Start a RisingWave standalone instance"
+dependencies = ["build"]
 script = '''
 #!/usr/bin/env bash
 
-RC_ENV_FILE="${PREFIX_CONFIG}/risectl-env"
+set -euo pipefail
 
-if [ ! -f "${RC_ENV_FILE}" ]; then
-  echo "risectl-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
-  exit 1
-fi
-
-source "${RC_ENV_FILE}"
-
-cargo run -p risingwave_cmd --bin risectl --profile "${RISINGWAVE_BUILD_PROFILE}" -- "$@"
-test $? -eq 0 || exit 1
+RUST_BACKTRACE=1 \
+cargo run -p risingwave_cmd_all \
+          --profile "${RISINGWAVE_BUILD_PROFILE}" \
+          ${RISINGWAVE_FEATURE_FLAGS} \
+          -- standalone $@
 '''
+
+# TODO(kwannoel): Support `tasks.standalone-dev` as well.
+# Then we can reuse risedev to start peripheral services, e.g. compactor, etcd, kafka, etc...
+[tasks.standalone-demo-dev]
+category = "RiseDev - Start/Stop"
+description = "🌟 Start a RisingWave standalone demo."
+dependencies = ["build"]
+script = "./src/cmd_all/scripts/standalone-demo-dev.sh"
+
+[tasks.standalone-demo-full]
+category = "RiseDev - Start/Stop"
+description = "🌟 Start a RisingWave standalone demo."
+dependencies = ["build"]
+script = "./src/cmd_all/scripts/standalone-demo-full.sh"
 
 [tasks.d]
 alias = "dev"
@@ -618,7 +671,7 @@ script = """
 set -e
 
 export CARGO_TARGET_DIR=target/coverage
-cargo llvm-cov nextest --html
+cargo llvm-cov nextest --html --workspace --exclude risingwave_simulation
 """
 description = "Run unit tests and report coverage"
 
@@ -629,7 +682,7 @@ script = """
 #!/usr/bin/env bash
 set -e
 
-cargo nextest run "$@"
+cargo nextest run --workspace --exclude risingwave_simulation "$@"
 """
 description = "🌟 Run unit tests"
 
@@ -1085,9 +1138,9 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.15.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.15.3", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
-] }
+], install_command = "binstall" }
 command = "sqllogictest"
 args = ["${@}"]
 description = "🌟 Run SQLLogicTest"
@@ -1184,23 +1237,4 @@ cat << EOF > src/config/example.toml
 # Check detailed comments in src/common/src/config.rs
 EOF
 cargo run -p risingwave_common --bin example-config >> src/config/example.toml
-'''
-
-[tasks.psql]
-category = "RiseDev - PSQL Client"
-description = "Run local psql client with default connection parameters. You can pass extra arguments to psql."
-script = '''
-#!/usr/bin/env bash
-set -euo pipefail
-
-RC_ENV_FILE="${PREFIX_CONFIG}/risectl-env"
-
-if [ ! -f "${RC_ENV_FILE}" ]; then
-  echo "risectl-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
-  exit 1
-fi
-
-source "${RC_ENV_FILE}"
-
-psql -h $RW_FRONTEND_LISTEN_ADDRESS -p $RW_FRONTEND_PORT -U root -d dev "$@"
 '''

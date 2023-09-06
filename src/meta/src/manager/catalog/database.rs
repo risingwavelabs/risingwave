@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableOption;
+use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
     Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
 };
@@ -259,10 +260,22 @@ impl DatabaseManager {
             .collect()
     }
 
-    pub fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+    pub fn list_readonly_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
         self.tables
             .values()
-            .filter(|table| table.schema_id == schema_id)
+            .filter(|table| {
+                table.schema_id == schema_id && table.table_type != TableType::Table as i32
+            })
+            .map(|table| table.id)
+            .collect_vec()
+    }
+
+    pub fn list_dml_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.tables
+            .values()
+            .filter(|table| {
+                table.schema_id == schema_id && table.table_type == TableType::Table as i32
+            })
             .map(|table| table.id)
             .collect_vec()
     }

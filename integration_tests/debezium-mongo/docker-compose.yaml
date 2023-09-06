@@ -1,14 +1,43 @@
 version: '3.1'
 
 services:
-  risingwave:
-    image: ghcr.io/risingwavelabs/risingwave:latest
-    ports:
-      - 4566:4566
-      - 5691:5691
-    command:
-      - playground
-    container_name: risingwave
+  compactor-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compactor-0
+  compute-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compute-node-0
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  frontend-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: frontend-node-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  meta-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: meta-node-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
 
   mongodb:
     image: mongo:4.4
@@ -71,11 +100,6 @@ services:
       MONGO_HOST: mongodb
       MONGO_PORT: 27017
       MONGO_DB_NAME: random_data
-
-  message_queue:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: message_queue
 
   register-mongodb-connector:
     image: curlimages/curl:7.79.1

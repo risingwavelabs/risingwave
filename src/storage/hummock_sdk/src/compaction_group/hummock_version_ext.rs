@@ -370,6 +370,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                 let b = sst2.key_range.as_ref().unwrap();
                 a.compare(b)
             });
+            assert!(can_concat(&cur_levels.levels[z].table_infos));
             level
                 .table_infos
                 .drain_filter(|sst_info| sst_info.table_ids.is_empty())
@@ -846,6 +847,21 @@ pub fn get_member_table_ids(version: &HummockVersion) -> HashSet<StateTableId> {
         .collect()
 }
 
+pub fn get_table_compaction_group_id_mapping(
+    version: &HummockVersion,
+) -> HashMap<StateTableId, CompactionGroupId> {
+    version
+        .levels
+        .iter()
+        .flat_map(|(group_id, levels)| {
+            levels
+                .member_table_ids
+                .iter()
+                .map(|table_id| (*table_id, *group_id))
+        })
+        .collect()
+}
+
 /// Gets all SSTs in `group_id`
 pub fn get_compaction_group_ssts(
     version: &HummockVersion,
@@ -917,6 +933,7 @@ pub fn add_ssts_to_sub_level(
                 let b = sst2.key_range.as_ref().unwrap();
                 a.compare(b)
             });
+        assert!(can_concat(&l0.sub_levels[sub_level_idx].table_infos));
     }
 }
 

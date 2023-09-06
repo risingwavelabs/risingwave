@@ -1,0 +1,33 @@
+name: Hakari Fix
+
+on:
+  pull_request:
+    types: ["opened", "synchronize"]
+    paths: ["Cargo.lock", "**/Cargo.toml"]
+
+jobs:
+  hakari-fix:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Install cargo-hakari
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hakari
+
+      - name: Hakari generate
+        run: cargo hakari generate
+
+      - name: Show diff
+        run: git diff
+
+      - uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: Fix "cargo-hakari"

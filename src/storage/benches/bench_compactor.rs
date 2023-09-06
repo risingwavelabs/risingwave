@@ -25,8 +25,9 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::{compact_task, SstableInfo};
+use risingwave_storage::hummock::compactor::compactor_runner::compact_and_build_sst;
 use risingwave_storage::hummock::compactor::{
-    Compactor, ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
+    ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
 };
 use risingwave_storage::hummock::iterator::{
     ConcatIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
@@ -197,7 +198,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         split_weight_by_vnode: 0,
         use_block_based_filter: true,
     };
-    Compactor::compact_and_build_sst(
+    compact_and_build_sst(
         &mut builder,
         Arc::new(CompactionDeleteRanges::default()),
         &task_config,

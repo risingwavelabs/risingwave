@@ -33,6 +33,7 @@ use risingwave_storage::store::{
 use risingwave_storage::StateStore;
 
 use crate::get_notification_client_for_test;
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::TestIngestBatch;
 
 #[tokio::test]
@@ -74,7 +75,7 @@ async fn test_failpoints_state_store_read_upload() {
     ];
     // Make sure the batch is sorted.
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    local.init(1);
+    local.init_for_test(1).await.unwrap();
     local
         .ingest_batch(
             batch1,
@@ -101,13 +102,9 @@ async fn test_failpoints_state_store_read_upload() {
             anchor.clone(),
             1,
             ReadOptions {
-                ignore_range_tombstone: false,
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                table_id: Default::default(),
-                retention_seconds: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -156,13 +153,9 @@ async fn test_failpoints_state_store_read_upload() {
             anchor.clone(),
             2,
             ReadOptions {
-                ignore_range_tombstone: false,
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                table_id: Default::default(),
-                retention_seconds: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await;
@@ -172,13 +165,9 @@ async fn test_failpoints_state_store_read_upload() {
             (Bound::Unbounded, Bound::Included(Bytes::from("ee"))),
             2,
             ReadOptions {
-                ignore_range_tombstone: false,
-                prefix_hint: None,
                 table_id: Default::default(),
-                retention_seconds: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await;
@@ -195,13 +184,9 @@ async fn test_failpoints_state_store_read_upload() {
             Bytes::from("ee"),
             2,
             ReadOptions {
-                ignore_range_tombstone: false,
                 prefix_hint: Some(Bytes::from(bee_prefix_hint)),
-                table_id: Default::default(),
-                retention_seconds: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -237,13 +222,9 @@ async fn test_failpoints_state_store_read_upload() {
             anchor.clone(),
             5,
             ReadOptions {
-                ignore_range_tombstone: false,
                 prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
-                table_id: Default::default(),
-                retention_seconds: None,
-                read_version_from_backup: false,
-                prefetch_options: Default::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await
@@ -255,13 +236,9 @@ async fn test_failpoints_state_store_read_upload() {
             (Bound::Unbounded, Bound::Included(Bytes::from("ee"))),
             5,
             ReadOptions {
-                ignore_range_tombstone: false,
-                prefix_hint: None,
-                table_id: Default::default(),
-                retention_seconds: None,
-                read_version_from_backup: false,
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
+                ..Default::default()
             },
         )
         .await

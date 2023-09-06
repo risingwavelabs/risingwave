@@ -105,6 +105,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::store::SyncResult;
@@ -118,13 +119,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_basic() {
+        for count in 0..20 {
+            test_basic_inner(count).await
+        }
+    }
+
+    async fn test_basic_inner(max_stream_chunk_count: usize) {
         let test_env = prepare_hummock_test_env().await;
 
         let table = gen_test_log_store_table();
 
         test_env.register_table(table.clone()).await;
 
-        let factory = KvLogStoreFactory::new(test_env.storage.clone(), table.clone(), None, 0);
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            None,
+            max_stream_chunk_count,
+        );
         let (mut reader, mut writer) = factory.build().await;
 
         let stream_chunk1 = gen_stream_chunk(0);
@@ -136,7 +148,10 @@ mod tests {
             .version()
             .max_committed_epoch
             + 1;
-        writer.init(epoch1).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch1))
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
         writer.flush_current_epoch(epoch2, false).await.unwrap();
@@ -182,13 +197,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_recovery() {
+        for count in 0..20 {
+            test_recovery_inner(count).await
+        }
+    }
+
+    async fn test_recovery_inner(max_stream_chunk_count: usize) {
         let test_env = prepare_hummock_test_env().await;
 
         let table = gen_test_log_store_table();
 
         test_env.register_table(table.clone()).await;
 
-        let factory = KvLogStoreFactory::new(test_env.storage.clone(), table.clone(), None, 0);
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            None,
+            max_stream_chunk_count,
+        );
         let (mut reader, mut writer) = factory.build().await;
 
         let stream_chunk1 = gen_stream_chunk(0);
@@ -200,7 +226,10 @@ mod tests {
             .version()
             .max_committed_epoch
             + 1;
-        writer.init(epoch1).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch1))
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
         writer.flush_current_epoch(epoch2, false).await.unwrap();
@@ -253,9 +282,17 @@ mod tests {
         test_env.storage.clear_shared_buffer().await.unwrap();
 
         // Rebuild log reader and writer in recovery
-        let factory = KvLogStoreFactory::new(test_env.storage.clone(), table.clone(), None, 0);
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            None,
+            max_stream_chunk_count,
+        );
         let (mut reader, mut writer) = factory.build().await;
-        writer.init(epoch3).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch3))
+            .await
+            .unwrap();
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::StreamChunk(read_stream_chunk)) => {
@@ -289,13 +326,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_truncate() {
+        for count in 0..20 {
+            test_truncate_inner(count).await
+        }
+    }
+
+    async fn test_truncate_inner(max_stream_chunk_count: usize) {
         let test_env = prepare_hummock_test_env().await;
 
         let table = gen_test_log_store_table();
 
         test_env.register_table(table.clone()).await;
 
-        let factory = KvLogStoreFactory::new(test_env.storage.clone(), table.clone(), None, 0);
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            None,
+            max_stream_chunk_count,
+        );
         let (mut reader, mut writer) = factory.build().await;
 
         let stream_chunk1 = gen_stream_chunk(0);
@@ -307,7 +355,10 @@ mod tests {
             .version()
             .max_committed_epoch
             + 1;
-        writer.init(epoch1).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch1))
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
         writer.flush_current_epoch(epoch2, true).await.unwrap();
@@ -363,10 +414,18 @@ mod tests {
         test_env.storage.clear_shared_buffer().await.unwrap();
 
         // Rebuild log reader and writer in recovery
-        let factory = KvLogStoreFactory::new(test_env.storage.clone(), table.clone(), None, 0);
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            None,
+            max_stream_chunk_count,
+        );
         let (mut reader, mut writer) = factory.build().await;
 
-        writer.init(epoch3).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch3))
+            .await
+            .unwrap();
         let stream_chunk3 = gen_stream_chunk(20);
         writer.write_chunk(stream_chunk3.clone()).await.unwrap();
 

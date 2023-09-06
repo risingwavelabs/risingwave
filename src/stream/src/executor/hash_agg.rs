@@ -27,13 +27,13 @@ use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::agg::{build, AggCall, BoxedAggregateFunction};
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
 use super::aggregation::{
-    agg_call_filter_res, iter_table_storage, AggStateStorage, ChunkBuilder, DistinctDeduplicater,
-    GroupKey, OnlyOutputIfHasInput,
+    agg_call_filter_res, iter_table_storage, AggStateStorage, DistinctDeduplicater, GroupKey,
+    OnlyOutputIfHasInput,
 };
 use super::sort_buffer::SortBuffer;
 use super::{
@@ -43,6 +43,7 @@ use super::{
 use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
+use crate::common::StreamChunkBuilder;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggGroup as GenericAggGroup};
 use crate::executor::error::StreamExecutorError;
@@ -89,6 +90,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
+
+    /// Aggregate functions.
+    agg_funcs: Vec<BoxedAggregateFunction>,
 
     /// Index of row count agg call (`count(*)`) in the call list.
     row_count_index: usize,
@@ -149,7 +153,7 @@ struct ExecutionVars<K: HashKey, S: StateStore> {
     window_watermark: Option<ScalarImpl>,
 
     /// Stream chunk builder.
-    chunk_builder: ChunkBuilder,
+    chunk_builder: StreamChunkBuilder,
 
     buffer: SortBuffer<S>,
 }
@@ -226,6 +230,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_schema: input_info.schema,
                 group_key_indices: args.extra.group_key_indices,
                 group_key_table_pk_projection: group_key_table_pk_projection.to_vec().into(),
+                agg_funcs: args.agg_calls.iter().map(build).try_collect()?,
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
@@ -289,6 +294,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 Some(this.group_key_table_pk_projection.clone()),
                             )),
                             &this.agg_calls,
+                            &this.agg_funcs,
                             &this.storages,
                             &this.result_table,
                             &this.input_pk_indices,
@@ -382,7 +388,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 }
             }
             agg_group
-                .apply_chunk(&chunk, &this.agg_calls, visibilities)
+                .apply_chunk(&chunk, &this.agg_calls, &this.agg_funcs, visibilities)
                 .await?;
             // Mark the group as changed.
             vars.group_change_set.insert(key);
@@ -428,15 +434,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let window_watermark = vars.window_watermark.take();
         let n_dirty_group = vars.group_change_set.len();
 
-        // Flush agg states if needed.
-        for key in &vars.group_change_set {
-            let agg_group = vars
-                .agg_group_cache
-                .get_mut(key)
-                .expect("changed group must have corresponding AggGroup");
-            agg_group.flush_state_if_needed(&mut this.storages).await?;
-        }
-
         let futs_of_all_groups = vars
             .group_change_set
             .drain()
@@ -448,6 +445,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             })
             .map(|mut agg_group| {
                 let storages = &this.storages;
+                let funcs = &this.agg_funcs;
                 // SAFETY:
                 // 1. `key`s in `keys_in_batch` are unique by nature, because they're
                 // from `group_change_set` which is a set.
@@ -456,7 +454,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 let mut agg_group = unsafe { agg_group.as_mut_guard() };
                 async move {
                     // Build aggregate result change.
-                    agg_group.build_change(storages).await
+                    agg_group.build_change(storages, funcs).await
                 }
             });
 
@@ -566,7 +564,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
-            chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
+            chunk_builder: StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types()),
             buffer: SortBuffer::new(window_col_idx_in_group_key, &this.result_table),
         };
 

@@ -69,7 +69,6 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
     security_group_id: Option<String>,
 
-    // TODO: rename to listen_address and separate out the port.
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
     listen_addr: String,
 
@@ -247,6 +246,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
+
         let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
             backend,
@@ -286,6 +286,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_ttl_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_ttl_reclaim_compaction_interval_sec,
+                periodic_tombstone_reclaim_compaction_interval_sec: config
+                    .meta
+                    .periodic_tombstone_reclaim_compaction_interval_sec,
                 periodic_split_compact_group_interval_sec: config
                     .meta
                     .periodic_split_compact_group_interval_sec,

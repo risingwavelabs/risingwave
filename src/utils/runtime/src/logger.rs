@@ -48,8 +48,6 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         .with_target("foyer_memory", Level::WARN)
         .with_target("foyer_storage", Level::WARN)
         // disable events that are too verbose
-        // if you want to enable any of them, find the target name and set it to `TRACE`
-        // .with_target("events::stream::mview::scan", Level::TRACE)
         .with_target("events", Level::ERROR)
 }
 
@@ -147,7 +145,7 @@ impl LoggerSettings {
 ///
 /// `RW_QUERY_LOG_TRUNCATE_LEN` configures the max length of the SQLs logged in the query log,
 /// to avoid the log file growing too large. The default value is 1024 in production.
-pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Registry) {
+pub fn init_risingwave_logger(settings: LoggerSettings) {
     let deployment = Deployment::current();
 
     // Default timer for logging with local time offset.
@@ -382,7 +380,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
     {
         let filter = filter::Targets::new().with_target("aws_smithy_client::retry", Level::DEBUG);
 
-        layers.push(Box::new(MetricsLayer::new(registry).with_filter(filter)));
+        layers.push(Box::new(MetricsLayer::new().with_filter(filter)));
     }
     tracing_subscriber::registry().with(layers).init();
     // TODO: add file-appender tracing subscriber in the future

@@ -140,7 +140,7 @@ pub struct TableCatalog {
     pub watermark_columns: FixedBitSet,
 
     /// Optional field specifies the distribution key indices in pk.
-    /// See https://github.com/risingwavelabs/risingwave/issues/8377 for more information.
+    /// See <https://github.com/risingwavelabs/risingwave/issues/8377> for more information.
     pub dist_key_in_pk: Vec<usize>,
 
     pub created_at_epoch: Option<Epoch>,
@@ -416,6 +416,14 @@ impl TableCatalog {
             .iter()
             .filter(|c| c.is_generated())
             .map(|c| c.name())
+    }
+
+    pub fn generated_col_idxes(&self) -> impl Iterator<Item = usize> + '_ {
+        self.columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.is_generated())
+            .map(|(i, _)| i)
     }
 
     pub fn default_columns(&self) -> impl Iterator<Item = (usize, ExprImpl)> + '_ {
