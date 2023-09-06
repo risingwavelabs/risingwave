@@ -5,7 +5,11 @@ In this demo, we want to showcase how RisingWave is able to sink data to Cassand
 1. Launch the cluster:
 
 ```sh
-docker compose up -d
+docker-compose -f docker-compose-cassandra.yml up -d
+```
+If we use syclladb.
+```sh
+docker-compose -f docker-compose-syclladb.yml up -d
 ```
 
 The cluster contains a RisingWave cluster and its necessary dependencies, a datagen that generates the data, a Cassandra for sink.
@@ -15,6 +19,10 @@ The cluster contains a RisingWave cluster and its necessary dependencies, a data
 
 ```sh
 docker compose exec cassandra bash /opt/cassandra/cassandra-sql/run-sql-file.sh create_cassandra_table
+```
+If we use syclladb.
+```sh
+docker compose exec syclladb bash /opt/scylladb/scylladb-sql/run-sql-file-syclladb.sh create_cassandra_table
 ```
 
 3. Execute the SQL queries in sequence:
@@ -27,7 +35,10 @@ docker compose exec cassandra bash /opt/cassandra/cassandra-sql/run-sql-file.sh 
 
 ```sh
 docker compose exec cassandra bash /opt/cassandra/cassandra-sql/run-sql-file.sh cassandra_query
-
+```
+If we use syclladb.
+```sh
+docker compose exec syclladb bash /opt/scylladb/scylladb-sql/run-sql-file-syclladb.sh cassandra_query
 ```
 
 ```sql

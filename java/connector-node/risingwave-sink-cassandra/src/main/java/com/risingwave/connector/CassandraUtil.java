@@ -16,7 +16,9 @@
 
 package com.risingwave.connector;
 
+import com.datastax.oss.driver.api.core.CqlIdentifier;
 import com.datastax.oss.driver.api.core.data.CqlDuration;
+import com.datastax.oss.driver.api.core.metadata.schema.ColumnMetadata;
 import com.risingwave.connector.api.ColumnDesc;
 import com.risingwave.proto.Data.DataType;
 import com.risingwave.proto.Data.DataType.TypeName;
@@ -27,43 +29,45 @@ import java.sql.Time;
 import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public class CassandraUtil {
-    private static String getCorrespondingCassandraType(DataType dataType) {
+    private static int getCorrespondingCassandraType(DataType dataType) {
         switch (dataType.getTypeName()) {
             case INT16:
-                return "smallint";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.SMALLINT;
             case INT32:
-                return "int";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.INT;
             case INT64:
-                return "bigint";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.BIGINT;
             case FLOAT:
-                return "float";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.FLOAT;
             case DOUBLE:
-                return "double";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.DOUBLE;
             case BOOLEAN:
-                return "boolean";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.BOOLEAN;
             case VARCHAR:
-                return "text";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.VARCHAR;
             case DECIMAL:
-                return "decimal";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.DECIMAL;
             case TIMESTAMP:
-                return "timestamp";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.TIMESTAMP;
             case TIMESTAMPTZ:
-                return "timestamp";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.TIMESTAMP;
             case DATE:
-                return "date";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.DATE;
             case TIME:
-                return "time";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.TIME;
             case BYTEA:
-                return "blob";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.BLOB;
             case LIST:
             case STRUCT:
                 throw Status.UNIMPLEMENTED
                         .withDescription(String.format("not support %s now", dataType))
                         .asRuntimeException();
             case INTERVAL:
-                return "duration";
+                return com.datastax.oss.protocol.internal.ProtocolConstants.DataType.DURATION;
             default:
                 throw Status.INVALID_ARGUMENT
                         .withDescription("unspecified type" + dataType)
@@ -72,14 +76,16 @@ public class CassandraUtil {
     }
 
     public static void checkSchema(
-            List<ColumnDesc> columnDescs, Map<String, String> cassandraColumnDescMap) {
+            List<ColumnDesc> columnDescs,
+            Map<CqlIdentifier, ColumnMetadata> cassandraColumnDescMap) {
         if (columnDescs.size() != cassandraColumnDescMap.size()) {
             throw Status.FAILED_PRECONDITION
                     .withDescription("Don't match in the number of columns in the table")
                     .asRuntimeException();
         }
         for (ColumnDesc columnDesc : columnDescs) {
-            if (!cassandraColumnDescMap.containsKey(columnDesc.getName())) {
+            CqlIdentifier cql = CqlIdentifier.fromInternal(columnDesc.getName());
+            if (!cassandraColumnDescMap.containsKey(cql)) {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
@@ -87,16 +93,38 @@ public class CassandraUtil {
                                         columnDesc.getName()))
                         .asRuntimeException();
             }
-            if (!cassandraColumnDescMap
-                    .get(columnDesc.getName())
-                    .equals(getCorrespondingCassandraType(columnDesc.getDataType()))) {
+            if (cassandraColumnDescMap.get(cql).getType().getProtocolCode()
+                    != getCorrespondingCassandraType(columnDesc.getDataType())) {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
                                         "Don't match in the type, name is %s, cassandra is %s, rw is %s",
                                         columnDesc.getName(),
-                                        cassandraColumnDescMap.get(columnDesc.getName()),
-                                        getCorrespondingCassandraType(columnDesc.getDataType())))
+                                        cassandraColumnDescMap.get(cql),
+                                        columnDesc.getDataType().getTypeName()))
+                        .asRuntimeException();
+            }
+        }
+    }
+
+    public static void checkPrimaryKey(
+            List<ColumnMetadata> cassandraColumnMetadatas, List<String> columnMetadatas) {
+        if (cassandraColumnMetadatas.size() != columnMetadatas.size()) {
+            throw Status.FAILED_PRECONDITION
+                    .withDescription("Primary key len don't match")
+                    .asRuntimeException();
+        }
+        Set<String> cassandraColumnsSet =
+                cassandraColumnMetadatas.stream()
+                        .map((a) -> a.getName().toString())
+                        .collect(Collectors.toSet());
+        for (String columnMetadata : columnMetadatas) {
+            if (!cassandraColumnsSet.contains(columnMetadata)) {
+                throw Status.FAILED_PRECONDITION
+                        .withDescription(
+                                String.format(
+                                        "Primary key don't match. RisingWave Primary key is %s, don't find it in cassandra",
+                                        columnMetadata))
                         .asRuntimeException();
             }
         }

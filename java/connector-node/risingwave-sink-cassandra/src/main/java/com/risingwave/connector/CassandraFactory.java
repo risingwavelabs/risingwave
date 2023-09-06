@@ -19,9 +19,9 @@ package com.risingwave.connector;
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.CqlSessionBuilder;
 import com.datastax.oss.driver.api.core.cql.*;
+import com.datastax.oss.driver.api.core.metadata.schema.TableMetadata;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.risingwave.connector.api.ColumnDesc;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkFactory;
 import com.risingwave.connector.api.sink.SinkWriter;
@@ -29,8 +29,6 @@ import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.proto.Catalog.SinkType;
 import io.grpc.Status;
 import java.net.InetSocketAddress;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,17 +69,13 @@ public class CassandraFactory implements SinkFactory {
         }
         CqlSession session = sessionBuilder.build();
 
-        String cql =
-                String.format(
-                        "SELECT column_name , type FROM system_schema.columns WHERE keyspace_name = '%s' AND table_name =  '%s';",
-                        config.getKeyspace(), config.getTable());
-
-        HashMap<String, String> cassandraColumnDescMap = new HashMap<>();
-        for (Row i : session.execute(cql)) {
-            cassandraColumnDescMap.put(i.getString(0), i.getString(1));
-        }
-        List<ColumnDesc> columnDescs = tableSchema.getColumnDescs();
-        CassandraUtil.checkSchema(columnDescs, cassandraColumnDescMap);
+        TableMetadata tableMetadata =
+                session.getMetadata()
+                        .getKeyspace(config.getKeyspace())
+                        .get()
+                        .getTable(config.getTable())
+                        .get();
+        CassandraUtil.checkSchema(tableSchema.getColumnDescs(), tableMetadata.getColumns());
 
         if (session.isClosed()) {
             throw Status.INVALID_ARGUMENT
@@ -92,11 +86,8 @@ public class CassandraFactory implements SinkFactory {
         session.close();
         switch (sinkType) {
             case UPSERT:
-                if (tableSchema.getPrimaryKeys().isEmpty()) {
-                    throw Status.INVALID_ARGUMENT
-                            .withDescription("please define primary key for upsert cassandra sink")
-                            .asRuntimeException();
-                }
+                CassandraUtil.checkPrimaryKey(
+                        tableMetadata.getPrimaryKey(), tableSchema.getPrimaryKeys());
                 break;
             case APPEND_ONLY:
             case FORCE_APPEND_ONLY:

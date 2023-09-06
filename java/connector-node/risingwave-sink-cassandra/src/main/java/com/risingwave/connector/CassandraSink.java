@@ -68,8 +68,7 @@ public class CassandraSink extends SinkWriterBase {
         }
 
         this.config = config;
-        this.batchBuilder =
-                BatchStatement.builder(DefaultBatchType.LOGGED).setKeyspace(config.getKeyspace());
+        this.batchBuilder = BatchStatement.builder(DefaultBatchType.LOGGED);
 
         // fetch non-pk columns for prepared statements
         nonKeyColumns =
