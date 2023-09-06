@@ -97,6 +97,8 @@ setup_new_cluster() {
 
 main() {
   set -euo pipefail
+  # Make sure we have all the branches
+  git fetch
   get_rw_versions
   setup_old_cluster
   configure_rw
