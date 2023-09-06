@@ -48,6 +48,8 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::StateStoreIter;
 
+const AVALIABLE_EPOCH_GAP: u64 = 256;
+const MEM_TABLE_SPILL_THRESHOLD: usize = 64 * 1024 * 1024;
 pub struct LocalHummockStorage {
     mem_table: MemTable,
 
@@ -321,13 +323,13 @@ impl LocalStateStore for LocalHummockStorage {
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {
-        if self.mem_table.kv_size.size() > 64 * 1024 * 1024 {
+        if self.mem_table.kv_size.size() > MEM_TABLE_SPILL_THRESHOLD {
             tracing::info!(
                 "The size of mem table exceeds 64 Mb and spill occurs. table_id {}",
                 self.table_id.table_id()
             );
             let gap_epoch = self.epoch() + 1;
-            if gap_epoch < self.prev_epoch() + 255 {
+            if gap_epoch < self.prev_epoch() + AVALIABLE_EPOCH_GAP {
                 self.epoch
                     .replace(gap_epoch)
                     .expect("should have init epoch before seal the gap epoch");
