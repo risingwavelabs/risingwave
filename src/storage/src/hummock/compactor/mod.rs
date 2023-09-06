@@ -71,7 +71,7 @@ use super::{
     CompactionDeleteRanges, GetObjectId, HummockResult, SstableBuilderOptions,
     SstableObjectIdManager, Xor16FilterBuilder,
 };
-use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::filter_key_extractor::{self, FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compactor_runner::compact_and_build_sst;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
@@ -318,6 +318,7 @@ pub fn start_compactor(
     compactor_context: CompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
+    filter_key_extractor_manager: FilterKeyExtractorManager,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -517,6 +518,7 @@ pub fn start_compactor(
 
                         let meta_client = hummock_meta_client.clone();
                         let sstable_object_id_manager = sstable_object_id_manager.clone();
+                        let filter_key_extractor_manager = filter_key_extractor_manager.clone();
                         executor.spawn(async move {
                                 let running_task_count = running_task_count.clone();
                                 match event {
@@ -535,7 +537,7 @@ pub fn start_compactor(
                                                         sstable_object_id_manager.remove_watermark_object_id(tracker_id);
                                                     },
                                                 );
-                                                compactor_runner::compact(context, compact_task, rx, Box::new(sstable_object_id_manager.clone())).await
+                                                compactor_runner::compact(context, compact_task, rx, Box::new(sstable_object_id_manager.clone()), filter_key_extractor_manager.clone()).await
                                             },
                                             Err(err) => {
                                                 tracing::warn!("Failed to track pending SST object id. {:#?}", err);
@@ -646,6 +648,7 @@ pub fn start_shared_compactor(
     dispatch_task: dispatch_compaction_task_request::Task,
     context: CompactorContext,
     object_id_getter: Box<dyn GetObjectId>,
+    filter_key_extractor_manager: FilterKeyExtractorManager,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let task_progress = context.task_progress_manager.clone();
@@ -699,9 +702,14 @@ pub fn start_shared_compactor(
                 let task_id = compact_task.task_id;
                 shutdown.lock().unwrap().insert(task_id, tx);
 
-                let (compact_task, table_stats) =
-                    compactor_runner::compact(context.clone(), compact_task, rx, object_id_getter)
-                        .await;
+                let (compact_task, table_stats) = compactor_runner::compact(
+                    context.clone(),
+                    compact_task,
+                    rx,
+                    object_id_getter,
+                    filter_key_extractor_manager.clone(),
+                )
+                .await;
                 shutdown.lock().unwrap().remove(&task_id);
                 context.running_task_count.fetch_sub(1, Ordering::SeqCst);
                 let report_compaction_task_request = ReportCompactionTaskRequest {

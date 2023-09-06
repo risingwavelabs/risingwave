@@ -224,6 +224,9 @@ pub async fn compactor_serve(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
     ));
+    let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+        filter_key_extractor_manager.clone(),
+    );
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store: sstable_store.clone(),
@@ -232,9 +235,6 @@ pub async fn compactor_serve(
         compaction_executor: Arc::new(CompactionExecutor::new(
             opts.compaction_worker_threads_number,
         )),
-        filter_key_extractor_manager: FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            filter_key_extractor_manager.clone(),
-        ),
         memory_limiter,
 
         task_progress_manager: Default::default(),
@@ -251,6 +251,7 @@ pub async fn compactor_serve(
             compactor_context.clone(),
             hummock_meta_client.clone(),
             sstable_object_id_manager.clone(),
+            filter_key_extractor_manager.clone(),
         ),
     ];
 
@@ -396,6 +397,10 @@ pub async fn shared_compactor_serve(
                                     });
                                     let static_filter_key_extractor_manager: Arc<StaticFilterKeyExtractorManager> =
                                         Arc::new(StaticFilterKeyExtractorManager::new(id_to_tables));
+                                    let filter_key_extractor_manager =
+                                        FilterKeyExtractorManager::StaticFilterKeyExtractorManager(
+                                            static_filter_key_extractor_manager,
+                                        );
                                     let compactor_context = CompactorContext {
                                         storage_opts: storage_opts.clone(),
                                         sstable_store: sstable_store.clone(),
@@ -404,10 +409,6 @@ pub async fn shared_compactor_serve(
                                         compaction_executor: Arc::new(CompactionExecutor::new(
                                             opts.compaction_worker_threads_number,
                                         )),
-                                        filter_key_extractor_manager:
-                                            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(
-                                                static_filter_key_extractor_manager,
-                                            ),
                                         memory_limiter: memory_limiter.clone(),
                                         task_progress_manager: Default::default(),
                                         await_tree_reg: cloned_await_tree_reg.clone(),
@@ -423,6 +424,7 @@ pub async fn shared_compactor_serve(
                                             dispatch_task.unwrap(),
                                             compactor_context,
                                             Box::new(shared_compactor_object_id_manager),
+                                            filter_key_extractor_manager.clone()
                                         );
                                     tokio::select! {
                                         _ = tokio::signal::ctrl_c() => {},

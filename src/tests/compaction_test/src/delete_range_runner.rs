@@ -574,21 +574,26 @@ fn run_compactor_thread(
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
 ) {
+    let filter_key_extractor_manager =
+        FilterKeyExtractorManager::RpcFilterKeyExtractorManager(filter_key_extractor_manager);
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
-        filter_key_extractor_manager: FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            filter_key_extractor_manager,
-        ),
+
         memory_limiter: MemoryLimiter::unlimit(),
         task_progress_manager: Default::default(),
         await_tree_reg: None,
         running_task_count: Arc::new(AtomicU32::new(0)),
     };
-    start_compactor(compactor_context, meta_client, sstable_object_id_manager)
+    start_compactor(
+        compactor_context,
+        meta_client,
+        sstable_object_id_manager,
+        filter_key_extractor_manager,
+    )
 }
 
 #[cfg(test)]

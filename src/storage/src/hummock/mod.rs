@@ -107,6 +107,8 @@ pub struct HummockStorage {
 
     context: CompactorContext,
 
+    filter_key_extractor_manager: FilterKeyExtractorManager,
+
     sstable_object_id_manager: SstableObjectIdManagerRef,
 
     buffer_tracker: BufferTracker,
@@ -179,14 +181,13 @@ impl HummockStorage {
             pin_version_rx,
             hummock_meta_client.clone(),
         ));
-
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            filter_key_extractor_manager.clone(),
+        );
         let compactor_context = CompactorContext::new_local_compact_context(
             options.clone(),
             sstable_store.clone(),
             compactor_metrics.clone(),
-            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                filter_key_extractor_manager.clone(),
-            ),
         );
 
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
@@ -196,6 +197,7 @@ impl HummockStorage {
             event_rx,
             pinned_version,
             compactor_context.clone(),
+            filter_key_extractor_manager.clone(),
             sstable_object_id_manager.clone(),
             state_store_metrics.clone(),
             options
@@ -207,6 +209,7 @@ impl HummockStorage {
 
         let instance = Self {
             context: compactor_context,
+            filter_key_extractor_manager,
             sstable_object_id_manager,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
@@ -262,7 +265,7 @@ impl HummockStorage {
     }
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManager {
-        &self.context.filter_key_extractor_manager
+        &self.filter_key_extractor_manager
     }
 
     pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
