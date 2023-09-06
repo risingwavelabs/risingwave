@@ -73,6 +73,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
             order_key_order_types,
             state_table,
             watermark_epoch: stream.get_watermark_epoch(),
+            metrics: params.executor_stats,
             chunk_size: params.env.config().developer.chunk_size,
             cache_policy: OverWindowCachePolicy::from_protobuf(
                 node.get_cache_policy().unwrap_or_default(),
