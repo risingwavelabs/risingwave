@@ -101,6 +101,7 @@ setup_old_cluster() {
 
 setup_new_cluster() {
   echo "--- Setup Risingwave @ $RW_COMMIT"
+  git checkout -
   download_and_prepare_rw $profile common
   # Make sure we always start w/o old config
   rm -r .risingwave/config
