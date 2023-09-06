@@ -472,6 +472,18 @@ You may use that to reproduce it in your local environment. For example:
 MADSIM_TEST_SEED=4 ./risedev sit-test test_backfill_with_upstream_and_snapshot_read
 ```
 
+### Backwards Compatibility tests
+
+This tests backwards compatibility between the earliest minor version
+and latest minor version of Risingwave (e.g. 1.0.0 vs 1.1.0).
+
+You can run it locally with:
+```bash
+./backwards-compat-tests/scripts/run_local.sh
+```
+
+In CI, you can make sure the PR runs it by adding the label `ci/run-backwards-compat-tests`.
+
 ## Miscellaneous checks
 
 For shell code, please run:
