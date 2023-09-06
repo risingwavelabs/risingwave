@@ -124,21 +124,21 @@ seed_json_kafka() {
 get_rw_versions() {
   # For backwards compat test we assume we are testing the latest version of RW (i.e. latest main commit)
   # against the Nth latest release candidate, where N > 1. N can be larger,
+  # in case some old cluster did not upgrade.
   local VERSION_OFFSET=4
 
-  # in case some old cluster did not upgrade.
-  #
   # First we obtain a list of versions from git branch names.
   # Then we normalize them to semver format (MAJOR.MINOR.PATCH).
   echo "--- git branch output"
-  git branch -r
-  local branches=$(git branch -r | grep -E "^  origin\/v[0-9]*\.[0-9]*.*-rc" | tr -d ' ' | sed -E 's/origin\/v([0-9]*\.[0-9])\-rc/\1.0/' | tr -d '\-vrcorigin\/' | tr -d ' ')
+  git branch -r | grep origin
+
   echo "--- BRANCHES"
+  local branches=$(git branch -r | grep -E "^  origin\/v[0-9]*\.[0-9]*.*-rc" | tr -d ' ' | sed -E 's/origin\/v([0-9]*\.[0-9])\-rc/\1.0/' | tr -d '\-vrcorigin\/' | tr -d ' ')
   echo "$branches"
 
   # Then we sort them in descending order.
-  local sorted_versions=$(echo -e "$branches" | sort -t '.' -n)
   echo "--- VERSIONS"
+  local sorted_versions=$(echo -e "$branches" | sort -t '.' -n)
   echo "$sorted_versions"
 
   # Then we take the Nth latest version.
