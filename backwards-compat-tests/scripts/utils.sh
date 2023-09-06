@@ -129,10 +129,10 @@ get_rw_versions() {
 
   # First we obtain a list of versions from git branch names.
   # Then we normalize them to semver format (MAJOR.MINOR.PATCH).
-  echo "--- git branch output"
+  echo "--- git branch origin output"
   git branch -r | grep origin
 
-  echo "--- BRANCHES"
+  echo "--- VERSION BRANCHES"
   local branches=$(git branch -r | grep -E "^  origin\/v[0-9]*\.[0-9]*.*-rc" | tr -d ' ' | sed -E 's/origin\/v([0-9]*\.[0-9])\-rc/\1.0/' | tr -d '\-vrcorigin\/' | tr -d ' ')
   echo "$branches"
 
