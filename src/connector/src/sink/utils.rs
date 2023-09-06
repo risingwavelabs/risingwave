@@ -491,7 +491,7 @@ pub async fn gen_append_only_message_stream<'a>(
 
 // reference: https://github.com/apache/kafka/blob/80982c4ae3fe6be127b48ec09caff11ab5f87c69/connect/json/src/main/java/org/apache/kafka/connect/json/JsonSchema.java#L39
 fn json_converter_field_to_json(field: &Field) -> Value {
-    let mut mapping = Map::with_capacity(3);
+    let mut mapping = Map::with_capacity(4);
     let type_mapping = |rw_type: &DataType| match rw_type {
         DataType::Boolean => "boolean",
         DataType::Int16 => "int16",
@@ -515,6 +515,7 @@ fn json_converter_field_to_json(field: &Field) -> Value {
     };
     mapping.insert("type".into(), json!(type_mapping(&field.data_type)));
     mapping.insert("optional".into(), json!("true"));
+    mapping.insert("field".into(), json!(field.name));
     match &field.data_type {
         DataType::Struct(_) => {
             let mut sub_fields = Vec::new();
@@ -531,9 +532,7 @@ fn json_converter_field_to_json(field: &Field) -> Value {
                 }),
             );
         }
-        _ => {
-            mapping.insert("field".into(), json!(field.name));
-        }
+        _ => {}
     }
     json!(mapping)
 }
@@ -551,7 +550,7 @@ fn generate_json_converter_schema(fields: &[Field], name: &str) -> Value {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::types::{DataType, Interval, ScalarImpl, Time, Timestamp};
+    use risingwave_common::types::{DataType, Interval, ScalarImpl, StructType, Time, Timestamp};
 
     use super::*;
     #[test]
@@ -667,5 +666,132 @@ mod tests {
         )
         .unwrap();
         assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));
+    }
+
+    #[test]
+    fn test_generate_json_converter_schema() {
+        let mock_field = Field {
+            data_type: DataType::Boolean,
+            name: Default::default(),
+            sub_fields: Default::default(),
+            type_name: Default::default(),
+        };
+        let fields = vec![
+            Field {
+                data_type: DataType::Boolean,
+                name: "v1".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Int16,
+                name: "v2".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Int32,
+                name: "v3".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Float32,
+                name: "v4".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Decimal,
+                name: "v5".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Date,
+                name: "v6".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "v7".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Time,
+                name: "v8".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Interval,
+                name: "v9".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Struct(StructType::new(vec![
+                    ("a", DataType::Timestamp),
+                    ("b", DataType::Timestamptz),
+                    (
+                        "c",
+                        DataType::Struct(StructType::new(vec![
+                            ("aa", DataType::Int64),
+                            ("bb", DataType::Float64),
+                        ])),
+                    ),
+                ])),
+                name: "v10".into(),
+                sub_fields: vec![
+                    Field {
+                        data_type: DataType::Timestamp,
+                        name: "a".into(),
+                        ..mock_field.clone()
+                    },
+                    Field {
+                        data_type: DataType::Timestamptz,
+                        name: "b".into(),
+                        ..mock_field.clone()
+                    },
+                    Field {
+                        data_type: DataType::Struct(StructType::new(vec![
+                            ("aa", DataType::Int64),
+                            ("bb", DataType::Float64),
+                        ])),
+                        name: "c".into(),
+                        sub_fields: vec![
+                            Field {
+                                data_type: DataType::Int64,
+                                name: "aa".into(),
+                                ..mock_field.clone()
+                            },
+                            Field {
+                                data_type: DataType::Float64,
+                                name: "bb".into(),
+                                ..mock_field.clone()
+                            },
+                        ],
+                        ..mock_field.clone()
+                    },
+                ],
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::List(Box::new(DataType::Bytea)),
+                name: "v11".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Jsonb,
+                name: "12".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Serial,
+                name: "13".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Int256,
+                name: "14".into(),
+                ..mock_field.clone()
+            },
+        ];
+        let schema = generate_json_converter_schema(&fields, "test").to_string();
+        let ans = r#"{"fields":[{"field":"v1","optional":"true","type":"boolean"},{"field":"v2","optional":"true","type":"int16"},{"field":"v3","optional":"true","type":"int32"},{"field":"v4","optional":"true","type":"float"},{"field":"v5","optional":"true","type":"string"},{"field":"v6","optional":"true","type":"int32"},{"field":"v7","optional":"true","type":"string"},{"field":"v8","optional":"true","type":"int64"},{"field":"v9","optional":"true","type":"string"},{"field":"v10","fields":[{"field":"a","optional":"true","type":"int64"},{"field":"b","optional":"true","type":"string"},{"field":"c","fields":[{"field":"aa","optional":"true","type":"int64"},{"field":"bb","optional":"true","type":"double"}],"optional":"true","type":"struct"}],"optional":"true","type":"struct"},{"field":"v11","items":{"type":"bytes"},"optional":"true","type":"array"},{"field":"12","optional":"true","type":"string"},{"field":"13","optional":"true","type":"int32"},{"field":"14","optional":"true","type":"string"}],"name":"test","optional":"false","type":"struct"}"#;
+        assert_eq!(schema, ans);
     }
 }
