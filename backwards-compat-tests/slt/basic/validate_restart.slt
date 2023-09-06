@@ -1,0 +1,41 @@
+# Rerun Original validation
+query I
+SELECT count(*) FROM t;
+----
+10000
+
+query I
+SELECT sum(v1), sum(v2) FROM t;
+----
+50005000 100015000
+
+query I
+SELECT count(*) FROM m;
+----
+10000
+
+query I
+SELECT sum(v1), sum(v2) FROM m;
+----
+50005000 100015000
+
+# Test updates and deletes
+
+statement ok
+SET RW_IMPLICIT_FLUSH=true;
+
+statement ok
+UPDATE t SET v2 = v2 + 1 WHERE v1 >= 1 AND v1 <= 5000;
+
+statement ok
+DELETE FROM t WHERE v1 > 5000;
+
+query I
+SELECT COUNT(*) FROM t;
+----
+5000
+
+query I
+SELECT SUM(v2) FROM t;
+----
+25015000
