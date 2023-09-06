@@ -44,7 +44,7 @@ use super::{
     Watermark,
 };
 use crate::common::table::state_table::StateTable;
-use crate::common::StreamChunkBuilder;
+use crate::common::JoinStreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
 use crate::executor::JoinType::LeftAnti;
 use crate::task::AtomicU64Ref;
@@ -305,7 +305,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor for HashJoi
 }
 
 struct HashJoinChunkBuilder<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> {
-    stream_chunk_builder: StreamChunkBuilder,
+    stream_chunk_builder: JoinStreamChunkBuilder,
 }
 
 struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
@@ -475,7 +475,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         let original_output_data_types = schema_fields
             .iter()
-            .map(|field| field.data_type.clone())
+            .map(|field| field.data_type())
             .collect_vec();
         let actual_output_data_types = output_indices
             .iter()
@@ -483,18 +483,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .collect_vec();
 
         // Data types of of hash join state.
-        let state_all_data_types_l = input_l
-            .schema()
-            .fields
-            .iter()
-            .map(|field| field.data_type.clone())
-            .collect_vec();
-        let state_all_data_types_r = input_r
-            .schema()
-            .fields
-            .iter()
-            .map(|field| field.data_type.clone())
-            .collect_vec();
+        let state_all_data_types_l = input_l.schema().data_types();
+        let state_all_data_types_r = input_r.schema().data_types();
 
         let state_pk_indices_l = input_l.pk_indices().to_vec();
         let state_pk_indices_r = input_r.pk_indices().to_vec();
@@ -519,12 +509,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         // check whether join key contains pk in both side
         let append_only_optimize = is_append_only && pk_contained_in_jk_l && pk_contained_in_jk_r;
 
-        let join_key_data_types_r = join_key_indices_l
+        let join_key_data_types_l = join_key_indices_l
             .iter()
             .map(|idx| state_all_data_types_l[*idx].clone())
             .collect_vec();
 
-        let join_key_data_types_l = join_key_indices_r
+        let join_key_data_types_r = join_key_indices_r
             .iter()
             .map(|idx| state_all_data_types_r[*idx].clone())
             .collect_vec();
@@ -561,7 +551,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             } else {
                 (state_all_data_types_l.len(), state_all_data_types_r.len())
             };
-            StreamChunkBuilder::get_i2o_mapping(output_indices.iter().cloned(), left_len, right_len)
+            JoinStreamChunkBuilder::get_i2o_mapping(&output_indices, left_len, right_len)
         };
 
         let l2o_indexed = MultiMap::from_iter(left_to_output.iter().copied());
@@ -711,6 +701,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             input_l.execute(),
             input_r.execute(),
             self.ctx.id,
+            self.ctx.fragment_id,
             self.metrics.clone(),
         );
         pin_mut!(aligned_stream);
@@ -1030,9 +1021,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .collect_vec();
 
         let mut hashjoin_chunk_builder = HashJoinChunkBuilder::<T, SIDE> {
-            stream_chunk_builder: StreamChunkBuilder::new(
+            stream_chunk_builder: JoinStreamChunkBuilder::new(
                 chunk_size,
-                actual_output_data_types,
+                actual_output_data_types.to_vec(),
                 side_update.i2o_mapping.clone(),
                 side_match.i2o_mapping.clone(),
             ),
@@ -1041,7 +1032,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let join_matched_join_keys = ctx
             .streaming_metrics
             .join_matched_join_keys
-            .with_label_values(&[&ctx.id.to_string(), &side_update.ht.table_id().to_string()]);
+            .with_label_values(&[
+                &ctx.id.to_string(),
+                &ctx.fragment_id.to_string(),
+                &side_update.ht.table_id().to_string(),
+            ]);
 
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
         for ((op, row), key) in chunk.rows().zip_eq_debug(keys.iter()) {

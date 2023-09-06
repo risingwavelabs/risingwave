@@ -16,7 +16,6 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use jni::objects::{JObject, JValue};
 use risingwave_common::util::addr::HostAddr;
@@ -25,16 +24,14 @@ use risingwave_jni_core::GetEventStreamJniSender;
 use risingwave_pb::connector_service::GetEventStreamResponse;
 use tokio::sync::mpsc;
 
-use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::CdcProperties;
+use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
     SplitReader,
 };
-
-impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
 
 pub struct CdcSplitReader {
     source_id: u64,
@@ -94,72 +91,13 @@ impl SplitReader for CdcSplitReader {
     }
 
     fn into_stream(self) -> BoxSourceWithStateStream {
-        self.into_chunk_stream()
+        let parser_config = self.parser_config.clone();
+        let source_context = self.source_ctx.clone();
+        into_chunk_stream(self, parser_config, source_context)
     }
 }
 
-impl CdcSplitReader {
-    /// RPC version which is deprecated
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    async fn into_data_stream_rpc_version(self) {
-        let cdc_client = self.source_ctx.connector_client.clone().ok_or_else(|| {
-            anyhow!("connector node endpoint not specified or unable to connect to connector node")
-        })?;
-
-        // rewrite the hostname and port for the split
-        let mut properties = self.conn_props.props.clone();
-
-        // For citus, we need to rewrite the table.name to capture sharding tables
-        if self.server_addr.is_some() {
-            let addr = self.server_addr.unwrap();
-            let host_addr = HostAddr::from_str(&addr)
-                .map_err(|err| anyhow!("invalid server address for cdc split. {}", err))?;
-            properties.insert("hostname".to_string(), host_addr.host);
-            properties.insert("port".to_string(), host_addr.port.to_string());
-            // rewrite table name with suffix to capture all shards in the split
-            let mut table_name = properties
-                .remove("table.name")
-                .ok_or_else(|| anyhow!("missing field 'table.name'"))?;
-            table_name.push_str("_[0-9]+");
-            properties.insert("table.name".into(), table_name);
-        }
-
-        let cdc_stream = cdc_client
-            .start_source_stream(
-                self.source_id,
-                self.conn_props.get_source_type_pb()?,
-                self.start_offset,
-                properties,
-                self.snapshot_done,
-            )
-            .await
-            .inspect_err(|err| tracing::error!("connector node start stream error: {}", err))?;
-        pin_mut!(cdc_stream);
-        #[for_await]
-        for event_res in cdc_stream {
-            match event_res {
-                Ok(GetEventStreamResponse { events, .. }) => {
-                    if events.is_empty() {
-                        continue;
-                    }
-                    let mut msgs = Vec::with_capacity(events.len());
-                    for event in events {
-                        msgs.push(SourceMessage::from(event));
-                    }
-                    yield msgs;
-                }
-                Err(e) => {
-                    return Err(anyhow!(
-                        "Cdc service error: code {}, msg {}",
-                        e.code(),
-                        e.message()
-                    ))
-                }
-            }
-        }
-    }
-
-    /// JNI version
+impl CommonSplitReader for CdcSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
         // rewrite the hostname and port for the split

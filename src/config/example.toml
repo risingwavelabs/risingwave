@@ -67,6 +67,7 @@ batch_chunk_size = 1024
 in_flight_barrier_nums = 10000
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
+streaming_metric_level = "Info"
 
 [streaming.developer]
 stream_enable_executor_row_count = false
@@ -122,7 +123,6 @@ lfu_tiny_lru_capacity_ratio = 0.01
 rated_random_rate_mb = 0
 flush_rate_limit_mb = 0
 reclaim_rate_limit_mb = 0
-refill_levels = []
 
 [storage.meta_file_cache]
 dir = ""
@@ -138,7 +138,11 @@ lfu_tiny_lru_capacity_ratio = 0.01
 rated_random_rate_mb = 0
 flush_rate_limit_mb = 0
 reclaim_rate_limit_mb = 0
-refill_levels = []
+
+[storage.cache_refill]
+data_refill_levels = []
+timeout_ms = 6000
+concurrency = 100
 
 [system]
 barrier_interval_ms = 1000
@@ -151,3 +155,4 @@ backup_storage_url = "memory"
 backup_storage_directory = "backup"
 telemetry_enabled = true
 max_concurrent_creating_streaming_jobs = 1
+pause_on_next_bootstrap = false

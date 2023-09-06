@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -27,6 +26,7 @@ use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
 };
 
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
 
 macro_rules! assert_count_range_scan {
@@ -42,13 +42,9 @@ macro_rules! assert_count_range_scan {
                 bounds,
                 $epoch,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-                    prefix_hint: None,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -110,7 +106,7 @@ async fn test_snapshot_inner(
         .await;
 
     let epoch1: u64 = 1;
-    local.init(epoch1);
+    local.init_for_test(epoch1).await.unwrap();
     local
         .ingest_batch(
             vec![
@@ -231,7 +227,7 @@ async fn test_snapshot_range_scan_inner(
     let mut local = hummock_storage
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
-    local.init(epoch);
+    local.init_for_test(epoch).await.unwrap();
 
     local
         .ingest_batch(
