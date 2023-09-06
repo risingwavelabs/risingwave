@@ -148,7 +148,20 @@ impl FromStr for Timestamptz {
             "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
             , "\nFor example: '2021-04-01 00:00:00+00:00'"
         );
-        let ret = speedate::DateTime::parse_str_rfc3339(s).map_err(|_| ERROR_MSG)?;
+        // Try `speedate` first
+        // * It is also used by `str_to_{date,time,timestamp}`
+        // * It can parse without seconds `2006-01-02 15:04-07:00`
+        let ret = match speedate::DateTime::parse_str_rfc3339(s) {
+            Ok(r) => r,
+            Err(_) => {
+                // Supplement with `chrono` for existing cases:
+                // * Extra space before offset `2006-01-02 15:04:05 -07:00`
+                return s
+                    .parse::<chrono::DateTime<Utc>>()
+                    .map(|t| Timestamptz(t.timestamp_micros()))
+                    .map_err(|_| ERROR_MSG);
+            }
+        };
         if ret.time.tz_offset.is_none() {
             return Err(ERROR_MSG);
         }
