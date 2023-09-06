@@ -156,7 +156,6 @@ pub trait HummockVersionUpdateExt {
     ) -> Vec<SstSplitInfo>;
 
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo>;
-
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
     fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo>;
     fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo>;
@@ -465,7 +464,11 @@ impl HummockVersionUpdateExt for HummockVersion {
 
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo> {
         let mut sst_split_info = vec![];
-        for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
+        let is_trival = version_delta.trivial_move;
+        for (index, (compaction_group_id, group_deltas)) in
+            version_delta.group_deltas.iter().enumerate()
+        {
+            let reclaim_sub_level = !is_trival || index == version_delta.group_deltas.len();
             let summary = summarize_group_deltas(group_deltas);
             if let Some(group_construct) = &summary.group_construct {
                 let mut new_levels = build_initial_compaction_group_levels(
@@ -559,7 +562,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                 }
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
-                levels.apply_compact_ssts(summary);
+                levels.apply_compact_ssts(summary, reclaim_sub_level);
             }
             if has_destroy {
                 self.levels.remove(compaction_group_id);
@@ -610,7 +613,7 @@ pub trait HummockLevelsExt {
     fn get_level(&self, idx: usize) -> &Level;
     fn get_level_mut(&mut self, idx: usize) -> &mut Level;
     fn count_ssts(&self) -> usize;
-    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary);
+    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary, reclaim_sub_level: bool);
     fn check_deleted_sst_exist(
         &self,
         delete_sst_levels: &[u32],
@@ -640,7 +643,7 @@ impl HummockLevelsExt for Levels {
             .sum()
     }
 
-    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary) {
+    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary, reclaim_sub_level: bool) {
         let GroupDeltasSummary {
             delete_sst_levels,
             delete_sst_ids_set,
@@ -698,11 +701,6 @@ impl HummockLevelsExt for Levels {
             }
         }
         if delete_sst_levels.iter().any(|level_id| *level_id == 0) {
-            self.l0
-                .as_mut()
-                .unwrap()
-                .sub_levels
-                .retain(|level| !level.table_infos.is_empty());
             self.l0.as_mut().unwrap().total_file_size = self
                 .l0
                 .as_mut()
@@ -719,6 +717,14 @@ impl HummockLevelsExt for Levels {
                 .iter()
                 .map(|level| level.uncompressed_file_size)
                 .sum::<u64>();
+        }
+
+        if reclaim_sub_level {
+            self.l0
+                .as_mut()
+                .unwrap()
+                .sub_levels
+                .retain(|level| !level.table_infos.is_empty());
         }
     }
 
@@ -1198,7 +1204,9 @@ mod tests {
             ]),
             ..Default::default()
         };
+
         version.apply_version_delta(&version_delta);
+
         let mut cg1 = build_initial_compaction_group_levels(
             1,
             &CompactionConfig {
