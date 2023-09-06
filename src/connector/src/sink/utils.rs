@@ -399,32 +399,65 @@ fn datum_to_json_object(
 #[derive(Debug, Clone, Default)]
 pub struct UpsertAdapterOpts {}
 
+fn gen_event_object(
+    schema: &Schema,
+    object: Value,
+    enable_schema: bool,
+    name: &Option<String>,
+) -> Option<Value> {
+    if enable_schema {
+        Some(json!({
+            "schema": generate_json_converter_schema(&schema.fields, name.as_ref().unwrap()),
+            "payload": object,
+        }))
+    } else {
+        Some(object)
+    }
+}
+
 #[try_stream(ok = (Option<Value>, Option<Value>), error = SinkError)]
 pub async fn gen_upsert_message_stream<'a>(
     schema: &'a Schema,
     pk_indices: &'a [usize],
     chunk: StreamChunk,
+    enable_schema: bool,
+    schema_name: Option<String>,
     _opts: UpsertAdapterOpts,
 ) {
     for (op, row) in chunk.rows() {
-        let event_key_object = Some(Value::Object(pk_to_json(row, &schema.fields, pk_indices)?));
+        let event_key_object = gen_event_object(
+            schema,
+            Value::Object(pk_to_json(row, &schema.fields, pk_indices)?),
+            enable_schema,
+            &schema_name,
+        );
 
         let event_object = match op {
-            Op::Insert => Some(Value::Object(record_to_json(
-                row,
-                &schema.fields,
-                TimestampHandlingMode::Milli,
-            )?)),
+            Op::Insert => gen_event_object(
+                schema,
+                Value::Object(record_to_json(
+                    row,
+                    &schema.fields,
+                    TimestampHandlingMode::Milli,
+                )?),
+                enable_schema,
+                &schema_name,
+            ),
             Op::Delete => Some(Value::Null),
             Op::UpdateDelete => {
                 // upsert semantic does not require update delete event
                 continue;
             }
-            Op::UpdateInsert => Some(Value::Object(record_to_json(
-                row,
-                &schema.fields,
-                TimestampHandlingMode::Milli,
-            )?)),
+            Op::UpdateInsert => gen_event_object(
+                schema,
+                Value::Object(record_to_json(
+                    row,
+                    &schema.fields,
+                    TimestampHandlingMode::Milli,
+                )?),
+                enable_schema,
+                &schema_name,
+            ),
         };
 
         yield (event_key_object, event_object);
@@ -454,6 +487,65 @@ pub async fn gen_append_only_message_stream<'a>(
 
         yield (event_key_object, event_object);
     }
+}
+
+// reference: https://github.com/apache/kafka/blob/80982c4ae3fe6be127b48ec09caff11ab5f87c69/connect/json/src/main/java/org/apache/kafka/connect/json/JsonSchema.java#L39
+fn json_converter_field_to_json(field: &Field) -> Value {
+    let mut mapping = Map::with_capacity(3);
+    let type_mapping = |rw_type: &DataType| match rw_type {
+        DataType::Boolean => "boolean",
+        DataType::Int16 => "int16",
+        DataType::Int32 => "int32",
+        DataType::Int64 => "int64",
+        DataType::Float32 => "float",
+        DataType::Float64 => "double",
+        DataType::Decimal => "string",
+        DataType::Date => "int32",
+        DataType::Varchar => "string",
+        DataType::Time => "int64",
+        DataType::Timestamp => "int64",
+        DataType::Timestamptz => "string",
+        DataType::Interval => "string",
+        DataType::Struct(_) => "struct",
+        DataType::List(_) => "array",
+        DataType::Bytea => "bytes",
+        DataType::Jsonb => "string",
+        DataType::Serial => "int32",
+        DataType::Int256 => "string",
+    };
+    mapping.insert("type".into(), json!(type_mapping(&field.data_type)));
+    mapping.insert("optional".into(), json!("true"));
+    match &field.data_type {
+        DataType::Struct(_) => {
+            let mut sub_fields = Vec::new();
+            for sub_field in &field.sub_fields {
+                sub_fields.push(json_converter_field_to_json(sub_field));
+            }
+            mapping.insert("fields".into(), json!(sub_fields));
+        }
+        DataType::List(list_type) => {
+            mapping.insert(
+                "items".into(),
+                json!({
+                    "type": type_mapping(list_type),
+                }),
+            );
+        }
+        _ => {
+            mapping.insert("field".into(), json!(field.name));
+        }
+    }
+    json!(mapping)
+}
+
+/// Generate schema for Kafka's `JsonConverter` when `schema.enable` is true
+fn generate_json_converter_schema(fields: &[Field], name: &str) -> Value {
+    json!({
+        "type": "struct",
+        "fields": fields.iter().map(json_converter_field_to_json).collect::<Vec<_>>(),
+        "optional": "false",
+        "name": name,
+    })
 }
 
 #[cfg(test)]

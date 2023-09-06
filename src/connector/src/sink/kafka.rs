@@ -203,6 +203,13 @@ pub struct KafkaConfig {
     )]
     pub use_transaction: bool,
 
+    #[serde(
+        rename = "schema.enable",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    pub schema_enable: bool,
+
     /// We have parsed the primary key for an upsert kafka sink into a `usize` vector representing
     /// the indices of the pk columns in the frontend, so we simply store the primary key here
     /// as a string.
@@ -496,6 +503,8 @@ impl KafkaSinkWriter {
             &self.schema,
             &self.pk_indices,
             chunk,
+            self.config.schema_enable,
+            Some(format!("{}.{}", self.db_name, self.sink_from_name)),
             UpsertAdapterOpts::default(),
         );
 

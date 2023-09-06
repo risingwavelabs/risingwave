@@ -207,6 +207,8 @@ impl KinesisSinkWriter {
             &self.schema,
             &self.pk_indices,
             chunk,
+            false,
+            None,
             UpsertAdapterOpts::default(),
         );
 

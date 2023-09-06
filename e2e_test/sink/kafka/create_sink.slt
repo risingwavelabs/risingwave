@@ -107,6 +107,16 @@ create sink si_kafka_upsert from t_kafka with (
 );
 
 statement ok
+create sink si_kafka_upsert_schema from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'test-rw-sink-upsert-schema',
+    type = 'upsert',
+    primary_key = 'id',
+    schema.enable = true,
+);
+
+statement ok
 create sink si_kafka_debezium from t_kafka with (
     connector = 'kafka',
     properties.bootstrap.server = '127.0.0.1:29092',
