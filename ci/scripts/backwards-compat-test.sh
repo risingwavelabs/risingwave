@@ -83,15 +83,6 @@ setup_old_cluster() {
   tar -xvf risingwave-v${OLD_VERSION}-x86_64-unknown-linux.tar.gz
   mv risingwave target/debug/risingwave
 
-#  echo "--- Setup old release $OLD_VERSION"
-#  pushd ..
-#  git clone --depth 1 --branch "v${OLD_VERSION}-rc" "https://github.com/risingwavelabs/risingwave.git"
-#  pushd risingwave
-#  mkdir -p target/debug
-#  echo "Branch:"
-#  git branch
-#  cp risingwave target/debug/risingwave
-
   echo "--- Start cluster on tag $OLD_VERSION"
   git config --global --add safe.directory /risingwave
 }
