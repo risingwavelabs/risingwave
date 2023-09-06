@@ -15,6 +15,7 @@ members = [
   "src/frontend",
   "src/frontend/planner_test",
   "src/java_binding",
+  "src/jni_core",
   "src/meta",
   "src/object_store",
   "src/prost",
@@ -113,6 +114,8 @@ risingwave_stream = { path = "./src/stream" }
 risingwave_test_runner = { path = "./src/test_runner" }
 risingwave_udf = { path = "./src/udf" }
 risingwave_variables = { path = "./src/utils/variables" }
+risingwave_java_binding = { path = "./src/java_binding" }
+risingwave_jni_core = { path = "src/jni_core" }
 
 [profile.dev]
 lto = 'off'

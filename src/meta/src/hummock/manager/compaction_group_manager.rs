@@ -50,9 +50,9 @@ use crate::model::{
 };
 use crate::storage::{MetaStore, Transaction};
 
-impl<S: MetaStore> HummockManager<S> {
+impl HummockManager {
     pub(super) async fn build_compaction_group_manager(
-        env: &MetaSrvEnv<S>,
+        env: &MetaSrvEnv,
     ) -> Result<RwLock<CompactionGroupManager>> {
         let default_config = match env.opts.compaction_config.as_ref() {
             None => CompactionConfigBuilder::new().build(),
@@ -62,7 +62,7 @@ impl<S: MetaStore> HummockManager<S> {
     }
 
     pub(super) async fn build_compaction_group_manager_with_config(
-        env: &MetaSrvEnv<S>,
+        env: &MetaSrvEnv,
         default_config: CompactionConfig,
     ) -> Result<RwLock<CompactionGroupManager>> {
         let compaction_group_manager = RwLock::new(CompactionGroupManager {

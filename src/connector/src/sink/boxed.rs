@@ -14,6 +14,7 @@
 
 use std::fmt::{Debug, Formatter};
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
@@ -54,7 +55,7 @@ impl<CM: 'static + Send> SinkWriter for BoxWriter<CM> {
         self.deref_mut().abort().await
     }
 
-    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> crate::sink::Result<()> {
+    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> crate::sink::Result<()> {
         self.deref_mut().update_vnode_bitmap(vnode_bitmap).await
     }
 }
