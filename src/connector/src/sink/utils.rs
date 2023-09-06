@@ -805,7 +805,7 @@ mod tests {
             Field {
                 data_type: DataType::Int256,
                 name: "14".into(),
-                ..mock_field.clone()
+                ..mock_field
             },
         ];
         let schema = generate_json_converter_schema(&fields, "test").to_string();
