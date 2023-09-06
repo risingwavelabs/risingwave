@@ -125,11 +125,11 @@ seed_old_cluster() {
   echo "--- BASIC TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/validate_original.slt"
 
-#  echo "--- NEXMARK TEST: Seeding old cluster with data"
-#  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/seed.slt"
-#
-#  echo "--- NEXMARK TEST: Validating old cluster"
-#  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/validate_original.slt"
+  echo "--- NEXMARK TEST: Seeding old cluster with data"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/seed.slt"
+
+  echo "--- NEXMARK TEST: Validating old cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/validate_original.slt"
 
   echo "--- TPCH TEST: Seeding old cluster with data"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/tpch-backwards-compat/seed.slt"
@@ -166,8 +166,8 @@ validate_new_cluster() {
   echo "--- BASIC TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/basic/validate_restart.slt"
 
-#  echo "--- NEXMARK TEST: Validating new cluster"
-#  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/validate_restart.slt"
+  echo "--- NEXMARK TEST: Validating new cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/nexmark-backwards-compat/validate_restart.slt"
 
   echo "--- TPCH TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/tpch-backwards-compat/validate_restart.slt"
