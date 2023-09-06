@@ -44,7 +44,6 @@ mod expr_in;
 mod expr_input_ref;
 mod expr_literal;
 mod expr_nested_construct;
-mod expr_proctime;
 mod expr_some_all;
 pub(crate) mod expr_udf;
 mod expr_unary;

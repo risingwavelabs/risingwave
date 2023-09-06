@@ -30,7 +30,6 @@ use super::expr_nested_construct::NestedConstructExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
-use crate::expr::expr_proctime::ProcTimeExpression;
 use crate::expr::{
     BoxedExpression, Expression, InputRefExpression, LiteralExpression, TryFromExprNodeBoxed,
 };
@@ -69,7 +68,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             ArrayConcatExpression::try_from_boxed(prost)
         }
         E::Vnode => VnodeExpression::try_from_boxed(prost),
-        E::Proctime => ProcTimeExpression::try_from_boxed(prost),
 
         _ => {
             let ret_type = DataType::from(prost.get_return_type().unwrap());

@@ -42,6 +42,7 @@ pub mod lower;
 pub mod md5;
 pub mod overlay;
 pub mod position;
+pub mod proctime;
 pub mod regexp;
 pub mod repeat;
 pub mod replace;

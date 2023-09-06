@@ -327,12 +327,16 @@ impl FunctionAttr {
             }
         } else {
             // no optimization
+            let array_zip = match num_args {
+                0 => quote! { std::iter::repeat(()) },
+                _ => quote! { multizip((#(#arrays.iter(),)*)) },
+            };
             quote! {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
 
                 match input.vis() {
                     Vis::Bitmap(vis) => {
-                        for ((#(#inputs,)*), visible) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(vis.iter()) {
+                        for ((#(#inputs,)*), visible) in #array_zip.zip(vis.iter()) {
                             if !visible {
                                 builder.append_null();
                                 continue;
@@ -341,7 +345,7 @@ impl FunctionAttr {
                         }
                     }
                     Vis::Compact(_) => {
-                        for (#(#inputs,)*) in multizip((#(#arrays.iter(),)*)) {
+                        for (#(#inputs,)*) in #array_zip {
                             #append_output
                         }
                     }
