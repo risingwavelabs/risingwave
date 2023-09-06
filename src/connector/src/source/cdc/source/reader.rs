@@ -124,8 +124,15 @@ impl CommonSplitReader for CdcSplitReader {
 
         let source_type = self.conn_props.get_source_type_pb()?;
 
+        JVM.as_ref()
+            .ok_or_else(|| anyhow!("JVM is not initialized, so fail to create cdc table"))?;
+
         std::thread::spawn(move || {
-            let mut env = JVM.attach_current_thread_as_daemon().unwrap();
+            let mut env = JVM
+                .as_ref()
+                .unwrap()
+                .attach_current_thread_as_daemon()
+                .unwrap();
 
             let st = env
                 .call_static_method(

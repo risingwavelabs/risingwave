@@ -18,17 +18,25 @@ use std::ffi::c_void;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 
 use jni::strings::JNIString;
 use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
+use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 
 use crate::run_this_func_to_get_valid_ptr_from_java_binding;
 
-pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
-    let libs_path = ".risingwave/bin/connector-node/libs/";
+pub static JVM: LazyLock<Option<JavaVM>> = LazyLock::new(|| {
+    let libs_path = if let Ok(libs_path) = std::env::var("CONNECTOR_LIBS_PATH") {
+        libs_path
+    } else if std::env::var("ENABLE_BUILD_RW_CONNECTOR").is_ok() {
+        // If ENABLE_BUILD_RW_CONNECTOR is set which means it is started from risedev with a connector.
+        ".risingwave/bin/connector-node/libs/".to_string()
+    } else {
+        return None;
+    };
 
-    let dir = Path::new(libs_path);
+    let dir = Path::new(&libs_path);
 
     if !dir.is_dir() {
         panic!("{} is not a directory", libs_path);
@@ -46,21 +54,25 @@ pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
         panic!("failed to read directory {}", libs_path);
     }
 
+    let jvm_heap_size = if let Ok(heap_size) = std::env::var("JVM_HEAP_SIZE") {
+        heap_size
+    } else {
+        // Use 10% of total memory by default
+        format!("{}", total_memory_available_bytes() / 10)
+    };
+
     // Build the VM properties
-    let jvm_args = InitArgsBuilder::new()
+    let args_builder = InitArgsBuilder::new()
         // Pass the JNI API version (default is 8)
         .version(JNIVersion::V8)
-        // You can additionally pass any JVM options (standard, like a system property,
-        // or VM-specific).
-        // Here we enable some extra JNI checks useful during development
-        // .option("-Xcheck:jni")
         .option("-ea")
         .option("-Dis_embedded_connector=true")
         .option(format!("-Djava.class.path={}", class_vec.join(":")))
-        // TODO: remove it
-        // .option("-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=9111")
-        .build()
-        .unwrap();
+        .option(format!("-Xms{}", jvm_heap_size))
+        .option(format!("-Xmx{}", jvm_heap_size));
+
+    tracing::info!("JVM args: {:?}", args_builder);
+    let jvm_args = args_builder.build().unwrap();
 
     // Create a new VM
     let jvm = match JavaVM::new(jvm_args) {
@@ -71,12 +83,17 @@ pub static JVM: LazyLock<Arc<JavaVM>> = LazyLock::new(|| {
     };
 
     tracing::info!("initialize JVM successfully");
-    Arc::new(jvm)
+    Some(jvm)
 });
 
 static REGISTERED: AtomicBool = AtomicBool::new(false);
 
 pub fn register_native_method_for_jvm() {
+    // JVM is not initialized
+    if JVM.is_none() {
+        return;
+    }
+
     // Ensure registering only once.
     if REGISTERED
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -86,6 +103,8 @@ pub fn register_native_method_for_jvm() {
     }
 
     let mut env = JVM
+        .as_ref()
+        .unwrap()
         .attach_current_thread()
         .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
         .unwrap();

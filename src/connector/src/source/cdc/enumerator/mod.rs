@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_pb::connector_service::SourceType as PbSourceType;
 
 use crate::source::cdc::{
@@ -60,6 +61,8 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
             .unwrap_or_default();
 
         let source_type = props.get_source_type_pb()?;
+        JVM.as_ref()
+            .ok_or_else(|| anyhow!("JVM is not initialized, so fail to create cdc table"))?;
         // validate connector properties
         connector_client
             .validate_source_properties(
