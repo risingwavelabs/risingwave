@@ -28,7 +28,6 @@ cp -r backwards-compat-tests/slt/* $TEST_DIR
 # Older versions of RW may not gracefully kill kafka.
 # So we duplicate the definition here.
 kill_cluster() {
-  set -euo pipefail
   # Kill other components
   tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
   | grep -v 'kafka' \
@@ -56,12 +55,10 @@ kill_cluster() {
 }
 
 run_sql () {
-  set -euo pipefail
   psql -h localhost -p 4566 -d dev -U root -c "$@"
 }
 
 check_version() {
-  set -euo pipefail
   local TAG=$1
   local raw_version=$(run_sql "SELECT version();")
   echo "--- Version"
@@ -76,14 +73,12 @@ check_version() {
 ################################### Entry Points
 
 create_kafka_topic() {
-  set -euo pipefail
   "$KAFKA_PATH"/bin/kafka-topics.sh \
     --create \
     --topic backwards_compat_test_kafka_source --bootstrap-server localhost:29092
 }
 
 insert_json_kafka() {
-  set -euo pipefail
   local JSON=$1
   echo "$JSON" | "$KAFKA_PATH"/bin/kafka-console-producer.sh \
     --topic backwards_compat_test_kafka_source \
@@ -108,8 +103,6 @@ seed_json_kafka() {
 # TODO: Run nexmark, tpch queries
 # TODO(kwannoel): use sqllogictest.
 seed_old_cluster() {
-  set -euo pipefail
-
   # Caller should make sure the test env has these.
   # They are called here because the current tests
   # may not be backwards compatible, so we need to call
@@ -152,8 +145,6 @@ seed_old_cluster() {
 }
 
 validate_new_cluster() {
-  set -euo pipefail
-
   NEW_TAG=$1
   echo "--- Start cluster on latest"
   ./risedev d full-without-monitoring
