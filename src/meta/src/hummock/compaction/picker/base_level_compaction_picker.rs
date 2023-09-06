@@ -21,8 +21,8 @@ use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, Ove
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use super::{
-    CompactionInput, CompactionPicker, CompactionTaskOptimizeRule, CompactionTaskValidator,
-    LocalPickerStatistic,
+    CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
+    ValidationRuleType,
 };
 use crate::hummock::compaction::create_overlap_strategy;
 use crate::hummock::compaction::picker::TrivialMovePicker;
@@ -226,7 +226,7 @@ impl LevelCompactionPicker {
 
             if !self.compaction_task_validator.valid_compact_task(
                 &result,
-                CompactionTaskOptimizeRule::ToBase,
+                ValidationRuleType::ToBase,
                 stats,
             ) {
                 continue;
@@ -234,7 +234,6 @@ impl LevelCompactionPicker {
 
             return Some(result);
         }
-        stats.skip_by_write_amp_limit += 1;
         None
     }
 
@@ -315,8 +314,7 @@ impl LevelCompactionPicker {
                     ..Default::default()
                 };
 
-                if !validator.valid_compact_task(&result, CompactionTaskOptimizeRule::Intra, stats)
-                {
+                if !validator.valid_compact_task(&result, ValidationRuleType::Intra, stats) {
                     continue;
                 }
 
@@ -932,7 +930,7 @@ pub mod tests {
             ..Default::default()
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-        let mut local_stats = LocalPickerStatistic::default();
+        let mut local_stats = ::default();
 
         let config = Arc::new(
             CompactionConfigBuilder::new()

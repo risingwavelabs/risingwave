@@ -20,8 +20,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
 use super::{
-    CompactionInput, CompactionPicker, CompactionTaskOptimizeRule, CompactionTaskValidator,
-    LocalPickerStatistic,
+    CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
+    ValidationRuleType,
 };
 use crate::hummock::compaction::picker::MAX_COMPACT_LEVEL_COUNT;
 use crate::hummock::level_handler::LevelHandler;
@@ -150,7 +150,7 @@ impl TierCompactionPicker {
 
             if !self.compaction_task_validator.valid_compact_task(
                 &result,
-                CompactionTaskOptimizeRule::Tier,
+                ValidationRuleType::Tier,
                 stats,
             ) {
                 continue;

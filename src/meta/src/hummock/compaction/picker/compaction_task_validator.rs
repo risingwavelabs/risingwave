@@ -12,45 +12,86 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_pb::hummock::CompactionConfig;
 
 use super::{CompactionInput, LocalPickerStatistic, MAX_COMPACT_LEVEL_COUNT};
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum CompactionTaskOptimizeRule {
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ValidationRuleType {
     Tier = 0,
     Intra = 1,
     ToBase = 2,
 }
 
 pub struct CompactionTaskValidator {
-    config: Arc<CompactionConfig>,
-    optimize_rules: BTreeSet<CompactionTaskOptimizeRule>,
+    validation_rules: HashMap<ValidationRuleType, Box<dyn CompactionTaskValidationRule>>,
 }
 
 impl CompactionTaskValidator {
     pub fn new(config: Arc<CompactionConfig>) -> Self {
-        CompactionTaskValidator {
-            config,
-            optimize_rules: BTreeSet::from_iter(
-                vec![
-                    CompactionTaskOptimizeRule::Tier,
-                    CompactionTaskOptimizeRule::Intra,
-                    CompactionTaskOptimizeRule::ToBase,
-                ]
-                .into_iter(),
-            ),
-        }
+        let mut validation_rules: HashMap<
+            ValidationRuleType,
+            Box<dyn CompactionTaskValidationRule>,
+        > = HashMap::default();
+
+        validation_rules.insert(
+            ValidationRuleType::Tier,
+            Box::new(TierCompactionTaskValidationRule {
+                config: config.clone(),
+                enable: true,
+            }),
+        );
+
+        validation_rules.insert(
+            ValidationRuleType::Intra,
+            Box::new(IntraCompactionTaskValidationRule {
+                config: config.clone(),
+                enable: true,
+            }),
+        );
+
+        validation_rules.insert(
+            ValidationRuleType::ToBase,
+            Box::new(BaseCompactionTaskValidationRule {
+                config,
+                enable: true,
+            }),
+        );
+
+        CompactionTaskValidator { validation_rules }
     }
 
-    fn valid_tier_compaction(
+    pub fn valid_compact_task(
         &self,
         input: &CompactionInput,
+        picker_type: ValidationRuleType,
         stats: &mut LocalPickerStatistic,
     ) -> bool {
+        self.validation_rules
+            .get(&picker_type)
+            .unwrap()
+            .validate(input, stats)
+    }
+}
+
+pub trait CompactionTaskValidationRule {
+    fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool;
+}
+
+struct TierCompactionTaskValidationRule {
+    config: Arc<CompactionConfig>,
+    enable: bool,
+}
+
+impl CompactionTaskValidationRule for TierCompactionTaskValidationRule {
+    fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
+        if !self.enable {
+            return true;
+        }
+
         // so the design here wants to merge multiple overlapping-levels in one compaction
         let max_compaction_bytes = std::cmp::min(
             self.config.max_compaction_bytes,
@@ -83,12 +124,19 @@ impl CompactionTaskValidator {
 
         true
     }
+}
 
-    fn valid_intra_compaction(
-        &self,
-        input: &CompactionInput,
-        stats: &mut LocalPickerStatistic,
-    ) -> bool {
+struct IntraCompactionTaskValidationRule {
+    config: Arc<CompactionConfig>,
+    enable: bool,
+}
+
+impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
+    fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
+        if !self.enable {
+            return true;
+        }
+
         let intra_sub_level_compact_level_count =
             self.config.level0_sub_level_compact_level_count as usize;
 
@@ -130,12 +178,19 @@ impl CompactionTaskValidator {
 
         true
     }
+}
 
-    fn valid_base_level_compaction(
-        &self,
-        input: &CompactionInput,
-        stats: &mut LocalPickerStatistic,
-    ) -> bool {
+struct BaseCompactionTaskValidationRule {
+    config: Arc<CompactionConfig>,
+    enable: bool,
+}
+
+impl CompactionTaskValidationRule for BaseCompactionTaskValidationRule {
+    fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
+        if !self.enable {
+            return true;
+        }
+
         // The size of target level may be too large, we shall skip this compact task and wait
         //  the data in base level compact to lower level.
         if input.target_input_size > self.config.max_compaction_bytes {
@@ -149,22 +204,5 @@ impl CompactionTaskValidator {
         }
 
         true
-    }
-
-    pub fn valid_compact_task(
-        &self,
-        input: &CompactionInput,
-        picker_type: CompactionTaskOptimizeRule,
-        stats: &mut LocalPickerStatistic,
-    ) -> bool {
-        if !self.optimize_rules.contains(&picker_type) {
-            return true;
-        }
-
-        match picker_type {
-            CompactionTaskOptimizeRule::Tier => self.valid_tier_compaction(input, stats),
-            CompactionTaskOptimizeRule::Intra => self.valid_intra_compaction(input, stats),
-            CompactionTaskOptimizeRule::ToBase => self.valid_base_level_compaction(input, stats),
-        }
     }
 }

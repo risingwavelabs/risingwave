@@ -24,7 +24,7 @@ mod ttl_reclaim_compaction_picker;
 mod compaction_task_validator;
 
 pub use base_level_compaction_picker::LevelCompactionPicker;
-pub use compaction_task_validator::{CompactionTaskOptimizeRule, CompactionTaskValidator};
+pub use compaction_task_validator::{CompactionTaskValidator, ValidationRuleType};
 pub use manual_compaction_picker::ManualCompactionPicker;
 pub use min_overlap_compaction_picker::MinOverlappingPicker;
 use risingwave_pb::hummock::hummock_version::Levels;
