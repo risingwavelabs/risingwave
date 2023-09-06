@@ -15,7 +15,7 @@
 use itertools::Itertools as _;
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, DataTypeName, ScalarImpl, StructType};
+use risingwave_common::types::{DataType, DataTypeName, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::func::*;
 
@@ -418,59 +418,12 @@ fn infer_type_for_special(
         }
         ExprType::RegexpMatch => {
             ensure_arity!("regexp_match", 2 <= | inputs | <= 3);
-            if inputs.len() == 3 {
-                match &inputs[2] {
-                    ExprImpl::Literal(flag) => {
-                        match flag.get_data() {
-                            Some(flag) => {
-                                let ScalarImpl::Utf8(flag) = flag else {
-                                    return Err(ErrorCode::BindError(
-                                        "flag in regexp_match must be a literal string".to_string(),
-                                    )
-                                    .into());
-                                };
-                                for c in flag.chars() {
-                                    if c == 'g' {
-                                        return Err(ErrorCode::InvalidInputSyntax(
-                                            "regexp_match() does not support the \"global\" option. Use the regexp_matches function instead."
-                                                .to_string(),
-                                        )
-                                        .into());
-                                    }
-                                    if !"ic".contains(c) {
-                                        return Err(ErrorCode::NotImplemented(
-                                            format!("invalid regular expression option: \"{c}\""),
-                                            None.into(),
-                                        )
-                                        .into());
-                                    }
-                                }
-                            }
-                            None => {
-                                // flag is NULL. Will return NULL.
-                            }
-                        }
-                    }
-                    _ => {
-                        return Err(ErrorCode::BindError(
-                            "flag in regexp_match must be a literal string".to_string(),
-                        )
-                        .into())
-                    }
-                }
+            inputs[0].cast_implicit_mut(DataType::Varchar)?;
+            inputs[1].cast_implicit_mut(DataType::Varchar)?;
+            if let Some(flags) = inputs.get_mut(2) {
+                flags.cast_implicit_mut(DataType::Varchar)?;
             }
             Ok(Some(DataType::List(Box::new(DataType::Varchar))))
-        }
-        ExprType::RegexpReplace => {
-            // regexp_replace(source, pattern, replacement [, start [, N ]] [, flags ])
-            // TODO: Preprocessing?
-            ensure_arity!("regexp_replace", 3 <= | inputs | <= 6);
-            Ok(Some(DataType::Varchar))
-        }
-        ExprType::RegexpCount => {
-            // TODO: Preprocessing?
-            ensure_arity!("regexp_count", 2 <= | inputs | <= 4);
-            Ok(Some(DataType::Int32))
         }
         ExprType::ArrayCat => {
             ensure_arity!("array_cat", | inputs | == 2);
