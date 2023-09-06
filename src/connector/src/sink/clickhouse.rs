@@ -23,7 +23,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarRefImpl, Serial};
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_rpc_client::ConnectorClient;
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::Serialize;
@@ -89,24 +88,23 @@ impl ClickHouseSink {
     }
 
     /// Check that the column names and types of risingwave and clickhouse are identical
-    fn check_column_name_and_type(&self, clickhouse_column: Vec<SystemColumn>) -> Result<()> {
-        let ck_fields_name = build_fields_name_type_from_schema(&self.schema)?;
-        if !ck_fields_name.len().eq(&clickhouse_column.len()) {
+    fn check_column_name_and_type(&self, clickhouse_columns_desc: Vec<SystemColumn>) -> Result<()> {
+        let rw_fields_name = build_fields_name_type_from_schema(&self.schema)?;
+        let clickhouse_columns_desc:HashMap<String,SystemColumn> = clickhouse_columns_desc.iter().map(|s|{
+            (s.name.clone(),s.clone())
+        }).collect();
+
+        if !rw_fields_name.len().le(&clickhouse_columns_desc.len()) {
             return Err(SinkError::ClickHouse("Schema len not match".to_string()));
         }
 
-        ck_fields_name
-            .iter()
-            .zip_eq_fast(clickhouse_column)
-            .try_for_each(|(key, value)| {
-                if !key.0.eq(&value.name) {
-                    return Err(SinkError::ClickHouse(format!(
-                        "Column name is not match, risingwave is {:?} and clickhouse is {:?}",
-                        key.0, value.name
-                    )));
-                }
-                Self::check_and_correct_column_type(&key.1, &value)
-            })?;
+        for i in rw_fields_name {
+            let value = clickhouse_columns_desc.get(&i.0).ok_or(SinkError::ClickHouse(format!(
+                "Column name don't find in clickhouse, risingwave is {:?} ",
+                i.0
+            )))?;
+            Self::check_and_correct_column_type(&i.1, &value)?
+        }
         Ok(())
     }
 
@@ -449,7 +447,7 @@ impl SinkWriter for ClickHouseSinkWriter {
     }
 }
 
-#[derive(ClickHouseRow, Deserialize)]
+#[derive(ClickHouseRow, Deserialize,Clone)]
 struct SystemColumn {
     name: String,
     r#type: String,
