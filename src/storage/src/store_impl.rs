@@ -29,8 +29,8 @@ use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError, HummockStorage, MemoryLimiter,
-    SstableObjectIdManagerRef, SstableStore,
+    set_metrics_registry, FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError,
+    HummockStorage, MemoryLimiter, SstableObjectIdManagerRef, SstableStore,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -542,12 +542,15 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
+        assert!(set_metrics_registry(GLOBAL_METRICS_REGISTRY.clone()));
+
         let data_file_cache = if opts.data_file_cache_dir.is_empty() {
             FileCache::none()
         } else {
             const MB: usize = 1024 * 1024;
 
             let foyer_store_config = FoyerStoreConfig {
+                name: "data".to_string(),
                 dir: PathBuf::from(opts.data_file_cache_dir.clone()),
                 capacity: opts.data_file_cache_capacity_mb * MB,
                 file_capacity: opts.data_file_cache_file_capacity_mb * MB,
@@ -563,8 +566,6 @@ impl StateStoreImpl {
                 reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
                 event_listener: vec![],
-                prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.clone()),
-                prometheus_namespace: Some("data".to_string()),
                 enable_filter: !opts.cache_refill_data_refill_levels.is_empty(),
             };
             let config = FoyerRuntimeConfig {
@@ -582,6 +583,7 @@ impl StateStoreImpl {
             const MB: usize = 1024 * 1024;
 
             let foyer_store_config = FoyerStoreConfig {
+                name: "meta".to_string(),
                 dir: PathBuf::from(opts.meta_file_cache_dir.clone()),
                 capacity: opts.meta_file_cache_capacity_mb * MB,
                 file_capacity: opts.meta_file_cache_file_capacity_mb * MB,
@@ -597,8 +599,6 @@ impl StateStoreImpl {
                 reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
                 event_listener: vec![],
-                prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.clone()),
-                prometheus_namespace: Some("meta".to_string()),
                 enable_filter: false,
             };
             let config = FoyerRuntimeConfig {

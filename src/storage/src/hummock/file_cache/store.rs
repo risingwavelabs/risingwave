@@ -23,9 +23,9 @@ use foyer::common::code::{Key, Value};
 use foyer::storage::admission::rated_random::RatedRandomAdmissionPolicy;
 use foyer::storage::admission::AdmissionPolicy;
 use foyer::storage::event::EventListener;
-use foyer::storage::store::{FetchValueFuture, PrometheusConfig};
+pub use foyer::storage::metrics::set_metrics_registry;
+use foyer::storage::store::FetchValueFuture;
 use foyer::storage::LfuFsStoreConfig;
-use prometheus::Registry;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 
@@ -59,6 +59,7 @@ where
     K: Key,
     V: Value,
 {
+    pub name: String,
     pub dir: PathBuf,
     pub capacity: usize,
     pub file_capacity: usize,
@@ -73,8 +74,6 @@ where
     pub lfu_window_to_cache_size_ratio: usize,
     pub lfu_tiny_lru_capacity_ratio: f64,
     pub rated_random_rate: usize,
-    pub prometheus_registry: Option<Registry>,
-    pub prometheus_namespace: Option<String>,
     pub event_listener: Vec<Arc<dyn EventListener<K = K, V = V>>>,
     pub enable_filter: bool,
 }
@@ -201,6 +200,7 @@ where
                 }
 
                 let c = LfuFsStoreConfig {
+                    name: foyer_store_config.name,
                     eviction_config: EvictionConfig {
                         window_to_cache_size_ratio: foyer_store_config
                             .lfu_window_to_cache_size_ratio,
@@ -222,10 +222,6 @@ where
                     reclaim_rate_limit: foyer_store_config.reclaim_rate_limit,
                     recover_concurrency: foyer_store_config.recover_concurrency,
                     event_listeners: foyer_store_config.event_listener,
-                    prometheus_config: PrometheusConfig {
-                        registry: foyer_store_config.prometheus_registry,
-                        namespace: foyer_store_config.prometheus_namespace,
-                    },
                     clean_region_threshold: foyer_store_config.reclaimers
                         + foyer_store_config.reclaimers / 2,
                 };
