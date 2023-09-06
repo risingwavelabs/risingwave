@@ -14,6 +14,19 @@ FORMAT plain ENCODE protobuf(
         message = 'test.User'
     );
 
+# for multiple schema registry nodes
+statement ok
+create table sr_pb_test_bk with (
+    connector = 'kafka',
+    topic = 'sr_pb_test',
+    properties.bootstrap.server = 'message_queue:29092',
+    scan.startup.mode = 'earliest',
+    message = 'test.User')
+FORMAT plain ENCODE protobuf(
+        schema.registry = 'http://message_queue:8081,http://message_queue:8081',
+        message = 'test.User'
+    );
+
 # Wait for source
 sleep 10s
 
@@ -34,3 +47,6 @@ select min(id), max(id) from sr_pb_test;
 
 statement ok
 drop table sr_pb_test;
+
+statement ok
+drop table sr_pb_test_bk;

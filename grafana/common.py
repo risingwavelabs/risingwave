@@ -96,6 +96,7 @@ class Layout:
 
 
 class Panels:
+    # Common options for timeseries panels
     common_options = {
         "fillOpacity": 10,
         "interval": "1s",

@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_common::session_config::OverWindowCachePolicy;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::function::window::WindowFuncCall;
 use risingwave_pb::stream_plan::PbOverWindowNode;
@@ -72,7 +73,9 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
             order_key_order_types,
             state_table,
             watermark_epoch: stream.get_watermark_epoch(),
+            metrics: params.executor_stats,
             chunk_size: params.env.config().developer.chunk_size,
+            cache_policy: OverWindowCachePolicy::from_protobuf(node.get_cache_policy()?),
         })
         .boxed())
     }

@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_storage::error::StorageError;
 
@@ -50,7 +51,7 @@ pub enum LogStoreReadItem {
 
 pub trait LogWriter {
     /// Initialize the log writer with an epoch
-    fn init(&mut self, epoch: u64) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+    fn init(&mut self, epoch: EpochPair) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
     /// Write a stream chunk to the log writer
     fn write_chunk(

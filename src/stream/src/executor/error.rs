@@ -219,6 +219,12 @@ impl From<PbFieldNotFound> for StreamExecutorError {
     }
 }
 
+impl From<String> for StreamExecutorError {
+    fn from(s: String) -> Self {
+        ErrorKind::Internal(anyhow::anyhow!(s)).into()
+    }
+}
+
 static_assertions::const_assert_eq!(std::mem::size_of::<StreamExecutorError>(), 8);
 
 #[cfg(test)]

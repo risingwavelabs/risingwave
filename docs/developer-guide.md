@@ -47,6 +47,7 @@ http://ecotrust-canada.github.io/markdown-toc/
 - [Add new dependencies](#add-new-dependencies)
 - [Submit PRs](#submit-prs)
 - [Profiling](#benchmarking-and-profiling)
+- [Understanding RisingWave Macros](#understanding-risingwave-macros)
 
 ## Read the design docs
 
@@ -61,6 +62,8 @@ You can also read the [crate level documentation](https://risingwavelabs.github.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 - The `docs` folder contains the design docs. If you want to learn about how RisingWave is designed and implemented, check out the design docs here.
 - The `dashboard` folder contains RisingWave dashboard v2.
+
+The [src/README.md](../src/README.md) file contains more details about Design Patterns in RisingWave.
 
 ## Set up the development environment
 
@@ -269,7 +272,10 @@ The Rust components use `tokio-tracing` to handle both logging and tracing. The 
 * Third-party libraries: warn
 * Other libraries: debug
 
-If you need to adjust log levels, change the logging filters in `src/utils/runtime/src/lib.rs`.
+If you need to override the default log levels, launch RisingWave with the environment variable `RUST_LOG` set as described [here](https://docs.rs/tracing-subscriber/0.3/tracing_subscriber/filter/struct.EnvFilter.html).
+
+There're also some logs designated for debugging purposes with target names starting with `events::`.
+For example, by setting `RUST_LOG=events::stream::message::chunk=trace`, all chunk messages will be logged as it passes through the executors in the streaming engine. Search in the codebase to find more of them.
 
 
 ## Test your code changes

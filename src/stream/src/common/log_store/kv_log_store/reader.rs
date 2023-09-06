@@ -87,13 +87,10 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                         (Included(range_start), Excluded(range_end)),
                         u64::MAX,
                         ReadOptions {
-                            prefix_hint: None,
-                            ignore_range_tombstone: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                             cache_policy: CachePolicy::Fill(CachePriority::Low),
-                            retention_seconds: None,
                             table_id,
-                            read_version_from_backup: false,
+                            ..Default::default()
                         },
                     )
                     .await
@@ -133,75 +130,69 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
             }
             ReaderState::ConsumingStream { epoch } => *epoch,
         };
-        loop {
-            let (item_epoch, item) = self.rx.next_item().await;
-            assert_eq!(epoch, item_epoch);
-            match item {
-                LogStoreBufferItem::StreamChunk { chunk, .. } => {
-                    return Ok((epoch, LogStoreReadItem::StreamChunk(chunk)));
-                }
-                LogStoreBufferItem::Flushed {
-                    vnode_bitmap,
-                    start_seq_id,
-                    end_seq_id,
-                } => {
-                    let streams = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
-                        let range_start =
-                            self.serde
-                                .serialize_log_store_pk(vnode, epoch, start_seq_id);
-                        let range_end = self.serde.serialize_log_store_pk(vnode, epoch, end_seq_id);
-                        let state_store = self.state_store.clone();
-                        let table_id = self.table_id;
-                        // Use u64::MAX here because the epoch to consume may be below the safe
-                        // epoch
-                        async move {
-                            Ok::<_, LogStoreError>(Box::pin(
-                                state_store
-                                    .iter(
-                                        (Included(range_start), Included(range_end)),
-                                        u64::MAX,
-                                        ReadOptions {
-                                            prefix_hint: None,
-                                            ignore_range_tombstone: false,
-                                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(
-                                            ),
-                                            cache_policy: CachePolicy::Fill(CachePriority::Low),
-                                            retention_seconds: None,
-                                            table_id,
-                                            read_version_from_backup: false,
-                                        },
-                                    )
-                                    .await?,
-                            ))
-                        }
-                    }))
-                    .await?;
-                    let combined_stream = select_all(streams);
-                    let stream_chunk = self
-                        .serde
-                        .deserialize_stream_chunk(combined_stream, start_seq_id, end_seq_id, epoch)
-                        .await?;
-                    return Ok((epoch, LogStoreReadItem::StreamChunk(stream_chunk)));
-                }
-                LogStoreBufferItem::Barrier {
-                    is_checkpoint,
-                    next_epoch,
-                } => {
-                    assert!(
-                        epoch < next_epoch,
-                        "next epoch {} should be greater than current epoch {}",
-                        next_epoch,
-                        epoch
-                    );
-                    self.reader_state = ReaderState::ConsumingStream { epoch: next_epoch };
-                    return Ok((epoch, LogStoreReadItem::Barrier { is_checkpoint }));
-                }
-                LogStoreBufferItem::UpdateVnodes(bitmap) => {
-                    self.serde.update_vnode_bitmap(bitmap);
-                    continue;
-                }
+        let (item_epoch, item) = self.rx.next_item().await;
+        assert_eq!(epoch, item_epoch);
+        Ok(match item {
+            LogStoreBufferItem::StreamChunk { chunk, .. } => {
+                (epoch, LogStoreReadItem::StreamChunk(chunk))
             }
-        }
+            LogStoreBufferItem::Flushed {
+                vnode_bitmap,
+                start_seq_id,
+                end_seq_id,
+            } => {
+                let streams = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
+                    let range_start = self
+                        .serde
+                        .serialize_log_store_pk(vnode, epoch, start_seq_id);
+                    let range_end = self.serde.serialize_log_store_pk(vnode, epoch, end_seq_id);
+                    let state_store = self.state_store.clone();
+                    let table_id = self.table_id;
+                    // Use u64::MAX here because the epoch to consume may be below the safe
+                    // epoch
+                    async move {
+                        Ok::<_, LogStoreError>(Box::pin(
+                            state_store
+                                .iter(
+                                    (Included(range_start), Included(range_end)),
+                                    u64::MAX,
+                                    ReadOptions {
+                                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                                        cache_policy: CachePolicy::Fill(CachePriority::Low),
+                                        table_id,
+                                        ..Default::default()
+                                    },
+                                )
+                                .await?,
+                        ))
+                    }
+                }))
+                .await?;
+                let combined_stream = select_all(streams);
+                let stream_chunk = self
+                    .serde
+                    .deserialize_stream_chunk(combined_stream, start_seq_id, end_seq_id, epoch)
+                    .await?;
+                (epoch, LogStoreReadItem::StreamChunk(stream_chunk))
+            }
+            LogStoreBufferItem::Barrier {
+                is_checkpoint,
+                next_epoch,
+            } => {
+                assert!(
+                    epoch < next_epoch,
+                    "next epoch {} should be greater than current epoch {}",
+                    next_epoch,
+                    epoch
+                );
+                self.reader_state = ReaderState::ConsumingStream { epoch: next_epoch };
+                (epoch, LogStoreReadItem::Barrier { is_checkpoint })
+            }
+            LogStoreBufferItem::UpdateVnodes(bitmap) => {
+                self.serde.update_vnode_bitmap(bitmap.clone());
+                (epoch, LogStoreReadItem::UpdateVnodeBitmap(bitmap))
+            }
+        })
     }
 
     #[expect(clippy::unused_async)]

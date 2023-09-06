@@ -113,6 +113,27 @@ pub fn row_id_column_desc() -> ColumnDesc {
     }
 }
 
+pub const OFFSET_COLUMN_NAME: &str = "_rw_offset";
+
+pub fn offset_column_name() -> String {
+    OFFSET_COLUMN_NAME.to_string()
+}
+
+pub fn is_offset_column_name(name: &str) -> bool {
+    name.starts_with(OFFSET_COLUMN_NAME)
+}
+/// Creates a offset column for storing upstream offset
+pub fn offset_column_desc() -> ColumnDesc {
+    ColumnDesc {
+        data_type: DataType::Varchar,
+        column_id: ColumnId::placeholder(),
+        name: offset_column_name(),
+        field_descs: vec![],
+        type_name: "".to_string(),
+        generated_or_default_column: None,
+    }
+}
+
 /// The local system catalog reader in the frontend node.
 #[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {

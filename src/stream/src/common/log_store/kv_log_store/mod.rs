@@ -100,6 +100,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::store::SyncResult;
@@ -142,7 +143,10 @@ mod tests {
             .version()
             .max_committed_epoch
             + 1;
-        writer.init(epoch1).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch1))
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
         writer.flush_current_epoch(epoch2, false).await.unwrap();
@@ -217,7 +221,10 @@ mod tests {
             .version()
             .max_committed_epoch
             + 1;
-        writer.init(epoch1).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch1))
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
         writer.flush_current_epoch(epoch2, false).await.unwrap();
@@ -277,7 +284,10 @@ mod tests {
             max_stream_chunk_count,
         );
         let (mut reader, mut writer) = factory.build().await;
-        writer.init(epoch3).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch3))
+            .await
+            .unwrap();
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::StreamChunk(read_stream_chunk)) => {
@@ -340,7 +350,10 @@ mod tests {
             .version()
             .max_committed_epoch
             + 1;
-        writer.init(epoch1).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch1))
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
         writer.flush_current_epoch(epoch2, true).await.unwrap();
@@ -404,7 +417,10 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        writer.init(epoch3).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch3))
+            .await
+            .unwrap();
         let stream_chunk3 = gen_stream_chunk(20);
         writer.write_chunk(stream_chunk3.clone()).await.unwrap();
 

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
@@ -185,12 +185,12 @@ impl LogReader for BoundedInMemLogStoreReader {
 
 impl LogWriter for BoundedInMemLogStoreWriter {
     #[expect(clippy::unused_async)]
-    async fn init(&mut self, epoch: u64) -> LogStoreResult<()> {
+    async fn init(&mut self, epoch: EpochPair) -> LogStoreResult<()> {
         let init_epoch_tx = self.init_epoch_tx.take().expect("cannot be init for twice");
         init_epoch_tx
-            .send(epoch)
+            .send(epoch.curr)
             .map_err(|_| anyhow!("unable to send init epoch"))?;
-        self.curr_epoch = Some(epoch);
+        self.curr_epoch = Some(epoch.curr);
         Ok(())
     }
 
@@ -243,13 +243,13 @@ impl LogWriter for BoundedInMemLogStoreWriter {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Op, StreamChunk};
-    use risingwave_common::row::OwnedRow;
+    use risingwave_common::array::Op;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+    use risingwave_common::util::epoch::EpochPair;
 
     use crate::common::log_store::in_mem::BoundedInMemLogStoreFactory;
     use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
+    use crate::common::StreamChunkBuilder;
 
     #[tokio::test]
     async fn test_in_memory_log_store() {
@@ -261,21 +261,26 @@ mod tests {
         let epoch2 = init_epoch + 2;
 
         let ops = vec![Op::Insert, Op::Delete, Op::UpdateInsert, Op::UpdateDelete];
-        let mut builder = DataChunkBuilder::new(vec![DataType::Int64, DataType::Varchar], 10000);
-        for i in 0..ops.len() {
+        let mut builder = StreamChunkBuilder::new(10000, vec![DataType::Int64, DataType::Varchar]);
+        for (i, op) in ops.into_iter().enumerate() {
             assert!(builder
-                .append_one_row(OwnedRow::new(vec![
-                    Some(ScalarImpl::Int64(i as i64)),
-                    Some(ScalarImpl::Utf8(format!("name_{}", i).into_boxed_str()))
-                ]))
+                .append_row(
+                    op,
+                    [
+                        Some(ScalarImpl::Int64(i as i64)),
+                        Some(ScalarImpl::Utf8(format!("name_{}", i).into_boxed_str()))
+                    ]
+                )
                 .is_none());
         }
-        let data_chunk = builder.consume_all().unwrap();
-        let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+        let stream_chunk = builder.take().unwrap();
         let stream_chunk_clone = stream_chunk.clone();
 
         let join_handle = tokio::spawn(async move {
-            writer.init(init_epoch).await.unwrap();
+            writer
+                .init(EpochPair::new_test_epoch(init_epoch))
+                .await
+                .unwrap();
             writer
                 .write_chunk(stream_chunk_clone.clone())
                 .await

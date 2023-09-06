@@ -377,6 +377,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::View(&PG_DEPEND) },
     { BuiltinCatalog::View(&INFORMATION_SCHEMA_COLUMNS) },
     { BuiltinCatalog::View(&INFORMATION_SCHEMA_TABLES) },
+    { BuiltinCatalog::View(&INFORMATION_SCHEMA_VIEWS) },
     { BuiltinCatalog::Table(&RW_DATABASES), read_rw_database_info },
     { BuiltinCatalog::Table(&RW_SCHEMAS), read_rw_schema_info },
     { BuiltinCatalog::Table(&RW_USERS), read_rw_user_info },
