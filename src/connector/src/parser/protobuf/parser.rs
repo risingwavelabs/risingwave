@@ -568,13 +568,6 @@ mod test {
                 DataType::Varchar, // oneof_string
                 DataType::Int32,   // oneof_int32
                 DataType::Varchar, // oneof_enum
-                DataType::List(
-                    DataType::Struct(StructType::new(vec![
-                        ("key", DataType::Varchar),
-                        ("value", DataType::Int32)
-                    ]))
-                    .into()
-                ), // map_field
                 DataType::Struct(StructType::new(vec![
                     ("seconds", DataType::Int64),
                     ("nanos", DataType::Int32)
@@ -689,7 +682,6 @@ mod test {
         pb_eq(a, "oneof_string", S::Utf8("".into()));
         pb_eq(a, "oneof_int32", S::Int32(123));
         pb_eq(a, "oneof_enum", S::Utf8("DEFAULT".into()));
-        // pb_eq(a, "map_field", S::Utf8("".into()));
     }
 
     fn pb_eq(a: &ProtobufAccess, field_name: &str, value: ScalarImpl) {
@@ -720,12 +712,6 @@ mod test {
                 name: "Nested".to_string(),
             }),
             repeated_int_field: vec![1, 2, 3, 4, 5],
-            map_field: {
-                let mut map = HashMap::new();
-                map.insert("key1".to_string(), 100);
-                map.insert("key2".to_string(), 200);
-                map
-            },
             timestamp_field: Some(::prost_types::Timestamp {
                 seconds: 1630927032,
                 nanos: 500000000,
