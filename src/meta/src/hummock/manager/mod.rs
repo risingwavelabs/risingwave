@@ -1005,6 +1005,12 @@ impl HummockManager {
             self.check_state_consistency().await;
         }
 
+        println!(
+            "get_compact_task_impl {} {}",
+            trivial_task_vec.len(),
+            normal_task.is_some()
+        );
+
         Ok((trivial_task_vec, normal_task))
     }
 
@@ -1356,6 +1362,12 @@ impl HummockManager {
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
         let cg_id = compact_tasks.first().unwrap().compaction_group_id;
+
+        println!(
+            "report_trivial_task_impl cg {} {}",
+            cg_id,
+            compact_tasks.len()
+        );
 
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let start_time = Instant::now();
