@@ -17,6 +17,5 @@
 #![feature(lazy_cell)]
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
-#![feature(result_option_inspect)]
 
 pub use risingwave_jni_core::*;
