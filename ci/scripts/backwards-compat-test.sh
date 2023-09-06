@@ -71,7 +71,7 @@ ENABLE_ALL_IN_ONE=true
 
 # Even if CI is release profile, we won't ever
 # build the binaries from scratch.
-# So we just use `/target/debug` for simplicity.
+# So we just use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
 EOF
 }
