@@ -13,16 +13,18 @@
 // limitations under the License.
 
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::meta::PausedReason;
 use tokio::sync::oneshot;
 
-use crate::model::PausedReason;
 use crate::{MetaError, MetaResult};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Injected {
     pub prev_epoch: Epoch,
     pub curr_epoch: Epoch,
-    pub paused: Option<PausedReason>,
+
+    pub prev_paused_reason: Option<PausedReason>,
+    pub curr_paused_reason: Option<PausedReason>,
 }
 
 /// Used for notifying the status of a scheduled command/barrier.

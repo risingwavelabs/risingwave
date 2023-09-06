@@ -74,6 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(".", "#[derive(prost_helpers::AnyPB)]")
         .type_attribute("node_body", "#[derive(::enum_as_inner::EnumAsInner)]")
         .type_attribute("rex_node", "#[derive(::enum_as_inner::EnumAsInner)]")
+        .type_attribute("meta.PausedReason", "#[derive(::enum_as_inner::EnumAsInner)]")
         .type_attribute(
             "stream_plan.Barrier.BarrierKind",
             "#[derive(::enum_as_inner::EnumAsInner)]",

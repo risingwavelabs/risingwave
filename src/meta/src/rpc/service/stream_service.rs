@@ -26,7 +26,6 @@ use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv};
-use crate::model::PausedReason;
 use crate::storage::MetaStore;
 use crate::stream::GlobalStreamManagerRef;
 
@@ -84,18 +83,26 @@ where
 
     #[cfg_attr(coverage, no_coverage)]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
-        self.barrier_scheduler
+        let i = self
+            .barrier_scheduler
             .run_command(Command::pause(PausedReason::Manual))
             .await?;
-        Ok(Response::new(PauseResponse {}))
+        Ok(Response::new(PauseResponse {
+            prev: i.prev_paused_reason.map(Into::into),
+            curr: i.curr_paused_reason.map(Into::into),
+        }))
     }
 
     #[cfg_attr(coverage, no_coverage)]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
-        self.barrier_scheduler
+        let i = self
+            .barrier_scheduler
             .run_command(Command::resume(PausedReason::Manual))
             .await?;
-        Ok(Response::new(ResumeResponse {}))
+        Ok(Response::new(ResumeResponse {
+            prev: i.prev_paused_reason.map(Into::into),
+            curr: i.curr_paused_reason.map(Into::into),
+        }))
     }
 
     async fn cancel_creating_jobs(

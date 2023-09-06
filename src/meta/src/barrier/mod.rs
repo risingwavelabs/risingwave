@@ -31,6 +31,7 @@ use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
+use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::Barrier;
 use risingwave_pb::stream_service::{
@@ -57,7 +58,7 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
     WorkerId,
 };
-use crate::model::{ActorId, BarrierManagerState, PausedReason};
+use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::meta_store::MetaStore;
 use crate::stream::SourceManagerRef;
@@ -719,18 +720,21 @@ where
             .await;
 
         // Notify about the injection.
-        let paused = command_ctx.next_paused_reason();
+        let prev_paused_reason = state.paused_reason();
+        let curr_paused_reason = command_ctx.next_paused_reason();
+
         let injected = Injected {
             prev_epoch: prev_epoch.value(),
             curr_epoch: curr_epoch.value(),
-            paused,
+            prev_paused_reason,
+            curr_paused_reason,
         };
         notifiers
             .iter_mut()
             .for_each(|n| n.notify_injected(injected));
 
         // Update the paused state after the barrier is injected.
-        state.set_paused_reason(paused);
+        state.set_paused_reason(curr_paused_reason);
         // Record the in-flight barrier.
         checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
     }

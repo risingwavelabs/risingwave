@@ -21,12 +21,12 @@ use std::time::Instant;
 use anyhow::anyhow;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_pb::meta::PausedReason;
 use tokio::sync::{oneshot, watch, RwLock};
 
-use super::notifier::Notifier;
+use super::notifier::{Injected, Notifier};
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
-use crate::model::PausedReason;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
@@ -239,41 +239,38 @@ impl<S: MetaStore> BarrierScheduler<S> {
     /// multiple commands are executed continuously.
     ///
     /// TODO: atomicity of multiple commands is not guaranteed.
-    async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<()> {
-        struct Context {
-            collect_rx: oneshot::Receiver<MetaResult<()>>,
-            finish_rx: oneshot::Receiver<()>,
-        }
-
+    async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<Vec<Injected>> {
         let mut contexts = Vec::with_capacity(commands.len());
         let mut scheduleds = Vec::with_capacity(commands.len());
 
         for command in commands {
+            let (injected_tx, injected_rx) = oneshot::channel();
             let (collect_tx, collect_rx) = oneshot::channel();
             let (finish_tx, finish_rx) = oneshot::channel();
 
-            contexts.push(Context {
-                collect_rx,
-                finish_rx,
-            });
+            contexts.push((injected_rx, collect_rx, finish_rx));
             scheduleds.push(self.inner.new_scheduled(
                 command.need_checkpoint(),
                 command,
                 once(Notifier {
+                    injected: Some(injected_tx),
                     collected: Some(collect_tx),
                     finished: Some(finish_tx),
-                    ..Default::default()
                 }),
             ));
         }
 
         self.push(scheduleds).await?;
 
-        for Context {
-            collect_rx,
-            finish_rx,
-        } in contexts
-        {
+        let mut injected_results = Vec::with_capacity(contexts.len());
+
+        for (injected_rx, collect_rx, finish_rx) in contexts {
+            // Wait for this command to be injected, and record the result.
+            let injected = injected_rx
+                .await
+                .map_err(|e| anyhow!("failed to inject barrier: {}", e))?;
+            injected_results.push(injected);
+
             // Throw the error if it occurs when collecting this barrier.
             collect_rx
                 .await
@@ -285,23 +282,29 @@ impl<S: MetaStore> BarrierScheduler<S> {
                 .map_err(|e| anyhow!("failed to finish command: {}", e))?;
         }
 
-        Ok(())
+        Ok(injected_results)
     }
 
     /// Run a command with a `Pause` command before and `Resume` command after it. Used for
     /// configuration change.
-    pub async fn run_config_change_command_with_pause(&self, command: Command) -> MetaResult<()> {
+    pub async fn run_config_change_command_with_pause(
+        &self,
+        command: Command,
+    ) -> MetaResult<Injected> {
         self.run_multiple_commands(vec![
             Command::pause(PausedReason::ConfigChange),
             command,
             Command::resume(PausedReason::ConfigChange),
         ])
         .await
+        .map(|i| i[1])
     }
 
     /// Run a command and return when it's completely finished.
-    pub async fn run_command(&self, command: Command) -> MetaResult<()> {
-        self.run_multiple_commands(vec![command]).await
+    pub async fn run_command(&self, command: Command) -> MetaResult<Injected> {
+        self.run_multiple_commands(vec![command])
+            .await
+            .map(|i| i[0])
     }
 
     /// Flush means waiting for the next barrier to collect.
