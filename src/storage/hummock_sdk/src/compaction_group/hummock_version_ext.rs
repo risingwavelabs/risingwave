@@ -466,10 +466,7 @@ impl HummockVersionUpdateExt for HummockVersion {
 
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo> {
         let mut sst_split_info = vec![];
-        let is_trivial = version_delta.trivial_move;
-        for (index, (compaction_group_id, group_deltas)) in
-            version_delta.group_deltas.iter().enumerate()
-        {
+        for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
             if let Some(group_construct) = &summary.group_construct {
                 let mut new_levels = build_initial_compaction_group_levels(
@@ -565,6 +562,17 @@ impl HummockVersionUpdateExt for HummockVersion {
 
                 for delta in &group_deltas.group_deltas {
                     if let DeltaType::IntraLevel(intra_level) = delta.get_delta_type().unwrap() {
+                        assert!(
+                            intra_level.level_idx == 0 || intra_level.inserted_table_infos.is_empty(),
+                    "we should only add to L0 when we commit an epoch. Inserting into {} {:?}",
+                    intra_level.level_idx,
+                    intra_level.inserted_table_infos
+                );
+                        assert!(
+                            intra_level.removed_table_ids.is_empty() || has_destroy,
+                            "no sst should be deleted when committing an epoch"
+                        );
+
                         if !intra_level.inserted_table_infos.is_empty() {
                             insert_new_sub_level(
                                 levels.l0.as_mut().unwrap(),
