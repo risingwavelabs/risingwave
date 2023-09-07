@@ -17,7 +17,6 @@ use core::result::Result::{Err, Ok};
 use std::ffi::c_void;
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
 
 use jni::strings::JNIString;
@@ -84,30 +83,16 @@ pub static JVM: LazyLock<Option<JavaVM>> = LazyLock::new(|| {
     };
 
     tracing::info!("initialize JVM successfully");
+
+    register_native_method_for_jvm(&jvm);
+
     Some(jvm)
 });
 
-static REGISTERED: AtomicBool = AtomicBool::new(false);
-
-pub fn register_native_method_for_jvm() {
-    // JVM is not initialized
-    if JVM.is_none() {
-        return;
-    }
-
-    // Ensure registering only once.
-    if REGISTERED
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return;
-    }
-
-    let mut env = JVM
-        .as_ref()
-        .unwrap()
+fn register_native_method_for_jvm(jvm: &JavaVM) {
+    let mut env = jvm
         .attach_current_thread()
-        .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
+        .inspect_err(|e| tracing::error!("jvm attach thread error: {:?}", e))
         .unwrap();
 
     // FIXME: remove this function might cause segment fault.
@@ -115,6 +100,7 @@ pub fn register_native_method_for_jvm() {
 
     let binding_class = env
         .find_class("com/risingwave/java/binding/Binding")
+        .inspect_err(|e| tracing::error!("jvm find class error: {:?}", e))
         .unwrap();
     env.register_native_methods(
         binding_class,
@@ -287,6 +273,7 @@ pub fn register_native_method_for_jvm() {
             },
         ],
     )
+    .inspect_err(|e| tracing::error!("jvm register native methods error: {:?}", e))
     .unwrap();
 
     tracing::info!("register native methods for jvm successfully");
