@@ -1911,7 +1911,7 @@ def section_hummock(panels):
             ],
         ),
         panels.timeseries_percentage(
-            "Bloom-Filter Miss Rate",
+            "Bloom-Filter Positive Rate",
             "Positive / Total",
             [
                 panels.target(

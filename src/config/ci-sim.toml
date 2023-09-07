@@ -1,5 +1,6 @@
 [server]
 telemetry_enabled = false
+metrics_level = "Disabled"
 
 [system]
 telemetry_enabled = false

@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, AsyncStackTraceOption,
+    extract_storage_memory_config, load_config, AsyncStackTraceOption, MetricLevel,
 };
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -275,7 +275,7 @@ pub async fn compactor_serve(
     });
 
     // Boot metrics service.
-    if config.server.metrics_level > 0 {
+    if config.server.metrics_level > MetricLevel::Disabled {
         MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 
