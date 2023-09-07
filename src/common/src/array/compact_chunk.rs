@@ -167,39 +167,43 @@ mod tests {
     #[test]
     fn test_merge_chunk_row() {
         let pk_indices = [0, 1];
-
-        let chunk = StreamChunk::from_pretty(
+        let mut compactor = StreamChunkCompactor::new(pk_indices.to_vec());
+        compactor.push_chunk(StreamChunk::from_pretty(
             " I I I
             + 2 5 7
             + 4 9 2
             - 2 5 7
+            + 2 5 5
             - 6 6 9
-            + 6 6 9",
-        );
-        let compacted_chunk = merge_chunk_row(chunk, &pk_indices);
+            + 6 6 9
+            - 9 9 1",
+        ));
+        compactor.push_chunk(StreamChunk::from_pretty(
+            " I I I
+            - 6 6 9
+            + 9 9 9
+            - 9 9 4
+            + 2 2 2
+            + 9 9 1",
+        ));
+        let mut iter = compactor.into_compacted_chunks().into_iter();
         assert_eq!(
-            compacted_chunk.compact(),
+            iter.next().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I I I
-                + 4 9 2",
+                + 4 9 2
+                + 2 5 5
+                - 6 6 9",
+            )
+        );
+        assert_eq!(
+            iter.next().unwrap().compact(),
+            StreamChunk::from_pretty(
+                " I I I
+                + 2 2 2",
             )
         );
 
-        let chunk = StreamChunk::from_pretty(
-            "  I I I
-            +  4 9 2
-            U- 2 5 1
-            U+ 2 5 1
-            U- 4 9 2
-            U+ 4 9 9",
-        );
-        let compacted_chunk = merge_chunk_row(chunk, &pk_indices);
-        assert_eq!(
-            compacted_chunk.compact(),
-            StreamChunk::from_pretty(
-                " I I I
-                + 4 9 9",
-            )
-        );
+        assert_eq!(iter.next(), None);
     }
 }
