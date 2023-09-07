@@ -16,7 +16,7 @@ use std::io::Write;
 use std::str::FromStr;
 
 use bytes::{Bytes, BytesMut};
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
 use postgres_types::ToSql;
 use serde::{Deserialize, Serialize};
@@ -148,8 +148,32 @@ impl FromStr for Timestamptz {
             "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
             , "\nFor example: '2021-04-01 00:00:00+00:00'"
         );
-        let ret = s.parse::<DateTime<Utc>>().map_err(|_| ERROR_MSG)?;
-        Ok(Timestamptz(ret.timestamp_micros()))
+        // Try `speedate` first
+        // * It is also used by `str_to_{date,time,timestamp}`
+        // * It can parse without seconds `2006-01-02 15:04-07:00`
+        let ret = match speedate::DateTime::parse_str_rfc3339(s) {
+            Ok(r) => r,
+            Err(_) => {
+                // Supplement with `chrono` for existing cases:
+                // * Extra space before offset `2006-01-02 15:04:05 -07:00`
+                return s
+                    .parse::<chrono::DateTime<Utc>>()
+                    .map(|t| Timestamptz(t.timestamp_micros()))
+                    .map_err(|_| ERROR_MSG);
+            }
+        };
+        if ret.time.tz_offset.is_none() {
+            return Err(ERROR_MSG);
+        }
+        if ret.date.year < 1600 {
+            return Err("parsing timestamptz with year < 1600 unsupported");
+        }
+        Ok(Timestamptz(
+            ret.timestamp_tz()
+                .checked_mul(1000000)
+                .and_then(|us| us.checked_add(ret.time.microsecond.into()))
+                .ok_or(ERROR_MSG)?,
+        ))
     }
 }
 
