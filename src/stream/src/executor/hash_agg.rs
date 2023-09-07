@@ -517,6 +517,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             // Commit all state tables.
             futures::future::try_join_all(
                 this.all_state_tables_mut()
+                    // ERROR: TRACE
                     .map(|table| async { table.commit(epoch).await }),
             )
             .await?;

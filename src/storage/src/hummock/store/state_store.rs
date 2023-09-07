@@ -250,6 +250,7 @@ impl LocalStateStore for LocalHummockStorage {
         Ok(())
     }
 
+    // ERROR: Trace error source.
     async fn flush(
         &mut self,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
@@ -281,6 +282,7 @@ impl LocalStateStore for LocalHummockStorage {
                 }
                 KeyOp::Delete(old_value) => {
                     if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                        // ERROR: Trace should be here??
                         do_delete_sanity_check(
                             key.clone(),
                             old_value,
