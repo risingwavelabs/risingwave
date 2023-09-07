@@ -536,6 +536,12 @@ message ExpandNode {
 
 message ProjectSetNode {
   repeated expr.ProjectSetSelectItem select_list = 1;
+  // this two field is expressing a list of usize pair, which means when project receives a
+  // watermark with `watermark_input_cols[i]` column index, it should derive a new watermark
+  // with `watermark_output_cols[i]`th expression
+  repeated uint32 watermark_input_cols = 2;
+  repeated uint32 watermark_expr_indices = 3;
+  repeated uint32 nondecreasing_exprs = 4;
 }
 
 // Sorts inputs and outputs ordered data based on watermark.
