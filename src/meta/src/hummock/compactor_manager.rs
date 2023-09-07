@@ -29,7 +29,6 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
@@ -125,7 +124,7 @@ pub struct CompactorManagerInner {
 }
 
 impl CompactorManagerInner {
-    pub async fn with_meta<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+    pub async fn with_meta(env: MetaSrvEnv) -> MetaResult<Self> {
         // Retrieve the existing task assignments from metastore.
         let task_assignment = CompactTaskAssignment::list(env.meta_store()).await?;
         let mut manager = Self {
@@ -370,7 +369,7 @@ pub struct CompactorManager {
 }
 
 impl CompactorManager {
-    pub async fn with_meta<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+    pub async fn with_meta(env: MetaSrvEnv) -> MetaResult<Self> {
         let inner = CompactorManagerInner::with_meta(env).await?;
 
         Ok(Self {

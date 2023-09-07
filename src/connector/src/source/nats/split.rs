@@ -25,7 +25,7 @@ pub struct NatsSplit {
     // TODO: to simplify the logic, return 1 split for first version. May use parallelism in
     // future.
     pub(crate) split_num: i32,
-    // nats does not provide offset
+    pub(crate) start_sequence: Option<u64>,
 }
 
 impl SplitMetaData for NatsSplit {
@@ -44,11 +44,16 @@ impl SplitMetaData for NatsSplit {
 }
 
 impl NatsSplit {
-    pub fn new(subject: String, split_num: i32) -> Self {
-        Self { subject, split_num }
+    pub fn new(subject: String, split_num: i32, start_sequence: Option<u64>) -> Self {
+        Self {
+            subject,
+            split_num,
+            start_sequence,
+        }
     }
 
-    pub fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
+    pub fn update_with_offset(&mut self, start_sequence: String) -> anyhow::Result<()> {
+        self.start_sequence = Some(start_sequence.as_str().parse::<u64>().unwrap());
         Ok(())
     }
 }

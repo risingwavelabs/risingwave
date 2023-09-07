@@ -40,17 +40,16 @@ use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId};
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
-pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
+pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
 
-pub struct SourceManager<S: MetaStore> {
+pub struct SourceManager {
     pub(crate) paused: Mutex<()>,
-    env: MetaSrvEnv<S>,
-    barrier_scheduler: BarrierScheduler<S>,
-    core: Mutex<SourceManagerCore<S>>,
+    env: MetaSrvEnv,
+    barrier_scheduler: BarrierScheduler,
+    core: Mutex<SourceManagerCore>,
     metrics: Arc<MetaMetrics>,
 }
 
@@ -222,8 +221,8 @@ impl ConnectorSourceWorkerHandle {
     }
 }
 
-pub struct SourceManagerCore<S: MetaStore> {
-    fragment_manager: FragmentManagerRef<S>,
+pub struct SourceManagerCore {
+    fragment_manager: FragmentManagerRef,
 
     /// Managed source loops
     managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
@@ -236,12 +235,9 @@ pub struct SourceManagerCore<S: MetaStore> {
     actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
-impl<S> SourceManagerCore<S>
-where
-    S: MetaStore,
-{
+impl SourceManagerCore {
     fn new(
-        fragment_manager: FragmentManagerRef<S>,
+        fragment_manager: FragmentManagerRef,
         managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
@@ -510,18 +506,15 @@ where
     )
 }
 
-impl<S> SourceManager<S>
-where
-    S: MetaStore,
-{
+impl SourceManager {
     const DEFAULT_SOURCE_TICK_INTERVAL: Duration = Duration::from_secs(10);
     const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
     pub async fn new(
-        env: MetaSrvEnv<S>,
-        barrier_scheduler: BarrierScheduler<S>,
-        catalog_manager: CatalogManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        env: MetaSrvEnv,
+        barrier_scheduler: BarrierScheduler,
+        catalog_manager: CatalogManagerRef,
+        fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();

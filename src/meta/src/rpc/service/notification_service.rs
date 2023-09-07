@@ -35,30 +35,26 @@ use crate::manager::{
     NotificationVersion, WorkerKey,
 };
 use crate::serving::ServingVnodeMappingRef;
-use crate::storage::MetaStore;
 
-pub struct NotificationServiceImpl<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct NotificationServiceImpl {
+    env: MetaSrvEnv,
 
-    catalog_manager: CatalogManagerRef<S>,
-    cluster_manager: ClusterManagerRef<S>,
-    hummock_manager: HummockManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
-    backup_manager: BackupManagerRef<S>,
+    catalog_manager: CatalogManagerRef,
+    cluster_manager: ClusterManagerRef,
+    hummock_manager: HummockManagerRef,
+    fragment_manager: FragmentManagerRef,
+    backup_manager: BackupManagerRef,
     serving_vnode_mapping: ServingVnodeMappingRef,
 }
 
-impl<S> NotificationServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl NotificationServiceImpl {
     pub fn new(
-        env: MetaSrvEnv<S>,
-        catalog_manager: CatalogManagerRef<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        hummock_manager: HummockManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        backup_manager: BackupManagerRef<S>,
+        env: MetaSrvEnv,
+        catalog_manager: CatalogManagerRef,
+        cluster_manager: ClusterManagerRef,
+        hummock_manager: HummockManagerRef,
+        fragment_manager: FragmentManagerRef,
+        backup_manager: BackupManagerRef,
         serving_vnode_mapping: ServingVnodeMappingRef,
     ) -> Self {
         Self {
@@ -209,10 +205,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> NotificationService for NotificationServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl NotificationService for NotificationServiceImpl {
     type SubscribeStream = UnboundedReceiverStream<Notification>;
 
     #[cfg_attr(coverage, no_coverage)]

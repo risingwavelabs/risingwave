@@ -28,24 +28,17 @@ use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::{HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
-use crate::storage::MetaStore;
-pub struct HummockServiceImpl<S>
-where
-    S: MetaStore,
-{
-    hummock_manager: HummockManagerRef<S>,
-    vacuum_manager: VacuumManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
+pub struct HummockServiceImpl {
+    hummock_manager: HummockManagerRef,
+    vacuum_manager: VacuumManagerRef,
+    fragment_manager: FragmentManagerRef,
 }
 
-impl<S> HummockServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl HummockServiceImpl {
     pub fn new(
-        hummock_manager: HummockManagerRef<S>,
-        vacuum_trigger: VacuumManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        hummock_manager: HummockManagerRef,
+        vacuum_trigger: VacuumManagerRef,
+        fragment_manager: FragmentManagerRef,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
@@ -56,10 +49,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> HummockManagerService for HummockServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl HummockManagerService for HummockServiceImpl {
     type SubscribeCompactionEventStream = RwReceiverStream<SubscribeCompactionEventResponse>;
 
     async fn unpin_version_before(
