@@ -274,11 +274,12 @@ fn bench_expr(c: &mut Criterion) {
             println!("todo: {sig:?}");
             continue;
         }
-        if sig.func == PbType::DateTrunc
+        if matches!(sig.func, PbType::DateTrunc | PbType::ToTimestamp1)
             && sig.inputs_type.len() == 2
             && sig.ret_type == DataTypeName::Timestamptz
         {
             // ignore: date_trunc(varchar, timestamptz) -> timestamptz
+            // ignore: to_timestamp1(varchar, varchar) -> timestamptz
             println!("ignore: {sig:?}");
             continue;
         }
@@ -294,6 +295,12 @@ fn bench_expr(c: &mut Criterion) {
                             Some("YYYY/MM/DD HH:MM:SS".into()),
                         )
                         .boxed(),
+                    );
+                    continue;
+                }
+                (PbType::IsJson, 1) => {
+                    children.push(
+                        LiteralExpression::new(DataType::Varchar, Some("VALUE".into())).boxed(),
                     );
                     continue;
                 }
