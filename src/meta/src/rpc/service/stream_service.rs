@@ -24,7 +24,7 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
-use crate::barrier::BarrierScheduler;
+use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv};
 use crate::stream::GlobalStreamManagerRef;
 
@@ -68,6 +68,30 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(FlushResponse {
             status: None,
             snapshot: Some(snapshot),
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
+        let i = self
+            .barrier_scheduler
+            .run_command(Command::pause(PausedReason::Manual))
+            .await?;
+        Ok(Response::new(PauseResponse {
+            prev: i.prev_paused_reason.map(Into::into),
+            curr: i.curr_paused_reason.map(Into::into),
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
+        let i = self
+            .barrier_scheduler
+            .run_command(Command::resume(PausedReason::Manual))
+            .await?;
+        Ok(Response::new(ResumeResponse {
+            prev: i.prev_paused_reason.map(Into::into),
+            curr: i.curr_paused_reason.map(Into::into),
         }))
     }
 
