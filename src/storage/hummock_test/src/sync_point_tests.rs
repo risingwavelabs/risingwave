@@ -34,7 +34,6 @@ use risingwave_meta::hummock::test_utils::{
 };
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::LocalNotification;
-use risingwave_meta::storage::MemStore;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::compactor_runner::compact;
@@ -229,7 +228,7 @@ async fn test_syncpoints_test_local_notification_receiver() {
 }
 
 pub async fn compact_once(
-    hummock_manager_ref: HummockManagerRef<MemStore>,
+    hummock_manager_ref: HummockManagerRef,
     compact_ctx: CompactorContext,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) {

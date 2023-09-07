@@ -12,27 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
-use std::sync::Arc;
-
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
 use risingwave_pb::meta::{GetTelemetryInfoRequest, TelemetryInfoResponse};
 use tonic::{Request, Response, Status};
 
 use crate::model::ClusterId;
-use crate::storage::MetaStore;
+use crate::storage::MetaStoreRef;
 
-pub struct TelemetryInfoServiceImpl<S: MetaStore> {
-    meta_store: Arc<S>,
+pub struct TelemetryInfoServiceImpl {
+    meta_store: MetaStoreRef,
 }
 
-impl<S: MetaStore> TelemetryInfoServiceImpl<S> {
-    pub fn new(meta_store: Arc<S>) -> Self {
+impl TelemetryInfoServiceImpl {
+    pub fn new(meta_store: MetaStoreRef) -> Self {
         Self { meta_store }
     }
 
     async fn get_tracking_id(&self) -> Option<ClusterId> {
-        ClusterId::from_meta_store(self.meta_store.deref())
+        ClusterId::from_meta_store(&self.meta_store)
             .await
             .ok()
             .flatten()
@@ -40,7 +37,7 @@ impl<S: MetaStore> TelemetryInfoServiceImpl<S> {
 }
 
 #[async_trait::async_trait]
-impl<S: MetaStore> TelemetryInfoService for TelemetryInfoServiceImpl<S> {
+impl TelemetryInfoService for TelemetryInfoServiceImpl {
     async fn get_telemetry_info(
         &self,
         _request: Request<GetTelemetryInfoRequest>,

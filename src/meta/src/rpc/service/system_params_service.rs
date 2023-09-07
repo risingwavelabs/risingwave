@@ -20,17 +20,13 @@ use risingwave_pb::meta::{
 use tonic::{Request, Response, Status};
 
 use crate::manager::SystemParamsManagerRef;
-use crate::storage::MetaStore;
 
-pub struct SystemParamsServiceImpl<S>
-where
-    S: MetaStore,
-{
-    system_params_manager: SystemParamsManagerRef<S>,
+pub struct SystemParamsServiceImpl {
+    system_params_manager: SystemParamsManagerRef,
 }
 
-impl<S: MetaStore> SystemParamsServiceImpl<S> {
-    pub fn new(system_params_manager: SystemParamsManagerRef<S>) -> Self {
+impl SystemParamsServiceImpl {
+    pub fn new(system_params_manager: SystemParamsManagerRef) -> Self {
         Self {
             system_params_manager,
         }
@@ -38,10 +34,7 @@ impl<S: MetaStore> SystemParamsServiceImpl<S> {
 }
 
 #[async_trait]
-impl<S> SystemParamsService for SystemParamsServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl SystemParamsService for SystemParamsServiceImpl {
     async fn get_system_params(
         &self,
         _request: Request<GetSystemParamsRequest>,

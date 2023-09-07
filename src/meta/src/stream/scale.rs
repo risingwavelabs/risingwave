@@ -40,7 +40,7 @@ use uuid::Uuid;
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::storage::{MetaStore, MetaStoreError, Transaction, DEFAULT_COLUMN_FAMILY};
+use crate::storage::{MetaStore, MetaStoreError, MetaStoreRef, Transaction, DEFAULT_COLUMN_FAMILY};
 use crate::stream::GlobalStreamManager;
 use crate::{MetaError, MetaResult};
 
@@ -56,10 +56,7 @@ impl From<TableRevision> for u64 {
 }
 
 impl TableRevision {
-    pub async fn get<S>(store: &S) -> MetaResult<Self>
-    where
-        S: MetaStore,
-    {
+    pub async fn get(store: &MetaStoreRef) -> MetaResult<Self> {
         let version = match store
             .get_cf(DEFAULT_COLUMN_FAMILY, TABLE_REVISION_KEY)
             .await
@@ -349,10 +346,7 @@ pub(crate) fn rebalance_actor_vnode(
     result
 }
 
-impl<S> GlobalStreamManager<S>
-where
-    S: MetaStore,
-{
+impl GlobalStreamManager {
     /// Build the context for rescheduling and do some validation for the request.
     async fn build_reschedule_context(
         &self,
@@ -1595,10 +1589,7 @@ where
     }
 }
 
-impl<S> GlobalStreamManager<S>
-where
-    S: MetaStore,
-{
+impl GlobalStreamManager {
     async fn generate_stable_resize_plan(
         &self,
         policy: StableResizePolicy,

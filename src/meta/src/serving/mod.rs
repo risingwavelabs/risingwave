@@ -28,7 +28,6 @@ use crate::manager::{
     ClusterManagerRef, FragmentManagerRef, LocalNotification, NotificationManagerRef,
 };
 use crate::model::FragmentId;
-use crate::storage::MetaStore;
 
 pub type ServingVnodeMappingRef = Arc<ServingVnodeMapping>;
 
@@ -104,10 +103,10 @@ fn to_deleted_fragment_parallel_unit_mapping(
         .collect()
 }
 
-pub(crate) async fn on_meta_start<S: MetaStore>(
-    notification_manager: NotificationManagerRef<S>,
-    cluster_manager: ClusterManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
+pub(crate) async fn on_meta_start(
+    notification_manager: NotificationManagerRef,
+    cluster_manager: ClusterManagerRef,
+    fragment_manager: FragmentManagerRef,
     serving_vnode_mapping: ServingVnodeMappingRef,
 ) {
     let streaming_parallelisms = fragment_manager.running_fragment_parallelisms(None).await;
@@ -127,10 +126,10 @@ pub(crate) async fn on_meta_start<S: MetaStore>(
     );
 }
 
-pub(crate) async fn start_serving_vnode_mapping_worker<S: MetaStore>(
-    notification_manager: NotificationManagerRef<S>,
-    cluster_manager: ClusterManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
+pub(crate) async fn start_serving_vnode_mapping_worker(
+    notification_manager: NotificationManagerRef,
+    cluster_manager: ClusterManagerRef,
+    fragment_manager: FragmentManagerRef,
     serving_vnode_mapping: ServingVnodeMappingRef,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (local_notification_tx, mut local_notification_rx) = tokio::sync::mpsc::unbounded_channel();

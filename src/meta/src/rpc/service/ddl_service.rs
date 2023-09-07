@@ -40,34 +40,30 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::ddl_controller::{DdlCommand, DdlController, DropMode, StreamingJobId};
-use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 #[derive(Clone)]
-pub struct DdlServiceImpl<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct DdlServiceImpl {
+    env: MetaSrvEnv,
 
-    catalog_manager: CatalogManagerRef<S>,
+    catalog_manager: CatalogManagerRef,
     sink_manager: SinkCoordinatorManager,
-    ddl_controller: DdlController<S>,
+    ddl_controller: DdlController,
     aws_client: Arc<Option<AwsEc2Client>>,
 }
 
-impl<S> DdlServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl DdlServiceImpl {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        env: MetaSrvEnv<S>,
+        env: MetaSrvEnv,
         aws_client: Option<AwsEc2Client>,
-        catalog_manager: CatalogManagerRef<S>,
-        stream_manager: GlobalStreamManagerRef<S>,
-        source_manager: SourceManagerRef<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        catalog_manager: CatalogManagerRef,
+        stream_manager: GlobalStreamManagerRef,
+        source_manager: SourceManagerRef,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
+        barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
     ) -> Self {
         let aws_cli_ref = Arc::new(aws_client);
@@ -93,10 +89,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> DdlService for DdlServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl DdlService for DdlServiceImpl {
     async fn create_database(
         &self,
         request: Request<CreateDatabaseRequest>,
@@ -737,10 +730,7 @@ where
     }
 }
 
-impl<S> DdlServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl DdlServiceImpl {
     async fn gen_unique_id<const C: IdCategoryType>(&self) -> MetaResult<u32> {
         let id = self.env.id_gen_manager().generate::<C>().await? as u32;
         Ok(id)

@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_nats::jetstream::context::Context;
-use async_nats::jetstream::stream::Stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
@@ -54,7 +53,6 @@ pub struct NatsSink {
 pub struct NatsSinkWriter {
     pub config: NatsConfig,
     context: Context,
-    stream: Stream,
     schema: Schema,
 }
 
@@ -122,15 +120,9 @@ impl NatsSinkWriter {
             .build_context()
             .await
             .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
-        let stream = config
-            .common
-            .build_or_get_stream(context.clone())
-            .await
-            .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
         Ok::<_, SinkError>(Self {
             config: config.clone(),
             context,
-            stream,
             schema: schema.clone(),
         })
     }
