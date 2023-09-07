@@ -53,8 +53,10 @@ pub static JVM: LazyLock<Result<JavaVM, RwError>> = LazyLock::new(|| {
 
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
-            if let Some(name) = entry.path().file_name() {
-                class_vec.push(libs_path.to_owned() + name.to_str().to_owned().unwrap());
+            let entry_path = entry.path();
+            if entry_path.file_name().is_some() {
+                let path = std::fs::canonicalize(entry_path)?;
+                class_vec.push(path.to_str().unwrap().to_string());
             }
         }
     } else {
