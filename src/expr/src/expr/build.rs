@@ -25,7 +25,6 @@ use super::expr_coalesce::CoalesceExpression;
 use super::expr_concat_ws::ConcatWsExpression;
 use super::expr_field::FieldExpression;
 use super::expr_in::InExpression;
-use super::expr_nested_construct::NestedConstructExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
@@ -58,8 +57,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         E::Coalesce => CoalesceExpression::try_from_boxed(prost),
         E::ConcatWs => ConcatWsExpression::try_from_boxed(prost),
         E::Field => FieldExpression::try_from_boxed(prost),
-        E::Array => NestedConstructExpression::try_from_boxed(prost),
-        E::Row => NestedConstructExpression::try_from_boxed(prost),
         E::Vnode => VnodeExpression::try_from_boxed(prost),
 
         _ => {

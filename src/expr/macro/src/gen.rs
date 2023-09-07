@@ -71,6 +71,8 @@ impl FunctionAttr {
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
+        } else if self.args.len() >= 1 && &self.args[0] == "..." {
+            self.generate_build_varargs_scalar_function(user_fn)?
         } else {
             self.generate_build_scalar_function(user_fn, true)?
         };
@@ -413,6 +415,79 @@ impl FunctionAttr {
                     context,
                     #(#child,)*
                     prebuilt_arg,
+                }))
+            }
+        })
+    }
+
+    /// Generate a build function for variable arguments scalar function.
+    fn generate_build_varargs_scalar_function(
+        &self,
+        user_fn: &UserFunctionAttr,
+    ) -> Result<TokenStream2> {
+        let fn_name = format_ident!("{}", user_fn.name);
+        let struct_name = format_ident!("{}", utils::to_camel_case(&self.ident_name()));
+        let builder_type = format_ident!("{}Builder", types::array_type(&self.ret));
+
+        let mut output = quote! { #fn_name(row) };
+        output = match user_fn.return_type_kind {
+            ReturnTypeKind::T => quote! { Some(#output) },
+            ReturnTypeKind::Option => output,
+            ReturnTypeKind::Result => quote! { Some(#output?) },
+            ReturnTypeKind::ResultOption => quote! { #output? },
+        };
+
+        Ok(quote! {
+            |return_type, children| {
+                use std::sync::Arc;
+                use risingwave_common::array::*;
+                use risingwave_common::types::*;
+                use risingwave_common::buffer::Bitmap;
+                use risingwave_common::row::OwnedRow;
+
+                use crate::expr::BoxedExpression;
+                use crate::Result;
+
+                #[derive(Debug)]
+                struct #struct_name {
+                    return_type: DataType,
+                    children: Vec<BoxedExpression>,
+                }
+                #[async_trait::async_trait]
+                impl crate::expr::Expression for #struct_name {
+                    fn return_type(&self) -> DataType {
+                        self.return_type.clone()
+                    }
+                    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+                        let mut columns = Vec::with_capacity(self.children.len());
+                        for child in &self.children {
+                            columns.push(child.eval_checked(input).await?);
+                        }
+                        let chunk = DataChunk::new(columns, input.vis().clone());
+
+                        let mut builder = #builder_type::with_type(input.capacity(), self.return_type.clone());
+                        for row in chunk.rows_with_holes() {
+                            if let Some(row) = row {
+                                builder.append(#output.as_ref().map(|s| s.as_scalar_ref()));
+                            } else {
+                                builder.append_null();
+                            }
+                        }
+                        Ok(Arc::new(builder.finish().into()))
+                    }
+                    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+                        let mut row = Vec::with_capacity(self.children.len());
+                        for child in &self.children {
+                            row.push(child.eval_row(input).await?);
+                        }
+                        let row = OwnedRow::new(row);
+                        Ok(#output.map(|s| s.into()))
+                    }
+                }
+
+                Ok(Box::new(#struct_name {
+                    return_type,
+                    children,
                 }))
             }
         })

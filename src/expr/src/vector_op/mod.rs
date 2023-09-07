@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod arithmetic_op;
+pub mod array;
 pub mod array_access;
 pub mod array_concat;
 pub mod array_distinct;
