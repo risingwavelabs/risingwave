@@ -12,17 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::barrier::TracedEpoch;
+use risingwave_pb::meta::PausedReason;
 
-/// The reason why the data sources in the cluster are paused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PausedReason {
-    /// The cluster is paused due to configuration change, e.g. altering table schema and scaling.
-    ConfigChange,
-    /// The cluster is paused due to manual operation, e.g. `risectl` command or the
-    /// `pause_on_next_bootstrap` system variable.
-    Manual,
-}
+use crate::barrier::TracedEpoch;
 
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`.
 pub struct BarrierManagerState {

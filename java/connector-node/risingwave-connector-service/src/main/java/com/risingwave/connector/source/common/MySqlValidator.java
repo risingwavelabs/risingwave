@@ -230,6 +230,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
             case "varchar":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "timestamp":
+                return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
             default:
                 return true; // true for other uncovered types
         }

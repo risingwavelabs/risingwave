@@ -65,7 +65,6 @@ memchr = { version = "2" }
 miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 mio = { version = "0.8", features = ["net", "os-ext"] }
 multimap = { version = "0.8" }
-nix = { version = "0.26" }
 nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
@@ -162,7 +161,6 @@ memchr = { version = "2" }
 miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 mio = { version = "0.8", features = ["net", "os-ext"] }
 multimap = { version = "0.8" }
-nix = { version = "0.26" }
 nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
