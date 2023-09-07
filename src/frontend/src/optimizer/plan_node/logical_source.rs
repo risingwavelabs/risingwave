@@ -460,6 +460,7 @@ impl ToBatch for LogicalSource {
 
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        // TODO: check this logic
         let mut plan = if self.core.for_table {
             StreamSource::new(self.rewrite_to_stream_batch_source()).into()
         } else {

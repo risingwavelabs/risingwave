@@ -275,6 +275,14 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_source_inner(source).map(|_| ())
     }
 
+    async fn create_source_with_graph(
+        &self,
+        _source: PbSource,
+        _graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        unreachable!()
+    }
+
     async fn create_sink(&self, sink: PbSink, graph: StreamFragmentGraph) -> Result<()> {
         self.create_sink_inner(sink, graph)
     }

@@ -97,6 +97,12 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_source(&self, source: PbSource) -> Result<()>;
 
+    async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+    ) -> Result<()>;
+
     async fn create_sink(&self, sink: PbSink, graph: StreamFragmentGraph) -> Result<()>;
 
     async fn create_function(&self, function: PbFunction) -> Result<()>;
@@ -242,6 +248,18 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn create_source(&self, source: PbSource) -> Result<()> {
         let (_id, version) = self.meta_client.create_source(source).await?;
+        self.wait_version(version).await
+    }
+
+    async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        let (_id, version) = self
+            .meta_client
+            .create_source_with_graph(source, graph)
+            .await?;
         self.wait_version(version).await
     }
 

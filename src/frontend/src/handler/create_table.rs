@@ -776,6 +776,7 @@ pub async fn handle_create_table(
             )?,
         };
 
+        // TODO: gen stream graph for table
         let mut graph = build_graph(plan);
         graph.parallelism = session
             .config()

@@ -649,6 +649,7 @@ where
                     self.start_create_table_procedure(table).await
                 }
             }
+            StreamingJob::Source(source) => self.start_create_source_procedure(source).await,
         }
     }
 
@@ -1680,7 +1681,7 @@ where
         Ok(version)
     }
 
-    pub async fn cancel_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
+    pub async fn cancel_create_source_procedure(&self, source: &Source) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -1694,7 +1695,6 @@ where
         database_core.unmark_creating(&key);
         user_core.decrease_ref(source.owner);
         refcnt_dec_connection(database_core, source.connection_id);
-        Ok(())
     }
 
     pub async fn start_create_table_procedure_with_source(

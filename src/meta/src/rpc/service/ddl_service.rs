@@ -175,25 +175,53 @@ where
         &self,
         request: Request<CreateSourceRequest>,
     ) -> Result<Response<CreateSourceResponse>, Status> {
-        let mut source = request.into_inner().get_source()?.clone();
+        let req = request.into_inner();
+        let mut source = req.get_source()?.clone();
 
         // validate connection before starting the DDL procedure
         if let Some(connection_id) = source.connection_id {
             self.validate_connection(connection_id).await?;
         }
 
-        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        source.id = id;
+        let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+        source.id = source_id;
 
-        let version = self
-            .ddl_controller
-            .run_command(DdlCommand::CreateSource(source))
-            .await?;
-        Ok(Response::new(CreateSourceResponse {
-            status: None,
-            source_id: id,
-            version,
-        }))
+        // TODO: create source stream job
+        match req.fragment_graph {
+            None => {
+                let version = self
+                    .ddl_controller
+                    .run_command(DdlCommand::CreateSource(source))
+                    .await?;
+                Ok(Response::new(CreateSourceResponse {
+                    status: None,
+                    source_id,
+                    version,
+                }))
+            }
+            Some(mut fragment_graph) => {
+                for fragment in fragment_graph.fragments.values_mut() {
+                    visit_fragment(fragment, |node_body| {
+                        if let NodeBody::Source(source_node) = node_body {
+                            // TODO: Refactor using source id.
+                            source_node.source_inner.as_mut().unwrap().source_id = source_id;
+                        }
+                    });
+                }
+
+                let stream_job = StreamingJob::Source(source);
+
+                let version = self
+                    .ddl_controller
+                    .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
+                    .await?;
+                Ok(Response::new(CreateSourceResponse {
+                    status: None,
+                    source_id,
+                    version,
+                }))
+            }
+        }
     }
 
     async fn drop_source(

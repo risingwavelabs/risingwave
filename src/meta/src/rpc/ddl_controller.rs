@@ -317,7 +317,7 @@ where
         if let Err(e) = self.source_manager.register_source(&source).await {
             self.catalog_manager
                 .cancel_create_source_procedure(&source)
-                .await?;
+                .await;
             return Err(e);
         }
 
@@ -448,6 +448,9 @@ where
                 StreamingJob::Sink(sink) => {
                     // Validate the sink on the connector node.
                     validate_sink(sink, self.env.connector_client()).await?;
+                }
+                StreamingJob::Source(_source) => {
+                    todo!("validate source if needed")
                 }
                 _ => {}
             }
@@ -695,6 +698,11 @@ where
                     .cancel_create_index_procedure(index, table)
                     .await;
             }
+            StreamingJob::Source(source) => {
+                self.catalog_manager
+                    .cancel_create_source_procedure(source)
+                    .await;
+            }
         }
         // 2. unmark creating tables.
         self.catalog_manager
@@ -742,6 +750,11 @@ where
                 creating_internal_table_ids.push(table.id);
                 self.catalog_manager
                     .finish_create_index_procedure(internal_tables, index, table)
+                    .await?
+            }
+            StreamingJob::Source(source) => {
+                self.catalog_manager
+                    .finish_create_source_procedure(source)
                     .await?
             }
         };

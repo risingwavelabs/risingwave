@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::catalog::{Index, Sink, Source, Table};
+use risingwave_pb::catalog::{Index, PbSource, Sink, Source, Table};
 
 use crate::model::FragmentId;
 
@@ -28,6 +28,7 @@ pub enum StreamingJob {
     Sink(Sink),
     Table(Option<Source>, Table),
     Index(Index, Table),
+    Source(PbSource),
 }
 
 impl StreamingJob {
@@ -44,6 +45,9 @@ impl StreamingJob {
             }
             StreamingJob::Index(index, _) => {
                 index.created_at_epoch = created_at_epoch;
+            }
+            StreamingJob::Source(source) => {
+                source.created_at_epoch = created_at_epoch;
             }
         }
     }
@@ -64,6 +68,9 @@ impl StreamingJob {
             StreamingJob::Index(index, _) => {
                 index.initialized_at_epoch = initialized_at_epoch;
             }
+            StreamingJob::Source(source) => {
+                source.initialized_at_epoch = initialized_at_epoch;
+            }
         }
     }
 }
@@ -79,6 +86,9 @@ impl StreamingJob {
                 index.index_table_id = id;
                 index_table.id = id;
             }
+            StreamingJob::Source(_) => {
+                // do nothing
+            }
         }
     }
 
@@ -88,7 +98,7 @@ impl StreamingJob {
             Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table) => {
                 table.fragment_id = id;
             }
-            Self::Sink(_) => {}
+            Self::Sink(_) | Self::Source(_) => {}
         }
     }
 
@@ -99,6 +109,7 @@ impl StreamingJob {
                 table.dml_fragment_id = id;
             }
             Self::MaterializedView(_) | Self::Index(_, _) | Self::Sink(_) => {}
+            Self::Source(_) => {}
         }
     }
 
@@ -108,6 +119,7 @@ impl StreamingJob {
             Self::Sink(sink) => sink.id,
             Self::Table(_, table) => table.id,
             Self::Index(index, _) => index.id,
+            Self::Source(source) => source.id,
         }
     }
 
@@ -117,6 +129,7 @@ impl StreamingJob {
             Self::Sink(_sink) => None,
             Self::Table(_, table) => Some(table.id),
             Self::Index(_, table) => Some(table.id),
+            Self::Source(_) => None,
         }
     }
 
@@ -126,7 +139,7 @@ impl StreamingJob {
             Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table) => {
                 Some(table)
             }
-            Self::Sink(_) => None,
+            Self::Sink(_) | Self::Source(_) => None,
         }
     }
 
@@ -136,6 +149,7 @@ impl StreamingJob {
             Self::Sink(sink) => sink.schema_id,
             Self::Table(_, table) => table.schema_id,
             Self::Index(index, _) => index.schema_id,
+            Self::Source(source) => source.schema_id,
         }
     }
 
@@ -145,6 +159,7 @@ impl StreamingJob {
             Self::Sink(sink) => sink.database_id,
             Self::Table(_, table) => table.database_id,
             Self::Index(index, _) => index.database_id,
+            Self::Source(source) => source.database_id,
         }
     }
 
@@ -154,6 +169,7 @@ impl StreamingJob {
             Self::Sink(sink) => sink.name.clone(),
             Self::Table(_, table) => table.name.clone(),
             Self::Index(index, _) => index.name.clone(),
+            Self::Source(source) => source.name.clone(),
         }
     }
 
@@ -163,6 +179,7 @@ impl StreamingJob {
             StreamingJob::Sink(sink) => sink.owner,
             StreamingJob::Table(_, table) => table.owner,
             StreamingJob::Index(index, _) => index.owner,
+            StreamingJob::Source(source) => source.owner,
         }
     }
 
@@ -172,6 +189,7 @@ impl StreamingJob {
             Self::Table(_, table) => table.definition.clone(),
             Self::Index(_, table) => table.definition.clone(),
             Self::Sink(sink) => sink.definition.clone(),
+            Self::Source(source) => source.definition.clone(),
         }
     }
 
@@ -181,6 +199,7 @@ impl StreamingJob {
             Self::Sink(sink) => sink.properties.clone(),
             Self::Table(_, table) => table.properties.clone(),
             Self::Index(_, index_table) => index_table.properties.clone(),
+            Self::Source(source) => source.properties.clone(),
         }
     }
 

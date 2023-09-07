@@ -358,6 +358,21 @@ impl MetaClient {
     pub async fn create_source(&self, source: PbSource) -> Result<(u32, CatalogVersion)> {
         let request = CreateSourceRequest {
             source: Some(source),
+            fragment_graph: None,
+        };
+
+        let resp = self.inner.create_source(request).await?;
+        Ok((resp.source_id, resp.version))
+    }
+
+    pub async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+    ) -> Result<(u32, CatalogVersion)> {
+        let request = CreateSourceRequest {
+            source: Some(source),
+            fragment_graph: Some(graph),
         };
 
         let resp = self.inner.create_source(request).await?;
@@ -1657,6 +1672,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
+            // ,{ ddl_client, create_source_with_graph, CreateSourceRequest, CreateSourceResponse }
             ,{ ddl_client, create_sink, CreateSinkRequest, CreateSinkResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::rc::Rc;
 use std::sync::LazyLock;
 
 use anyhow::anyhow;
@@ -44,6 +45,7 @@ use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
 };
 use risingwave_pb::plan_common::{EncodeType, FormatType};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     self, get_delimiter, AstString, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement,
     DebeziumAvroSchema, Encode, Format, ProtobufSchema, SourceSchemaV2, SourceWatermark,
@@ -51,6 +53,7 @@ use risingwave_sqlparser::ast::{
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
 use crate::handler::create_table::{
@@ -59,9 +62,10 @@ use crate::handler::create_table::{
 };
 use crate::handler::util::{get_connector, is_cdc_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::LogicalSource;
 use crate::session::SessionImpl;
 use crate::utils::resolve_connection_in_with_option;
-use crate::{bind_data_type, WithOptions};
+use crate::{bind_data_type, build_graph, OptimizerContext, PlanRef, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
@@ -1103,19 +1107,24 @@ pub async fn handle_create_source(
 
     let source_schema = stmt.source_schema.into_source_schema_v2();
 
-    let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
+    let mut with_properties = handler_args
+        .with_options
+        .clone()
+        .into_inner()
+        .into_iter()
+        .collect();
     validate_compatibility(&source_schema, &mut with_properties)?;
 
     ensure_table_constraints_supported(&stmt.constraints)?;
     let pk_names = bind_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    let cdc_backfill = is_cdc_connector(&with_properties); // && session.config().get_cdc_backfill();
+    let create_cdc_source_job = is_cdc_connector(&with_properties); // && session.config().get_cdc_backfill();
     let (columns_from_resolve_source, pk_names, source_info) = try_bind_columns_from_source(
         &source_schema,
         pk_names,
         &stmt.columns,
         &with_properties,
-        cdc_backfill,
+        create_cdc_source_job,
     )
     .await?;
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
@@ -1153,13 +1162,13 @@ pub async fn handle_create_source(
     let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 
-    let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
+    // let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
     // resolve privatelink connection for Kafka source
     let mut with_options = WithOptions::new(with_properties);
     let connection_id =
         resolve_connection_in_with_option(&mut with_options, &schema_name, &session)?;
-    let definition = handler_args.normalized_sql;
+    let definition = handler_args.normalized_sql.clone();
 
     let source = PbSource {
         id: TableId::placeholder().table_id,
@@ -1167,7 +1176,7 @@ pub async fn handle_create_source(
         database_id,
         name,
         row_id_index,
-        columns,
+        columns: columns.iter().map(|c| c.to_protobuf()).collect_vec(),
         pk_column_ids,
         properties: with_options.into_inner().into_iter().collect(),
         info: Some(source_info),
@@ -1182,7 +1191,34 @@ pub async fn handle_create_source(
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.create_source(source).await?;
+
+    if create_cdc_source_job {
+        // TODO: create source stream job in ddl service
+        let graph = {
+            let context = OptimizerContext::from_handler_args(handler_args);
+            let source_node: PlanRef = LogicalSource::new(
+                Some(Rc::new(SourceCatalog::from(&source))),
+                columns,
+                row_id_index.map(|idx| idx as _),
+                true,
+                false,
+                context.into(),
+            )?
+            .into();
+
+            let mut graph = build_graph(source_node);
+            graph.parallelism = session
+                .config()
+                .get_streaming_parallelism()
+                .map(|parallelism| Parallelism { parallelism });
+            graph
+        };
+        catalog_writer
+            .create_source_with_graph(source, graph)
+            .await?;
+    } else {
+        catalog_writer.create_source(source).await?;
+    }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))
 }
