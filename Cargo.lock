@@ -6907,6 +6907,7 @@ dependencies = [
  "num-bigint",
  "opendal",
  "parking_lot 0.12.1",
+ "paste",
  "prometheus",
  "prost",
  "prost-reflect",
