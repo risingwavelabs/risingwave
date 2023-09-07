@@ -194,7 +194,7 @@ impl<S: StateStore> SortBuffer<S> {
 
         let pk_range = (
             last_table_pk
-                .map(|pk| Bound::Excluded(pk))
+                .map(Bound::Excluded)
                 .unwrap_or(Bound::Unbounded),
             Bound::<row::Empty>::Unbounded,
         );
