@@ -29,6 +29,7 @@ use tokio_retry::Retry;
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriter, SinkWriterParam};
 use crate::common::NatsCommon;
+use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{Result, Sink, SinkError, SINK_TYPE_APPEND_ONLY};
 
 pub const NATS_SINK: &str = "nats";
@@ -85,7 +86,7 @@ impl NatsSink {
 #[async_trait::async_trait]
 impl Sink for NatsSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = NatsSinkWriter;
+    type LogSinker = LogSinkerOf<NatsSinkWriter>;
 
     async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
         if !self.is_append_only {
@@ -105,8 +106,12 @@ impl Sink for NatsSink {
         Ok(())
     }
 
-    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
-        Ok(NatsSinkWriter::new(self.config.clone(), self.schema.clone()).await?)
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        Ok(
+            NatsSinkWriter::new(self.config.clone(), self.schema.clone())
+                .await?
+                .into_log_sinker(writer_param.sink_metrics),
+        )
     }
 }
 

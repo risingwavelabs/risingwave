@@ -17,6 +17,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_rpc_client::ConnectorClient;
 
+use crate::sink::writer::LogSinkerOf;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 #[derive(Clone, Debug)]
@@ -34,9 +35,9 @@ impl RedisSink {
 #[async_trait]
 impl Sink for RedisSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = RedisSinkWriter;
+    type LogSinker = LogSinkerOf<RedisSinkWriter>;
 
-    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
+    async fn new_log_sinker(&self, _writer_env: SinkWriterParam) -> Result<Self::LogSinker> {
         todo!()
     }
 

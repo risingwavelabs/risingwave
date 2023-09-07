@@ -35,9 +35,10 @@ use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
+use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterParam,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY,
+    SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 
 pub const KINESIS_SINK: &str = "kinesis";
@@ -68,7 +69,7 @@ impl KinesisSink {
 #[async_trait::async_trait]
 impl Sink for KinesisSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = KinesisSinkWriter;
+    type LogSinker = LogSinkerOf<KinesisSinkWriter>;
 
     async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.
@@ -93,8 +94,8 @@ impl Sink for KinesisSink {
         Ok(())
     }
 
-    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
-        KinesisSinkWriter::new(
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        Ok(KinesisSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
@@ -102,7 +103,8 @@ impl Sink for KinesisSink {
             self.db_name.clone(),
             self.sink_from_name.clone(),
         )
-        .await
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 }
 

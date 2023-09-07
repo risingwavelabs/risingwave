@@ -21,16 +21,18 @@ use futures::stream::select_all;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_connector::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
 use tokio_stream::StreamExt;
 
-use crate::common::log_store::kv_log_store::buffer::{LogStoreBufferItem, LogStoreBufferReceiver};
-use crate::common::log_store::kv_log_store::serde::{
+use crate::common::log_store_impl::kv_log_store::buffer::{
+    LogStoreBufferItem, LogStoreBufferReceiver,
+};
+use crate::common::log_store_impl::kv_log_store::serde::{
     new_log_store_item_stream, LogStoreItemStream, LogStoreRowSerde,
 };
-use crate::common::log_store::{LogReader, LogStoreError, LogStoreReadItem, LogStoreResult};
 
 enum ReaderState<S: StateStore> {
     /// No data has been read yet
@@ -151,7 +153,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     // Use u64::MAX here because the epoch to consume may be below the safe
                     // epoch
                     async move {
-                        Ok::<_, LogStoreError>(Box::pin(
+                        Ok::<_, anyhow::Error>(Box::pin(
                             state_store
                                 .iter(
                                     (Included(range_start), Included(range_end)),

@@ -39,12 +39,12 @@ use serde_json::Value;
 use url::Url;
 
 use super::{
-    Sink, SinkError, SinkWriter, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
+    Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::deserialize_bool_from_string;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig};
+use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 
 /// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
@@ -232,14 +232,14 @@ impl IcebergSink {
 #[async_trait::async_trait]
 impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
-    type Writer = CoordinatedSinkWriter<IcebergWriter>;
+    type LogSinker = LogSinkerOf<CoordinatedSinkWriter<IcebergWriter>>;
 
     async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
         let _ = self.create_table().await?;
         Ok(())
     }
 
-    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let table = self.create_table().await?;
 
         let inner = IcebergWriter {
@@ -264,7 +264,8 @@ impl Sink for IcebergSink {
             })?,
             inner,
         )
-        .await?)
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
     async fn new_coordinator(

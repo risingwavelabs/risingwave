@@ -16,15 +16,15 @@ use std::sync::Arc;
 
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_connector::sink::log_store::LogStoreFactory;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::store::NewLocalOptions;
 use risingwave_storage::StateStore;
 
-use crate::common::log_store::kv_log_store::buffer::new_log_store_buffer;
-use crate::common::log_store::kv_log_store::reader::KvLogStoreReader;
-use crate::common::log_store::kv_log_store::serde::LogStoreRowSerde;
-use crate::common::log_store::kv_log_store::writer::KvLogStoreWriter;
-use crate::common::log_store::LogStoreFactory;
+use crate::common::log_store_impl::kv_log_store::buffer::new_log_store_buffer;
+use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
+use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
+use crate::common::log_store_impl::kv_log_store::writer::KvLogStoreWriter;
 
 mod buffer;
 mod reader;
@@ -101,16 +101,18 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::util::epoch::EpochPair;
+    use risingwave_connector::sink::log_store::{
+        LogReader, LogStoreFactory, LogStoreReadItem, LogWriter,
+    };
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::store::SyncResult;
     use risingwave_storage::StateStore;
 
-    use crate::common::log_store::kv_log_store::test_utils::{
+    use crate::common::log_store_impl::kv_log_store::test_utils::{
         gen_stream_chunk, gen_test_log_store_table,
     };
-    use crate::common::log_store::kv_log_store::KvLogStoreFactory;
-    use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
+    use crate::common::log_store_impl::kv_log_store::KvLogStoreFactory;
 
     #[tokio::test]
     async fn test_basic() {

@@ -41,10 +41,11 @@ use tracing::{error, warn};
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::iceberg::REMOTE_ICEBERG_SINK;
 use crate::sink::utils::{record_to_json, TimestampHandlingMode};
+use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::SinkError::Remote;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkCommitCoordinator, SinkError, SinkParam,
-    SinkWriter, SinkWriterParam,
+    SinkWriterParam,
 };
 use crate::ConnectorParams;
 
@@ -96,15 +97,16 @@ impl RemoteSink {
 #[async_trait]
 impl Sink for RemoteSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = RemoteSinkWriter;
+    type LogSinker = LogSinkerOf<RemoteSinkWriter>;
 
-    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(RemoteSinkWriter::new(
             self.config.clone(),
             self.param.clone(),
             writer_param.connector_params,
         )
-        .await?)
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
     async fn validate(&self, client: Option<ConnectorClient>) -> Result<()> {
@@ -159,13 +161,13 @@ pub struct CoordinatedRemoteSink(pub RemoteSink);
 #[async_trait]
 impl Sink for CoordinatedRemoteSink {
     type Coordinator = RemoteCoordinator;
-    type Writer = CoordinatedSinkWriter<CoordinatedRemoteSinkWriter>;
+    type LogSinker = LogSinkerOf<CoordinatedSinkWriter<CoordinatedRemoteSinkWriter>>;
 
     async fn validate(&self, client: Option<ConnectorClient>) -> Result<()> {
         self.0.validate(client).await
     }
 
-    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
@@ -185,7 +187,8 @@ impl Sink for CoordinatedRemoteSink {
             )
             .await?,
         )
-        .await?)
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
     async fn new_coordinator(

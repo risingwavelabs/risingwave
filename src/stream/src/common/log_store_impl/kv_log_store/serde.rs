@@ -38,6 +38,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{
     BasicSerde, ValueRowDeserializer, ValueRowSerializer,
 };
+use risingwave_connector::sink::log_store::{LogStoreReadItem, LogStoreResult};
 use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
@@ -45,10 +46,9 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::StateStoreReadIterStream;
 use risingwave_storage::table::{compute_vnode, Distribution};
 
-use crate::common::log_store::kv_log_store::{
+use crate::common::log_store_impl::kv_log_store::{
     ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,
 };
-use crate::common::log_store::{LogStoreError, LogStoreReadItem, LogStoreResult};
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
 const DELETE_OP_CODE: RowOpCodeType = 2;
@@ -312,34 +312,32 @@ impl LogStoreRowSerde {
             match self.deserialize(value)? {
                 (epoch, LogStoreRowOp::Row { op, row }) => {
                     if epoch != expected_epoch {
-                        return Err(LogStoreError::Internal(anyhow!(
+                        return Err(anyhow!(
                             "decoded epoch {} not match expected epoch {}",
                             epoch,
                             expected_epoch
-                        )));
+                        ));
                     }
                     ops.push(op);
                     if ops.len() > size_bound {
-                        return Err(LogStoreError::Internal(anyhow!(
+                        return Err(anyhow!(
                             "row count {} exceed size bound {}",
                             ops.len(),
                             size_bound
-                        )));
+                        ));
                     }
                     assert!(data_chunk_builder.append_one_row(row).is_none());
                 }
                 (_, LogStoreRowOp::Barrier { .. }) => {
-                    return Err(LogStoreError::Internal(anyhow!(
-                        "should not get barrier when decoding stream chunk"
-                    )));
+                    return Err(anyhow!("should not get barrier when decoding stream chunk"));
                 }
             }
         }
         if ops.is_empty() {
-            return Err(LogStoreError::Internal(anyhow!(
+            return Err(anyhow!(
                 "should not get empty row when decoding stream chunk. start seq id: {}, end seq id {}",
                 start_seq_id,
-                end_seq_id))
+                end_seq_id)
             );
         }
         Ok(StreamChunk::from_parts(
@@ -399,11 +397,11 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
             StreamState::AllConsumingRow { curr_epoch }
             | StreamState::BarrierAligning { curr_epoch, .. } => {
                 if *curr_epoch != epoch {
-                    Err(LogStoreError::Internal(anyhow!(
+                    Err(anyhow!(
                         "epoch {} does not match with current epoch {}",
                         epoch,
                         curr_epoch
-                    )))
+                    ))
                 } else {
                     Ok(())
                 }
@@ -411,11 +409,11 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
 
             StreamState::BarrierEmitted { prev_epoch } => {
                 if *prev_epoch >= epoch {
-                    Err(LogStoreError::Internal(anyhow!(
+                    Err(anyhow!(
                         "epoch {} should be greater than prev epoch {}",
                         epoch,
                         prev_epoch
-                    )))
+                    ))
                 } else {
                     Ok(())
                 }
@@ -432,18 +430,18 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
             if is_checkpoint == *curr_is_checkpoint {
                 Ok(())
             } else {
-                Err(LogStoreError::Internal(anyhow!(
+                Err(anyhow!(
                     "current aligning barrier is_checkpoint: {}, current barrier is_checkpoint {}",
                     curr_is_checkpoint,
                     is_checkpoint
-                )))
+                ))
             }
         } else {
             Ok(())
         }
     }
 
-    #[try_stream(ok = (u64, LogStoreReadItem), error = LogStoreError)]
+    #[try_stream(ok = (u64, LogStoreReadItem), error = anyhow::Error)]
     async fn into_log_store_item_stream(self, chunk_size: usize) {
         let mut ops = Vec::with_capacity(chunk_size);
         let mut data_chunk_builder =
@@ -541,13 +539,14 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
         }
         // End of stream
         match &self.stream_state {
-            StreamState::BarrierEmitted { .. } | StreamState::Uninitialized => {},
-            s => return Err(LogStoreError::Internal(
-                anyhow!(
-                    "when any of the stream reaches the end, it should be right after emitting an barrier. Current state: {:?}",
-                    s)
-                )
-            ),
+            StreamState::BarrierEmitted { .. } | StreamState::Uninitialized => {}
+            s => {
+                return Err(anyhow!(
+                    "when any of the stream reaches the end, it should be right \
+                after emitting an barrier. Current state: {:?}",
+                    s
+                ));
+            }
         }
         assert!(
             self.barrier_streams.is_empty(),
@@ -556,8 +555,8 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
         if cfg!(debug_assertion) {
             while let Some((opt, _stream)) = self.row_streams.next().await {
                 if let Some(result) = opt {
-                    return Err(LogStoreError::Internal(
-                        anyhow!("when any of the stream reaches the end, other stream should also reaches the end, but poll result: {:?}", result))
+                    return Err(
+                        anyhow!("when any of the stream reaches the end, other stream should also reaches the end, but poll result: {:?}", result)
                     );
                 }
             }
@@ -580,20 +579,20 @@ mod tests {
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+    use risingwave_connector::sink::log_store::LogStoreReadItem;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_storage::store::StateStoreReadIterStream;
     use risingwave_storage::table::DEFAULT_VNODE;
     use tokio::sync::oneshot;
     use tokio::sync::oneshot::Sender;
 
-    use crate::common::log_store::kv_log_store::serde::{
+    use crate::common::log_store_impl::kv_log_store::serde::{
         new_log_store_item_stream, LogStoreRowOp, LogStoreRowOpStream, LogStoreRowSerde,
     };
-    use crate::common::log_store::kv_log_store::test_utils::{
+    use crate::common::log_store_impl::kv_log_store::test_utils::{
         gen_test_data, gen_test_log_store_table, TEST_TABLE_ID,
     };
-    use crate::common::log_store::kv_log_store::SeqIdType;
-    use crate::common::log_store::LogStoreReadItem;
+    use crate::common::log_store_impl::kv_log_store::SeqIdType;
 
     const EPOCH1: u64 = 233;
     const EPOCH2: u64 = EPOCH1 + 1;

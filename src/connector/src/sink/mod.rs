@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod blackhole;
 pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
@@ -19,21 +20,23 @@ pub mod coordinate;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
+pub mod log_store;
 pub mod nats;
 pub mod redis;
 pub mod remote;
 #[cfg(any(test, madsim))]
 pub mod test_sink;
 pub mod utils;
+pub mod writer;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::future::Future;
 
 use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
-use risingwave_common::array::StreamChunk;
+use prometheus::{Histogram, HistogramOpts};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
@@ -47,17 +50,20 @@ pub use tracing;
 use self::catalog::SinkType;
 use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
 use self::iceberg::{IcebergSink, ICEBERG_SINK, REMOTE_ICEBERG_SINK};
+use crate::sink::blackhole::{BlackHoleSink, BLACKHOLE_SINK};
 use crate::sink::boxed::BoxSink;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::clickhouse::CLICKHOUSE_SINK;
 use crate::sink::iceberg::{IcebergConfig, RemoteIcebergConfig, RemoteIcebergSink};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
+use crate::sink::log_store::LogReader;
 use crate::sink::nats::{NatsConfig, NatsSink, NATS_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig, RemoteSink};
 #[cfg(any(test, madsim))]
 use crate::sink::test_sink::{build_test_sink, TEST_SINK_NAME};
+use crate::sink::writer::SinkWriter;
 use crate::ConnectorParams;
 
 pub const DOWNSTREAM_SINK_KEY: &str = "connector";
@@ -137,21 +143,38 @@ impl From<SinkCatalog> for SinkParam {
     }
 }
 
+#[derive(Clone)]
+pub struct SinkMetrics {
+    pub sink_commit_duration_metrics: Histogram,
+}
+
+impl Default for SinkMetrics {
+    fn default() -> Self {
+        SinkMetrics {
+            sink_commit_duration_metrics: Histogram::with_opts(HistogramOpts::new(
+                "unused", "unused",
+            ))
+            .unwrap(),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<MetaClient>,
+    pub sink_metrics: SinkMetrics,
 }
 
 #[async_trait]
 pub trait Sink {
-    type Writer: SinkWriter<CommitMetadata = ()>;
+    type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
     async fn validate(&self, client: Option<ConnectorClient>) -> Result<()>;
-    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
     async fn new_coordinator(
         &self,
         _connector_client: Option<ConnectorClient>,
@@ -160,91 +183,11 @@ pub trait Sink {
     }
 }
 
-#[async_trait]
-pub trait SinkWriter: Send + 'static {
-    type CommitMetadata: Send = ();
-    /// Begin a new epoch
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
-
-    /// Write a stream chunk to sink
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
-
-    /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
-    /// writer should commit the current epoch.
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata>;
-
-    /// Clean up
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    /// Update the vnode bitmap of current sink writer
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
-        Ok(())
-    }
-}
-
-#[async_trait]
-// An old version of SinkWriter for backward compatibility
-pub trait SinkWriterV1: Send + 'static {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
-
-    // the following interface is for transactions, if not supported, return Ok(())
-    // start a transaction with epoch number. Note that epoch number should be increasing.
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
-
-    // commits the current transaction and marks all messages in the transaction success.
-    async fn commit(&mut self) -> Result<()>;
-
-    // aborts the current transaction because some error happens. we should rollback to the last
-    // commit point.
-    async fn abort(&mut self) -> Result<()>;
-}
-
-pub struct SinkWriterV1Adapter<W: SinkWriterV1> {
-    is_empty: bool,
-    epoch: u64,
-    inner: W,
-}
-
-impl<W: SinkWriterV1> SinkWriterV1Adapter<W> {
-    pub(crate) fn new(inner: W) -> Self {
-        Self {
-            inner,
-            is_empty: true,
-            epoch: u64::MIN,
-        }
-    }
-}
-
-#[async_trait]
-impl<W: SinkWriterV1> SinkWriter for SinkWriterV1Adapter<W> {
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.epoch = epoch;
-        Ok(())
-    }
-
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.is_empty {
-            self.is_empty = false;
-            self.inner.begin_epoch(self.epoch).await?;
-        }
-        self.inner.write_batch(chunk).await
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        if is_checkpoint {
-            if !self.is_empty {
-                self.inner.commit().await?
-            }
-            self.is_empty = true;
-        }
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        self.inner.abort().await
-    }
+pub trait LogSinker: Send + 'static {
+    fn consume_log_and_sink(
+        self,
+        log_reader: impl LogReader,
+    ) -> impl Future<Output = Result<()>> + Send + 'static;
 }
 
 #[async_trait]
@@ -284,40 +227,6 @@ pub enum SinkConfig {
     Nats(NatsConfig),
     #[cfg(any(test, madsim))]
     Test,
-}
-
-pub const BLACKHOLE_SINK: &str = "blackhole";
-
-#[derive(Debug)]
-pub struct BlackHoleSink;
-
-#[async_trait]
-impl Sink for BlackHoleSink {
-    type Coordinator = DummySinkCommitCoordinator;
-    type Writer = Self;
-
-    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
-        Ok(Self)
-    }
-
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl SinkWriter for BlackHoleSink {
-    async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
-        Ok(())
-    }
-
-    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
-        Ok(())
-    }
-
-    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        Ok(())
-    }
 }
 
 impl SinkConfig {
@@ -378,19 +287,20 @@ pub enum SinkImpl {
     TestSink(BoxSink),
 }
 
-impl SinkImpl {
+impl SinkConfig {
     pub fn get_connector(&self) -> &'static str {
         match self {
-            SinkImpl::Kafka(_) => "kafka",
-            SinkImpl::Redis(_) => "redis",
-            SinkImpl::Remote(_) => "remote",
-            SinkImpl::BlackHole(_) => "blackhole",
-            SinkImpl::Kinesis(_) => "kinesis",
-            SinkImpl::ClickHouse(_) => "clickhouse",
-            SinkImpl::Iceberg(_) => "iceberg",
-            SinkImpl::Nats(_) => "nats",
-            SinkImpl::RemoteIceberg(_) => "iceberg",
-            SinkImpl::TestSink(_) => "test",
+            SinkConfig::Kafka(_) => "kafka",
+            SinkConfig::Redis(_) => "redis",
+            SinkConfig::Remote(_) => "remote",
+            SinkConfig::BlackHole => "blackhole",
+            SinkConfig::Kinesis(_) => "kinesis",
+            SinkConfig::ClickHouse(_) => "clickhouse",
+            SinkConfig::Iceberg(_) => "iceberg",
+            SinkConfig::Nats(_) => "nats",
+            SinkConfig::RemoteIceberg(_) => "iceberg",
+            #[cfg(any(test, madsim))]
+            SinkConfig::Test => "test",
         }
     }
 }

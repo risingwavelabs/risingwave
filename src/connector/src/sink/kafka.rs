@@ -40,9 +40,8 @@ use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
-use crate::sink::{
-    DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
-};
+use crate::sink::writer::{LogSinkerOf, SinkWriterExt, SinkWriterV1, SinkWriterV1Adapter};
+use crate::sink::{DummySinkCommitCoordinator, Result, SinkWriterParam};
 use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkProducerContext};
 use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
@@ -281,9 +280,9 @@ impl KafkaSink {
 #[async_trait::async_trait]
 impl Sink for KafkaSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = SinkWriterV1Adapter<KafkaSinkWriter>;
+    type LogSinker = LogSinkerOf<SinkWriterV1Adapter<KafkaSinkWriter>>;
 
-    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(SinkWriterV1Adapter::new(
             KafkaSinkWriter::new(
                 self.config.clone(),
@@ -295,7 +294,8 @@ impl Sink for KafkaSink {
                 format!("sink-{:?}", writer_param.executor_id),
             )
             .await?,
-        ))
+        )
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
     async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {

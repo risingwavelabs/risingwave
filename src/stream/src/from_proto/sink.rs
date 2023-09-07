@@ -16,13 +16,13 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::sink::catalog::SinkType;
-use risingwave_connector::sink::{SinkParam, SinkWriterParam};
+use risingwave_connector::sink::{SinkConfig, SinkMetrics, SinkParam, SinkWriterParam};
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
 use risingwave_storage::dispatch_state_store;
 
 use super::*;
-use crate::common::log_store::in_mem::BoundedInMemLogStoreFactory;
-use crate::common::log_store::kv_log_store::KvLogStoreFactory;
+use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
+use crate::common::log_store_impl::kv_log_store::KvLogStoreFactory;
 use crate::executor::SinkExecutor;
 
 pub struct SinkExecutorBuilder;
@@ -56,6 +56,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .into_iter()
             .map(ColumnCatalog::from)
             .collect_vec();
+        let connector = SinkConfig::from_hashmap(properties.clone())?.get_connector();
         let sink_param = SinkParam {
             sink_id,
             properties,
@@ -68,6 +69,17 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             sink_type,
             db_name,
             sink_from_name,
+        };
+
+        let identity = format!("SinkExecutor {:X?}", params.executor_id);
+
+        let sink_commit_duration_metrics = stream
+            .streaming_metrics
+            .sink_commit_duration
+            .with_label_values(&[identity.as_str(), connector]);
+
+        let sink_metrics = SinkMetrics {
+            sink_commit_duration_metrics,
         };
 
         match node.log_store_type() {
@@ -84,6 +96,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                             executor_id: params.executor_id,
                             vnode_bitmap: params.vnode_bitmap,
                             meta_client: params.env.meta_client(),
+                            sink_metrics,
                         },
                         sink_param,
                         columns,
@@ -111,6 +124,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                                 executor_id: params.executor_id,
                                 vnode_bitmap: params.vnode_bitmap,
                                 meta_client: params.env.meta_client(),
+                                sink_metrics,
                             },
                             sink_param,
                             columns,

@@ -22,12 +22,17 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_rpc_client::ConnectorClient;
 
-use crate::sink::{Sink, SinkCommitCoordinator, SinkWriter, SinkWriterParam};
+use crate::sink::writer::{LogSinkerOf, SinkWriter};
+use crate::sink::{Sink, SinkCommitCoordinator, SinkWriterParam};
 
 pub type BoxWriter<CM> = Box<dyn SinkWriter<CommitMetadata = CM> + Send + 'static>;
 pub type BoxCoordinator = Box<dyn SinkCommitCoordinator + Send + 'static>;
-pub type BoxSink =
-    Box<dyn Sink<Writer = BoxWriter<()>, Coordinator = BoxCoordinator> + Send + Sync + 'static>;
+pub type BoxSink = Box<
+    dyn Sink<LogSinker = LogSinkerOf<BoxWriter<()>>, Coordinator = BoxCoordinator>
+        + Send
+        + Sync
+        + 'static,
+>;
 
 impl Debug for BoxSink {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -74,14 +79,17 @@ impl SinkCommitCoordinator for BoxCoordinator {
 #[async_trait]
 impl Sink for BoxSink {
     type Coordinator = BoxCoordinator;
-    type Writer = BoxWriter<()>;
+    type LogSinker = LogSinkerOf<BoxWriter<()>>;
 
     async fn validate(&self, client: Option<ConnectorClient>) -> crate::sink::Result<()> {
         self.deref().validate(client).await
     }
 
-    async fn new_writer(&self, writer_param: SinkWriterParam) -> crate::sink::Result<Self::Writer> {
-        self.deref().new_writer(writer_param).await
+    async fn new_log_sinker(
+        &self,
+        writer_param: SinkWriterParam,
+    ) -> crate::sink::Result<Self::LogSinker> {
+        self.deref().new_log_sinker(writer_param).await
     }
 
     async fn new_coordinator(

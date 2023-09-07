@@ -26,7 +26,8 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_connector::sink::boxed::{BoxCoordinator, BoxWriter};
 use risingwave_connector::sink::test_sink::registry_build_sink;
-use risingwave_connector::sink::{Sink, SinkWriter, SinkWriterParam};
+use risingwave_connector::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
+use risingwave_connector::sink::{Sink, SinkWriterParam};
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
 use tokio::time::sleep;
 
@@ -73,7 +74,7 @@ struct TestSink {
 #[async_trait]
 impl Sink for TestSink {
     type Coordinator = BoxCoordinator;
-    type Writer = BoxWriter<()>;
+    type LogSinker = LogSinkerOf<BoxWriter<()>>;
 
     async fn validate(
         &self,
@@ -82,15 +83,16 @@ impl Sink for TestSink {
         Ok(())
     }
 
-    async fn new_writer(
+    async fn new_log_sinker(
         &self,
-        _writer_param: SinkWriterParam,
-    ) -> risingwave_connector::sink::Result<Self::Writer> {
+        writer_param: SinkWriterParam,
+    ) -> risingwave_connector::sink::Result<Self::LogSinker> {
         self.parallelism_counter.fetch_add(1, Relaxed);
-        Ok(Box::new(TestWriter {
+        Ok((Box::new(TestWriter {
             parallelism_counter: self.parallelism_counter.clone(),
             row_counter: self.row_counter.clone(),
-        }))
+        }) as BoxWriter<()>)
+            .into_log_sinker(writer_param.sink_metrics))
     }
 }
 
