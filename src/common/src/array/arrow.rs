@@ -653,13 +653,7 @@ impl TryFrom<&StructArray> for arrow_array::StructArray {
     fn try_from(array: &StructArray) -> Result<Self, Self::Error> {
         let struct_data_vector: Vec<(arrow_schema::FieldRef, arrow_array::ArrayRef)> = array
             .fields()
-            .zip_eq_debug(
-                array
-                    .data_type()
-                    .as_struct()
-                    .expect("not struct type")
-                    .iter(),
-            )
+            .zip_eq_debug(array.data_type().as_struct().iter())
             .map(|(arr, (name, ty))| {
                 Ok((
                     Field::new(name, ty.try_into().map_err(ArrayError::ToArrow)?, true).into(),

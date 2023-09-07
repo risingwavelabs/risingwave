@@ -24,7 +24,6 @@ use std::str::{FromStr, Utf8Error};
 
 use bytes::{Buf, BufMut, Bytes};
 use chrono::{Datelike, Timelike};
-use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use parse_display::{Display, FromStr};
 use paste::paste;
@@ -92,17 +91,7 @@ pub type F64 = ordered_float::OrderedFloat<f64>;
 // `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
 // but without data fields.
 #[derive(
-    Debug,
-    Display,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    EnumDiscriminants,
-    EnumAsInner,
-    FromStr,
+    Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumDiscriminants, FromStr,
 )]
 #[strum_discriminants(derive(strum_macros::EnumIter, Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]

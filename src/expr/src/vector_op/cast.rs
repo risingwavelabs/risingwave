@@ -318,7 +318,7 @@ fn unnest(input: &str) -> Result<Vec<&str>> {
 fn str_to_list(input: &str, ctx: &Context) -> Result<ListValue> {
     let cast = build_func(
         PbType::Cast,
-        ctx.return_type.as_list().unwrap().as_ref().clone(),
+        ctx.return_type.as_list().clone(),
         vec![InputRefExpression::new(DataType::Varchar, 0).boxed()],
     )
     .unwrap();
@@ -338,11 +338,8 @@ fn str_to_list(input: &str, ctx: &Context) -> Result<ListValue> {
 fn list_cast(input: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
     let cast = build_func(
         PbType::Cast,
-        ctx.return_type.as_list().unwrap().as_ref().clone(),
-        vec![
-            InputRefExpression::new(ctx.arg_types[0].as_list().unwrap().as_ref().clone(), 0)
-                .boxed(),
-        ],
+        ctx.return_type.as_list().clone(),
+        vec![InputRefExpression::new(ctx.arg_types[0].as_list().clone(), 0).boxed()],
     )
     .unwrap();
     let elements = input.iter();
@@ -361,8 +358,8 @@ fn list_cast(input: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
 #[function("cast(struct) -> struct")]
 fn struct_cast(input: StructRef<'_>, ctx: &Context) -> Result<StructValue> {
     let fields = (input.iter_fields_ref())
-        .zip_eq_fast(ctx.arg_types[0].as_struct().unwrap().types())
-        .zip_eq_fast(ctx.return_type.as_struct().unwrap().types())
+        .zip_eq_fast(ctx.arg_types[0].as_struct().types())
+        .zip_eq_fast(ctx.return_type.as_struct().types())
         .map(|((datum_ref, source_field_type), target_field_type)| {
             if source_field_type == target_field_type {
                 return Ok(datum_ref.map(|scalar_ref| scalar_ref.into_scalar_impl()));

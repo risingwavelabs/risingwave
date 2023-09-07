@@ -96,7 +96,7 @@ fn array_cat(
             .chain(right.iter().flat_map(|list| list.iter()))
             .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
             .collect()
-    } else if &**ctx.arg_types[0].as_list().unwrap() == &ctx.arg_types[1] {
+    } else if ctx.arg_types[0].as_list() == &ctx.arg_types[1] {
         // array[] || array
         let Some(right) = right else {
             return left.map(|left| left.to_owned_scalar());
@@ -106,7 +106,7 @@ fn array_cat(
             .chain([Some(right.into())])
             .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
             .collect()
-    } else if &ctx.arg_types[0] == &**ctx.arg_types[1].as_list().unwrap() {
+    } else if &ctx.arg_types[0] == ctx.arg_types[1].as_list() {
         // array || array[]
         let Some(left) = left else {
             return right.map(|right| right.to_owned_scalar());
