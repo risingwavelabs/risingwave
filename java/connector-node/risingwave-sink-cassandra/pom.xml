@@ -9,9 +9,9 @@
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
-    <artifactId>risingwave-sink-es-7</artifactId>
+    <artifactId>risingwave-sink-cassandra</artifactId>
     <version>1.0-SNAPSHOT</version>
-    <name>risingwave-sink-es-7</name>
+    <name>risingwave-sink-cassandra</name>
 
     <dependencies>
         <dependency>
@@ -49,14 +49,11 @@
             <version>${jackson.version}</version>
         </dependency>
 
-        <!-- ElasticSearch drivers -->
+        <!-- cassandra drivers -->
         <dependency>
-            <groupId>org.elasticsearch</groupId>
-            <artifactId>elasticsearch</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.elasticsearch.client</groupId>
-            <artifactId>elasticsearch-rest-high-level-client</artifactId>
+            <groupId>com.datastax.oss</groupId>
+            <artifactId>java-driver-core</artifactId>
+            <version>${datastax.version}</version>
         </dependency>
     </dependencies>
 
