@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
 use std::ops::Bound::{Excluded, Included};
 use std::sync::Arc;
 
@@ -59,93 +58,85 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
 }
 
 impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
-    type FlushCurrentEpoch<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
-    type InitFuture<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
-    type WriteChunkFuture<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
-
-    fn init(&mut self, epoch: EpochPair) -> Self::InitFuture<'_> {
-        async move {
-            self.state_store
-                .init(InitOptions::new_with_epoch(epoch))
-                .await?;
-            self.seq_id = FIRST_SEQ_ID;
-            self.tx.init(epoch.curr);
-            Ok(())
-        }
+    async fn init(&mut self, epoch: EpochPair) -> LogStoreResult<()> {
+        self.state_store
+            .init(InitOptions::new_with_epoch(epoch))
+            .await?;
+        self.seq_id = FIRST_SEQ_ID;
+        self.tx.init(epoch.curr);
+        Ok(())
     }
 
-    fn write_chunk(&mut self, chunk: StreamChunk) -> Self::WriteChunkFuture<'_> {
-        async move {
-            assert!(chunk.cardinality() > 0);
-            let epoch = self.state_store.epoch();
-            let start_seq_id = self.seq_id;
-            self.seq_id += chunk.cardinality() as SeqIdType;
-            let end_seq_id = self.seq_id - 1;
-            if let Some(chunk) =
-                self.tx
-                    .try_add_stream_chunk(epoch, chunk, start_seq_id, end_seq_id)
-            {
-                // When enter this branch, the chunk cannot be added directly, and should be add to
-                // state store and flush
-                let mut vnode_bitmap_builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-                for (i, (op, row)) in chunk.rows().enumerate() {
-                    let seq_id = start_seq_id + (i as SeqIdType);
-                    assert!(seq_id <= end_seq_id);
-                    let (vnode, key, value) = self.serde.serialize_data_row(epoch, seq_id, op, row);
-                    vnode_bitmap_builder.set(vnode.to_index(), true);
-                    self.state_store.insert(key, value, None)?;
-                }
-                self.state_store.flush(Vec::new()).await?;
-
-                let vnode_bitmap = vnode_bitmap_builder.finish();
-                self.tx
-                    .add_flushed(epoch, start_seq_id, end_seq_id, vnode_bitmap);
+    async fn write_chunk(&mut self, chunk: StreamChunk) -> LogStoreResult<()> {
+        assert!(chunk.cardinality() > 0);
+        let epoch = self.state_store.epoch();
+        let start_seq_id = self.seq_id;
+        self.seq_id += chunk.cardinality() as SeqIdType;
+        let end_seq_id = self.seq_id - 1;
+        if let Some(chunk) = self
+            .tx
+            .try_add_stream_chunk(epoch, chunk, start_seq_id, end_seq_id)
+        {
+            // When enter this branch, the chunk cannot be added directly, and should be add to
+            // state store and flush
+            let mut vnode_bitmap_builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            for (i, (op, row)) in chunk.rows().enumerate() {
+                let seq_id = start_seq_id + (i as SeqIdType);
+                assert!(seq_id <= end_seq_id);
+                let (vnode, key, value) = self.serde.serialize_data_row(epoch, seq_id, op, row);
+                vnode_bitmap_builder.set(vnode.to_index(), true);
+                self.state_store.insert(key, value, None)?;
             }
-            Ok(())
+            self.state_store.flush(Vec::new()).await?;
+
+            let vnode_bitmap = vnode_bitmap_builder.finish();
+            self.tx
+                .add_flushed(epoch, start_seq_id, end_seq_id, vnode_bitmap);
         }
+        Ok(())
     }
 
-    fn flush_current_epoch(
+    async fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
-    ) -> Self::FlushCurrentEpoch<'_> {
-        async move {
-            let epoch = self.state_store.epoch();
-            for vnode in self.serde.vnodes().iter_vnodes() {
-                let (key, value) = self.serde.serialize_barrier(epoch, vnode, is_checkpoint);
-                self.state_store.insert(key, value, None)?;
-            }
-            self.tx
-                .flush_all_unflushed(|chunk, epoch, start_seq_id, end_seq_id| {
-                    for (i, (op, row)) in chunk.rows().enumerate() {
-                        let seq_id = start_seq_id + (i as SeqIdType);
-                        assert!(seq_id <= end_seq_id);
-                        let (_, key, value) = self.serde.serialize_data_row(epoch, seq_id, op, row);
-                        self.state_store.insert(key, value, None)?;
-                    }
-                    Ok(())
-                })?;
-            let mut delete_range = Vec::with_capacity(self.serde.vnodes().count_ones());
-            if let Some(truncation_offset) = self.tx.pop_truncation() {
-                for vnode in self.serde.vnodes().iter_vnodes() {
-                    let range_begin = Bytes::from(vnode.to_be_bytes().to_vec());
-                    let range_end = self
-                        .serde
-                        .serialize_truncation_offset_watermark(vnode, truncation_offset);
-                    delete_range.push((Included(range_begin), Excluded(range_end)));
-                }
-            }
-            self.state_store.flush(delete_range).await?;
-            self.state_store.seal_current_epoch(next_epoch);
-            self.tx.barrier(epoch, is_checkpoint, next_epoch);
-            self.seq_id = FIRST_SEQ_ID;
-            Ok(())
+    ) -> LogStoreResult<()> {
+        let epoch = self.state_store.epoch();
+        for vnode in self.serde.vnodes().iter_vnodes() {
+            let (key, value) = self.serde.serialize_barrier(epoch, vnode, is_checkpoint);
+            self.state_store.insert(key, value, None)?;
         }
+        self.tx
+            .flush_all_unflushed(|chunk, epoch, start_seq_id, end_seq_id| {
+                for (i, (op, row)) in chunk.rows().enumerate() {
+                    let seq_id = start_seq_id + (i as SeqIdType);
+                    assert!(seq_id <= end_seq_id);
+                    let (_, key, value) = self.serde.serialize_data_row(epoch, seq_id, op, row);
+                    self.state_store.insert(key, value, None)?;
+                }
+                Ok(())
+            })?;
+        let mut delete_range = Vec::with_capacity(self.serde.vnodes().count_ones());
+        if let Some(truncation_offset) = self.tx.pop_truncation() {
+            for vnode in self.serde.vnodes().iter_vnodes() {
+                let range_begin = Bytes::from(vnode.to_be_bytes().to_vec());
+                let range_end = self
+                    .serde
+                    .serialize_truncation_offset_watermark(vnode, truncation_offset);
+                delete_range.push((Included(range_begin), Excluded(range_end)));
+            }
+        }
+        self.state_store.flush(delete_range).await?;
+        self.state_store.seal_current_epoch(next_epoch);
+        self.tx.barrier(epoch, is_checkpoint, next_epoch);
+        self.seq_id = FIRST_SEQ_ID;
+        Ok(())
     }
 
-    fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+    #[expect(clippy::unused_async)]
+    async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
         self.serde.update_vnode_bitmap(new_vnodes.clone());
         self.tx.update_vnode(self.state_store.epoch(), new_vnodes);
+        Ok(())
     }
 }

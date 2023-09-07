@@ -27,24 +27,21 @@ use crate::manager::{
 use crate::model::ClusterId;
 #[cfg(any(test, feature = "test"))]
 use crate::storage::MemStore;
-use crate::storage::MetaStore;
+use crate::storage::{MetaStoreBoxExt, MetaStoreRef};
 use crate::MetaResult;
 
 /// [`MetaSrvEnv`] is the global environment in Meta service. The instance will be shared by all
 /// kind of managers inside Meta.
 #[derive(Clone)]
-pub struct MetaSrvEnv<S>
-where
-    S: MetaStore,
-{
+pub struct MetaSrvEnv {
     /// id generator manager.
-    id_gen_manager: IdGeneratorManagerRef<S>,
+    id_gen_manager: IdGeneratorManagerRef,
 
     /// meta store.
-    meta_store: Arc<S>,
+    meta_store: MetaStoreRef,
 
     /// notification manager.
-    notification_manager: NotificationManagerRef<S>,
+    notification_manager: NotificationManagerRef,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
@@ -53,7 +50,7 @@ where
     idle_manager: IdleManagerRef,
 
     /// system param manager.
-    system_params_manager: SystemParamsManagerRef<S>,
+    system_params_manager: SystemParamsManagerRef,
 
     /// Unique identifier of the cluster.
     cluster_id: ClusterId,
@@ -203,14 +200,11 @@ impl MetaOpts {
     }
 }
 
-impl<S> MetaSrvEnv<S>
-where
-    S: MetaStore,
-{
+impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
         init_system_params: SystemParams,
-        meta_store: Arc<S>,
+        meta_store: MetaStoreRef,
     ) -> MetaResult<Self> {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
@@ -218,7 +212,7 @@ where
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let (cluster_id, cluster_first_launch) =
-            if let Some(id) = ClusterId::from_meta_store(meta_store.deref()).await? {
+            if let Some(id) = ClusterId::from_meta_store(&meta_store).await? {
                 (id, false)
             } else {
                 (ClusterId::new(), true)
@@ -249,27 +243,27 @@ where
         })
     }
 
-    pub fn meta_store_ref(&self) -> Arc<S> {
+    pub fn meta_store_ref(&self) -> MetaStoreRef {
         self.meta_store.clone()
     }
 
-    pub fn meta_store(&self) -> &S {
-        self.meta_store.deref()
+    pub fn meta_store(&self) -> &MetaStoreRef {
+        &self.meta_store
     }
 
-    pub fn id_gen_manager_ref(&self) -> IdGeneratorManagerRef<S> {
+    pub fn id_gen_manager_ref(&self) -> IdGeneratorManagerRef {
         self.id_gen_manager.clone()
     }
 
-    pub fn id_gen_manager(&self) -> &IdGeneratorManager<S> {
+    pub fn id_gen_manager(&self) -> &IdGeneratorManager {
         self.id_gen_manager.deref()
     }
 
-    pub fn notification_manager_ref(&self) -> NotificationManagerRef<S> {
+    pub fn notification_manager_ref(&self) -> NotificationManagerRef {
         self.notification_manager.clone()
     }
 
-    pub fn notification_manager(&self) -> &NotificationManager<S> {
+    pub fn notification_manager(&self) -> &NotificationManager {
         self.notification_manager.deref()
     }
 
@@ -281,11 +275,11 @@ where
         self.idle_manager.deref()
     }
 
-    pub fn system_params_manager_ref(&self) -> SystemParamsManagerRef<S> {
+    pub fn system_params_manager_ref(&self) -> SystemParamsManagerRef {
         self.system_params_manager.clone()
     }
 
-    pub fn system_params_manager(&self) -> &SystemParamsManager<S> {
+    pub fn system_params_manager(&self) -> &SystemParamsManager {
         self.system_params_manager.deref()
     }
 
@@ -311,7 +305,7 @@ where
 }
 
 #[cfg(any(test, feature = "test"))]
-impl MetaSrvEnv<MemStore> {
+impl MetaSrvEnv {
     // Instance for test.
     pub async fn for_test() -> Self {
         Self::for_test_opts(MetaOpts::test(false).into()).await
@@ -319,7 +313,7 @@ impl MetaSrvEnv<MemStore> {
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
-        let meta_store = Arc::new(MemStore::default());
+        let meta_store = MemStore::default().into_ref();
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());

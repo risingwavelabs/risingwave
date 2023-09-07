@@ -27,7 +27,6 @@ use super::command::CommandContext;
 use super::notifier::Notifier;
 use crate::barrier::Command;
 use crate::model::ActorId;
-use crate::storage::MetaStore;
 
 type CreateMviewEpoch = Epoch;
 type ConsumedRows = u64;
@@ -142,9 +141,9 @@ impl Progress {
 }
 
 /// The command tracking by the [`CreateMviewProgressTracker`].
-pub(super) struct TrackingCommand<S: MetaStore> {
+pub(super) struct TrackingCommand {
     /// The context of the command.
-    pub context: Arc<CommandContext<S>>,
+    pub context: Arc<CommandContext>,
 
     /// Should be called when the command is finished.
     pub notifiers: Vec<Notifier>,
@@ -152,15 +151,15 @@ pub(super) struct TrackingCommand<S: MetaStore> {
 
 /// Track the progress of all creating mviews. When creation is done, `notify_finished` will be
 /// called on registered notifiers.
-pub(super) struct CreateMviewProgressTracker<S: MetaStore> {
+pub(super) struct CreateMviewProgressTracker {
     /// Progress of the create-mview DDL indicated by the epoch.
-    progress_map: HashMap<CreateMviewEpoch, (Progress, TrackingCommand<S>)>,
+    progress_map: HashMap<CreateMviewEpoch, (Progress, TrackingCommand)>,
 
     /// Find the epoch of the create-mview DDL by the actor containing the chain node.
     actor_map: HashMap<ActorId, CreateMviewEpoch>,
 }
 
-impl<S: MetaStore> CreateMviewProgressTracker<S> {
+impl CreateMviewProgressTracker {
     pub fn new() -> Self {
         Self {
             progress_map: Default::default(),
@@ -185,7 +184,7 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
     pub fn find_cancelled_command(
         &mut self,
         actors_to_cancel: HashSet<ActorId>,
-    ) -> Option<TrackingCommand<S>> {
+    ) -> Option<TrackingCommand> {
         let epochs = actors_to_cancel
             .into_iter()
             .map(|actor_id| self.actor_map.get(&actor_id))
@@ -205,9 +204,9 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
     /// If the actors to track is empty, return the given command as it can be finished immediately.
     pub fn add(
         &mut self,
-        command: TrackingCommand<S>,
+        command: TrackingCommand,
         version_stats: &HummockVersionStats,
-    ) -> Option<TrackingCommand<S>> {
+    ) -> Option<TrackingCommand> {
         let actors = command.context.actors_to_track();
         if actors.is_empty() {
             // The command can be finished immediately.
@@ -279,7 +278,7 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
         &mut self,
         progress: &CreateMviewProgress,
         version_stats: &HummockVersionStats,
-    ) -> Option<TrackingCommand<S>> {
+    ) -> Option<TrackingCommand> {
         let actor = progress.chain_actor_id;
         let Some(epoch) = self.actor_map.get(&actor).copied() else {
             panic!(
