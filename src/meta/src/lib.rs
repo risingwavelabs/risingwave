@@ -247,6 +247,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             ui_path: opts.dashboard_ui_path,
         };
 
+        let initial_system_params = config.as_initial_system_params();
         let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
             backend,
@@ -305,7 +306,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .compaction_task_max_heartbeat_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
             },
-            config.system.into_init_system_params(),
+            initial_system_params,
         )
         .await
         .unwrap();

@@ -778,9 +778,6 @@ pub struct SystemConfig {
     #[serde(default = "default::system::backup_storage_directory")]
     pub backup_storage_directory: Option<String>,
 
-    #[serde(default = "default::system::telemetry_enabled")]
-    pub telemetry_enabled: Option<bool>,
-
     /// Max number of concurrent creating streaming jobs.
     #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
     pub max_concurrent_creating_streaming_jobs: Option<u32>,
@@ -790,22 +787,27 @@ pub struct SystemConfig {
     pub pause_on_next_bootstrap: Option<bool>,
 }
 
-impl SystemConfig {
-    pub fn into_init_system_params(self) -> SystemParams {
+impl RwConfig {
+    // NOTE(eric): The naming is confusing here. `SystemParams` means the paratmeters that are
+    // persisted in Meta store, while the `SystemConfig` in this file corresponds to the `[system]`
+    // section in `risingwave.toml`
+    pub fn as_initial_system_params(&self) -> SystemParams {
         SystemParams {
-            barrier_interval_ms: self.barrier_interval_ms,
-            checkpoint_frequency: self.checkpoint_frequency,
-            sstable_size_mb: self.sstable_size_mb,
-            parallel_compact_size_mb: self.parallel_compact_size_mb,
-            block_size_kb: self.block_size_kb,
-            bloom_false_positive: self.bloom_false_positive,
-            state_store: self.state_store,
-            data_directory: self.data_directory,
-            backup_storage_url: self.backup_storage_url,
-            backup_storage_directory: self.backup_storage_directory,
-            telemetry_enabled: self.telemetry_enabled,
-            max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
-            pause_on_next_bootstrap: self.pause_on_next_bootstrap,
+            barrier_interval_ms: self.system.barrier_interval_ms,
+            checkpoint_frequency: self.system.checkpoint_frequency,
+            sstable_size_mb: self.system.sstable_size_mb,
+            parallel_compact_size_mb: self.system.parallel_compact_size_mb,
+            block_size_kb: self.system.block_size_kb,
+            bloom_false_positive: self.system.bloom_false_positive,
+            state_store: self.system.state_store.clone(),
+            data_directory: self.system.data_directory.clone(),
+            backup_storage_url: self.system.backup_storage_url.clone(),
+            backup_storage_directory: self.system.backup_storage_directory.clone(),
+            max_concurrent_creating_streaming_jobs: self
+                .system
+                .max_concurrent_creating_streaming_jobs,
+            pause_on_next_bootstrap: self.system.pause_on_next_bootstrap,
+            telemetry_enabled: Some(self.server.telemetry_enabled),
         }
     }
 }

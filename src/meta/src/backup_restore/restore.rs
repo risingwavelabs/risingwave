@@ -291,7 +291,7 @@ mod tests {
     use clap::Parser;
     use itertools::Itertools;
     use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
-    use risingwave_common::config::SystemConfig;
+    use risingwave_common::config::RwConfig;
     use risingwave_pb::hummock::HummockVersion;
     use risingwave_pb::meta::SystemParams;
 
@@ -321,7 +321,7 @@ mod tests {
         SystemParams {
             state_store: Some("state_store".to_string()),
             data_directory: Some("data_directory".to_string()),
-            ..SystemConfig::default().into_init_system_params()
+            ..RwConfig::default().as_initial_system_params()
         }
     }
 
