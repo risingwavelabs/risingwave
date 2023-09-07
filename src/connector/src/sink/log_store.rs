@@ -100,13 +100,15 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
     }
 }
 
-pub trait LogStoreTransformChunkLogReader: LogReader {
-    fn transform_chunk<F: Fn(StreamChunk) -> StreamChunk + Sized>(
+#[easy_ext::ext(LogStoreTransformChunkLogReader)]
+impl<T> T
+where
+    T: LogReader,
+{
+    pub fn transform_chunk<F: Fn(StreamChunk) -> StreamChunk + Sized>(
         self,
         f: F,
     ) -> TransformChunkLogReader<F, Self> {
         TransformChunkLogReader { f, inner: self }
     }
 }
-
-impl<R: LogReader> LogStoreTransformChunkLogReader for R {}
