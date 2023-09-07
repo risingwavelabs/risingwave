@@ -15,7 +15,7 @@ statement ok
 create materialized view mv2 as select t.ts, unnest(Array[1,2,3]) from t emit on window close;
 
 statement ok
-insert into t values ('2023-05-06 16:51:00', 1);
+insert into t values ('2023-05-06 16:51:00', 1), ('2023-05-06 16:51:00', 2), ('2023-05-06 16:51:00', 3);
 
 statement ok
 insert into t values ('2023-05-06 16:56:01', 1);
@@ -28,6 +28,8 @@ query TI
 select * from mv1;
 ----
 2023-05-06 16:51:00 1
+2023-05-06 16:51:00 2
+2023-05-06 16:51:00 3
 
 skipif in-memory
 query TI
