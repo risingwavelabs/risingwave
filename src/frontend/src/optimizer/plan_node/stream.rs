@@ -733,7 +733,6 @@ pub fn to_stream_prost_body(
                 .iter()
                 .map(|(_, y)| *y as u32)
                 .collect(),
-            merge_chunk: me.merge_chunk,
             nondecreasing_exprs: me.nondecreasing_exprs.iter().map(|i| *i as u32).collect(),
         }),
         Node::Sink(me) => PbNodeBody::Sink(SinkNode {

@@ -448,8 +448,7 @@ impl PlanRoot {
         if let Some(exprs) = exprs {
             let logical_project = generic::Project::new(exprs, stream_plan);
             // The project node merges a chunk if it has an ungenerated row id as stream key.
-            stream_plan =
-                StreamProject::with_merge_chunk(logical_project, row_id_index.is_none()).into();
+            stream_plan = StreamProject::new(logical_project).into();
         }
 
         // Add WatermarkFilter node.

@@ -71,7 +71,6 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             watermark_derivations,
             nondecreasing_expr_indices,
             materialize_selectivity_threshold,
-            node.merge_chunk,
         )
         .boxed())
     }

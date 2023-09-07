@@ -202,8 +202,6 @@ message ProjectNode {
   repeated uint32 watermark_input_cols = 2;
   repeated uint32 watermark_output_cols = 3;
   repeated uint32 nondecreasing_exprs = 4;
-  bool merge_chunk = 5;
-
 }
 
 message FilterNode {

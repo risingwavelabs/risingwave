@@ -16,7 +16,7 @@ use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
 use multimap::MultiMap;
-use risingwave_common::array::{merge_chunk_row, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ToOwnedDatum;
@@ -50,9 +50,6 @@ struct Inner {
     /// the selectivity threshold which should be in `[0,1]`. for the chunk with selectivity less
     /// than the threshold, the Project executor will construct a new chunk before expr evaluation,
     materialize_selectivity_threshold: f64,
-
-    /// Whether the project executor will merge a chunk on the stream key.
-    merge_chunk: bool,
 }
 
 impl ProjectExecutor {
@@ -66,7 +63,6 @@ impl ProjectExecutor {
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
         materialize_selectivity_threshold: f64,
-        merge_chunk: bool,
     ) -> Self {
         let info = ExecutorInfo {
             schema: input.schema().to_owned(),
@@ -97,7 +93,6 @@ impl ProjectExecutor {
                 nondecreasing_expr_indices,
                 last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
                 materialize_selectivity_threshold,
-                merge_chunk,
             },
         }
     }
@@ -152,15 +147,7 @@ impl Inner {
         }
         let (_, vis) = data_chunk.into_parts();
         let vis = vis.into_visibility();
-        let new_chunk = if self.merge_chunk {
-            merge_chunk_row(
-                StreamChunk::new(ops, projected_columns, vis),
-                &self.info.pk_indices,
-            )
-        } else {
-            StreamChunk::new(ops, projected_columns, vis)
-        };
-
+        let new_chunk = StreamChunk::new(ops, projected_columns, vis);
         Ok(Some(new_chunk))
     }
 
@@ -296,7 +283,6 @@ mod tests {
             MultiMap::new(),
             vec![],
             0.0,
-            true,
         ));
         let mut project = project.execute();
 
@@ -380,7 +366,6 @@ mod tests {
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
             vec![2],
             0.0,
-            false,
         ));
         let mut project = project.execute();
 

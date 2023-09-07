@@ -33,8 +33,6 @@ pub struct StreamProject {
     /// All the watermark derivations, (input_column_index, output_column_index). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: Vec<(usize, usize)>,
-    /// Whether the project executor will merge a chunk on the stream key.
-    merge_chunk: bool,
     /// Nondecreasing expression indices. `Project` can produce watermarks for these expressions.
     nondecreasing_exprs: Vec<usize>,
 }
@@ -53,7 +51,7 @@ impl Distill for StreamProject {
 }
 
 impl StreamProject {
-    fn new_inner(logical: generic::Project<PlanRef>, merge_chunk: Option<bool>) -> Self {
+    pub fn new(logical: generic::Project<PlanRef>) -> Self {
         let input = logical.input.clone();
         let distribution = logical
             .i2o_col_mapping()
@@ -93,17 +91,8 @@ impl StreamProject {
             base,
             logical,
             watermark_derivations,
-            merge_chunk: merge_chunk.unwrap_or(!input.append_only()),
             nondecreasing_exprs,
         }
-    }
-
-    pub fn new(logical: generic::Project<PlanRef>) -> Self {
-        Self::new_inner(logical, None)
-    }
-
-    pub fn with_merge_chunk(logical: generic::Project<PlanRef>, merge_chunk: bool) -> Self {
-        Self::new_inner(logical, Some(merge_chunk))
     }
 
     pub fn as_logical(&self) -> &generic::Project<PlanRef> {
@@ -123,7 +112,7 @@ impl PlanTreeNodeUnary for StreamProject {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut logical = self.logical.clone();
         logical.input = input;
-        Self::with_merge_chunk(logical, self.merge_chunk)
+        Self::new(logical)
     }
 }
 impl_plan_tree_node_for_unary! {StreamProject}
@@ -144,7 +133,6 @@ impl StreamNode for StreamProject {
                 .collect(),
             watermark_input_cols,
             watermark_output_cols,
-            merge_chunk: self.merge_chunk,
             nondecreasing_exprs: self.nondecreasing_exprs.iter().map(|i| *i as _).collect(),
         })
     }
@@ -157,8 +145,7 @@ impl ExprRewritable for StreamProject {
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut logical = self.logical.clone();
-        let merge_chunk = self.merge_chunk;
         logical.rewrite_exprs(r);
-        Self::with_merge_chunk(logical, merge_chunk).into()
+        Self::new(logical).into()
     }
 }
