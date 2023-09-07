@@ -711,14 +711,8 @@ pub fn to_stream_prost_body(
                 table: Some(me.table.to_internal_table_prost()),
             })
         }
-        Node::ProjectSet(me) => {
-            let me = &me.core;
-            let select_list = me
-                .select_list
-                .iter()
-                .map(ExprImpl::to_project_set_select_item_proto)
-                .collect();
-            PbNodeBody::ProjectSet(ProjectSetNode { select_list })
+        Node::ProjectSet(_) => {
+            unreachable!()
         }
         Node::Project(me) => PbNodeBody::Project(ProjectNode {
             select_list: me.core.exprs.iter().map(|x| x.to_expr_proto()).collect(),
