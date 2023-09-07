@@ -78,6 +78,10 @@ impl Frame {
             exclusion,
         }
     }
+
+    pub fn is_unbounded(&self) -> bool {
+        self.bounds.is_unbounded()
+    }
 }
 
 impl Frame {
@@ -126,6 +130,10 @@ impl FrameBounds {
         match self {
             Self::Rows(_, end) => matches!(end, FrameBound::UnboundedFollowing),
         }
+    }
+
+    pub fn is_unbounded(&self) -> bool {
+        self.start_is_unbounded() || self.end_is_unbounded()
     }
 }
 

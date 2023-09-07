@@ -154,7 +154,7 @@ where
             }
             SnapshotEvent::Chunk(chunk_str) => {
                 let chunk = StreamChunk::from_pretty(chunk_str);
-                *chunk_str = chunk.to_pretty_string();
+                *chunk_str = chunk.to_pretty().to_string();
                 tx.push_chunk(chunk);
             }
             SnapshotEvent::Watermark { col_idx, val } => tx.push_watermark(
@@ -191,10 +191,10 @@ fn run_until_pending(
                 if options.sort_chunk {
                     chunk = chunk.sort_rows();
                 }
-                let mut output = chunk.to_pretty_string();
+                let mut output = chunk.to_pretty().to_string();
                 if options.include_applied_result {
                     let applied = store.apply_chunk(&chunk);
-                    output += &format!("\napplied result:\n{}", applied.to_pretty_string());
+                    output += &format!("\napplied result:\n{}", applied.to_pretty());
                 }
                 SnapshotEvent::Chunk(output)
             }

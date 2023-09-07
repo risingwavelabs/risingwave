@@ -30,6 +30,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::{extract_storage_memory_config, load_config, NoOverride, RwConfig};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_test::get_notification_client_for_test;
+use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -398,7 +399,7 @@ impl NormalState {
     async fn new(hummock: &HummockStorage, table_id: u32, epoch: u64) -> Self {
         let table_id = TableId::new(table_id);
         let mut storage = hummock.new_local(NewLocalOptions::for_test(table_id)).await;
-        storage.init(epoch);
+        storage.init_for_test(epoch).await.unwrap();
         Self { storage, table_id }
     }
 
@@ -574,9 +575,8 @@ fn run_compactor_thread(
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
 ) {
-    let compactor_context = Arc::new(CompactorContext {
+    let compactor_context = CompactorContext {
         storage_opts,
-        hummock_meta_client: meta_client,
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
@@ -588,8 +588,8 @@ fn run_compactor_thread(
         task_progress_manager: Default::default(),
         await_tree_reg: None,
         running_task_count: Arc::new(AtomicU32::new(0)),
-    });
-    start_compactor(compactor_context, sstable_object_id_manager)
+    };
+    start_compactor(compactor_context, meta_client, sstable_object_id_manager)
 }
 
 #[cfg(test)]

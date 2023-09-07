@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Ok;
+use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
 use clickhouse::Client;
@@ -308,12 +309,22 @@ pub struct ClickHouseCommon {
     pub table: String,
 }
 
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+
 impl ClickHouseCommon {
     pub(crate) fn build_client(&self) -> anyhow::Result<Client> {
-        let client = Client::default()
+        use hyper_tls::HttpsConnector;
+
+        let https = HttpsConnector::new();
+        let client = hyper::Client::builder()
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+            .build::<_, hyper::Body>(https);
+
+        let client = Client::with_http_client(client)
             .with_url(&self.url)
             .with_user(&self.user)
-            .with_password(&self.password);
+            .with_password(&self.password)
+            .with_database(&self.database);
         Ok(client)
     }
 }
@@ -355,14 +366,58 @@ pub struct NatsCommon {
 }
 
 impl NatsCommon {
-    pub(crate) async fn build_context(&self) -> anyhow::Result<jetstream::Context> {
+    pub(crate) async fn build_client(&self) -> anyhow::Result<async_nats::Client> {
         let mut connect_options = async_nats::ConnectOptions::new();
         if let (Some(v_user), Some(v_password)) = (self.user.as_ref(), self.password.as_ref()) {
             connect_options = connect_options.user_and_password(v_user.into(), v_password.into());
         }
         let client = connect_options.connect(self.server_url.clone()).await?;
+        Ok(client)
+    }
+
+    pub(crate) async fn build_context(&self) -> anyhow::Result<jetstream::Context> {
+        let client = self.build_client().await?;
         let jetstream = async_nats::jetstream::new(client);
         Ok(jetstream)
+    }
+
+    pub(crate) async fn build_subscriber(&self) -> anyhow::Result<async_nats::Subscriber> {
+        let client = self.build_client().await?;
+        let subscription = client.subscribe(self.subject.clone()).await?;
+        Ok(subscription)
+    }
+
+    pub(crate) async fn build_consumer(
+        &self,
+        split_id: i32,
+        start_sequence: Option<u64>,
+    ) -> anyhow::Result<
+        async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
+    > {
+        let context = self.build_context().await?;
+        let stream = self.build_or_get_stream(context.clone()).await?;
+        let name = format!("risingwave-consumer-{}-{}", self.subject, split_id);
+        let mut config = jetstream::consumer::pull::Config {
+            ack_policy: jetstream::consumer::AckPolicy::None,
+            ..Default::default()
+        };
+        match start_sequence {
+            Some(v) => {
+                let consumer = stream
+                    .get_or_create_consumer(&name, {
+                        config.deliver_policy = DeliverPolicy::ByStartSequence {
+                            start_sequence: v + 1,
+                        };
+                        config
+                    })
+                    .await?;
+                Ok(consumer)
+            }
+            None => {
+                let consumer = stream.get_or_create_consumer(&name, config).await?;
+                Ok(consumer)
+            }
+        }
     }
 
     pub(crate) async fn build_or_get_stream(
