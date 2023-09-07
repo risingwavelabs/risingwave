@@ -39,6 +39,11 @@ use crate::expr::Context;
 /// ----
 /// {123}
 ///
+/// query T
+/// select array_cat(null::int[], null::int[]);
+/// ----
+/// NULL
+///
 /// # append
 /// query T
 /// select array_cat(array[array[66]], array[233]);
@@ -89,11 +94,13 @@ fn array_cat(
     right: Option<ListRef<'_>>,
     ctx: &Context,
 ) -> Option<ListValue> {
-    let elems: Vec<Datum> = if &ctx.arg_types[0] == &ctx.arg_types[1] {
+    let elems: Vec<Datum> = if ctx.arg_types[0] == ctx.arg_types[1] {
         // array || array
+        let (Some(left), Some(right)) = (left, right) else {
+            return left.or(right).map(|list| list.to_owned_scalar());
+        };
         left.iter()
-            .flat_map(|list| list.iter())
-            .chain(right.iter().flat_map(|list| list.iter()))
+            .chain(right.iter())
             .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
             .collect()
     } else if ctx.arg_types[0].as_list() == &ctx.arg_types[1] {
