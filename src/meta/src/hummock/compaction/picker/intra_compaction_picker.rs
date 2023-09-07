@@ -18,13 +18,17 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
-use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
+use super::{
+    CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
+    ValidationRuleType,
+};
 use crate::hummock::compaction::create_overlap_strategy;
 use crate::hummock::compaction::picker::TrivialMovePicker;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct IntraCompactionPicker {
     config: Arc<CompactionConfig>,
+    compaction_task_validator: Arc<CompactionTaskValidator>,
 }
 
 impl CompactionPicker for IntraCompactionPicker {
@@ -62,8 +66,22 @@ impl CompactionPicker for IntraCompactionPicker {
 }
 
 impl IntraCompactionPicker {
+    #[cfg(test)]
     pub fn new(config: Arc<CompactionConfig>) -> IntraCompactionPicker {
-        IntraCompactionPicker { config }
+        IntraCompactionPicker {
+            compaction_task_validator: Arc::new(CompactionTaskValidator::new(config.clone())),
+            config,
+        }
+    }
+
+    pub fn new_with_validator(
+        config: Arc<CompactionConfig>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
+    ) -> IntraCompactionPicker {
+        IntraCompactionPicker {
+            config,
+            compaction_task_validator,
+        }
     }
 
     fn pick_l0_intra(
@@ -90,8 +108,6 @@ impl IntraCompactionPicker {
                 self.config.sub_level_max_compaction_bytes,
             );
 
-            let tier_sub_level_compact_level_count =
-                self.config.level0_sub_level_compact_level_count as usize;
             let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
                 self.config.sub_level_max_compaction_bytes / 2,
                 max_compaction_bytes,
@@ -107,18 +123,9 @@ impl IntraCompactionPicker {
                 continue;
             }
 
-            let mut skip_by_write_amp = false;
-            // Limit the number of selection levels for the non-overlapping
-            // sub_level at least level0_sub_level_compact_level_count
-            for (plan_index, input) in l0_select_tables_vec.into_iter().enumerate() {
-                if plan_index == 0
-                    && input.sstable_infos.len()
-                        < self.config.level0_sub_level_compact_level_count as usize
-                {
-                    // first plan level count smaller than limit
-                    break;
-                }
-
+            let mut select_input_size = 0;
+            let mut total_file_count = 0;
+            for input in l0_select_tables_vec {
                 let mut max_level_size = 0;
                 for level_select_table in &input.sstable_infos {
                     let level_select_size = level_select_table
@@ -127,22 +134,6 @@ impl IntraCompactionPicker {
                         .sum::<u64>();
 
                     max_level_size = std::cmp::max(max_level_size, level_select_size);
-                }
-
-                // This limitation would keep our write-amplification no more than
-                // ln(max_compaction_bytes/flush_level_bytes) /
-                // ln(self.config.level0_sub_level_compact_level_count/2) Here we only use half
-                // of level0_sub_level_compact_level_count just for convenient.
-                let is_write_amp_large =
-                    max_level_size * self.config.level0_sub_level_compact_level_count as u64 / 2
-                        >= input.total_file_size;
-
-                if (is_write_amp_large
-                    || input.sstable_infos.len() < tier_sub_level_compact_level_count)
-                    && input.total_file_count < self.config.level0_max_compact_file_number as usize
-                {
-                    skip_by_write_amp = true;
-                    continue;
                 }
 
                 let mut select_level_inputs = Vec::with_capacity(input.sstable_infos.len());
@@ -155,17 +146,29 @@ impl IntraCompactionPicker {
                         level_type: LevelType::Nonoverlapping as i32,
                         table_infos: level_select_sst,
                     });
+
+                    select_input_size += input.total_file_size;
+                    total_file_count += input.total_file_count;
                 }
                 select_level_inputs.reverse();
-                return Some(CompactionInput {
-                    input_levels: select_level_inputs,
-                    target_level: 0,
-                    target_sub_level_id: level.sub_level_id,
-                });
-            }
 
-            if skip_by_write_amp {
-                stats.skip_by_write_amp_limit += 1;
+                let result = CompactionInput {
+                    input_levels: select_level_inputs,
+                    target_sub_level_id: level.sub_level_id,
+                    select_input_size,
+                    total_file_count: total_file_count as u64,
+                    ..Default::default()
+                };
+
+                if !self.compaction_task_validator.valid_compact_task(
+                    &result,
+                    ValidationRuleType::Intra,
+                    stats,
+                ) {
+                    continue;
+                }
+
+                return Some(result);
             }
         }
 
@@ -225,6 +228,7 @@ impl IntraCompactionPicker {
                 target_level_idx -= 1;
             }
 
+            let select_input_size = select_sst.file_size;
             let input_levels = vec![
                 InputLevel {
                     level_idx: 0,
@@ -241,6 +245,9 @@ impl IntraCompactionPicker {
                 input_levels,
                 target_level: 0,
                 target_sub_level_id: l0.sub_levels[target_level_idx].sub_level_id,
+                select_input_size,
+                total_file_count: 1,
+                ..Default::default()
             });
         }
         None

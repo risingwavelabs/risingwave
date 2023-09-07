@@ -26,8 +26,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{compact_task, CompactionConfig, LevelType};
 
 use super::picker::{
-    IntraCompactionPicker, SpaceReclaimCompactionPicker, SpaceReclaimPickerState, TtlPickerState,
-    TtlReclaimCompactionPicker,
+    CompactionTaskValidator, IntraCompactionPicker, SpaceReclaimCompactionPicker,
+    SpaceReclaimPickerState, TtlPickerState, TtlReclaimCompactionPicker,
 };
 use super::{
     create_compaction_task, LevelCompactionPicker, ManualCompactionOption, ManualCompactionPicker,
@@ -111,14 +111,22 @@ impl DynamicLevelSelectorCore {
         &self,
         picker_info: &PickerInfo,
         overlap_strategy: Arc<dyn OverlapStrategy>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
     ) -> Box<dyn CompactionPicker> {
         match picker_info.picker_type {
-            PickerType::Tier => Box::new(TierCompactionPicker::new(self.config.clone())),
-            PickerType::ToBase => Box::new(LevelCompactionPicker::new(
+            PickerType::Tier => Box::new(TierCompactionPicker::new_with_validator(
+                self.config.clone(),
+                compaction_task_validator,
+            )),
+            PickerType::ToBase => Box::new(LevelCompactionPicker::new_with_validator(
                 picker_info.target_level,
                 self.config.clone(),
+                compaction_task_validator,
             )),
-            PickerType::Intra => Box::new(IntraCompactionPicker::new(self.config.clone())),
+            PickerType::Intra => Box::new(IntraCompactionPicker::new_with_validator(
+                self.config.clone(),
+                compaction_task_validator,
+            )),
             PickerType::BottomLevel => {
                 assert_eq!(picker_info.select_level + 1, picker_info.target_level);
                 Box::new(MinOverlappingPicker::new(
@@ -277,6 +285,7 @@ impl DynamicLevelSelectorCore {
                 }
             });
 
+            // FIXME: more accurate score calculation algorithm will be introduced (#11903)
             ctx.score_levels.push({
                 PickerInfo {
                     score: non_overlapping_score,
@@ -415,12 +424,20 @@ impl LevelSelector for DynamicLevelSelector {
         let overlap_strategy =
             create_overlap_strategy(compaction_group.compaction_config.compaction_mode());
         let ctx = dynamic_level_core.get_priority_levels(levels, level_handlers);
+        // TODO: Determine which rule to enable by write limit
+        let compaction_task_validator = Arc::new(CompactionTaskValidator::new(
+            compaction_group.compaction_config.clone(),
+        ));
         for picker_info in &ctx.score_levels {
             if picker_info.score <= SCORE_BASE {
                 return None;
             }
-            let mut picker =
-                dynamic_level_core.create_compaction_picker(picker_info, overlap_strategy.clone());
+            let mut picker = dynamic_level_core.create_compaction_picker(
+                picker_info,
+                overlap_strategy.clone(),
+                compaction_task_validator.clone(),
+            );
+
             let mut stats = LocalPickerStatistic::default();
             if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
                 ret.add_pending_task(task_id, level_handlers);

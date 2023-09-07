@@ -20,7 +20,10 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel};
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
-use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
+use super::{
+    CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
+    ValidationRuleType,
+};
 use crate::hummock::compaction::create_overlap_strategy;
 use crate::hummock::compaction::picker::TrivialMovePicker;
 use crate::hummock::level_handler::LevelHandler;
@@ -28,6 +31,7 @@ use crate::hummock::level_handler::LevelHandler;
 pub struct LevelCompactionPicker {
     target_level: usize,
     config: Arc<CompactionConfig>,
+    compaction_task_validator: Arc<CompactionTaskValidator>,
 }
 
 impl CompactionPicker for LevelCompactionPicker {
@@ -80,10 +84,24 @@ impl CompactionPicker for LevelCompactionPicker {
 }
 
 impl LevelCompactionPicker {
+    #[cfg(test)]
     pub fn new(target_level: usize, config: Arc<CompactionConfig>) -> LevelCompactionPicker {
         LevelCompactionPicker {
             target_level,
+            compaction_task_validator: Arc::new(CompactionTaskValidator::new(config.clone())),
             config,
+        }
+    }
+
+    pub fn new_with_validator(
+        target_level: usize,
+        config: Arc<CompactionConfig>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
+    ) -> LevelCompactionPicker {
+        LevelCompactionPicker {
+            target_level,
+            config,
+            compaction_task_validator,
         }
     }
 
@@ -113,10 +131,10 @@ impl LevelCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
+        // TODO: remove this
         let l0_size = l0.total_file_size - level_handlers[0].get_pending_file_size();
         let base_level_size = target_level.total_file_size
             - level_handlers[target_level.level_idx as usize].get_pending_file_size();
-
         if l0_size < base_level_size {
             stats.skip_by_write_amp_limit += 1;
             return None;
@@ -153,7 +171,7 @@ impl LevelCompactionPicker {
 
         let mut skip_by_pending = false;
         let mut input_levels = vec![];
-        let mut min_write_amp_meet = false;
+
         for input in l0_select_tables_vec {
             let l0_select_tables = input
                 .sstable_infos
@@ -180,16 +198,6 @@ impl LevelCompactionPicker {
                 continue;
             }
 
-            // The size of target level may be too large, we shall skip this compact task and wait
-            //  the data in base level compact to lower level.
-            if target_level_size > self.config.max_compaction_bytes && strict_check {
-                continue;
-            }
-
-            if input.total_file_size >= target_level_size {
-                min_write_amp_meet = true;
-            }
-
             input_levels.push((input, target_level_size, target_level_ssts));
         }
 
@@ -200,20 +208,7 @@ impl LevelCompactionPicker {
             return None;
         }
 
-        if !min_write_amp_meet && strict_check {
-            // If the write-amplification of all candidate task are large, we may hope to wait base
-            // level compact more data to lower level.  But if we skip all task, I'm
-            // afraid the data will be blocked in level0 and will be never compacted to base level.
-            // So we only allow one task exceed write-amplification-limit running in
-            // level0 to base-level.
-            return None;
-        }
-
         for (input, target_file_size, target_level_files) in input_levels {
-            if min_write_amp_meet && input.total_file_size < target_file_size {
-                continue;
-            }
-
             let mut select_level_inputs = input
                 .sstable_infos
                 .into_iter()
@@ -224,18 +219,33 @@ impl LevelCompactionPicker {
                 })
                 .collect_vec();
             select_level_inputs.reverse();
+            let target_file_count = target_level_files.len();
             select_level_inputs.push(InputLevel {
                 level_idx: target_level.level_idx,
                 level_type: target_level.level_type,
                 table_infos: target_level_files,
             });
-            return Some(CompactionInput {
+
+            let result = CompactionInput {
                 input_levels: select_level_inputs,
                 target_level: self.target_level,
-                target_sub_level_id: 0,
-            });
+                select_input_size: input.total_file_size,
+                target_input_size: target_file_size,
+                total_file_count: (input.total_file_count + target_file_count) as u64,
+                ..Default::default()
+            };
+
+            if !self.compaction_task_validator.valid_compact_task(
+                &result,
+                ValidationRuleType::ToBase,
+                stats,
+            ) && strict_check
+            {
+                continue;
+            }
+
+            return Some(result);
         }
-        stats.skip_by_write_amp_limit += 1;
         None
     }
 }
@@ -632,6 +642,7 @@ pub mod tests {
             }],
             target_level: 1,
             target_sub_level_id: pending_level.sub_level_id,
+            ..Default::default()
         };
         assert!(!levels_handler[0].is_level_pending_compact(&pending_level));
         tier_task_input.add_pending_task(1, &mut levels_handler);
@@ -649,7 +660,6 @@ pub mod tests {
         // But stopped by pending sub-level when trying to include more sub-levels.
         let mut picker = LevelCompactionPicker::new(1, config.clone());
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
-
         assert!(ret.is_none());
 
         // Free the pending sub-level.
@@ -695,7 +705,6 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        // println!("ret.input_levels: {:?}", ret.input_levels);
         // 1. trivial_move
         assert_eq!(2, ret.input_levels.len());
         assert!(ret.input_levels[1].table_infos.is_empty());
@@ -705,7 +714,6 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        println!("ret.input_levels: {:?}", ret.input_levels);
         assert_eq!(3, ret.input_levels.len());
         assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
     }
