@@ -35,7 +35,7 @@
 - input: CREATE TABLE T (a STRUCT<v1 INT>)
   formatted_sql: CREATE TABLE T (a STRUCT<v1 INT>)
 - input: CREATE TABLE T (FULL INT)
-  error_msg: 'sql parser error: syntax error at or near FULL'
+  error_msg: 'sql parser error: syntax error at or near FULL at line:1, column:21'
 - input: CREATE TABLE T ("FULL" INT)
   formatted_sql: CREATE TABLE T ("FULL" INT)
 - input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
