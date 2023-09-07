@@ -20,7 +20,7 @@ use crate::ExprError;
 /// Returns the length of an array.
 ///
 /// ```sql
-/// array_length ( array anyarray) → int64
+/// array_length (array anyarray) → int64
 /// ```
 ///
 /// Examples:

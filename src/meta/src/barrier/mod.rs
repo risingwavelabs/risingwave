@@ -31,6 +31,7 @@ use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
+use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::Barrier;
 use risingwave_pb::stream_service::{
@@ -48,6 +49,7 @@ use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
 use self::progress::TrackingCommand;
+use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::HummockManagerRef;
@@ -56,7 +58,7 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
     WorkerId,
 };
-use crate::model::{ActorId, BarrierManagerState, PausedReason};
+use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -671,7 +673,7 @@ impl GlobalBarrierManager {
 
         let Scheduled {
             command,
-            notifiers,
+            mut notifiers,
             send_latency_timer,
             checkpoint,
             span,
@@ -695,25 +697,37 @@ impl GlobalBarrierManager {
             self.fragment_manager.clone(),
             self.env.stream_client_pool_ref(),
             info,
-            prev_epoch,
-            curr_epoch,
+            prev_epoch.clone(),
+            curr_epoch.clone(),
             state.paused_reason(),
             command,
             kind,
             self.source_manager.clone(),
             span.clone(),
         ));
-        let mut notifiers = notifiers;
-        notifiers.iter_mut().for_each(Notifier::notify_to_send);
+
         send_latency_timer.observe_duration();
 
-        checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
         self.inject_barrier(command_ctx.clone(), barrier_complete_tx)
             .instrument(span)
             .await;
 
+        // Notify about the injection.
+        let prev_paused_reason = state.paused_reason();
+        let curr_paused_reason = command_ctx.next_paused_reason();
+
+        let info = BarrierInfo {
+            prev_epoch: prev_epoch.value(),
+            curr_epoch: curr_epoch.value(),
+            prev_paused_reason,
+            curr_paused_reason,
+        };
+        notifiers.iter_mut().for_each(|n| n.notify_injected(info));
+
         // Update the paused state after the barrier is injected.
-        state.set_paused_reason(command_ctx.next_paused_reason());
+        state.set_paused_reason(curr_paused_reason);
+        // Record the in-flight barrier.
+        checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
     }
 
     /// Inject a barrier to all CNs and spawn a task to collect it
