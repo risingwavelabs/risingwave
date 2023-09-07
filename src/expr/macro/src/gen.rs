@@ -71,8 +71,6 @@ impl FunctionAttr {
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
-        } else if self.args.len() >= 1 && &self.args[0] == "..." {
-            self.generate_build_varargs_scalar_function(user_fn)?
         } else {
             self.generate_build_scalar_function(user_fn, true)?
         };
@@ -102,6 +100,7 @@ impl FunctionAttr {
         optimize_const: bool,
     ) -> Result<TokenStream2> {
         let num_args = self.args.len();
+        let varargs = self.args.len() == 1 && &self.args[0] == "...";
         let fn_name = format_ident!("{}", user_fn.name);
         let struct_name = match optimize_const {
             true => format_ident!("{}OptimizeConst", utils::to_camel_case(&self.ident_name())),
@@ -150,8 +149,6 @@ impl FunctionAttr {
         let inputs = idents("i", &children_indices);
         let prebuilt_inputs = idents("i", &prebuilt_indices);
         let non_prebuilt_inputs = idents("i", &non_prebuilt_indices);
-        let all_child = idents("child", &(0..num_args).collect_vec());
-        let child = idents("child", &children_indices);
         let array_refs = idents("array", &children_indices);
         let arrays = idents("a", &children_indices);
         let datums = idents("v", &children_indices);
@@ -212,6 +209,46 @@ impl FunctionAttr {
         } else {
             quote! { () }
         };
+
+        // evaluate child expressions and
+        // - build a chunk if arguments are varibale
+        // - downcast arrays if arguments are fixed
+        let eval_children = if varargs {
+            quote! {
+                let mut columns = Vec::with_capacity(self.children.len());
+                for child in &self.children {
+                    columns.push(child.eval_checked(input).await?);
+                }
+                let chunk = DataChunk::new(columns, input.vis().clone());
+            }
+        } else {
+            quote! {
+                #(
+                    let #array_refs = self.children[#children_indices].eval_checked(input).await?;
+                    let #arrays: &#arg_arrays = #array_refs.as_ref().into();
+                )*
+            }
+        };
+        // evaluate child expressions and
+        // - build a row if arguments are varibale
+        // - downcast scalars if arguments are fixed
+        let eval_row_children = if varargs {
+            quote! {
+                let mut row = Vec::with_capacity(self.children.len());
+                for child in &self.children {
+                    row.push(child.eval_row(input).await?);
+                }
+                let row = OwnedRow::new(row);
+            }
+        } else {
+            quote! {
+                #(
+                    let #datums = self.children[#children_indices].eval_row(input).await?;
+                    let #inputs: Option<#arg_types> = #datums.as_ref().map(|s| s.as_scalar_ref_impl().try_into().unwrap());
+                )*
+            }
+        };
+
         let generic = if self.ret == "boolean" && user_fn.generic == 3 {
             // XXX: for generic compare functions, we need to specify the compatible type
             let compatible_type = types::ref_type(types::min_compatible_type(&self.args))
@@ -239,8 +276,14 @@ impl FunctionAttr {
         };
         // call the user defined function
         // inputs: [ Option<impl ScalarRef> ]
-        let mut output =
-            quote! { #fn_name #generic(#(#non_prebuilt_inputs,)* #prebuilt_arg #context #writer) };
+        let mut output = match varargs {
+            true => quote! { #fn_name(row, #context #writer) },
+            false => {
+                quote! { #fn_name #generic(#(#non_prebuilt_inputs,)* #prebuilt_arg #context #writer) }
+            }
+        };
+        // handle error if the function returns `Result`
+        // wrap a `Some` if the function doesn't return `Option`
         output = match user_fn.return_type_kind {
             ReturnTypeKind::T => quote! { Some(#output) },
             ReturnTypeKind::Option => output,
@@ -249,7 +292,7 @@ impl FunctionAttr {
         };
         // if user function accepts non-option arguments, we assume the function
         // returns null on null input, so we need to unwrap the inputs before calling.
-        if !user_fn.arg_option {
+        if !varargs && !user_fn.arg_option {
             output = quote! {
                 match (#(#inputs,)*) {
                     (#(Some(#inputs),)*) => #output,
@@ -257,7 +300,7 @@ impl FunctionAttr {
                 }
             };
         };
-        // output: Option<impl ScalarRef or Scalar>
+        // now the `output` is: Option<impl ScalarRef or Scalar>
         let append_output = match user_fn.write {
             true => quote! {{
                 let mut writer = builder.writer().begin();
@@ -297,6 +340,18 @@ impl FunctionAttr {
             quote! {
                 let c = #fn_name(#(#arrays),*);
                 Ok(Arc::new(c.into()))
+            }
+        } else if varargs {
+            quote! {
+                let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
+                for row in chunk.rows_with_holes() {
+                    if let Some(row) = row {
+                        #append_output
+                    } else {
+                        builder.append_null();
+                    }
+                }
+                Ok(Arc::new(builder.finish().into()))
             }
         } else if (types::is_primitive(&self.ret) || self.ret == "boolean") && user_fn.is_pure() {
             // SIMD optimization for primitive types
@@ -380,13 +435,11 @@ impl FunctionAttr {
                     return_type,
                     arg_types: children.iter().map(|c| c.return_type()).collect(),
                 };
-                let mut iter = children.into_iter();
-                #(let #all_child = iter.next().unwrap();)*
 
                 #[derive(Debug)]
                 struct #struct_name {
                     context: Context,
-                    #(#child: BoxedExpression,)*
+                    children: Vec<BoxedExpression>,
                     prebuilt_arg: #prebuilt_arg_type,
                 }
                 #[async_trait::async_trait]
@@ -395,99 +448,19 @@ impl FunctionAttr {
                         self.context.return_type.clone()
                     }
                     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-                        // evaluate children and downcast arrays
-                        #(
-                            let #array_refs = self.#child.eval_checked(input).await?;
-                            let #arrays: &#arg_arrays = #array_refs.as_ref().into();
-                        )*
+                        #eval_children
                         #eval
                     }
                     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-                        #(
-                            let #datums = self.#child.eval_row(input).await?;
-                            let #inputs: Option<#arg_types> = #datums.as_ref().map(|s| s.as_scalar_ref_impl().try_into().unwrap());
-                        )*
+                        #eval_row_children
                         Ok(#row_output)
                     }
                 }
 
                 Ok(Box::new(#struct_name {
                     context,
-                    #(#child,)*
-                    prebuilt_arg,
-                }))
-            }
-        })
-    }
-
-    /// Generate a build function for variable arguments scalar function.
-    fn generate_build_varargs_scalar_function(
-        &self,
-        user_fn: &UserFunctionAttr,
-    ) -> Result<TokenStream2> {
-        let fn_name = format_ident!("{}", user_fn.name);
-        let struct_name = format_ident!("{}", utils::to_camel_case(&self.ident_name()));
-        let builder_type = format_ident!("{}Builder", types::array_type(&self.ret));
-
-        let mut output = quote! { #fn_name(row) };
-        output = match user_fn.return_type_kind {
-            ReturnTypeKind::T => quote! { Some(#output) },
-            ReturnTypeKind::Option => output,
-            ReturnTypeKind::Result => quote! { Some(#output?) },
-            ReturnTypeKind::ResultOption => quote! { #output? },
-        };
-
-        Ok(quote! {
-            |return_type, children| {
-                use std::sync::Arc;
-                use risingwave_common::array::*;
-                use risingwave_common::types::*;
-                use risingwave_common::buffer::Bitmap;
-                use risingwave_common::row::OwnedRow;
-
-                use crate::expr::BoxedExpression;
-                use crate::Result;
-
-                #[derive(Debug)]
-                struct #struct_name {
-                    return_type: DataType,
-                    children: Vec<BoxedExpression>,
-                }
-                #[async_trait::async_trait]
-                impl crate::expr::Expression for #struct_name {
-                    fn return_type(&self) -> DataType {
-                        self.return_type.clone()
-                    }
-                    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-                        let mut columns = Vec::with_capacity(self.children.len());
-                        for child in &self.children {
-                            columns.push(child.eval_checked(input).await?);
-                        }
-                        let chunk = DataChunk::new(columns, input.vis().clone());
-
-                        let mut builder = #builder_type::with_type(input.capacity(), self.return_type.clone());
-                        for row in chunk.rows_with_holes() {
-                            if let Some(row) = row {
-                                builder.append(#output.as_ref().map(|s| s.as_scalar_ref()));
-                            } else {
-                                builder.append_null();
-                            }
-                        }
-                        Ok(Arc::new(builder.finish().into()))
-                    }
-                    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-                        let mut row = Vec::with_capacity(self.children.len());
-                        for child in &self.children {
-                            row.push(child.eval_row(input).await?);
-                        }
-                        let row = OwnedRow::new(row);
-                        Ok(#output.map(|s| s.into()))
-                    }
-                }
-
-                Ok(Box::new(#struct_name {
-                    return_type,
                     children,
+                    prebuilt_arg,
                 }))
             }
         })
