@@ -23,28 +23,21 @@ use risingwave_pb::meta::{
 use tonic::{Request, Response, Status};
 
 use crate::manager::ClusterManagerRef;
-use crate::storage::MetaStore;
 use crate::MetaError;
 
 #[derive(Clone)]
-pub struct ClusterServiceImpl<S: MetaStore> {
-    cluster_manager: ClusterManagerRef<S>,
+pub struct ClusterServiceImpl {
+    cluster_manager: ClusterManagerRef,
 }
 
-impl<S> ClusterServiceImpl<S>
-where
-    S: MetaStore,
-{
-    pub fn new(cluster_manager: ClusterManagerRef<S>) -> Self {
+impl ClusterServiceImpl {
+    pub fn new(cluster_manager: ClusterManagerRef) -> Self {
         ClusterServiceImpl { cluster_manager }
     }
 }
 
 #[async_trait::async_trait]
-impl<S> ClusterService for ClusterServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl ClusterService for ClusterServiceImpl {
     async fn add_worker_node(
         &self,
         request: Request<AddWorkerNodeRequest>,
