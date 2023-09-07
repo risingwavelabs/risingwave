@@ -45,8 +45,8 @@ use crate::test_utils::prepare_first_valid_version;
 
 pub async fn prepare_local_version_manager(
     opt: Arc<StorageOpts>,
-    env: MetaSrvEnv<MemStore>,
-    hummock_manager_ref: HummockManagerRef<MemStore>,
+    env: MetaSrvEnv,
+    hummock_manager_ref: HummockManagerRef,
     worker_node: WorkerNode,
 ) -> LocalVersionManagerRef {
     let (pinned_version, _, _) =

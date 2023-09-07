@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
@@ -81,7 +83,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for Coordi
         self.inner.abort().await
     }
 
-    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> Result<()> {
+    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         self.inner.update_vnode_bitmap(vnode_bitmap).await
     }
 }

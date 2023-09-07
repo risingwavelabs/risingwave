@@ -25,29 +25,25 @@ use super::CompactorManagerRef;
 use crate::backup_restore::BackupManagerRef;
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetaSrvEnv;
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
-pub type VacuumManagerRef<S> = Arc<VacuumManager<S>>;
+pub type VacuumManagerRef = Arc<VacuumManager>;
 
-pub struct VacuumManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
-    hummock_manager: HummockManagerRef<S>,
-    backup_manager: BackupManagerRef<S>,
+pub struct VacuumManager {
+    env: MetaSrvEnv,
+    hummock_manager: HummockManagerRef,
+    backup_manager: BackupManagerRef,
     /// Use the CompactorManager to dispatch VacuumTask.
     compactor_manager: CompactorManagerRef,
     /// SST object ids which have been dispatched to vacuum nodes but are not replied yet.
     pending_object_ids: parking_lot::RwLock<HashSet<HummockSstableObjectId>>,
 }
 
-impl<S> VacuumManager<S>
-where
-    S: MetaStore,
-{
+impl VacuumManager {
     pub fn new(
-        env: MetaSrvEnv<S>,
-        hummock_manager: HummockManagerRef<S>,
-        backup_manager: BackupManagerRef<S>,
+        env: MetaSrvEnv,
+        hummock_manager: HummockManagerRef,
+        backup_manager: BackupManagerRef,
         compactor_manager: CompactorManagerRef,
     ) -> Self {
         Self {

@@ -157,6 +157,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ArrayPrepend
             | expr_node::Type::FormatType
             | expr_node::Type::ArrayDistinct
+            | expr_node::Type::ArrayMin
             | expr_node::Type::ArrayDims
             | expr_node::Type::ArrayLength
             | expr_node::Type::Cardinality
