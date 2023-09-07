@@ -26,7 +26,7 @@ shift $((OPTIND -1))
 if [[ "$profile" == "ci-dev" ]]; then
   echo "Running in ci-dev mode"
   ENABLE_RELEASE_PROFILE=false
-elif [[ "$profile" != "ci-release" ]]; then
+elif [[ "$profile" == "ci-release" ]]; then
   echo "Running in ci-release mode"
   ENABLE_RELEASE_PROFILE=true
 else
