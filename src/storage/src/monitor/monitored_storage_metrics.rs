@@ -43,16 +43,14 @@ pub struct MonitoredStorageMetrics {
 
 pub static GLOBAL_STORAGE_METRICS: OnceLock<MonitoredStorageMetrics> = OnceLock::new();
 
-pub fn global_storage_metrics(storage_metric_level: MetricLevel) -> MonitoredStorageMetrics {
+pub fn global_storage_metrics(metric_level: MetricLevel) -> MonitoredStorageMetrics {
     GLOBAL_STORAGE_METRICS
-        .get_or_init(|| {
-            MonitoredStorageMetrics::new(&GLOBAL_METRICS_REGISTRY, storage_metric_level)
-        })
+        .get_or_init(|| MonitoredStorageMetrics::new(&GLOBAL_METRICS_REGISTRY, metric_level))
         .clone()
 }
 
 impl MonitoredStorageMetrics {
-    pub fn new(registry: &Registry, storage_metric_level: MetricLevel) -> Self {
+    pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
         // 256B ~ max 4GB
         let size_buckets = exponential_buckets(256.0, 16.0, 7).unwrap();
         // 10ms ~ max 2.7h
@@ -68,7 +66,7 @@ impl MonitoredStorageMetrics {
         let get_key_size = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Debug,
             get_key_size,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(
@@ -81,7 +79,7 @@ impl MonitoredStorageMetrics {
         let get_value_size = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Debug,
             get_value_size,
-            storage_metric_level,
+            metric_level,
         );
 
         let mut buckets = exponential_buckets(0.000004, 2.0, 4).unwrap(); // 4 ~ 32us
@@ -101,7 +99,7 @@ impl MonitoredStorageMetrics {
         let get_duration = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Critical,
             get_duration,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(
@@ -111,11 +109,8 @@ impl MonitoredStorageMetrics {
         );
         let iter_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let iter_size = RelabeledHistogramVec::with_metric_level(
-            MetricLevel::Debug,
-            iter_size,
-            storage_metric_level,
-        );
+        let iter_size =
+            RelabeledHistogramVec::with_metric_level(MetricLevel::Debug, iter_size, metric_level);
 
         let opts = histogram_opts!(
             "state_store_iter_item",
@@ -124,11 +119,8 @@ impl MonitoredStorageMetrics {
         );
         let iter_item =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let iter_item = RelabeledHistogramVec::with_metric_level(
-            MetricLevel::Debug,
-            iter_item,
-            storage_metric_level,
-        );
+        let iter_item =
+            RelabeledHistogramVec::with_metric_level(MetricLevel::Debug, iter_item, metric_level);
 
         let opts = histogram_opts!(
             "state_store_iter_init_duration",
@@ -140,7 +132,7 @@ impl MonitoredStorageMetrics {
         let iter_init_duration = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Critical,
             iter_init_duration,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(
@@ -153,7 +145,7 @@ impl MonitoredStorageMetrics {
         let iter_scan_duration = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Critical,
             iter_scan_duration,
-            storage_metric_level,
+            metric_level,
         );
 
         let iter_in_process_counts = register_int_counter_vec_with_registry!(
@@ -166,7 +158,7 @@ impl MonitoredStorageMetrics {
         let iter_in_process_counts = RelabeledCounterVec::with_metric_level(
             MetricLevel::Debug,
             iter_in_process_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(
@@ -179,7 +171,7 @@ impl MonitoredStorageMetrics {
         let may_exist_duration = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Debug,
             may_exist_duration,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(

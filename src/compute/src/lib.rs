@@ -36,7 +36,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use clap::{Parser, ValueEnum};
-use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
+use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 use serde::{Deserialize, Serialize};
@@ -103,7 +103,7 @@ pub struct ComputeNodeOpts {
     /// >0 = enable metrics
     #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
-    pub metrics_level: Option<u32>,
+    pub metrics_level: Option<MetricLevel>,
 
     /// Path to data file cache data directory.
     /// Left empty to disable file cache.
