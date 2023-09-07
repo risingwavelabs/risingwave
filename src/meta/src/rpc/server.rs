@@ -539,7 +539,6 @@ pub async fn start_service_as_election_leader(
     let user_srv = UserServiceImpl::new(env.clone(), catalog_manager.clone());
 
     let scale_srv = ScaleServiceImpl::new(
-        barrier_scheduler.clone(),
         fragment_manager.clone(),
         cluster_manager.clone(),
         source_manager,
