@@ -22,12 +22,14 @@ use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
 use clickhouse::Client;
 use rdkafka::ClientConfig;
+use risingwave_common::error::anyhow_error;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::json::JsonString;
 use serde_with::{serde_as, DisplayFromStr};
 
 use crate::aws_auth::AwsAuthProps;
 use crate::deserialize_duration_from_string;
+use crate::sink::SinkError;
 
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
@@ -379,7 +381,8 @@ impl NatsCommon {
                     .map(|url| url.parse())
                     .collect::<Result<Vec<async_nats::ServerAddr>, _>>()?,
             )
-            .await?;
+            .await
+            .map_err(|e| SinkError::Nats(anyhow_error!("build nats client error: {:?}", e)))?;
         Ok(client)
     }
 
