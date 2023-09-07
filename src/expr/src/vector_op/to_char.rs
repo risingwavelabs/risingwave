@@ -17,11 +17,12 @@ use std::sync::LazyLock;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::StrftimeItems;
-use risingwave_common::types::{Timestamp, Timestamptz};
-use risingwave_expr_macro::function;
+use risingwave_common::types::{DataType, Timestamp, Timestamptz};
+use risingwave_expr_macro::{build_function, function};
 
 use super::timestamptz::time_zone_err;
-use crate::Result;
+use crate::expr::BoxedExpression;
+use crate::{ExprError, Result};
 
 type Pattern<'a> = Vec<chrono::format::Item<'a>>;
 
@@ -115,16 +116,27 @@ impl ChronoPattern {
     "to_char(timestamp, varchar) -> varchar",
     prebuild = "ChronoPattern::compile($1)"
 )]
-fn to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl Write) {
+fn timestamp_to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl Write) {
     let format = data.0.format_with_items(pattern.borrow_dependent().iter());
     write!(writer, "{}", format).unwrap();
+}
+
+// Only to register this signature to function signature map.
+#[build_function("to_char(timestamptz, varchar) -> varchar")]
+fn timestamptz_to_char(
+    _return_type: DataType,
+    _children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    Err(ExprError::UnsupportedFunction(
+        "to_timestamp should have been rewritten to include timezone".into(),
+    ))
 }
 
 #[function(
     "to_char(timestamptz, varchar, varchar) -> varchar",
     prebuild = "ChronoPattern::compile($1)"
 )]
-fn to_char_timestamptz(
+fn timestamptz_to_char3(
     data: Timestamptz,
     zone: &str,
     tmpl: &ChronoPattern,

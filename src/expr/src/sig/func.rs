@@ -179,9 +179,6 @@ mod tests {
         // handle them specially without relying on FuncSigMap.
         let expected = expect_test::expect![[r#"
             {
-                ToTimestamp1: [
-                    "to_timestamp1(varchar, varchar) -> timestamp/timestamptz",
-                ],
                 Cast: [
                     "cast(boolean) -> int32/varchar",
                     "cast(int16) -> int256/decimal/float64/float32/int64/int32/varchar",

@@ -69,7 +69,8 @@ fn parse(s: &str, tmpl: &ChronoPattern) -> Result<Parsed> {
 
 #[function(
     "to_timestamp1(varchar, varchar) -> timestamp",
-    prebuild = "ChronoPattern::compile($1)"
+    prebuild = "ChronoPattern::compile($1)",
+    deprecated
 )]
 pub fn to_timestamp_legacy(s: &str, tmpl: &ChronoPattern) -> Result<Timestamp> {
     let parsed = parse(s, tmpl)?;
