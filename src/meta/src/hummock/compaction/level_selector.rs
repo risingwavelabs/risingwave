@@ -26,7 +26,7 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{compact_task, CompactionConfig, LevelType};
 
 use super::picker::{
-    SpaceReclaimCompactionPicker, SpaceReclaimPickerState, TtlPickerState,
+    CompactionTaskValidator, SpaceReclaimCompactionPicker, SpaceReclaimPickerState, TtlPickerState,
     TtlReclaimCompactionPicker,
 };
 use super::{
@@ -95,14 +95,19 @@ impl DynamicLevelSelectorCore {
         select_level: usize,
         target_level: usize,
         overlap_strategy: Arc<dyn OverlapStrategy>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
     ) -> Box<dyn CompactionPicker> {
         if select_level == 0 {
             if target_level == 0 {
-                Box::new(TierCompactionPicker::new(self.config.clone()))
+                Box::new(TierCompactionPicker::new_with_validator(
+                    self.config.clone(),
+                    compaction_task_validator,
+                ))
             } else {
-                Box::new(LevelCompactionPicker::new(
+                Box::new(LevelCompactionPicker::new_with_validator(
                     target_level,
                     self.config.clone(),
+                    compaction_task_validator,
                 ))
             }
         } else {
@@ -374,6 +379,11 @@ impl LevelSelector for DynamicLevelSelector {
         let overlap_strategy =
             create_overlap_strategy(compaction_group.compaction_config.compaction_mode());
         let ctx = dynamic_level_core.get_priority_levels(levels, level_handlers);
+
+        // TODO: Determine which rule to enable by write limit
+        let compaction_task_validator = Arc::new(CompactionTaskValidator::new(
+            compaction_group.compaction_config.clone(),
+        ));
         for (score, select_level, target_level) in ctx.score_levels {
             if score <= SCORE_BASE {
                 return None;
@@ -382,6 +392,7 @@ impl LevelSelector for DynamicLevelSelector {
                 select_level,
                 target_level,
                 overlap_strategy.clone(),
+                compaction_task_validator.clone(),
             );
             let mut stats = LocalPickerStatistic::default();
             if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
