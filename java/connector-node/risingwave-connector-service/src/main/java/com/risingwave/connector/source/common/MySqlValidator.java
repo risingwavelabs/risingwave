@@ -103,11 +103,12 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
     @Override
     public void validateTable() {
-        try {
-            validateTableSchema();
-        } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e.getMessage());
-        }
+        // TODO: for cdc source job we don't need to validate table schema
+        // try {
+        //     validateTableSchema();
+        // } catch (SQLException e) {
+        //     throw ValidatorUtils.internalError(e.getMessage());
+        // }
     }
 
     private void validateTableSchema() throws SQLException {

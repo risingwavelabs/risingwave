@@ -467,11 +467,11 @@ impl HummockEventHandler {
                 self.pinned_version.load().max_committed_epoch(),
             ));
 
-        info_in_release!(
-            "update to hummock version: {}, epoch: {}",
-            new_pinned_version.id(),
-            new_pinned_version.max_committed_epoch()
-        );
+        // info_in_release!(
+        //     "update to hummock version: {}, epoch: {}",
+        //     new_pinned_version.id(),
+        //     new_pinned_version.max_committed_epoch()
+        // );
 
         self.uploader.update_pinned_version(new_pinned_version);
     }

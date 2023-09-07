@@ -445,7 +445,7 @@ pub fn start_compactor(
                             }
                         }
 
-                        tracing::info!(
+                        tracing::trace!(
                             running_task_count = %running_task_count.load(Ordering::Relaxed),
                             pull_task_ack = %pull_task_ack.load(Ordering::Relaxed),
                             pending_pull_task_count = %pending_pull_task_count

@@ -146,6 +146,10 @@ impl BuildingFragment {
                 dml_node.table_id = table_id;
                 dml_node.table_version_id = job.table_version_id().unwrap();
             }
+            NodeBody::Source(_) => {
+                // workaround to make Source be able to be scheduled
+                has_table = true;
+            }
             _ => {}
         });
 

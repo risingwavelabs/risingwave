@@ -62,10 +62,10 @@ use crate::handler::create_table::{
 };
 use crate::handler::util::{get_connector, is_cdc_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::LogicalSource;
+use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::utils::resolve_connection_in_with_option;
-use crate::{bind_data_type, build_graph, OptimizerContext, PlanRef, WithOptions};
+use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
@@ -1199,17 +1199,17 @@ pub async fn handle_create_source(
         // TODO: create source stream job in ddl service
         let graph = {
             let context = OptimizerContext::from_handler_args(handler_args);
-            let source_node: PlanRef = LogicalSource::new(
+            let logical_source = LogicalSource::new(
                 Some(Rc::new(SourceCatalog::from(&source))),
                 columns,
                 row_id_index.map(|idx| idx as _),
                 true,
                 false,
                 context.into(),
-            )?
-            .into();
+            )?;
 
-            let mut graph = build_graph(source_node);
+            let stream_node = logical_source.to_stream(&mut ToStreamContext::new(false))?;
+            let mut graph = build_graph(stream_node);
             graph.parallelism = session
                 .config()
                 .get_streaming_parallelism()
