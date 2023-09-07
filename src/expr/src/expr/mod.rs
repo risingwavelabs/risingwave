@@ -37,7 +37,6 @@ mod expr_binary_nonnull;
 mod expr_binary_nullable;
 mod expr_case;
 mod expr_coalesce;
-mod expr_concat_ws;
 mod expr_field;
 mod expr_in;
 mod expr_input_ref;

@@ -31,6 +31,7 @@ pub mod cardinality;
 pub mod cast;
 pub mod cmp;
 pub mod concat_op;
+pub mod concat_ws;
 pub mod conjunction;
 pub mod date_trunc;
 pub mod encdec;

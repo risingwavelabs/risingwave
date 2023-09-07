@@ -22,7 +22,6 @@ use risingwave_pb::expr::ExprNode;
 use super::expr_array_transform::ArrayTransformExpression;
 use super::expr_case::CaseExpression;
 use super::expr_coalesce::CoalesceExpression;
-use super::expr_concat_ws::ConcatWsExpression;
 use super::expr_field::FieldExpression;
 use super::expr_in::InExpression;
 use super::expr_some_all::SomeAllExpression;
@@ -55,7 +54,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         E::In => InExpression::try_from_boxed(prost),
         E::Case => CaseExpression::try_from_boxed(prost),
         E::Coalesce => CoalesceExpression::try_from_boxed(prost),
-        E::ConcatWs => ConcatWsExpression::try_from_boxed(prost),
         E::Field => FieldExpression::try_from_boxed(prost),
         E::Vnode => VnodeExpression::try_from_boxed(prost),
 
