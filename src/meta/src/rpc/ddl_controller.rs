@@ -604,8 +604,13 @@ impl DdlController {
         let default_parallelism =
             self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
 
-        let actor_graph_builder =
-            ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
+        let actor_graph_builder = ActorGraphBuilder::new(
+            complete_graph,
+            self.env.id_gen_manager_ref(),
+            cluster_info,
+            default_parallelism,
+        )
+        .await?;
 
         let ActorGraphBuildResult {
             graph,
@@ -613,9 +618,7 @@ impl DdlController {
             existing_locations,
             dispatchers,
             merge_updates,
-        } = actor_graph_builder
-            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
-            .await?;
+        } = actor_graph_builder.generate_graph(stream_job).await?;
         assert!(merge_updates.is_empty());
 
         // 3. Build the table fragments structure that will be persisted in the stream manager,
@@ -895,8 +898,13 @@ impl DdlController {
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
         let default_parallelism =
             self.resolve_stream_parallelism(default_parallelism, &cluster_info)?;
-        let actor_graph_builder =
-            ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
+        let actor_graph_builder = ActorGraphBuilder::new(
+            complete_graph,
+            self.env.id_gen_manager_ref(),
+            cluster_info,
+            default_parallelism,
+        )
+        .await?;
 
         let ActorGraphBuildResult {
             graph,
@@ -904,9 +912,7 @@ impl DdlController {
             existing_locations,
             dispatchers,
             merge_updates,
-        } = actor_graph_builder
-            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
-            .await?;
+        } = actor_graph_builder.generate_graph(stream_job).await?;
         assert!(dispatchers.is_empty());
 
         // 3. Assign a new dummy ID for the new table fragments.

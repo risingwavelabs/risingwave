@@ -328,6 +328,10 @@ fn build_fragment(
                 NodeBody::Exchange(exchange_node) => {
                     let exchange_node_strategy = exchange_node.get_strategy()?.clone();
 
+                    if let DispatcherType::Simple = exchange_node_strategy.r#type() {
+                        current_fragment.requires_singleton = true;
+                    }
+
                     // Exchange node should have only one input.
                     let [input]: [_; 1] = std::mem::take(&mut child_node.input).try_into().unwrap();
                     let child_fragment = build_and_add_fragment(state, input)?;

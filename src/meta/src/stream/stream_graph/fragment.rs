@@ -35,6 +35,7 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 
+use super::group_schedule::Scheduling;
 use crate::manager::{IdGeneratorManagerRef, StreamingJob};
 use crate::model::FragmentId;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
@@ -735,6 +736,7 @@ impl CompleteStreamFragmentGraph {
         id: GlobalFragmentId,
         actors: Vec<StreamActor>,
         distribution: Distribution,
+        scheduling: Scheduling,
     ) -> Fragment {
         let building_fragment = self.get_fragment(id).into_building().unwrap();
         let internal_tables = building_fragment.extract_internal_tables();
@@ -744,7 +746,9 @@ impl CompleteStreamFragmentGraph {
             upstream_table_columns: _,
         } = building_fragment;
 
-        let distribution_type = distribution.to_distribution_type() as i32;
+        let distribution_type = distribution.to_distribution_type();
+        let distribution_type_2 = scheduling.distribution_type;
+        assert_eq!(distribution_type, distribution_type_2);
 
         let state_table_ids = internal_tables
             .iter()
@@ -759,8 +763,10 @@ impl CompleteStreamFragmentGraph {
 
         Fragment {
             fragment_id: inner.fragment_id,
+            fragment_group_id: scheduling.fragment_group_id.as_global_id(),
+            actor_group_mapping: Some(scheduling.actor_group_mapping.to_protobuf()),
             fragment_type_mask: inner.fragment_type_mask,
-            distribution_type,
+            distribution_type: distribution_type as _,
             actors,
             vnode_mapping: Some(distribution.into_mapping().to_protobuf()),
             state_table_ids,
@@ -818,5 +824,9 @@ impl CompleteStreamFragmentGraph {
     /// Returns all building fragments in the graph.
     pub(super) fn building_fragments(&self) -> &HashMap<GlobalFragmentId, BuildingFragment> {
         &self.building_graph.fragments
+    }
+
+    pub(super) fn existing_fragments(&self) -> &HashMap<GlobalFragmentId, Fragment> {
+        &self.existing_fragments
     }
 }

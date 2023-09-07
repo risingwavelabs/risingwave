@@ -14,6 +14,7 @@
 
 mod actor;
 mod fragment;
+mod group_schedule;
 mod id;
 mod schedule;
 

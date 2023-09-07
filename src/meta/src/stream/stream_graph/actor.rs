@@ -20,8 +20,8 @@ use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::hash::{ActorId, ActorMapping, ParallelUnitId};
-use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::hash::{ActorGroupId, ActorId, ActorMapping, ParallelUnitId};
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
@@ -29,6 +29,7 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
 };
 
+use super::group_schedule::{self, FragmentSchedulings};
 use super::id::GlobalFragmentIdsExt;
 use super::Locations;
 use crate::manager::{IdGeneratorManagerRef, StreamingClusterInfo, StreamingJob};
@@ -64,6 +65,8 @@ struct ActorBuilder {
     /// The fragment ID of this actor.
     fragment_id: GlobalFragmentId,
 
+    actor_group_id: ActorGroupId,
+
     /// The body of this actor, verbatim from the frontend.
     ///
     /// This cannot be directly used for execution, and it will be rewritten after we know all of
@@ -84,12 +87,14 @@ impl ActorBuilder {
     fn new(
         actor_id: GlobalActorId,
         fragment_id: GlobalFragmentId,
+        actor_group_id: ActorGroupId,
         vnode_bitmap: Option<Bitmap>,
         node: Arc<StreamNode>,
     ) -> Self {
         Self {
             actor_id,
             fragment_id,
+            actor_group_id,
             nodes: node,
             downstreams: HashMap::new(),
             upstreams: HashMap::new(),
@@ -231,6 +236,7 @@ impl ActorBuilder {
 
         Ok(StreamActor {
             actor_id: self.actor_id.as_global_id(),
+            actor_group_id: self.actor_group_id,
             fragment_id: self.fragment_id.as_global_id(),
             nodes: Some(rewritten_nodes),
             dispatcher: self.downstreams.into_values().collect(),
@@ -310,13 +316,14 @@ impl ActorGraphBuildStateInner {
         actor_id: GlobalActorId,
         fragment_id: GlobalFragmentId,
         parallel_unit_id: ParallelUnitId,
+        actor_group_id: ActorGroupId,
         vnode_bitmap: Option<Bitmap>,
         node: Arc<StreamNode>,
     ) {
         self.actor_builders
             .try_insert(
                 actor_id,
-                ActorBuilder::new(actor_id, fragment_id, vnode_bitmap, node),
+                ActorBuilder::new(actor_id, fragment_id, actor_group_id, vnode_bitmap, node),
             )
             .unwrap();
 
@@ -592,6 +599,10 @@ pub struct ActorGraphBuilder {
     /// The actual distribution for each existing fragment.
     existing_distributions: HashMap<GlobalFragmentId, Distribution>,
 
+    id_gen_manager: IdGeneratorManagerRef,
+
+    schedulings: FragmentSchedulings,
+
     /// The complete fragment graph.
     fragment_graph: CompleteStreamFragmentGraph,
 
@@ -602,8 +613,9 @@ pub struct ActorGraphBuilder {
 impl ActorGraphBuilder {
     /// Create a new actor graph builder with the given "complete" graph. Returns an error if the
     /// graph is failed to be scheduled.
-    pub fn new(
+    pub async fn new(
         fragment_graph: CompleteStreamFragmentGraph,
+        id_gen_manager: IdGeneratorManagerRef,
         cluster_info: StreamingClusterInfo,
         default_parallelism: NonZeroUsize,
     ) -> MetaResult<Self> {
@@ -616,9 +628,19 @@ impl ActorGraphBuilder {
         )
         .schedule(&fragment_graph)?;
 
+        let schedulings = group_schedule::Scheduler::new(
+            &fragment_graph,
+            id_gen_manager.clone(),
+            default_parallelism.get(),
+        )
+        .schedule()
+        .await?;
+
         Ok(Self {
             distributions,
             existing_distributions,
+            id_gen_manager,
+            schedulings,
             fragment_graph,
             cluster_info,
         })
@@ -630,6 +652,13 @@ impl ActorGraphBuilder {
         self.distributions
             .get(&fragment_id)
             .or_else(|| self.existing_distributions.get(&fragment_id))
+            .unwrap()
+    }
+
+    fn get_scheduling(&self, fragment_id: GlobalFragmentId) -> &group_schedule::Scheduling {
+        (self.schedulings.building)
+            .get(&fragment_id)
+            .or_else(|| self.schedulings.existing.get(&fragment_id))
             .unwrap()
     }
 
@@ -655,18 +684,22 @@ impl ActorGraphBuilder {
 
     /// Build a stream graph by duplicating each fragment as parallel actors. Returns
     /// [`ActorGraphBuildResult`] that will be further used to build actors on the compute nodes.
-    pub async fn generate_graph(
-        self,
-        id_gen_manager: IdGeneratorManagerRef,
-        job: &StreamingJob,
-    ) -> MetaResult<ActorGraphBuildResult> {
+    pub async fn generate_graph(self, job: &StreamingJob) -> MetaResult<ActorGraphBuildResult> {
         // Pre-generate IDs for all actors.
         let actor_len = self
             .distributions
             .values()
             .map(|d| d.parallelism())
             .sum::<usize>() as u64;
-        let id_gen = GlobalActorIdGen::new(&id_gen_manager, actor_len).await?;
+
+        let actor_len_2 = (self.schedulings.building)
+            .values()
+            .map(|s| s.parallelism())
+            .sum::<usize>() as u64;
+
+        assert_eq!(actor_len, actor_len_2);
+
+        let id_gen = GlobalActorIdGen::new(&self.id_gen_manager, actor_len).await?;
 
         // Build the actor graph and get the final state.
         let ActorGraphBuildStateInner {
@@ -705,9 +738,13 @@ impl ActorGraphBuilder {
                 .into_iter()
                 .map(|(fragment_id, actors)| {
                     let distribution = self.distributions[&fragment_id].clone();
-                    let fragment =
-                        self.fragment_graph
-                            .seal_fragment(fragment_id, actors, distribution);
+                    let scheduling = self.get_scheduling(fragment_id).clone();
+                    let fragment = self.fragment_graph.seal_fragment(
+                        fragment_id,
+                        actors,
+                        distribution,
+                        scheduling,
+                    );
                     let fragment_id = fragment_id.as_global_id();
                     (fragment_id, fragment)
                 })
@@ -784,6 +821,7 @@ impl ActorGraphBuilder {
     ) -> MetaResult<()> {
         let current_fragment = self.fragment_graph.get_fragment(fragment_id);
         let distribution = self.get_distribution(fragment_id);
+        let scheduling = self.get_scheduling(fragment_id);
 
         // First, add or record the actors for the current fragment into the state.
         let actor_ids = match current_fragment {
@@ -792,16 +830,18 @@ impl ActorGraphBuilder {
                 let node = Arc::new(current_fragment.node.clone().unwrap());
                 let bitmaps = distribution.as_hash().map(|m| m.to_bitmaps());
 
-                distribution
-                    .parallel_units()
-                    .map(|parallel_unit_id| {
+                (distribution.parallel_units())
+                    .zip_eq_debug(scheduling.actor_groups())
+                    .map(|(parallel_unit_id, actor_group_id)| {
                         let actor_id = state.next_actor_id();
                         let vnode_bitmap = bitmaps.as_ref().map(|m| &m[&parallel_unit_id]).cloned();
+                        // TODO: use bitmap from `scheduling`
 
                         state.inner.add_actor(
                             actor_id,
                             fragment_id,
                             parallel_unit_id,
+                            actor_group_id,
                             vnode_bitmap,
                             node.clone(),
                         );

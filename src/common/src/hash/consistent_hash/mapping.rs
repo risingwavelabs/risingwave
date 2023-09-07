@@ -30,6 +30,7 @@ use crate::util::iter_util::ZipEqDebug;
 
 // TODO: find a better place for this.
 pub type ActorId = u32;
+pub type ActorGroupId = u32;
 
 /// Trait for items that can be used as keys in [`VnodeMapping`].
 pub trait VnodeMappingItem {
@@ -249,6 +250,11 @@ pub mod marker {
         type Item = ActorId;
     }
 
+    pub struct ActorGroup;
+    impl VnodeMappingItem for ActorGroup {
+        type Item = ActorGroupId;
+    }
+
     /// A marker type for items of [`ParallelUnitId`].
     pub struct ParallelUnit;
     impl VnodeMappingItem for ParallelUnit {
@@ -260,6 +266,9 @@ pub mod marker {
 pub type ActorMapping = VnodeMapping<marker::Actor>;
 /// An expanded mapping from [`VirtualNode`] to [`ActorId`].
 pub type ExpandedActorMapping = ExpandedMapping<marker::Actor>;
+
+pub type ActorGroupMapping = VnodeMapping<marker::ActorGroup>;
+pub type ExpandedActorGroupMapping = ExpandedMapping<marker::ActorGroup>;
 
 /// A mapping from [`VirtualNode`] to [`ParallelUnitId`].
 pub type ParallelUnitMapping = VnodeMapping<marker::ParallelUnit>;
@@ -286,6 +295,27 @@ impl ActorMapping {
 
     /// Convert this actor mapping to the protobuf representation.
     pub fn to_protobuf(&self) -> ActorMappingProto {
+        ActorMappingProto {
+            original_indices: self.original_indices.clone(),
+            data: self.data.clone(),
+        }
+    }
+}
+
+impl ActorGroupMapping {
+    /// Create an actor mapping from the protobuf representation.
+    pub fn from_protobuf(proto: &ActorMappingProto) -> Self {
+        // TODO: fix this
+        assert_eq!(proto.original_indices.len(), proto.data.len());
+        Self {
+            original_indices: proto.original_indices.clone(),
+            data: proto.data.clone(),
+        }
+    }
+
+    /// Convert this actor mapping to the protobuf representation.
+    pub fn to_protobuf(&self) -> ActorMappingProto {
+        // TODO: fix this
         ActorMappingProto {
             original_indices: self.original_indices.clone(),
             data: self.data.clone(),

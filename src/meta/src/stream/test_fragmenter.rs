@@ -460,12 +460,12 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let actor_graph_builder = ActorGraphBuilder::new(
         CompleteStreamFragmentGraph::for_test(fragment_graph),
+        env.id_gen_manager_ref(),
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),
-    )?;
-    let ActorGraphBuildResult { graph, .. } = actor_graph_builder
-        .generate_graph(env.id_gen_manager_ref(), &job)
-        .await?;
+    )
+    .await?;
+    let ActorGraphBuildResult { graph, .. } = actor_graph_builder.generate_graph(&job).await?;
 
     let table_fragments = TableFragments::for_test(TableId::default(), graph);
     let actors = table_fragments.actors();

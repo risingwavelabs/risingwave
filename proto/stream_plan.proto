@@ -713,6 +713,7 @@ message StreamActor {
 
   uint32 actor_id = 1;
   uint32 fragment_id = 2;
+  uint32 actor_group_id = 10;
   StreamNode nodes = 3;
   repeated Dispatcher dispatcher = 4;
   // The actors that send messages to this actor.
