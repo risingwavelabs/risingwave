@@ -649,7 +649,7 @@ pub fn start_compactor(
 #[cfg_attr(coverage, no_coverage)]
 #[allow(clippy::too_many_arguments)]
 pub fn start_shared_compactor(
-    mut client: HummockManagerServiceClient<tonic::transport::Channel>,
+    client: HummockManagerServiceClient<tonic::transport::Channel>,
     mut receiver: mpsc::UnboundedReceiver<Request<DispatchCompactionTaskRequest>>,
     context: CompactorContext,
 ) -> (JoinHandle<()>, Sender<()>) {
@@ -660,10 +660,13 @@ pub fn start_shared_compactor(
 
     let join_handle = tokio::spawn(async move {
         let shutdown_map = CompactionShutdownMap::default();
-        let shutdown = shutdown_map.clone();
+        let report_client = client.clone();
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
-        loop {
-            tokio::select! {
+        let executor = context.compaction_executor.clone();
+        let mut heart_beat_client = client.clone();
+
+        'consume_stream: loop {
+            let request: Option<Request<DispatchCompactionTaskRequest>> = tokio::select! {
                 _ = periodic_event_interval.tick() => {
                     let mut progress_list = Vec::new();
                     for (&task_id, progress) in task_progress.lock().iter() {
@@ -685,10 +688,11 @@ pub fn start_shared_compactor(
                         )),
                      };
 
-                     match client.report_compaction_task(report_compaction_task_request).await{
+                     match heart_beat_client.report_compaction_task(report_compaction_task_request).await{
                         Ok(_) => {},
                         Err(_) => tracing::warn!("Failed to report heartbeat"),
-                    }
+                    };
+                    continue
                 }
 
 
@@ -698,7 +702,16 @@ pub fn start_shared_compactor(
                 }
 
                 request = receiver.recv() => {
-                    if let Some(request) = request {
+                    request
+                }
+
+            };
+            match request {
+                Some(request) => {
+                    let context = context.clone();
+                    let shutdown = shutdown_map.clone();
+                    let mut report_client = report_client.clone();
+                    executor.spawn(async move {
                         let DispatchCompactionTaskRequest {
                             tables,
                             output_object_ids,
@@ -743,7 +756,7 @@ pub fn start_shared_compactor(
                                         })),
                                     };
 
-                                    match client
+                                    match report_client
                                         .report_compaction_task(report_compaction_task_request)
                                         .await
                                     {
@@ -762,7 +775,7 @@ pub fn start_shared_compactor(
                                             let report_vacuum_task_request = ReportVacuumTaskRequest {
                                                 vacuum_task: Some(vacuum_task),
                                             };
-                                            match client.report_vacuum_task(report_vacuum_task_request).await {
+                                            match report_client.report_vacuum_task(report_vacuum_task_request).await {
                                                 Ok(_) => tracing::info!("Finished vacuuming SSTs"),
                                                 Err(e) => tracing::warn!("Failed to report vacuum task: {:#?}", e),
                                             }
@@ -782,7 +795,7 @@ pub fn start_shared_compactor(
                                                 total_object_count,
                                                 total_object_size,
                                             };
-                                            match client
+                                            match report_client
                                                 .report_full_scan_task(report_full_scan_task_request)
                                                 .await
                                             {
@@ -818,11 +831,10 @@ pub fn start_shared_compactor(
                                     }
                                 }
                             }
-                    } else {
-                        continue;
-                    }
+                    });
                 }
-            };
+                None => continue 'consume_stream,
+            }
         }
     });
     (join_handle, shutdown_tx)
