@@ -478,9 +478,9 @@ dependencies = [
 
 [[package]]
 name = "async-recursion"
-version = "1.0.4"
+version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e97ce7de6cf12de5d7226c73f5ba9811622f4db3a5b91b55c53e987e5f91cba"
+checksum = "5fd55a5ba1179988837d24ab4c7cc8ed6efdeff578ede0416b4225a5fca35bd0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2340,9 +2340,9 @@ dependencies = [
 
 [[package]]
 name = "deranged"
-version = "0.3.7"
+version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7684a49fb1af197853ef7b2ee694bc1f5b4179556f1e5710e1760c5db6f5e929"
+checksum = "f2696e8a945f658fd14dc3b87242e6b80cd0f36ff04ea560fa39082368847946"
 dependencies = [
  "serde",
 ]
@@ -2773,9 +2773,9 @@ dependencies = [
 
 [[package]]
 name = "flate2"
-version = "1.0.26"
+version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b9429470923de8e8cbd4d2dc513535400b4b3fef0319fb5c4e1f520a7bef743"
+checksum = "c6c98ee8095e9d1dcbf2fcc6d95acccb90d1c81db1e44725c6a984b1dbdfb010"
 dependencies = [
  "crc32fast",
  "libz-sys",
@@ -2833,7 +2833,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=99b21df#99b21dfd0759bc7b9b04c46e952a7283c36b2672"
+source = "git+https://github.com/mrcroxx/foyer?rev=2b8907c#2b8907c3cc629da22622a17bbc6bf16dc52c7bc1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2847,7 +2847,7 @@ dependencies = [
  "itertools 0.11.0",
  "libc",
  "memoffset 0.9.0",
- "nix",
+ "nix 0.27.1",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
@@ -2861,7 +2861,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=99b21df#99b21dfd0759bc7b9b04c46e952a7283c36b2672"
+source = "git+https://github.com/mrcroxx/foyer?rev=2b8907c#2b8907c3cc629da22622a17bbc6bf16dc52c7bc1"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
@@ -2875,7 +2875,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=99b21df#99b21dfd0759bc7b9b04c46e952a7283c36b2672"
+source = "git+https://github.com/mrcroxx/foyer?rev=2b8907c#2b8907c3cc629da22622a17bbc6bf16dc52c7bc1"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -2893,7 +2893,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=99b21df#99b21dfd0759bc7b9b04c46e952a7283c36b2672"
+source = "git+https://github.com/mrcroxx/foyer?rev=2b8907c#2b8907c3cc629da22622a17bbc6bf16dc52c7bc1"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2909,7 +2909,7 @@ dependencies = [
  "itertools 0.11.0",
  "libc",
  "memoffset 0.9.0",
- "nix",
+ "nix 0.27.1",
  "parking_lot 0.12.1",
  "paste",
  "pin-project",
@@ -2924,20 +2924,27 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=99b21df#99b21dfd0759bc7b9b04c46e952a7283c36b2672"
+source = "git+https://github.com/mrcroxx/foyer?rev=2b8907c#2b8907c3cc629da22622a17bbc6bf16dc52c7bc1"
 dependencies = [
  "crossbeam-channel",
  "crossbeam-utils",
  "either",
  "futures-channel",
  "futures-core",
+ "futures-executor",
  "futures-sink",
+ "futures-util",
  "itertools 0.10.5",
+ "lock_api",
+ "nix 0.27.1",
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.8",
  "proc-macro2",
  "quote",
  "rand",
+ "regex",
+ "regex-automata 0.3.7",
+ "regex-syntax 0.7.5",
  "syn 2.0.31",
  "tokio",
  "tracing-core",
@@ -4696,6 +4703,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
+dependencies = [
+ "bitflags 2.4.0",
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
 name = "nkeys"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5059,18 +5077,18 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-src"
-version = "111.27.0+1.1.1v"
+version = "300.1.3+3.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06e8f197c82d7511c5b014030c9b1efeda40d7d5f99d23b4ceed3524a5e63f02"
+checksum = "cd2c101a165fff9935e34def4669595ab1c7847943c42be86e21503e482be107"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.92"
+version = "0.9.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db7e971c2c2bba161b2d2fdf37080177eff520b3bc044787c7f1f5f9e78d869b"
+checksum = "db4d56a4c0478783083cfafcc42493dd4a981d41669da64b4572a2a089b51b1d"
 dependencies = [
  "cc",
  "libc",
@@ -5713,7 +5731,7 @@ dependencies = [
  "inferno",
  "libc",
  "log",
- "nix",
+ "nix 0.26.2",
  "once_cell",
  "parking_lot 0.12.1",
  "smallvec",
@@ -6562,7 +6580,7 @@ dependencies = [
  "itertools 0.11.0",
  "libc",
  "madsim-tokio",
- "nix",
+ "nix 0.26.2",
  "opentelemetry",
  "parking_lot 0.12.1",
  "prometheus",
@@ -7160,6 +7178,19 @@ dependencies = [
 name = "risingwave_java_binding"
 version = "0.1.0"
 dependencies = [
+ "prost",
+ "risingwave_common",
+ "risingwave_expr",
+ "risingwave_jni_core",
+ "risingwave_pb",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "risingwave_jni_core"
+version = "0.1.0"
+dependencies = [
  "bytes",
  "futures",
  "itertools 0.11.0",
@@ -7551,7 +7582,7 @@ dependencies = [
  "memcomparable",
  "moka",
  "more-asserts",
- "nix",
+ "nix 0.26.2",
  "num-integer",
  "parking_lot 0.12.1",
  "procfs 0.15.1",
@@ -7572,7 +7603,6 @@ dependencies = [
  "sled",
  "spin 0.9.8",
  "sync-point",
- "sysinfo",
  "tempfile",
  "thiserror",
  "tokio-retry",
@@ -8814,9 +8844,9 @@ checksum = "2047c6ded9c721764247e62cd3b03c09ffc529b2ba5b10ec482ae507a4a70160"
 
 [[package]]
 name = "sysinfo"
-version = "0.29.9"
+version = "0.29.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8d0e9cc2273cc8d31377bdd638d72e3ac3e5607b18621062b169d02787f1bab"
+checksum = "0a18d114d420ada3a891e6bc8e96a2023402203296a47cdd65083377dad18ba5"
 dependencies = [
  "cfg-if",
  "core-foundation-sys",
@@ -9695,9 +9725,9 @@ checksum = "9d5b2c62b4012a3e1eca5a7e077d13b3bf498c4073e33ccd58626607748ceeca"
 
 [[package]]
 name = "walkdir"
-version = "2.3.3"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36df944cda56c7d8d8b7496af378e6b16de9284591917d307c9b4d313c44e698"
+checksum = "d71d857dc86794ca4c280d616f7da00d2dbfd8cd788846559a6813e6aa4b54ee"
 dependencies = [
  "same-file",
  "winapi-util",
@@ -10103,7 +10133,6 @@ dependencies = [
  "miniz_oxide",
  "mio",
  "multimap",
- "nix",
  "nom",
  "num-bigint",
  "num-integer",

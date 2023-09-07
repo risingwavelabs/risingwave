@@ -34,14 +34,10 @@ use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
 use crate::model::{BarrierManagerState, MigrationPlan, PausedReason};
-use crate::storage::MetaStore;
 use crate::stream::build_actor_connector_splits;
 use crate::MetaResult;
 
-impl<S> GlobalBarrierManager<S>
-where
-    S: MetaStore,
-{
+impl GlobalBarrierManager {
     // Retry base interval in milliseconds.
     const RECOVERY_RETRY_BASE_INTERVAL: u64 = 20;
     // Retry max interval.

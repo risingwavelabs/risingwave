@@ -420,12 +420,15 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
 
+    #[serde(default = "default::streaming::streaming_metric_level")]
+    pub streaming_metric_level: MetricLevel,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
 
 #[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
-pub enum StorageMetricLevel {
+pub enum MetricLevel {
     #[default]
     Disabled = 0,
     Critical = 1,
@@ -433,13 +436,13 @@ pub enum StorageMetricLevel {
     Debug = 3,
 }
 
-impl PartialEq<Self> for StorageMetricLevel {
+impl PartialEq<Self> for MetricLevel {
     fn eq(&self, other: &Self) -> bool {
         (*self as u8).eq(&(*other as u8))
     }
 }
 
-impl PartialOrd for StorageMetricLevel {
+impl PartialOrd for MetricLevel {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         (*self as u8).partial_cmp(&(*other as u8))
     }
@@ -567,7 +570,7 @@ pub struct StorageConfig {
     pub compactor_max_sst_size: u64,
 
     #[serde(default = "default::storage::storage_metric_level")]
-    pub storage_metric_level: StorageMetricLevel,
+    pub storage_metric_level: MetricLevel,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -938,7 +941,7 @@ pub mod default {
     }
 
     pub mod storage {
-        use crate::config::StorageMetricLevel;
+        use crate::config::MetricLevel;
 
         pub fn share_buffers_sync_parallelism() -> u32 {
             1
@@ -1045,13 +1048,13 @@ pub mod default {
             512 * 1024 * 1024 // 512m
         }
 
-        pub fn storage_metric_level() -> StorageMetricLevel {
-            StorageMetricLevel::Info
+        pub fn storage_metric_level() -> MetricLevel {
+            MetricLevel::Info
         }
     }
 
     pub mod streaming {
-        use crate::config::AsyncStackTraceOption;
+        use crate::config::{AsyncStackTraceOption, MetricLevel};
 
         pub fn in_flight_barrier_nums() -> usize {
             // quick fix
@@ -1065,6 +1068,10 @@ pub mod default {
 
         pub fn unique_user_stream_errors() -> usize {
             10
+        }
+
+        pub fn streaming_metric_level() -> MetricLevel {
+            MetricLevel::Info
         }
     }
 

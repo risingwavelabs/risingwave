@@ -59,7 +59,7 @@ use risingwave_storage::monitor::{
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
-use risingwave_stream::executor::monitor::GLOBAL_STREAMING_METRICS;
+use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -169,7 +169,9 @@ pub async fn compute_node_serve(
     // Initialize the metrics subsystem.
     let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
     let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
-    let streaming_metrics = Arc::new(GLOBAL_STREAMING_METRICS.clone());
+    let streaming_metrics = Arc::new(global_streaming_metrics(
+        config.streaming.streaming_metric_level,
+    ));
     let batch_task_metrics = Arc::new(GLOBAL_BATCH_TASK_METRICS.clone());
     let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
     let batch_manager_metrics = GLOBAL_BATCH_MANAGER_METRICS.clone();
@@ -216,9 +218,8 @@ pub async fn compute_node_serve(
             let memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
-            let compactor_context = Arc::new(CompactorContext {
+            let compactor_context = CompactorContext {
                 storage_opts,
-                hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
@@ -229,10 +230,11 @@ pub async fn compute_node_serve(
                 task_progress_manager: Default::default(),
                 await_tree_reg: None,
                 running_task_count: Arc::new(AtomicU32::new(0)),
-            });
+            };
 
             let (handle, shutdown_sender) = start_compactor(
                 compactor_context,
+                hummock_meta_client.clone(),
                 storage.sstable_object_id_manager().clone(),
             );
             sub_tasks.push((handle, shutdown_sender));

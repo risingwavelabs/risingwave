@@ -30,6 +30,7 @@ pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
 pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
+mod common;
 pub mod external;
 mod manager;
 mod mock_external_table;

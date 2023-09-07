@@ -25,7 +25,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::manager::ClusterManager;
 use crate::model::ClusterId;
-use crate::storage::MetaStore;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NodeCount {
@@ -64,13 +63,13 @@ impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
 }
 
 #[derive(Clone)]
-pub(crate) struct MetaReportCreator<S: MetaStore> {
-    cluster_mgr: Arc<ClusterManager<S>>,
+pub(crate) struct MetaReportCreator {
+    cluster_mgr: Arc<ClusterManager>,
     meta_backend: MetaBackend,
 }
 
-impl<S: MetaStore> MetaReportCreator<S> {
-    pub(crate) fn new(cluster_mgr: Arc<ClusterManager<S>>, meta_backend: MetaBackend) -> Self {
+impl MetaReportCreator {
+    pub(crate) fn new(cluster_mgr: Arc<ClusterManager>, meta_backend: MetaBackend) -> Self {
         Self {
             cluster_mgr,
             meta_backend,
@@ -79,7 +78,7 @@ impl<S: MetaStore> MetaReportCreator<S> {
 }
 
 #[async_trait::async_trait]
-impl<S: MetaStore> TelemetryReportCreator for MetaReportCreator<S> {
+impl TelemetryReportCreator for MetaReportCreator {
     async fn create_report(
         &self,
         tracking_id: String,

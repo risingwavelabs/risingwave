@@ -27,6 +27,7 @@ pub mod test_sink;
 pub mod utils;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
@@ -173,10 +174,14 @@ pub trait SinkWriter: Send + 'static {
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata>;
 
     /// Clean up
-    async fn abort(&mut self) -> Result<()>;
+    async fn abort(&mut self) -> Result<()> {
+        Ok(())
+    }
 
     /// Update the vnode bitmap of current sink writer
-    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> Result<()>;
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -239,10 +244,6 @@ impl<W: SinkWriterV1> SinkWriter for SinkWriterV1Adapter<W> {
 
     async fn abort(&mut self) -> Result<()> {
         self.inner.abort().await
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
-        Ok(())
     }
 }
 
@@ -314,15 +315,7 @@ impl SinkWriter for BlackHoleSink {
         Ok(())
     }
 
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }

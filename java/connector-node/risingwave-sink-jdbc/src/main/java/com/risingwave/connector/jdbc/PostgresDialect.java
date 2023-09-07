@@ -45,7 +45,8 @@ public class PostgresDialect implements JdbcDialect {
 
     @Override
     public String quoteIdentifier(String identifier) {
-        return identifier;
+        // quote identifier will be case-sensitive in postgres
+        return "\"" + identifier + "\"";
     }
 
     @Override

@@ -33,7 +33,6 @@ use super::id::GlobalFragmentIdsExt;
 use super::Locations;
 use crate::manager::{IdGeneratorManagerRef, StreamingClusterInfo, StreamingJob};
 use crate::model::{DispatcherId, FragmentId};
-use crate::storage::MetaStore;
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, EdgeId, EitherFragment, StreamFragmentEdge,
 };
@@ -656,14 +655,11 @@ impl ActorGraphBuilder {
 
     /// Build a stream graph by duplicating each fragment as parallel actors. Returns
     /// [`ActorGraphBuildResult`] that will be further used to build actors on the compute nodes.
-    pub async fn generate_graph<S>(
+    pub async fn generate_graph(
         self,
-        id_gen_manager: IdGeneratorManagerRef<S>,
+        id_gen_manager: IdGeneratorManagerRef,
         job: &StreamingJob,
-    ) -> MetaResult<ActorGraphBuildResult>
-    where
-        S: MetaStore,
-    {
+    ) -> MetaResult<ActorGraphBuildResult> {
         // Pre-generate IDs for all actors.
         let actor_len = self
             .distributions
