@@ -452,7 +452,7 @@ pub fn start_compactor(
                             }
                         }
 
-                        tracing::info!(
+                        tracing::trace!(
                             cpu = %last_workload.cpu,
                             running_task_count = %running_task_count.load(Ordering::Relaxed),
                             pull_task_ack = %pull_task_ack.load(Ordering::Relaxed),

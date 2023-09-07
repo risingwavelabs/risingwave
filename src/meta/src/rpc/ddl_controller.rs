@@ -449,8 +449,9 @@ where
                     // Validate the sink on the connector node.
                     validate_sink(sink, self.env.connector_client()).await?;
                 }
-                StreamingJob::Source(_source) => {
-                    todo!("validate source if needed")
+                StreamingJob::Source(source) => {
+                    // Register the source on the connector node.
+                    self.source_manager.register_source(source).await?;
                 }
                 _ => {}
             }
