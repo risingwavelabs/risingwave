@@ -124,12 +124,14 @@ pub fn register_native_method_for_jvm() {
                 sig: JNIString::from("()I"),
                 fn_ptr: crate::Java_com_risingwave_java_binding_Binding_vnodeCount as *mut c_void,
             },
+            #[cfg(not(madsim))]
             NativeMethod {
                 name: JNIString::from("hummockIteratorNew"),
                 sig: JNIString::from("([B)J"),
                 fn_ptr: crate::Java_com_risingwave_java_binding_Binding_hummockIteratorNew
                     as *mut c_void,
             },
+            #[cfg(not(madsim))]
             NativeMethod {
                 name: JNIString::from("hummockIteratorNext"),
                 sig: JNIString::from("(J)J"),
