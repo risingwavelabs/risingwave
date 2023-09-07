@@ -53,7 +53,7 @@ pub struct MemTable {
 
 #[derive(Error, Debug)]
 pub enum MemTableError {
-    #[error("Inconsistent operation")]
+    #[error("Inconsistent operation key: {key:?}, prev: {prev:?}, new: {new:?}")]
     InconsistentOperation { key: Bytes, prev: KeyOp, new: KeyOp },
 }
 
