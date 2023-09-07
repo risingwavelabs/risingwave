@@ -114,7 +114,7 @@ impl Relation {
                 correlated_indices
             }
             Relation::TableFunction(table_function) => table_function
-                .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
             _ => vec![],
         }
     }
@@ -438,7 +438,10 @@ impl Binder {
                 for_system_time_as_of_proctime,
             } => self.bind_relation_by_name(name, alias, for_system_time_as_of_proctime),
             TableFactor::TableFunction { name, alias, args } => {
-                self.bind_table_function(name, alias, args)
+                self.try_mark_lateral_as_visible();
+                let result = self.bind_table_function(name, alias, args);
+                self.try_mark_lateral_as_invisible();
+                result
             }
             TableFactor::Derived {
                 lateral,
