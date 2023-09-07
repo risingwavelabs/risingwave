@@ -61,8 +61,7 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
             .unwrap_or_default();
 
         let source_type = props.get_source_type_pb()?;
-        JVM.as_ref()
-            .ok_or_else(|| anyhow!("JVM is not initialized, so fail to create cdc table"))?;
+        JVM.as_ref()?;
         // validate connector properties
         connector_client
             .validate_source_properties(

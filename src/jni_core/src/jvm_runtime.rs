@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use core::option::Option::Some;
-use core::result::Result::{Err, Ok};
 use std::ffi::c_void;
 use std::fs;
 use std::path::Path;
@@ -21,11 +20,12 @@ use std::sync::LazyLock;
 
 use jni::strings::JNIString;
 use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 
 use crate::run_this_func_to_get_valid_ptr_from_java_binding;
 
-pub static JVM: LazyLock<Option<JavaVM>> = LazyLock::new(|| {
+pub static JVM: LazyLock<Result<JavaVM, RwError>> = LazyLock::new(|| {
     let libs_path = if let Ok(libs_path) = std::env::var("CONNECTOR_LIBS_PATH") {
         libs_path
     } else if std::env::var("ENABLE_BUILD_RW_CONNECTOR").is_ok() {
@@ -33,13 +33,20 @@ pub static JVM: LazyLock<Option<JavaVM>> = LazyLock::new(|| {
         // connector.
         ".risingwave/bin/connector-node/libs/".to_string()
     } else {
-        return None;
+        return Err(ErrorCode::InternalError(
+            "environment variable CONNECTOR_LIBS_PATH is not specified".to_string(),
+        )
+        .into());
     };
 
     let dir = Path::new(&libs_path);
 
     if !dir.is_dir() {
-        panic!("{} is not a directory", libs_path);
+        return Err(ErrorCode::InternalError(format!(
+            "CONNECTOR_LIBS_PATH \"{}\" is not a directory",
+            libs_path
+        ))
+        .into());
     }
 
     let mut class_vec = vec![];
@@ -51,7 +58,11 @@ pub static JVM: LazyLock<Option<JavaVM>> = LazyLock::new(|| {
             }
         }
     } else {
-        panic!("failed to read directory {}", libs_path);
+        return Err(ErrorCode::InternalError(format!(
+            "failed to read CONNECTOR_LIBS_PATH \"{}\"",
+            libs_path
+        ))
+        .into());
     }
 
     let jvm_heap_size = if let Ok(heap_size) = std::env::var("JVM_HEAP_SIZE") {
@@ -68,7 +79,6 @@ pub static JVM: LazyLock<Option<JavaVM>> = LazyLock::new(|| {
         .option("-ea")
         .option("-Dis_embedded_connector=true")
         .option(format!("-Djava.class.path={}", class_vec.join(":")))
-        .option(format!("-Xms{}", jvm_heap_size))
         .option(format!("-Xmx{}", jvm_heap_size));
 
     tracing::info!("JVM args: {:?}", args_builder);
@@ -77,7 +87,8 @@ pub static JVM: LazyLock<Option<JavaVM>> = LazyLock::new(|| {
     // Create a new VM
     let jvm = match JavaVM::new(jvm_args) {
         Err(err) => {
-            panic!("{:?}", err)
+            tracing::error!("fail to new JVM {:?}", err);
+            return Err(ErrorCode::InternalError("fail to new JVM".to_string()).into());
         }
         Ok(jvm) => jvm,
     };
@@ -86,7 +97,7 @@ pub static JVM: LazyLock<Option<JavaVM>> = LazyLock::new(|| {
 
     register_native_method_for_jvm(&jvm);
 
-    Some(jvm)
+    Ok(jvm)
 });
 
 fn register_native_method_for_jvm(jvm: &JavaVM) {
