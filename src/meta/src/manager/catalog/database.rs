@@ -25,7 +25,6 @@ use risingwave_pb::catalog::{
 use super::{ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
 use crate::manager::{IndexId, MetaSrvEnv, TableId};
 use crate::model::MetadataModel;
-use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
 
 pub type Catalog = (
@@ -79,7 +78,7 @@ pub struct DatabaseManager {
 }
 
 impl DatabaseManager {
-    pub async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+    pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let databases = Database::list(env.meta_store()).await?;
         let schemas = Schema::list(env.meta_store()).await?;
         let sources = Source::list(env.meta_store()).await?;

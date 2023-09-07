@@ -47,6 +47,7 @@
         <module>connector-node/risingwave-sink-iceberg</module>
         <module>connector-node/risingwave-sink-deltalake</module>
         <module>connector-node/risingwave-sink-es-7</module>
+        <module>connector-node/risingwave-sink-cassandra</module>
         <module>connector-node/risingwave-sink-jdbc</module>
         <module>connector-node/risingwave-source-cdc</module>
         <module>connector-node/risingwave-connector-test</module>
@@ -73,6 +74,7 @@
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.3.3</hadoop.version>
         <elasticsearch.version>7.17.10</elasticsearch.version>
+        <datastax.version>4.15.0</datastax.version>
     </properties>
 
     <dependencyManagement>
@@ -251,6 +253,11 @@
             <dependency>
                 <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-es-7</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.risingwave</groupId>
+                <artifactId>risingwave-sink-cassandra</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>

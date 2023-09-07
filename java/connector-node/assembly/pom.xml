@@ -36,6 +36,10 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
+            <artifactId>risingwave-sink-cassandra</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-jdbc</artifactId>
         </dependency>
         <dependency>

@@ -80,6 +80,8 @@ impl SpaceReclaimCompactionPicker {
                 }
                 if !select_input_ssts.is_empty() {
                     return Some(CompactionInput {
+                        select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+                        total_file_count: select_input_ssts.len() as u64,
                         input_levels: vec![
                             InputLevel {
                                 level_idx: level.level_idx,
@@ -94,6 +96,7 @@ impl SpaceReclaimCompactionPicker {
                         ],
                         target_level: level.level_idx as usize,
                         target_sub_level_id: level.sub_level_id,
+                        ..Default::default()
                     });
                 }
             }
@@ -135,6 +138,8 @@ impl SpaceReclaimCompactionPicker {
             // turn to next_round
             if !select_input_ssts.is_empty() {
                 return Some(CompactionInput {
+                    select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+                    total_file_count: select_input_ssts.len() as u64,
                     input_levels: vec![
                         InputLevel {
                             level_idx: state.last_level as u32,
@@ -148,7 +153,7 @@ impl SpaceReclaimCompactionPicker {
                         },
                     ],
                     target_level: state.last_level,
-                    target_sub_level_id: 0,
+                    ..Default::default()
                 });
             }
             state.last_level += 1;

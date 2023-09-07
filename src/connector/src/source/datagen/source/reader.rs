@@ -16,22 +16,19 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures::{StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
+use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 
 use super::generator::DatagenEventGenerator;
-use crate::impl_common_split_reader_logic;
 use crate::parser::{EncodingProperties, ParserConfig, ProtocolProperties};
+use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit, FieldDesc};
 use crate::source::{
-    BoxSourceStream, BoxSourceWithStateStream, Column, DataType, SourceContextRef, SplitId,
+    BoxSourceWithStateStream, Column, DataType, SourceContextRef, SourceMessage, SplitId,
     SplitImpl, SplitMetaData, SplitReader,
 };
-
-impl_common_split_reader_logic!(DatagenSplitReader, DatagenProperties);
 
 pub struct DatagenSplitReader {
     generator: DatagenEventGenerator,
@@ -170,13 +167,17 @@ impl SplitReader for DatagenSplitReader {
                 )
                 .boxed()
             }
-            _ => self.into_chunk_stream(),
+            _ => {
+                let parser_config = self.parser_config.clone();
+                let source_context = self.source_ctx.clone();
+                into_chunk_stream(self, parser_config, source_context)
+            }
         }
     }
 }
 
-impl DatagenSplitReader {
-    pub(crate) fn into_data_stream(self) -> BoxSourceStream {
+impl CommonSplitReader for DatagenSplitReader {
+    fn into_data_stream(self) -> impl Stream<Item = Result<Vec<SourceMessage>, anyhow::Error>> {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         spawn_data_generation_stream(self.generator.into_msg_stream(), BUFFER_SIZE).boxed()

@@ -30,6 +30,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::{extract_storage_memory_config, load_config, NoOverride, RwConfig};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_test::get_notification_client_for_test;
+use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -41,6 +42,7 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
+    RpcFilterKeyExtractorManager,
 };
 use risingwave_storage::hummock::compactor::{
     start_compactor, CompactionExecutor, CompactorContext,
@@ -212,13 +214,19 @@ async fn compaction_test(
         sstable_store.clone(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
-        Arc::new(FilterKeyExtractorManager::default()),
+        Arc::new(RpcFilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
         compactor_metrics.clone(),
     )
     .await?;
     let sstable_object_id_manager = store.sstable_object_id_manager().clone();
-    let filter_key_extractor_manager = store.filter_key_extractor_manager().clone();
+    let filter_key_extractor_manager = match store.filter_key_extractor_manager().clone() {
+        FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            rpc_filter_key_extractor_manager,
+        ) => rpc_filter_key_extractor_manager,
+        FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+    };
+
     filter_key_extractor_manager.update(
         1,
         Arc::new(FilterKeyExtractorImpl::FullKey(
@@ -391,7 +399,7 @@ impl NormalState {
     async fn new(hummock: &HummockStorage, table_id: u32, epoch: u64) -> Self {
         let table_id = TableId::new(table_id);
         let mut storage = hummock.new_local(NewLocalOptions::for_test(table_id)).await;
-        storage.init(epoch);
+        storage.init_for_test(epoch).await.unwrap();
         Self { storage, table_id }
     }
 
@@ -560,28 +568,28 @@ fn run_compactor_thread(
     storage_opts: Arc<StorageOpts>,
     sstable_store: SstableStoreRef,
     meta_client: Arc<MockHummockMetaClient>,
-    filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
+    filter_key_extractor_manager: Arc<RpcFilterKeyExtractorManager>,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
     compactor_metrics: Arc<CompactorMetrics>,
 ) -> (
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
 ) {
-    let compactor_context = Arc::new(CompactorContext {
+    let compactor_context = CompactorContext {
         storage_opts,
-        hummock_meta_client: meta_client,
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
-        filter_key_extractor_manager,
+        filter_key_extractor_manager: FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            filter_key_extractor_manager,
+        ),
         memory_limiter: MemoryLimiter::unlimit(),
-        sstable_object_id_manager,
         task_progress_manager: Default::default(),
         await_tree_reg: None,
         running_task_count: Arc::new(AtomicU32::new(0)),
-    });
-    start_compactor(compactor_context)
+    };
+    start_compactor(compactor_context, meta_client, sstable_object_id_manager)
 }
 
 #[cfg(test)]

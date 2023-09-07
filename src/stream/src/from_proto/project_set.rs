@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use multimap::MultiMap;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
@@ -38,13 +40,32 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
                 ProjectSetSelectItem::from_prost(proto, params.env.config().developer.chunk_size)
             })
             .try_collect()?;
+        let watermark_derivations = MultiMap::from_iter(
+            node.get_watermark_input_cols()
+                .iter()
+                .map(|idx| *idx as usize)
+                .zip_eq_fast(
+                    node.get_watermark_expr_indices()
+                        .iter()
+                        .map(|idx| *idx as usize),
+                ),
+        );
+        let nondecreasing_expr_indices = node
+            .get_nondecreasing_exprs()
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect();
+
         let chunk_size = params.env.config().developer.chunk_size;
         Ok(ProjectSetExecutor::new(
+            params.actor_context,
             input,
             params.pk_indices,
             select_list,
             params.executor_id,
             chunk_size,
+            watermark_derivations,
+            nondecreasing_expr_indices,
         )
         .boxed())
     }

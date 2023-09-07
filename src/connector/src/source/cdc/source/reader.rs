@@ -16,28 +16,26 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures::{pin_mut, StreamExt, TryStreamExt};
+use futures::pin_mut;
 use futures_async_stream::try_stream;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::GetEventStreamResponse;
 
-use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
-use crate::source::cdc::CdcProperties;
+use crate::source::cdc::{CdcProperties, CdcSourceType, CdcSourceTypeTrait, DebeziumCdcSplit};
+use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
     SplitReader,
 };
 
-impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
-
-pub struct CdcSplitReader {
+pub struct CdcSplitReader<T: CdcSourceTypeTrait> {
     source_id: u64,
     start_offset: Option<String>,
     // host address of worker node for a Citus cluster
     server_addr: Option<String>,
-    conn_props: CdcProperties,
+    conn_props: CdcProperties<T>,
 
     split_id: SplitId,
     // whether the full snapshot phase is done
@@ -47,22 +45,25 @@ pub struct CdcSplitReader {
 }
 
 #[async_trait]
-impl SplitReader for CdcSplitReader {
-    type Properties = CdcProperties;
+impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T>
+where
+    DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = anyhow::Error>,
+{
+    type Properties = CdcProperties<T>;
 
     #[allow(clippy::unused_async)]
     async fn new(
-        conn_props: CdcProperties,
+        conn_props: CdcProperties<T>,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         assert_eq!(splits.len(), 1);
-        let split = splits.into_iter().next().unwrap();
+        let split = DebeziumCdcSplit::<T>::try_from(splits.into_iter().next().unwrap())?;
         let split_id = split.id();
-        match split {
-            SplitImpl::MySqlCdc(split) | SplitImpl::PostgresCdc(split) => Ok(Self {
+        match T::source_type() {
+            CdcSourceType::Mysql | CdcSourceType::Postgres => Ok(Self {
                 source_id: split.split_id() as u64,
                 start_offset: split.start_offset().clone(),
                 server_addr: None,
@@ -72,7 +73,7 @@ impl SplitReader for CdcSplitReader {
                 parser_config,
                 source_ctx,
             }),
-            SplitImpl::CitusCdc(split) => Ok(Self {
+            CdcSourceType::Citus => Ok(Self {
                 source_id: split.split_id() as u64,
                 start_offset: split.start_offset().clone(),
                 server_addr: split.server_addr().clone(),
@@ -82,20 +83,21 @@ impl SplitReader for CdcSplitReader {
                 parser_config,
                 source_ctx,
             }),
-
-            _ => Err(anyhow!(
-                "failed to create cdc split reader: invalid splis info"
-            )),
         }
     }
 
     fn into_stream(self) -> BoxSourceWithStateStream {
-        self.into_chunk_stream()
+        let parser_config = self.parser_config.clone();
+        let source_context = self.source_ctx.clone();
+        into_chunk_stream(self, parser_config, source_context)
     }
 }
 
-impl CdcSplitReader {
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T>
+where
+    Self: SplitReader,
+{
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
         let cdc_client = self.source_ctx.connector_client.clone().ok_or_else(|| {
             anyhow!("connector node endpoint not specified or unable to connect to connector node")
@@ -122,7 +124,7 @@ impl CdcSplitReader {
         let cdc_stream = cdc_client
             .start_source_stream(
                 self.source_id,
-                self.conn_props.get_source_type_pb()?,
+                self.conn_props.get_source_type_pb(),
                 self.start_offset,
                 properties,
                 self.snapshot_done,

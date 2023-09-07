@@ -23,8 +23,8 @@ use risingwave_batch::monitor::{
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
-    load_config, AsyncStackTraceOption, StorageMemoryConfig, MAX_CONNECTION_WINDOW_SIZE,
-    STREAM_WINDOW_SIZE,
+    load_config, AsyncStackTraceOption, MetricLevel, StorageMemoryConfig,
+    MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -59,7 +59,7 @@ use risingwave_storage::monitor::{
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
-use risingwave_stream::executor::monitor::GLOBAL_STREAMING_METRICS;
+use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -169,7 +169,7 @@ pub async fn compute_node_serve(
     // Initialize the metrics subsystem.
     let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
     let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
-    let streaming_metrics = Arc::new(GLOBAL_STREAMING_METRICS.clone());
+    let streaming_metrics = Arc::new(global_streaming_metrics(config.server.metrics_level));
     let batch_task_metrics = Arc::new(GLOBAL_BATCH_TASK_METRICS.clone());
     let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
     let batch_manager_metrics = GLOBAL_BATCH_MANAGER_METRICS.clone();
@@ -177,10 +177,10 @@ pub async fn compute_node_serve(
 
     // Initialize state store.
     let state_store_metrics = Arc::new(global_hummock_state_store_metrics(
-        config.storage.storage_metric_level,
+        config.server.metrics_level,
     ));
     let object_store_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
-    let storage_metrics = Arc::new(global_storage_metrics(config.storage.storage_metric_level));
+    let storage_metrics = Arc::new(global_storage_metrics(config.server.metrics_level));
     let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
         meta_client.clone(),
@@ -216,22 +216,25 @@ pub async fn compute_node_serve(
             let memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
-            let compactor_context = Arc::new(CompactorContext {
+            let compactor_context = CompactorContext {
                 storage_opts,
-                hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
                 memory_limiter,
-                sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
+
                 task_progress_manager: Default::default(),
                 await_tree_reg: None,
                 running_task_count: Arc::new(AtomicU32::new(0)),
-            });
+            };
 
-            let (handle, shutdown_sender) = start_compactor(compactor_context);
+            let (handle, shutdown_sender) = start_compactor(
+                compactor_context,
+                hummock_meta_client.clone(),
+                storage.sstable_object_id_manager().clone(),
+            );
             sub_tasks.push((handle, shutdown_sender));
         }
         let flush_limiter = storage.get_memory_limiter();
@@ -449,7 +452,7 @@ pub async fn compute_node_serve(
     join_handle_vec.push(join_handle);
 
     // Boot metrics service.
-    if config.server.metrics_level > 0 {
+    if config.server.metrics_level > MetricLevel::Disabled {
         MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 

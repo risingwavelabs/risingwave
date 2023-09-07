@@ -15,9 +15,10 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+use itertools::Either;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
-use rdkafka::producer::{BaseProducer, BaseRecord};
+use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
 use rdkafka::ClientConfig;
 
 /// Create a kafka topic
@@ -82,22 +83,21 @@ pub async fn producer(broker_addr: &str, datadir: String) {
             .expect("failed to create topic");
 
         let content = std::fs::read(file.path()).unwrap();
-        let msgs: Box<dyn Iterator<Item = (Option<&[u8]>, &[u8])> + Send> =
-            if topic.ends_with("bin") {
-                // binary message data, a file is a message
-                Box::new(std::iter::once((None, content.as_slice())))
-            } else {
-                // text message data, a line is a message
-                Box::new(
-                    content
-                        .split(|&b| b == b'\n')
-                        .filter(|line| !line.is_empty())
-                        .map(|line| match line.iter().position(|&b| b == KEY_DELIMITER) {
-                            Some(pos) => (Some(&line[..pos]), &line[pos + 1..]),
-                            None => (None, line),
-                        }),
-                )
-            };
+        let msgs = if topic.ends_with("bin") {
+            // binary message data, a file is a message
+            Either::Left(std::iter::once((None, content.as_slice())))
+        } else {
+            // text message data, a line is a message
+            Either::Right(
+                content
+                    .split(|&b| b == b'\n')
+                    .filter(|line| !line.is_empty())
+                    .map(|line| match line.iter().position(|&b| b == KEY_DELIMITER) {
+                        Some(pos) => (Some(&line[..pos]), &line[pos + 1..]),
+                        None => (None, line),
+                    }),
+            )
+        };
         for (key, payload) in msgs {
             loop {
                 let ts = SystemTime::now()
