@@ -51,8 +51,8 @@ pub fn array_min<T: Scalar>(list: ListRef<'_>) -> Result<Option<T>> {
 #[function("array_max(list) -> varchar")]
 #[function("array_max(list) -> bytea")]
 pub fn array_max<T: Scalar>(list: ListRef<'_>) -> Result<Option<T>> {
-    let min_value = list.iter().flatten().map(DefaultOrdered).max();
-    match min_value.map(|v| v.0).to_owned_datum() {
+    let max_value = list.iter().flatten().map(DefaultOrdered).max();
+    match max_value.map(|v| v.0).to_owned_datum() {
         Some(s) => Ok(Some(s.try_into()?)),
         None => Ok(None),
     }
