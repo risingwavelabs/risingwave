@@ -55,7 +55,7 @@ use risingwave_storage::opts::StorageOpts;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
-use tonic::transport::Channel;
+use tonic::transport::{Channel, Endpoint};
 use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
@@ -63,6 +63,9 @@ use crate::rpc::{CompactorServiceImpl, MonitorServiceImpl};
 use crate::telemetry::CompactorTelemetryCreator;
 use crate::CompactorOpts;
 
+const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
+// See `Endpoint::keep_alive_timeout`
+const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
 pub async fn prepare_start_parameters(
     config: RwConfig,
     object_metrics: Arc<object_metrics::ObjectStoreMetrics>,
@@ -311,15 +314,22 @@ pub async fn shared_compactor_serve(
     opts: CompactorOpts,
 ) -> (JoinHandle<()>, Sender<()>) {
     let endpoint: &'static str = Box::leak(opts.proxy_rpc_endpoint.clone().into_boxed_str());
-    let channel = Channel::from_static(endpoint).connect().await.unwrap();
-
+    let endpoint = Endpoint::from_static(endpoint);
+    // let channel = Channel::from_static(endpoint).connect().await.unwrap();
+    let channel = endpoint
+        .http2_keep_alive_interval(Duration::from_secs(ENDPOINT_KEEP_ALIVE_INTERVAL_SEC))
+        .keep_alive_timeout(Duration::from_secs(ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
+        .connect_timeout(Duration::from_secs(5))
+        .connect()
+        .await
+        .expect("Failed to create channel via proxy rpc endpoint.");
     let client: HummockManagerServiceClient<Channel> =
         HummockManagerServiceClient::new(channel.clone());
     let mut system_params_client = SystemParamsServiceClient::new(channel.clone());
     let system_params_response = system_params_client
         .get_system_params(GetSystemParamsRequest {})
         .await
-        .unwrap();
+        .expect("Fail to get system params, the compactor pod  cannot be started.");
 
     let system_params = system_params_response.into_inner().params.unwrap();
     let config = load_config(&opts.config_path, &opts);

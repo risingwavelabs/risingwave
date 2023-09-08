@@ -37,7 +37,7 @@ use risingwave_meta::manager::LocalNotification;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::filter_key_extractor::{self, FilterKeyExtractorManager};
+use risingwave_storage::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_storage::hummock::compactor::compactor_runner::compact;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::{CachePolicy, GetObjectId, SstableObjectIdManager};
