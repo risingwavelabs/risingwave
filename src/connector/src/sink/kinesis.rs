@@ -30,13 +30,11 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
 use super::encoder::{JsonEncoder, SerToBytes, SerToString};
-use super::formatter::{AppendOnlyFormatter, SinkFormatter};
+use super::formatter::{AppendOnlyFormatter, SinkFormatter, UpsertFormatter};
 use super::utils::TimestampHandlingMode;
 use super::SinkParam;
 use crate::common::KinesisCommon;
-use crate::sink::utils::{
-    gen_debezium_message_stream, gen_upsert_message_stream, DebeziumAdapterOpts, UpsertAdapterOpts,
-};
+use crate::sink::utils::{gen_debezium_message_stream, DebeziumAdapterOpts};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterParam,
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -228,18 +226,6 @@ impl KinesisSinkWriter {
         Ok(())
     }
 
-    async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
-        let upsert_stream = gen_upsert_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            UpsertAdapterOpts::default(),
-        );
-
-        crate::impl_load_stream_write_record!(upsert_stream, self.put_record);
-        Ok(())
-    }
-
     async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
         let dbz_stream = gen_debezium_message_stream(
             &self.schema,
@@ -278,7 +264,13 @@ impl SinkWriter for KinesisSinkWriter {
             )
             .await
         } else if self.config.r#type == SINK_TYPE_UPSERT {
-            self.upsert(chunk).await
+            let f = UpsertFormatter::new(
+                JsonEncoder::new(TimestampHandlingMode::Milli),
+                JsonEncoder::new(TimestampHandlingMode::Milli),
+                &self.schema,
+                &self.pk_indices,
+            );
+            self.write_chunk(chunk, f).await
         } else {
             unreachable!()
         }

@@ -32,16 +32,14 @@ use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
 
 use super::encoder::{JsonEncoder, SerToBytes};
-use super::formatter::{AppendOnlyFormatter, SinkFormatter};
+use super::formatter::{AppendOnlyFormatter, SinkFormatter, UpsertFormatter};
 use super::utils::TimestampHandlingMode;
 use super::{
     Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
-use crate::sink::utils::{
-    gen_debezium_message_stream, gen_upsert_message_stream, DebeziumAdapterOpts, UpsertAdapterOpts,
-};
+use crate::sink::utils::{gen_debezium_message_stream, DebeziumAdapterOpts};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
 };
@@ -505,23 +503,6 @@ impl KafkaSinkWriter {
         Ok(())
     }
 
-    async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
-        let upsert_stream = gen_upsert_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            UpsertAdapterOpts::default(),
-        );
-
-        #[for_await]
-        for msg in upsert_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
-        }
-        Ok(())
-    }
-
     async fn write_chunk<
         K: SerToBytes,
         V: SerToBytes,
@@ -572,7 +553,13 @@ impl SinkWriterV1 for KafkaSinkWriter {
                 .await
             } else {
                 // Upsert
-                self.upsert(chunk).await
+                let f = UpsertFormatter::new(
+                    JsonEncoder::new(TimestampHandlingMode::Milli),
+                    JsonEncoder::new(TimestampHandlingMode::Milli),
+                    &self.schema,
+                    &self.pk_indices,
+                );
+                self.write_chunk(chunk, f).await
             }
         }
     }
