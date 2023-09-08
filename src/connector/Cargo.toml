@@ -119,7 +119,7 @@ rand = "0.8"
 tempfile = "3"
 
 [build-dependencies]
-prost-build = "0.11"
+prost-build = "0.12"
 
 [[bench]]
 name = "parser"
