@@ -28,10 +28,6 @@ use crate::run_this_func_to_get_valid_ptr_from_java_binding;
 pub static JVM: LazyLock<Result<JavaVM, RwError>> = LazyLock::new(|| {
     let libs_path = if let Ok(libs_path) = std::env::var("CONNECTOR_LIBS_PATH") {
         libs_path
-    } else if std::env::var("ENABLE_BUILD_RW_CONNECTOR").is_ok() {
-        // If ENABLE_BUILD_RW_CONNECTOR is set which means it is started from risedev with a
-        // connector.
-        ".risingwave/bin/connector-node/libs/".to_string()
     } else {
         return Err(ErrorCode::InternalError(
             "environment variable CONNECTOR_LIBS_PATH is not specified".to_string(),
