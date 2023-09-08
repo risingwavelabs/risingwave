@@ -31,14 +31,16 @@ use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
 
+use super::encoder::{JsonEncoder, SerToBytes};
+use super::formatter::{AppendOnlyFormatter, SinkFormatter};
+use super::utils::TimestampHandlingMode;
 use super::{
     Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
 use crate::sink::utils::{
-    gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
-    DebeziumAdapterOpts, UpsertAdapterOpts,
+    gen_debezium_message_stream, gen_upsert_message_stream, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
 use crate::sink::{
     DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
@@ -457,15 +459,27 @@ impl KafkaSinkWriter {
         event_key_object: Option<Value>,
         event_object: Option<Value>,
     ) -> Result<()> {
+        self.write_encoded_row(
+            event_key_object.map(|v| v.to_string().into_bytes()),
+            event_object.map(|v| v.to_string().into_bytes()),
+        )
+        .await
+    }
+
+    async fn write_encoded_row(
+        &self,
+        event_key_object: Option<Vec<u8>>,
+        event_object: Option<Vec<u8>>,
+    ) -> Result<()> {
         // here we assume the key part always exists and value part is optional.
         // if value is None, we will skip the payload part.
-        let key_str = event_key_object.unwrap().to_string();
-        let mut record = FutureRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
-            .key(key_str.as_bytes());
+        let key_str = event_key_object.unwrap();
+        let mut record =
+            FutureRecord::<[u8], [u8]>::to(self.config.common.topic.as_str()).key(&key_str);
         let payload;
         if let Some(value) = event_object {
-            payload = value.to_string();
-            record = record.payload(payload.as_bytes());
+            payload = value;
+            record = record.payload(&payload);
         }
         self.send_result(record).await?;
         Ok(())
@@ -508,15 +522,26 @@ impl KafkaSinkWriter {
         Ok(())
     }
 
-    async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
-        let append_only_stream =
-            gen_append_only_message_stream(&self.schema, &self.pk_indices, chunk);
-
-        #[for_await]
-        for msg in append_only_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
+    async fn write_chunk<
+        K: SerToBytes,
+        V: SerToBytes,
+        F: SinkFormatter<K = Option<K>, V = Option<V>>,
+    >(
+        &self,
+        chunk: StreamChunk,
+        mut formatter: F,
+    ) -> Result<()> {
+        for (op, row) in chunk.rows() {
+            let Some((event_key_object, event_object)) = formatter.format_row(op, row)? else {continue};
+            self.write_encoded_row(
+                event_key_object
+                    .map(|x| SerToBytes::ser_to_bytes(&x))
+                    .transpose()?,
+                event_object
+                    .map(|x| SerToBytes::ser_to_bytes(&x))
+                    .transpose()?,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -527,7 +552,13 @@ impl SinkWriterV1 for KafkaSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if self.is_append_only {
             // Append-only
-            self.append_only(chunk).await
+            let f = AppendOnlyFormatter::new(
+                JsonEncoder::new(TimestampHandlingMode::Milli),
+                JsonEncoder::new(TimestampHandlingMode::Milli),
+                &self.schema,
+                &self.pk_indices,
+            );
+            self.write_chunk(chunk, f).await
         } else {
             // Debezium
             if self.config.r#type == SINK_TYPE_DEBEZIUM {
