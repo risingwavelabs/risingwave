@@ -62,6 +62,9 @@ impl GlobalBarrierManager {
 
     /// Clean up all dirty streaming jobs.
     async fn clean_dirty_fragments(&self) -> MetaResult<()> {
+        // List stream jobs, includes both created / creating.
+        // Need to rewrite as well.
+        // List ALL stream jobs.
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
         let to_drop_table_fragments = self
             .fragment_manager

@@ -120,6 +120,8 @@ impl NotificationServiceImpl {
 
     async fn get_tables_and_creating_tables_snapshot(&self) -> (Vec<Table>, NotificationVersion) {
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+        // FIXME: Can be combined 1+2
+        // 1
         let mut tables = catalog_guard
             .database
             .list_tables()
@@ -129,6 +131,7 @@ impl NotificationServiceImpl {
                     || t.stream_job_status == PbStreamJobStatus::Created as i32
             })
             .collect_vec();
+        // 2
         tables.extend(catalog_guard.database.list_creating_tables());
         let notification_version = self.env.notification_manager().current_version().await;
         (tables, notification_version)
@@ -147,12 +150,13 @@ impl NotificationServiceImpl {
         }
     }
 
+    /// HERE
     async fn frontend_subscribe(&self) -> MetaSnapshot {
         let (
             (databases, schemas, tables, sources, sinks, indexes, views, functions, connections),
             users,
             catalog_version,
-        ) = self.get_catalog_snapshot().await;
+        ) = self.get_catalog_snapshot().await; // RETURN status::CREATED here, make them vis in FE.
         let (parallel_unit_mappings, parallel_unit_mapping_version) =
             self.get_parallel_unit_mapping_snapshot().await;
         let serving_parallel_unit_mappings = self.get_serving_vnode_mappings();

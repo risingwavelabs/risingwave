@@ -712,6 +712,9 @@ impl CatalogManager {
         if database_core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure");
         } else {
+            // commit_meta?
+            // also add a status for table and sink catalog.
+            // Seems like these will no longer be needed
             database_core.mark_creating(&key);
             database_core.mark_creating_streaming_job(table.id, key);
             for &dependent_relation_id in &table.dependent_relations {
@@ -748,7 +751,14 @@ impl CatalogManager {
             table.stream_job_status = PbStreamJobStatus::Created.into();
             tables.insert(table.id, table.clone());
         }
+        // set status to created for table,
+        // and just commit to meta again.
+        // Then it will just update.
+        // previously only commit here.
         commit_meta!(self, tables)?;
+
+        // in frontend, there is some function which gets all created catalog,
+        // we only include the catalog with status::created in the snapshot.
 
         let version = self
             .notify_frontend(
