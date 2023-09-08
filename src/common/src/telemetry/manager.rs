@@ -24,7 +24,8 @@ where
     F: TelemetryReportCreator + Send + Sync + 'static,
     I: TelemetryInfoFetcher + Send + Sync + 'static,
 {
-    core: Arc<TelemetryManagerCore<F, I>>,
+    info_fetcher: Arc<I>,
+    report_creator: Arc<F>,
 }
 
 impl<F, I> TelemetryManager<F, I>
@@ -34,39 +35,12 @@ where
 {
     pub fn new(info_fetcher: Arc<I>, report_creator: Arc<F>) -> Self {
         Self {
-            core: Arc::new(TelemetryManagerCore::new(info_fetcher, report_creator)),
-        }
-    }
-
-    #[must_use]
-    pub async fn start(&self) -> (JoinHandle<()>, Sender<()>) {
-        self.core.start().await
-    }
-}
-
-// TODO(eric): remove me. No need for 'Core'
-struct TelemetryManagerCore<F, I>
-where
-    F: TelemetryReportCreator + Send + Sync + 'static,
-    I: TelemetryInfoFetcher + Send + Sync + 'static,
-{
-    info_fetcher: Arc<I>,
-    report_creator: Arc<F>,
-}
-
-impl<F, I> TelemetryManagerCore<F, I>
-where
-    F: TelemetryReportCreator + Send + Sync + 'static,
-    I: TelemetryInfoFetcher + Send + Sync + 'static,
-{
-    fn new(info_fetcher: Arc<I>, report_creator: Arc<F>) -> Self {
-        Self {
             info_fetcher,
             report_creator,
         }
     }
 
-    async fn start(&self) -> (JoinHandle<()>, Sender<()>) {
+    pub async fn start(&self) -> (JoinHandle<()>, Sender<()>) {
         start_telemetry_reporting(self.info_fetcher.clone(), self.report_creator.clone()).await
     }
 }
