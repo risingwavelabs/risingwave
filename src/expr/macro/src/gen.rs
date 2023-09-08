@@ -790,7 +790,7 @@ impl FunctionAttr {
         let type_infer_fn = if let Some(func) = &self.type_infer {
             func.parse().unwrap()
         } else {
-            if matches!(self.ret.as_str(), "any" | "list" | "struct") {
+            if matches!(self.ret.as_str(), "any" | "anyarray" | "struct") {
                 return Err(Error::new(
                     Span::call_site(),
                     format!("type inference function is required for {}", self.ret),

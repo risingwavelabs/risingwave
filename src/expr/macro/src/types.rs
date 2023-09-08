@@ -33,7 +33,7 @@ const TYPE_MATRIX: &str = "
     varchar     Varchar     Utf8        Utf8Array           Box<str>        &str            _
     bytea       Bytea       Bytea       BytesArray          Box<[u8]>       &[u8]           _
     jsonb       Jsonb       Jsonb       JsonbArray          JsonbVal        JsonbRef<'_>    _
-    list        List        List        ListArray           ListValue       ListRef<'_>     _
+    anyarray    List        List        ListArray           ListValue       ListRef<'_>     _
     struct      Struct      Struct      StructArray         StructValue     StructRef<'_>   _
 ";
 
@@ -79,7 +79,7 @@ pub fn is_primitive(ty: &str) -> bool {
 
 fn lookup_matrix(mut ty: &str, idx: usize) -> &str {
     if ty.ends_with("[]") {
-        ty = "list";
+        ty = "anyarray";
     } else if ty.starts_with("struct") {
         ty = "struct";
     } else if ty == "void" {
