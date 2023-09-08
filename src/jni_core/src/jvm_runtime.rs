@@ -275,6 +275,12 @@ fn register_native_method_for_jvm(jvm: &JavaVM) {
                 fn_ptr: crate::Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToChannel
                     as *mut c_void,
             },
+            NativeMethod {
+                name: JNIString::from("cdcJniChannelClose"),
+                sig: JNIString::from("(J)V"),
+                fn_ptr: crate::Java_com_risingwave_java_binding_Binding_cdcJniChannelClose
+                    as *mut c_void,
+            },
         ],
     )
     .inspect_err(|e| tracing::error!("jvm register native methods error: {:?}", e))

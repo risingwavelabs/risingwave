@@ -842,8 +842,6 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsg
         // If msg is null means just check whether channel is closed.
         if msg.is_null() {
             if channel.as_ref().is_closed() {
-                // Drop channel as well.
-                channel.drop();
                 return Ok(JNI_FALSE);
             } else {
                 return Ok(JNI_TRUE);
@@ -860,12 +858,19 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsg
                 Ok(JNI_TRUE)
             }
             Err(e) => {
-                channel.drop();
                 tracing::debug!("send error.  {:?}", e);
                 Ok(JNI_FALSE)
             }
         }
     })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_cdcJniChannelClose<'a>(
+    _env: EnvParam<'a>,
+    pointer: Pointer<'a, GetEventStreamJniSender>,
+) {
+    pointer.drop()
 }
 
 #[cfg(test)]

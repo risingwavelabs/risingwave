@@ -231,6 +231,14 @@ JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIter
 JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToChannel
   (JNIEnv *, jclass, jlong, jbyteArray);
 
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    cdcJniChannelClose
+ * Signature: (J)V
+ */
+JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_cdcJniChannelClose
+  (JNIEnv *, jclass, jlong);
+
 #ifdef __cplusplus
 }
 #endif

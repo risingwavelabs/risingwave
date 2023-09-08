@@ -91,4 +91,6 @@ public class Binding {
     static native long streamChunkIteratorFromPretty(String str);
 
     public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
+
+    static native void cdcJniChannelClose(long pointer);
 }

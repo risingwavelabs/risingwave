@@ -17,6 +17,7 @@ package com.risingwave.connector.source.core;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.java.binding.Binding;
+import com.risingwave.java.binding.CdcJniChannel;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto;
 import java.util.HashMap;
@@ -64,7 +65,7 @@ public class JniDbzSourceHandler {
             return;
         }
 
-        try {
+        try (CdcJniChannel channel = new CdcJniChannel(channelPtr)) {
             // Start the engine
             runner.start();
             LOG.info("Start consuming events of table {}", config.getSourceId());
@@ -83,10 +84,12 @@ public class JniDbzSourceHandler {
                             "Engine#{}: emit one chunk {} events to network ",
                             config.getSourceId(),
                             resp.getEventsCount());
-                    success = Binding.sendCdcSourceMsgToChannel(channelPtr, resp.toByteArray());
+                    success =
+                            Binding.sendCdcSourceMsgToChannel(
+                                    channel.getPointer(), resp.toByteArray());
                 } else {
                     // If resp is null means just check whether channel is closed.
-                    success = Binding.sendCdcSourceMsgToChannel(channelPtr, null);
+                    success = Binding.sendCdcSourceMsgToChannel(channel.getPointer(), null);
                 }
                 if (!success) {
                     LOG.info(
