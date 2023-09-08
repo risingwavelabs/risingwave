@@ -16,7 +16,6 @@
 
 use std::ops::Bound;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKeyRangeRef};
@@ -25,10 +24,6 @@ use risingwave_pb::hummock::SstableInfo;
 
 mod block_cache;
 pub use block_cache::*;
-
-use crate::filter_key_extractor::RpcFilterKeyExtractorManager;
-use crate::hummock::store::state_store::LocalHummockStorage;
-use crate::opts::StorageOpts;
 
 mod file_cache;
 pub use file_cache::*;

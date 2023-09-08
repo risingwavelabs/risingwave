@@ -37,10 +37,11 @@ use tracing::log::error;
 use super::local_hummock_storage::{HummockStorageIterator, LocalHummockStorage};
 use super::version::{CommittedVersion, HummockVersionReader};
 use crate::error::StorageResult;
-use crate::filter_key_extractor::{FilterKeyExtractorManager, FilterKeyExtractorManagerRef};
+use crate::filter_key_extractor::{FilterKeyExtractorManager, RpcFilterKeyExtractorManager};
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
+use crate::hummock::event_handler::refiller::CacheRefillConfig;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler, ReadVersionMappingType};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
@@ -545,7 +546,7 @@ impl HummockStorage {
             sstable_store,
             hummock_meta_client,
             notification_client,
-            Arc::new(FilterKeyExtractorManager::default()),
+            Arc::new(RpcFilterKeyExtractorManager::default()),
             Arc::new(HummockStateStoreMetrics::unused()),
             Arc::new(CompactorMetrics::unused()),
         )
