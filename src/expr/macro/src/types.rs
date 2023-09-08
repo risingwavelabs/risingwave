@@ -39,13 +39,6 @@ const TYPE_MATRIX: &str = "
 
 /// Maps a data type to its corresponding data type name.
 pub fn data_type(ty: &str) -> &str {
-    // XXX:
-    // For functions that contain `any` type, or `...` variable arguments,
-    // there are special handlings in the frontend, and the signature won't be accessed.
-    // So we simply return a placeholder here.
-    if ty == "any" || ty == "..." {
-        return "Int32";
-    }
     lookup_matrix(ty, 1)
 }
 
