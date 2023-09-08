@@ -49,8 +49,6 @@ This chapter is a simple demo of feature extraction in `RisingWave`, primarily s
 
 In this case, we need to calculate the frequency and count of user account changes over a period of time. We mainly use SQL aggregation functions and UDFs (User-Defined Functions) to achieve this.
 
-Due to the similarity between the code in this demo and another code, the implementation code is located in the `nyc-taxi-feature-store-demo` folder.
-
 #### Installation
 
 1. Build docker. Kafka RisingWave and Feature Store.
