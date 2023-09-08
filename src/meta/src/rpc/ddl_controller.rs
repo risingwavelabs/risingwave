@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{ActorGroupId, VirtualNode};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
@@ -36,7 +37,8 @@ use crate::barrier::BarrierManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
     IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
-    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId,
+    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId, WorkerId,
+    WorkerLocations,
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -99,6 +101,12 @@ pub enum DdlCommand {
     AlterSourceColumn(Source),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
+}
+
+pub struct NewClusterStreamingInfo {
+    pub assignments: BTreeMap<ActorGroupId, WorkerId>,
+
+    pub worker_locations: WorkerLocations,
 }
 
 #[derive(Clone)]
@@ -624,8 +632,7 @@ impl DdlController {
         // 3. Build the table fragments structure that will be persisted in the stream manager,
         // and the context that contains all information needed for building the
         // actors on the compute nodes.
-        let table_fragments =
-            TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
+        let table_fragments = TableFragments::new(id.into(), graph, env);
 
         let ctx = CreateStreamingJobContext {
             dispatchers,
@@ -929,12 +936,7 @@ impl DdlController {
         // 4. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
-        let table_fragments = TableFragments::new(
-            dummy_id.into(),
-            graph,
-            &building_locations.actor_locations,
-            env,
-        );
+        let table_fragments = TableFragments::new(dummy_id.into(), graph, env);
 
         let ctx = ReplaceTableContext {
             old_table_fragments,

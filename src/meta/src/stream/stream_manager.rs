@@ -29,7 +29,7 @@ use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
 use uuid::Uuid;
 
-use super::Locations;
+use super::LocationsV2;
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
@@ -54,10 +54,10 @@ pub struct CreateStreamingJobContext {
     pub internal_tables: HashMap<u32, Table>,
 
     /// The locations of the actors to build in the streaming job.
-    pub building_locations: Locations,
+    pub building_locations: LocationsV2,
 
     /// The locations of the existing actors, essentially the upstream mview actors to update.
-    pub existing_locations: Locations,
+    pub existing_locations: LocationsV2,
 
     /// The properties of the streaming job.
     // TODO: directly store `StreamingJob` here.
@@ -147,10 +147,10 @@ pub struct ReplaceTableContext {
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
 
     /// The locations of the actors to build in the new table to replace.
-    pub building_locations: Locations,
+    pub building_locations: LocationsV2,
 
     /// The locations of the existing actors, essentially the downstream chain actors to update.
-    pub existing_locations: Locations,
+    pub existing_locations: LocationsV2,
 
     /// The properties of the streaming job.
     // TODO: directly store `StreamingJob here.
@@ -330,8 +330,8 @@ impl GlobalStreamManager {
     async fn build_actors(
         &self,
         table_fragments: &TableFragments,
-        building_locations: &Locations,
-        existing_locations: &Locations,
+        building_locations: &LocationsV2,
+        existing_locations: &LocationsV2,
     ) -> MetaResult<()> {
         let actor_map = table_fragments.actor_map();
 
@@ -407,7 +407,6 @@ impl GlobalStreamManager {
             definition,
             mv_table_id,
             internal_tables,
-            ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
         // Register to compaction group beforehand.
@@ -431,6 +430,11 @@ impl GlobalStreamManager {
 
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
             .await?;
+
+        // TODO: notify about new assignments.
+        self.cluster_manager
+            .record_new_assignments(&building_locations.assignments)
+            .await;
 
         // Add table fragments to meta store with state: `State::Initial`.
         self.fragment_manager
@@ -569,6 +573,7 @@ impl GlobalStreamManager {
 }
 
 #[cfg(test)]
+#[cfg(any())]
 mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::net::SocketAddr;

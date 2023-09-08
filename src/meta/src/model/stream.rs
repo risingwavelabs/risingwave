@@ -123,12 +123,7 @@ impl MetadataModel for TableFragments {
 impl TableFragments {
     /// Create a new `TableFragments` with state of `Initial`, with other fields empty.
     pub fn for_test(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
-        Self::new(
-            table_id,
-            fragments,
-            &BTreeMap::new(),
-            StreamEnvironment::default(),
-        )
+        Self::new(table_id, fragments, StreamEnvironment::default())
     }
 
     /// Create a new `TableFragments` with state of `Initial`, with the status of actors set to
@@ -136,16 +131,30 @@ impl TableFragments {
     pub fn new(
         table_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
-        actor_locations: &BTreeMap<ActorId, ParallelUnit>,
+        // actor_locations: &BTreeMap<ActorId, ParallelUnit>,
         env: StreamEnvironment,
     ) -> Self {
-        let actor_status = actor_locations
-            .iter()
-            .map(|(&actor_id, parallel_unit)| {
+        // let actor_status = actor_locations
+        //     .iter()
+        //     .map(|(&actor_id, parallel_unit)| {
+        //         (
+        //             actor_id,
+        //             ActorStatus {
+        //                 parallel_unit: Some(parallel_unit.clone()),
+        //                 state: ActorState::Inactive as i32,
+        //             },
+        //         )
+        //     })
+        //     .collect();
+
+        let actor_status = fragments
+            .values()
+            .flat_map(|f| &f.actors)
+            .map(|a| {
                 (
-                    actor_id,
+                    a.actor_id,
                     ActorStatus {
-                        parallel_unit: Some(parallel_unit.clone()),
+                        parallel_unit: None,
                         state: ActorState::Inactive as i32,
                     },
                 )

@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
+use risingwave_common::hash::{ActorGroupId, ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -183,6 +183,11 @@ impl FragmentManager {
         !self.core.read().await.table_fragments.is_empty()
     }
 
+    async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
+        // TODO: notify actor group mapping
+    }
+
+    #[cfg(any())]
     async fn notify_fragment_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
         // Notify all fragment mapping to frontend nodes
         for fragment in table_fragment.fragments.values() {
@@ -564,6 +569,7 @@ impl FragmentManager {
 
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
     /// collected
+    #[deprecated]
     pub async fn load_all_actors(
         &self,
         check_state: impl Fn(ActorState, TableId, ActorId) -> bool,
@@ -592,6 +598,47 @@ impl FragmentManager {
                             .entry(worker_id)
                             .or_insert_with(Vec::new)
                             .push(actor_id);
+                    }
+                }
+            }
+        }
+
+        ActorInfos {
+            actor_maps,
+            barrier_inject_actor_maps,
+        }
+    }
+
+    /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
+    /// collected
+    pub async fn load_all_actors_2(
+        &self,
+        assignments: &HashMap<ActorGroupId, WorkerId>,
+        check_state: impl Fn(ActorState, TableId, ActorId) -> bool,
+    ) -> ActorInfos {
+        let mut actor_maps = HashMap::new();
+        let mut barrier_inject_actor_maps = HashMap::new();
+
+        let map = &self.core.read().await.table_fragments;
+        for fragments in map.values() {
+            let table_id = fragments.table_id();
+            let barrier_inject_actors = fragments.barrier_inject_actor_ids();
+
+            for actor in fragments.fragments.values().flat_map(|f| &f.actors) {
+                let actor_state = fragments.actor_status[&actor.actor_id].state();
+                if check_state(actor_state, table_id, actor.actor_id) {
+                    let worker_id = assignments[&actor.actor_group_id];
+
+                    actor_maps
+                        .entry(worker_id)
+                        .or_insert_with(Vec::new)
+                        .push(actor.actor_id);
+
+                    if barrier_inject_actors.contains(&actor.actor_id) {
+                        barrier_inject_actor_maps
+                            .entry(worker_id)
+                            .or_insert_with(Vec::new)
+                            .push(actor.actor_id);
                     }
                 }
             }

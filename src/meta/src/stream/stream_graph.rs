@@ -20,4 +20,5 @@ mod schedule;
 
 pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
 pub use fragment::{CompleteStreamFragmentGraph, StreamFragmentGraph};
+pub use group_schedule::LocationsV2;
 pub use schedule::Locations;

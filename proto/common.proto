@@ -60,6 +60,8 @@ message WorkerNode {
   repeated ParallelUnit parallel_units = 5;
   Property property = 6;
 
+  // uint32 parallelism = 8;
+
   // Ranges from 0 to 1023, used to generate the machine ID field in the global unique ID.
   optional uint32 transactional_id = 7;
 }

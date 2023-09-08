@@ -12,18 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::hash::{ActorGroupId, ActorGroupMapping};
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::hash::{ActorGroupId, ActorGroupMapping, ActorId};
+use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::stream_plan::DispatcherType;
 
 use super::id::GlobalFragmentId;
 use super::CompleteStreamFragmentGraph;
-use crate::manager::{IdCategory, IdGeneratorManagerRef};
+use crate::manager::{IdCategory, IdGeneratorManagerRef, WorkerId, WorkerKey, WorkerLocations};
 use crate::MetaResult;
 
 #[derive(Clone, Debug)]
@@ -41,12 +43,22 @@ impl Scheduling {
     pub fn actor_groups(&self) -> impl Iterator<Item = ActorGroupId> + '_ {
         self.actor_group_mapping.iter_unique()
     }
+
+    pub fn to_bitmaps(&self) -> Option<HashMap<ActorGroupId, Bitmap>> {
+        match self.distribution_type {
+            FragmentDistributionType::Unspecified => unreachable!(),
+            FragmentDistributionType::Single => None,
+            FragmentDistributionType::Hash => Some(self.actor_group_mapping.to_bitmaps()),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct FragmentSchedulings {
     pub building: HashMap<GlobalFragmentId, Scheduling>,
     pub existing: HashMap<GlobalFragmentId, Scheduling>,
+
+    pub new_assignments: HashMap<ActorGroupId, WorkerId>,
 }
 
 pub(super) struct Scheduler<'a> {
@@ -55,6 +67,8 @@ pub(super) struct Scheduler<'a> {
     id_gen_manager: IdGeneratorManagerRef,
 
     default_parallelism: usize,
+
+    worker_nodes: HashMap<WorkerId, WorkerNode>,
 }
 
 impl<'a> Scheduler<'a> {
@@ -62,11 +76,13 @@ impl<'a> Scheduler<'a> {
         graph: &'a CompleteStreamFragmentGraph,
         id_gen_manager: IdGeneratorManagerRef,
         default_parallelism: usize,
+        worker_nodes: HashMap<WorkerId, WorkerNode>,
     ) -> Self {
         Self {
             graph,
             id_gen_manager,
             default_parallelism,
+            worker_nodes,
         }
     }
 
@@ -111,8 +127,12 @@ impl<'a> Scheduler<'a> {
     }
 
     pub async fn schedule(&self) -> MetaResult<FragmentSchedulings> {
+        let mut round_robin_assignment =
+            RoundRobinAssignment::new(self.worker_nodes.values().map(|w| w.id).collect_vec());
+
         let mut building = HashMap::new();
         let mut existing = HashMap::new();
+        let mut new_actor_group_ids = Vec::new();
 
         for group in self.split_into_groups() {
             let scheduling = match *group
@@ -140,11 +160,13 @@ impl<'a> Scheduler<'a> {
                         .id_gen_manager
                         .generate_interval::<{ IdCategory::ActorGroup }>(parallelism as _)
                         .await? as ActorGroupId;
+                    let actor_group_ids =
+                        start_actor_group_id..(start_actor_group_id + parallelism as ActorGroupId);
 
-                    let actor_group_mapping = ActorGroupMapping::new_uniform(
-                        start_actor_group_id..(start_actor_group_id + parallelism as u32),
-                    )
-                    .into();
+                    new_actor_group_ids.extend(actor_group_ids.clone());
+
+                    let actor_group_mapping =
+                        ActorGroupMapping::new_uniform(actor_group_ids).into();
 
                     Scheduling {
                         fragment_group_id: new_group_id,
@@ -184,6 +206,80 @@ impl<'a> Scheduler<'a> {
             }
         }
 
-        Ok(FragmentSchedulings { building, existing })
+        let new_assignments: HashMap<_, _> = new_actor_group_ids
+            .into_iter()
+            .zip(round_robin_assignment)
+            .collect();
+
+        if new_assignments.is_empty() {
+            bail!("empty worker nodes");
+        }
+
+        Ok(FragmentSchedulings {
+            building,
+            existing,
+            new_assignments,
+        })
+    }
+}
+
+// TODO: weighted round robin based on parallelism
+pub struct RoundRobinAssignment {
+    worker_nodes: Vec<WorkerId>,
+    i: usize,
+}
+
+impl RoundRobinAssignment {
+    pub fn new(worker_nodes: impl IntoIterator<Item = WorkerId>) -> Self {
+        Self {
+            worker_nodes: worker_nodes.into_iter().collect(),
+            i: 0,
+        }
+    }
+}
+
+impl Iterator for RoundRobinAssignment {
+    type Item = WorkerId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let worker_node = self.worker_nodes.get(self.i)?;
+        self.i = (self.i + 1) % self.worker_nodes.len();
+        Some(*worker_node)
+    }
+}
+
+// pub struct LocationsV2 {}
+
+/// [`Locations`] represents the parallel unit and worker locations of the actors.
+#[cfg_attr(test, derive(Default))]
+pub struct LocationsV2 {
+    /// actor location map.
+    pub actor_groups: BTreeMap<ActorId, ActorGroupId>,
+
+    pub assignments: HashMap<ActorGroupId, WorkerId>,
+
+    /// worker location map.
+    pub worker_locations: WorkerLocations,
+}
+
+impl LocationsV2 {
+    /// Returns all actors for every worker node.
+    pub fn worker_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
+        self.actor_groups
+            .iter()
+            .map(|(&actor_id, actor_group_id)| (self.assignments[actor_group_id], actor_id))
+            .into_group_map()
+    }
+
+    /// Returns an iterator of `ActorInfo`.
+    pub fn actor_infos(&self) -> impl Iterator<Item = ActorInfo> + '_ {
+        self.actor_groups
+            .iter()
+            .map(|(&actor_id, actor_group_id)| ActorInfo {
+                actor_id,
+                host: self.worker_locations[&self.assignments[actor_group_id]]
+                    .host
+                    .clone(),
+            })
     }
 }

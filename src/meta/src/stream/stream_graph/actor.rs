@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -29,10 +29,12 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
 };
 
-use super::group_schedule::{self, FragmentSchedulings};
+use super::group_schedule::{self, FragmentSchedulings, LocationsV2, Scheduling};
 use super::id::GlobalFragmentIdsExt;
 use super::Locations;
-use crate::manager::{IdGeneratorManagerRef, StreamingClusterInfo, StreamingJob};
+use crate::manager::{
+    FragmentManagerRef, IdGeneratorManagerRef, StreamingClusterInfo, StreamingJob, WorkerId,
+};
 use crate::model::{DispatcherId, FragmentId};
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, EdgeId, EitherFragment, StreamFragmentEdge,
@@ -228,11 +230,13 @@ impl ActorBuilder {
             .into_values()
             .flat_map(|ActorUpstream { actors, .. }| actors.as_global_ids())
             .collect();
+
         // Only fill the definition when debug assertions enabled, otherwise use name instead.
-        #[cfg(not(debug_assertions))]
-        let mview_definition = job.name();
-        #[cfg(debug_assertions)]
-        let mview_definition = job.definition();
+        let mview_definition = if cfg!(debug_assertions) {
+            job.definition()
+        } else {
+            job.name()
+        };
 
         Ok(StreamActor {
             actor_id: self.actor_id.as_global_id(),
@@ -279,6 +283,8 @@ impl ExternalChange {
 /// The parallel unit location of actors.
 type ActorLocations = BTreeMap<GlobalActorId, ParallelUnitId>;
 
+type ActorGroupLocations = BTreeMap<GlobalActorId, ActorGroupId>;
+
 /// The actual mutable state of building an actor graph.
 ///
 /// When the fragments are visited in a topological order, actor builders will be added to this
@@ -293,18 +299,22 @@ struct ActorGraphBuildStateInner {
     /// The scheduled locations of the actors to be built.
     building_locations: ActorLocations,
 
+    // building_scheduling_locations: ActorGroupLocations,
     /// The required changes to the external actors. See [`ExternalChange`].
     external_changes: BTreeMap<GlobalActorId, ExternalChange>,
 
     /// The actual locations of the external actors.
     external_locations: ActorLocations,
+
+    external_scheduling_locations: ActorGroupLocations,
 }
 
 /// The information of a fragment, used for parameter passing for `Inner::add_link`.
 struct FragmentLinkNode<'a> {
     fragment_id: GlobalFragmentId,
     actor_ids: &'a [GlobalActorId],
-    distribution: &'a Distribution,
+    // distribution: &'a Distribution,
+    scheduling: &'a Scheduling,
 }
 
 impl ActorGraphBuildStateInner {
@@ -315,7 +325,7 @@ impl ActorGraphBuildStateInner {
         &mut self,
         actor_id: GlobalActorId,
         fragment_id: GlobalFragmentId,
-        parallel_unit_id: ParallelUnitId,
+        // parallel_unit_id: ParallelUnitId,
         actor_group_id: ActorGroupId,
         vnode_bitmap: Option<Bitmap>,
         node: Arc<StreamNode>,
@@ -327,9 +337,9 @@ impl ActorGraphBuildStateInner {
             )
             .unwrap();
 
-        self.building_locations
-            .try_insert(actor_id, parallel_unit_id)
-            .unwrap();
+        // self.building_locations
+        //     .try_insert(actor_id, parallel_unit_id)
+        //     .unwrap();
     }
 
     /// Record the location of an external actor.
@@ -340,6 +350,17 @@ impl ActorGraphBuildStateInner {
     ) {
         self.external_locations
             .try_insert(actor_id, parallel_unit_id)
+            .unwrap();
+    }
+
+    /// Record the location of an external actor.
+    fn record_external_scheduling_location(
+        &mut self,
+        actor_id: GlobalActorId,
+        actor_group_id: ActorGroupId,
+    ) {
+        self.external_scheduling_locations
+            .try_insert(actor_id, actor_group_id)
             .unwrap();
     }
 
@@ -413,11 +434,20 @@ impl ActorGraphBuildStateInner {
 
     /// Get the location of an actor. Will look up the location map of both the actors to be built
     /// and the external actors.
+    #[deprecated]
     fn get_location(&self, actor_id: GlobalActorId) -> ParallelUnitId {
         self.building_locations
             .get(&actor_id)
             .copied()
             .or_else(|| self.external_locations.get(&actor_id).copied())
+            .unwrap()
+    }
+
+    fn get_scheduling_location(&self, actor_id: GlobalActorId) -> ActorGroupId {
+        self.actor_builders
+            .get(&actor_id)
+            .map(|b| b.actor_group_id)
+            .or_else(|| self.external_scheduling_locations.get(&actor_id).copied())
             .unwrap()
     }
 
@@ -441,15 +471,16 @@ impl ActorGraphBuildStateInner {
             // For `NoShuffle`, make n "1-1" links between the actors.
             DispatcherType::NoShuffle => {
                 assert_eq!(upstream.actor_ids.len(), downstream.actor_ids.len());
-                let upstream_locations: HashMap<_, _> = upstream
+
+                let upstream_locations: HashMap<ActorGroupId, GlobalActorId> = upstream
                     .actor_ids
                     .iter()
-                    .map(|id| (self.get_location(*id), *id))
+                    .map(|id| (self.get_scheduling_location(*id), *id))
                     .collect();
-                let downstream_locations: HashMap<_, _> = downstream
+                let downstream_locations: HashMap<ActorGroupId, GlobalActorId> = downstream
                     .actor_ids
                     .iter()
-                    .map(|id| (self.get_location(*id), *id))
+                    .map(|id| (self.get_scheduling_location(*id), *id))
                     .collect();
 
                 for (location, upstream_id) in upstream_locations {
@@ -483,16 +514,18 @@ impl ActorGraphBuildStateInner {
                 let dispatcher = if let DispatcherType::Hash = dt {
                     // Transform the `ParallelUnitMapping` from the downstream distribution to the
                     // `ActorMapping`, used for the `HashDispatcher` for the upstream actors.
-                    let downstream_locations: HashMap<ParallelUnitId, ActorId> = downstream
+                    let downstream_locations: HashMap<ActorGroupId, ActorId> = downstream
                         .actor_ids
                         .iter()
-                        .map(|&actor_id| (self.get_location(actor_id), actor_id.as_global_id()))
+                        .map(|&actor_id| {
+                            (
+                                self.get_scheduling_location(actor_id),
+                                actor_id.as_global_id(),
+                            )
+                        })
                         .collect();
-                    let actor_mapping = downstream
-                        .distribution
-                        .as_hash()
-                        .unwrap()
-                        .to_actor(&downstream_locations);
+                    let actor_mapping = (downstream.scheduling.actor_group_mapping)
+                        .transform(&downstream_locations);
 
                     Self::new_hash_dispatcher(
                         &edge.dispatch_strategy,
@@ -577,10 +610,10 @@ pub struct ActorGraphBuildResult {
     pub graph: BTreeMap<FragmentId, Fragment>,
 
     /// The scheduled locations of the actors to be built.
-    pub building_locations: Locations,
+    pub building_locations: LocationsV2,
 
     /// The actual locations of the external actors.
-    pub existing_locations: Locations,
+    pub existing_locations: LocationsV2,
 
     /// The new dispatchers to be added to the upstream mview actors. Used for MV on MV.
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
@@ -632,6 +665,7 @@ impl ActorGraphBuilder {
             &fragment_graph,
             id_gen_manager.clone(),
             default_parallelism.get(),
+            cluster_info.worker_nodes.clone(),
         )
         .schedule()
         .await?;
@@ -682,22 +716,46 @@ impl ActorGraphBuilder {
         }
     }
 
+    /// Convert the actor location map to the [`Locations`] struct.
+    fn build_locations_2<'a>(
+        &self,
+        fragments: impl IntoIterator<Item = &'a Fragment>,
+        new_assignments: HashMap<ActorGroupId, WorkerId>,
+    ) -> LocationsV2 {
+        let actor_groups = fragments
+            .into_iter()
+            .flat_map(|f| &f.actors)
+            .map(|a| (a.actor_id, a.actor_group_id))
+            .collect();
+
+        let mut assignments = self.cluster_info.assignments.clone();
+        assignments.extend(new_assignments);
+
+        let worker_locations = self.cluster_info.worker_nodes.clone();
+
+        LocationsV2 {
+            actor_groups,
+            assignments,
+            worker_locations,
+        }
+    }
+
     /// Build a stream graph by duplicating each fragment as parallel actors. Returns
     /// [`ActorGraphBuildResult`] that will be further used to build actors on the compute nodes.
     pub async fn generate_graph(self, job: &StreamingJob) -> MetaResult<ActorGraphBuildResult> {
-        // Pre-generate IDs for all actors.
-        let actor_len = self
-            .distributions
-            .values()
-            .map(|d| d.parallelism())
-            .sum::<usize>() as u64;
+        // // Pre-generate IDs for all actors.
+        // let actor_len = self
+        //     .distributions
+        //     .values()
+        //     .map(|d| d.parallelism())
+        //     .sum::<usize>() as u64;
 
-        let actor_len_2 = (self.schedulings.building)
+        let actor_len = (self.schedulings.building)
             .values()
             .map(|s| s.parallelism())
             .sum::<usize>() as u64;
 
-        assert_eq!(actor_len, actor_len_2);
+        // assert_eq!(actor_len, actor_len_2);
 
         let id_gen = GlobalActorIdGen::new(&self.id_gen_manager, actor_len).await?;
 
@@ -707,6 +765,7 @@ impl ActorGraphBuilder {
             building_locations,
             external_changes,
             external_locations,
+            external_scheduling_locations,
         } = self.build_actor_graph(id_gen)?;
 
         for parallel_unit_id in external_locations.values() {
@@ -723,7 +782,7 @@ impl ActorGraphBuilder {
         }
 
         // Serialize the graph into a map of sealed fragments.
-        let graph = {
+        let graph: BTreeMap<FragmentId, Fragment> = {
             let mut actors: HashMap<GlobalFragmentId, Vec<StreamActor>> = HashMap::new();
 
             // As all fragments are processed, we can now `build` the actors where the `Exchange`
@@ -737,12 +796,12 @@ impl ActorGraphBuilder {
             actors
                 .into_iter()
                 .map(|(fragment_id, actors)| {
-                    let distribution = self.distributions[&fragment_id].clone();
+                    // let distribution = self.distributions[&fragment_id].clone();
                     let scheduling = self.get_scheduling(fragment_id).clone();
                     let fragment = self.fragment_graph.seal_fragment(
                         fragment_id,
                         actors,
-                        distribution,
+                        // distribution,
                         scheduling,
                     );
                     let fragment_id = fragment_id.as_global_id();
@@ -752,8 +811,18 @@ impl ActorGraphBuilder {
         };
 
         // Convert the actor location map to the `Locations` struct.
-        let building_locations = self.build_locations(building_locations);
-        let existing_locations = self.build_locations(external_locations);
+
+        let existing_locations = self.build_locations_2(
+            self.fragment_graph.existing_fragments().values(),
+            Default::default(),
+        );
+
+        let building_locations =
+            self.build_locations_2(graph.values(), self.schedulings.new_assignments.clone());
+
+        // Convert the actor location map to the `Locations` struct.
+        // let building_locations = self.build_locations(building_locations);
+        // let existing_locations = self.build_locations(external_locations);
 
         // Extract the new dispatchers from the external changes.
         let dispatchers = external_changes
@@ -820,7 +889,7 @@ impl ActorGraphBuilder {
         state: &mut ActorGraphBuildState,
     ) -> MetaResult<()> {
         let current_fragment = self.fragment_graph.get_fragment(fragment_id);
-        let distribution = self.get_distribution(fragment_id);
+        // let distribution = self.get_distribution(fragment_id);
         let scheduling = self.get_scheduling(fragment_id);
 
         // First, add or record the actors for the current fragment into the state.
@@ -828,19 +897,21 @@ impl ActorGraphBuilder {
             // For building fragments, we need to generate the actor builders.
             EitherFragment::Building(current_fragment) => {
                 let node = Arc::new(current_fragment.node.clone().unwrap());
-                let bitmaps = distribution.as_hash().map(|m| m.to_bitmaps());
+                // let bitmaps = distribution.as_hash().map(|m| m.to_bitmaps());
+                let bitmaps = scheduling.to_bitmaps();
 
-                (distribution.parallel_units())
-                    .zip_eq_debug(scheduling.actor_groups())
-                    .map(|(parallel_unit_id, actor_group_id)| {
+                scheduling
+                    .actor_groups()
+                    .map(|actor_group_id| {
                         let actor_id = state.next_actor_id();
-                        let vnode_bitmap = bitmaps.as_ref().map(|m| &m[&parallel_unit_id]).cloned();
-                        // TODO: use bitmap from `scheduling`
+                        // let vnode_bitmap = bitmaps.as_ref().map(|m|
+                        // &m[&parallel_unit_id]).cloned();
+                        let vnode_bitmap = bitmaps.as_ref().map(|m| &m[&actor_group_id]).cloned();
 
                         state.inner.add_actor(
                             actor_id,
                             fragment_id,
-                            parallel_unit_id,
+                            // parallel_unit_id,
                             actor_group_id,
                             vnode_bitmap,
                             node.clone(),
@@ -857,16 +928,20 @@ impl ActorGraphBuilder {
                 .iter()
                 .map(|a| {
                     let actor_id = GlobalActorId::new(a.actor_id);
-                    let parallel_unit_id = match &distribution {
-                        Distribution::Singleton(parallel_unit_id) => *parallel_unit_id,
-                        Distribution::Hash(mapping) => mapping
-                            .get_matched(&Bitmap::from(a.get_vnode_bitmap().unwrap()))
-                            .unwrap(),
-                    };
+                    // let parallel_unit_id = match &distribution {
+                    //     Distribution::Singleton(parallel_unit_id) => *parallel_unit_id,
+                    //     Distribution::Hash(mapping) => mapping
+                    //         .get_matched(&Bitmap::from(a.get_vnode_bitmap().unwrap()))
+                    //         .unwrap(),
+                    // };
+
+                    // state
+                    //     .inner
+                    //     .record_external_location(actor_id, parallel_unit_id);
 
                     state
                         .inner
-                        .record_external_location(actor_id, parallel_unit_id);
+                        .record_external_scheduling_location(actor_id, a.actor_group_id);
 
                     actor_id
                 })
@@ -880,18 +955,20 @@ impl ActorGraphBuilder {
                 .get(&downstream_fragment_id)
                 .expect("downstream fragment not processed yet");
 
-            let downstream_distribution = self.get_distribution(downstream_fragment_id);
+            let downstream_scheduling = self.get_scheduling(downstream_fragment_id);
 
             state.inner.add_link(
                 FragmentLinkNode {
                     fragment_id,
                     actor_ids: &actor_ids,
-                    distribution,
+                    // distribution,
+                    scheduling,
                 },
                 FragmentLinkNode {
                     fragment_id: downstream_fragment_id,
                     actor_ids: downstream_actors,
-                    distribution: downstream_distribution,
+                    // distribution: downstream_distribution,
+                    scheduling: downstream_scheduling,
                 },
                 edge,
             );

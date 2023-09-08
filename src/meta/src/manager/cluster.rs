@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
-use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::hash::{ActorGroupId, ParallelUnitId};
 use risingwave_pb::common::worker_node::{Property, State};
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
@@ -277,6 +277,16 @@ impl ClusterManager {
         Ok(())
     }
 
+    pub async fn record_new_assignments(&self, assignments: &HashMap<ActorGroupId, WorkerId>) {
+        let mut core = self.core.write().await;
+
+        for (&k, &v) in assignments {
+            if let Some(old_v) = core.assignments.insert(k, v) {
+                assert_eq!(old_v, v);
+            }
+        }
+    }
+
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
         let worker = core.get_worker_by_host_checked(host_address.clone())?;
@@ -494,7 +504,9 @@ impl ClusterManager {
 #[derive(Debug, Clone)]
 pub struct StreamingClusterInfo {
     /// All **active** compute nodes in the cluster.
-    pub worker_nodes: HashMap<u32, WorkerNode>,
+    pub worker_nodes: HashMap<WorkerId, WorkerNode>,
+
+    pub assignments: HashMap<ActorGroupId, WorkerId>,
 
     /// All parallel units of the **active** compute nodes in the cluster.
     pub parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
@@ -506,6 +518,8 @@ pub struct StreamingClusterInfo {
 pub struct ClusterManagerCore {
     /// Record for workers in the cluster.
     workers: HashMap<WorkerKey, Worker>,
+
+    assignments: HashMap<ActorGroupId, WorkerId>, // TODO: should we persist this?
 
     /// Record for tracking available machine ids, one is available.
     available_transactional_ids: VecDeque<u32>,
@@ -573,6 +587,7 @@ impl ClusterManagerCore {
                 .into_iter()
                 .map(|w| (WorkerKey(w.key().unwrap()), w))
                 .collect(),
+            assignments: Default::default(), // TODO: recover
             available_transactional_ids,
         })
     }
@@ -693,6 +708,7 @@ impl ClusterManagerCore {
             worker_nodes: active_workers,
             parallel_units: active_parallel_units,
             unschedulable_parallel_units,
+            assignments: self.assignments.clone(),
         }
     }
 

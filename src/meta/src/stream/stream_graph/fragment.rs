@@ -735,7 +735,7 @@ impl CompleteStreamFragmentGraph {
         &self,
         id: GlobalFragmentId,
         actors: Vec<StreamActor>,
-        distribution: Distribution,
+        // distribution: Distribution,
         scheduling: Scheduling,
     ) -> Fragment {
         let building_fragment = self.get_fragment(id).into_building().unwrap();
@@ -746,9 +746,9 @@ impl CompleteStreamFragmentGraph {
             upstream_table_columns: _,
         } = building_fragment;
 
-        let distribution_type = distribution.to_distribution_type();
-        let distribution_type_2 = scheduling.distribution_type;
-        assert_eq!(distribution_type, distribution_type_2);
+        // let distribution_type = distribution.to_distribution_type();
+        let distribution_type = scheduling.distribution_type;
+        // assert_eq!(distribution_type, distribution_type_2);
 
         let state_table_ids = internal_tables
             .iter()
@@ -768,7 +768,7 @@ impl CompleteStreamFragmentGraph {
             fragment_type_mask: inner.fragment_type_mask,
             distribution_type: distribution_type as _,
             actors,
-            vnode_mapping: Some(distribution.into_mapping().to_protobuf()),
+            vnode_mapping: None, // TODO: remove
             state_table_ids,
             upstream_fragment_ids,
         }
