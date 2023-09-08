@@ -12,13 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use parking_lot::Mutex;
-use tokio::select;
-use tokio::sync::oneshot::{self, Sender};
-use tokio::sync::watch::Receiver;
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use super::report::{start_telemetry_reporting, TelemetryInfoFetcher, TelemetryReportCreator};

@@ -22,7 +22,6 @@ use futures::future::join_all;
 use itertools::Itertools;
 use regex::Regex;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
-use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;

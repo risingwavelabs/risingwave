@@ -790,7 +790,7 @@ pub struct SystemConfig {
 
 impl SystemConfig {
     #![allow(deprecated)]
-    pub fn into_initial_system_params(&self) -> SystemParams {
+    pub fn into_init_system_params(self) -> SystemParams {
         SystemParams {
             barrier_interval_ms: self.barrier_interval_ms,
             checkpoint_frequency: self.checkpoint_frequency,
@@ -798,10 +798,10 @@ impl SystemConfig {
             parallel_compact_size_mb: self.parallel_compact_size_mb,
             block_size_kb: self.block_size_kb,
             bloom_false_positive: self.bloom_false_positive,
-            state_store: self.state_store.clone(),
-            data_directory: self.data_directory.clone(),
-            backup_storage_url: self.backup_storage_url.clone(),
-            backup_storage_directory: self.backup_storage_directory.clone(),
+            state_store: self.state_store,
+            data_directory: self.data_directory,
+            backup_storage_url: self.backup_storage_url,
+            backup_storage_directory: self.backup_storage_directory,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
             pause_on_next_bootstrap: self.pause_on_next_bootstrap,
             telemetry_enabled: None, // deprecated
