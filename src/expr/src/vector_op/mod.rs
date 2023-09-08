@@ -37,6 +37,7 @@ pub mod date_trunc;
 pub mod encdec;
 pub mod exp;
 pub mod extract;
+pub mod format;
 pub mod format_type;
 pub mod int256;
 pub mod jsonb_access;
