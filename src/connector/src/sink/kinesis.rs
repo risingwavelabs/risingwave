@@ -29,11 +29,13 @@ use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
+use super::encoder::{JsonEncoder, SerToBytes, SerToString};
+use super::formatter::{AppendOnlyFormatter, SinkFormatter};
+use super::utils::TimestampHandlingMode;
 use super::SinkParam;
 use crate::common::KinesisCommon;
 use crate::sink::utils::{
-    gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
-    DebeziumAdapterOpts, UpsertAdapterOpts,
+    gen_debezium_message_stream, gen_upsert_message_stream, DebeziumAdapterOpts, UpsertAdapterOpts,
 };
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterParam,
@@ -201,6 +203,31 @@ impl KinesisSinkWriter {
         })
     }
 
+    async fn write_chunk<
+        K: SerToString,
+        V: SerToBytes,
+        F: SinkFormatter<K = Option<K>, V = Option<V>>,
+    >(
+        &self,
+        chunk: StreamChunk,
+        mut formatter: F,
+    ) -> Result<()> {
+        for (op, row) in chunk.rows() {
+            let Some((event_key_object, event_object)) = formatter.format_row(op, row)? else {continue};
+            self.put_record(
+                &event_key_object.unwrap().ser_to_string()?,
+                Blob::new(
+                    event_object
+                        .map(|x| x.ser_to_bytes())
+                        .transpose()?
+                        .unwrap_or_default(),
+                ),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
     async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
         let upsert_stream = gen_upsert_message_stream(
             &self.schema,
@@ -210,14 +237,6 @@ impl KinesisSinkWriter {
         );
 
         crate::impl_load_stream_write_record!(upsert_stream, self.put_record);
-        Ok(())
-    }
-
-    async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
-        let append_only_stream =
-            gen_append_only_message_stream(&self.schema, &self.pk_indices, chunk);
-
-        crate::impl_load_stream_write_record!(append_only_stream, self.put_record);
         Ok(())
     }
 
@@ -242,7 +261,13 @@ impl KinesisSinkWriter {
 impl SinkWriter for KinesisSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if self.is_append_only {
-            self.append_only(chunk).await
+            let f = AppendOnlyFormatter::new(
+                JsonEncoder::new(TimestampHandlingMode::Milli),
+                JsonEncoder::new(TimestampHandlingMode::Milli),
+                &self.schema,
+                &self.pk_indices,
+            );
+            self.write_chunk(chunk, f).await
         } else if self.config.r#type == SINK_TYPE_DEBEZIUM {
             self.debezium_update(
                 chunk,

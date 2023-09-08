@@ -20,7 +20,6 @@ use serde_json::{json, Map, Value};
 use tracing::warn;
 
 use super::encoder::{JsonEncoder, RowEncoder};
-use super::formatter::{AppendOnlyFormatter, SinkFormatter};
 use crate::sink::{Result, SinkError};
 
 const DEBEZIUM_NAME_FIELD_PREFIX: &str = "RisingWave";
@@ -307,27 +306,6 @@ pub async fn gen_upsert_message_stream<'a>(
                 TimestampHandlingMode::Milli,
             )?)),
         };
-
-        yield (event_key_object, event_object);
-    }
-}
-
-#[try_stream(ok = (Option<Value>, Option<Value>), error = SinkError)]
-pub async fn gen_append_only_message_stream<'a>(
-    schema: &'a Schema,
-    pk_indices: &'a [usize],
-    chunk: StreamChunk,
-) {
-    let mut f = AppendOnlyFormatter::new(
-        JsonEncoder::new(TimestampHandlingMode::Milli),
-        JsonEncoder::new(TimestampHandlingMode::Milli),
-        schema,
-        pk_indices,
-    );
-    for (op, row) in chunk.rows() {
-        let Some((event_key_object, event_object)) = f.format_row(op, row)? else {continue};
-        let event_key_object = event_key_object.map(Value::Object);
-        let event_object = event_object.map(Value::Object);
 
         yield (event_key_object, event_object);
     }
