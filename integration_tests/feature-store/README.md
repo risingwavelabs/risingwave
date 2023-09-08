@@ -45,7 +45,7 @@ The Feature Store system performs several tasks in sequence:
 # Account change feature store
 #### Case Description
 
-This chapter is a simple demo of feature extraction in `RisingWave`, primarily showcasing the real-time feature aggregation and updating capabilities of `RisingWave`. 
+This chapter is a simple demo of feature extraction in `RisingWave`, primarily showcasing the real-time feature aggregation and updating capabilities of `RisingWave`.
 
 In this case, we need to calculate the frequency and count of user account changes over a period of time. We mainly use SQL aggregation functions and UDFs (User-Defined Functions) to achieve this.
 
