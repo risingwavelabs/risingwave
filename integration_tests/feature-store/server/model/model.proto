@@ -1,0 +1,22 @@
+syntax = "proto3";
+package model;
+
+service Model {
+  rpc GetAmount(GetAmountRequest) returns (GetAmountResponse) {}
+  rpc Training(TrainingRequest) returns (TrainingResponse) {}
+}
+
+message TrainingRequest {
+}
+
+message TrainingResponse {
+}
+
+message GetAmountRequest {
+  int64 do_location_id = 1;
+  int64 pu_location_id = 2;
+}
+
+message GetAmountResponse {
+  float amount = 1;
+}
