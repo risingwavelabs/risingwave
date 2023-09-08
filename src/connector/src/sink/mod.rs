@@ -16,6 +16,8 @@ pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
+pub mod doris;
+pub mod doris_connector;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
@@ -473,6 +475,10 @@ pub enum SinkError {
     ClickHouse(String),
     #[error("Nats error: {0}")]
     Nats(anyhow::Error),
+    #[error("Doris http error: {0}")]
+    Http(anyhow::Error),
+    #[error("Doris error: {0}")]
+    Doris(String),
 }
 
 impl From<RpcError> for SinkError {

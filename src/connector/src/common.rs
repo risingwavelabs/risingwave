@@ -27,6 +27,7 @@ use serde_with::{serde_as, DisplayFromStr};
 
 use crate::aws_auth::AwsAuthProps;
 use crate::deserialize_duration_from_string;
+use crate::sink::doris_connector::DorisGet;
 
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
@@ -308,6 +309,7 @@ pub struct ClickHouseCommon {
     pub table: String,
 }
 
+
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl ClickHouseCommon {
@@ -325,6 +327,26 @@ impl ClickHouseCommon {
             .with_password(&self.password)
             .with_database(&self.database);
         Ok(client)
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct DorisCommon {
+    #[serde(rename = "doris.url")]
+    pub url: String,
+    #[serde(rename = "doris.user")]
+    pub user: String,
+    #[serde(rename = "doris.password")]
+    pub password: String,
+    #[serde(rename = "doris.database")]
+    pub database: String,
+    #[serde(rename = "doris.table")]
+    pub table: String,
+}
+
+impl DorisCommon{
+    pub(crate) fn build_client(&self) -> anyhow::Result<DorisGet> {
+        Ok(DorisGet::new(self.url.clone(),self.table.clone(),self.database.clone(),self.user.clone(),self.password.clone()))
     }
 }
 
