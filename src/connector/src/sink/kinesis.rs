@@ -28,7 +28,7 @@ use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
-use super::encoder::{JsonEncoder, SerToBytes, SerToString};
+use super::encoder::{Base64Adapter, JsonEncoder, ProtoEncoder, SerToBytes, SerToString};
 use super::formatter::{
     AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, SinkFormatter, UpsertFormatter,
 };
@@ -232,7 +232,8 @@ impl SinkWriter for KinesisSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if self.is_append_only {
             let f = AppendOnlyFormatter::new(
-                JsonEncoder::new(TimestampHandlingMode::Milli),
+                // JsonEncoder::new(TimestampHandlingMode::Milli),
+                Base64Adapter::new(ProtoEncoder {}),
                 JsonEncoder::new(TimestampHandlingMode::Milli),
                 &self.schema,
                 &self.pk_indices,

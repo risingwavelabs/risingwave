@@ -18,11 +18,15 @@ use risingwave_common::row::Row;
 
 use crate::sink::Result;
 
+mod base64_adapter;
 mod empty;
 mod json;
+mod proto;
 
+pub use base64_adapter::Base64Adapter;
 pub use empty::EmptyEncoder;
 pub use json::JsonEncoder;
+pub use proto::ProtoEncoder;
 
 pub trait RowEncoder {
     type Output: SerToBytes;
