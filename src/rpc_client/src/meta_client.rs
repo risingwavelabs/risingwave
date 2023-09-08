@@ -429,11 +429,13 @@ impl MetaClient {
 
     pub async fn replace_table(
         &self,
+        source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
     ) -> Result<CatalogVersion> {
         let request = ReplaceTablePlanRequest {
+            source,
             table: Some(table),
             fragment_graph: Some(graph),
             table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),

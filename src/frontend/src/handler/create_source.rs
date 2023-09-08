@@ -252,7 +252,7 @@ fn consume_string_from_options(
     ))))
 }
 
-fn get_json_schema_location(
+pub fn get_json_schema_location(
     row_options: &mut BTreeMap<String, String>,
 ) -> Result<Option<(AstString, bool)>> {
     let schema_location = try_consume_string_from_options(row_options, "schema.location");

@@ -139,6 +139,7 @@ pub enum Command {
         new_table_fragments: TableFragments,
         merge_updates: Vec<MergeUpdate>,
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+        init_split_assignment: SplitAssignment,
     },
 
     /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
@@ -352,6 +353,7 @@ impl CommandContext {
                 old_table_fragments,
                 merge_updates,
                 dispatchers,
+                init_split_assignment,
                 ..
             } => {
                 let dropped_actors = old_table_fragments.actor_ids();
@@ -368,10 +370,16 @@ impl CommandContext {
                     })
                     .collect();
 
+                let actor_splits = init_split_assignment
+                    .values()
+                    .flat_map(build_actor_connector_splits)
+                    .collect();
+
                 Some(Mutation::Update(UpdateMutation {
                     actor_new_dispatchers,
                     merge_update: merge_updates.clone(),
                     dropped_actors,
+                    actor_splits,
                     ..Default::default()
                 }))
             }
@@ -761,6 +769,7 @@ impl CommandContext {
                 new_table_fragments,
                 merge_updates,
                 dispatchers,
+                ..
             } => {
                 let table_ids = HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
 
