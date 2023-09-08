@@ -17,6 +17,7 @@ use std::str::FromStr;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use jni::objects::JValue;
 use prost::Message;
 use risingwave_common::util::addr::HostAddr;
@@ -163,13 +164,7 @@ where
 
         while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {
             tracing::debug!("receive events {:?}", events.len());
-            if events.is_empty() {
-                continue;
-            }
-            let mut msgs = Vec::with_capacity(events.len());
-            for event in events {
-                msgs.push(SourceMessage::from(event));
-            }
+            let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
             yield msgs;
         }
     }
