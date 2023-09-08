@@ -414,7 +414,7 @@ impl<T: AsRef<[u8]>> TableKey<T> {
 
 impl EstimateSize for TableKey<Bytes> {
     fn estimated_heap_size(&self) -> usize {
-        self.0.estimated_size()
+        self.0.estimated_heap_size()
     }
 }
 

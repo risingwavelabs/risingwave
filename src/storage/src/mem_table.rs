@@ -702,6 +702,7 @@ mod tests {
         mem_table
             .insert(TableKey("key1".into()), "value1".into())
             .unwrap();
+
         assert_eq!(
             mem_table.kv_size.size(),
             std::mem::size_of::<Bytes>()

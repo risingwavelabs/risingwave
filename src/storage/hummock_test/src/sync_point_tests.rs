@@ -310,7 +310,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let val1 = Bytes::from(b"1"[..].repeat(1 << 10)); // 1024 Byte value
 
     local.init_for_test(100).await.unwrap();
-    let mut start_key = b"\0\0aaa".to_vec();
+    let mut start_key = b"aaa".to_vec();
     for _ in 0..10 {
         local
             .insert(
@@ -323,21 +323,21 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     }
     local
         .insert(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0ggg"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"ggg"),
             val0.clone(),
             None,
         )
         .unwrap();
     local
         .insert(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0hhh"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"hhh"),
             val0.clone(),
             None,
         )
         .unwrap();
     local
         .insert(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0kkk"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"kkk"),
             val0.clone(),
             None,
         )
@@ -354,22 +354,22 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
 
     local
         .insert(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0aaa"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"aaa"),
             val1.clone(),
             None,
         )
         .unwrap();
     local
         .insert(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0bbb"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"bbb"),
             val1.clone(),
             None,
         )
         .unwrap();
     local
         .flush(vec![(
-            Bound::Included(Bytes::from(b"\0\0ggg".as_slice())),
-            Bound::Excluded(Bytes::from(b"\0\0hhh".as_slice())),
+            Bound::Included(Bytes::from(b"ggg".as_slice())),
+            Bound::Excluded(Bytes::from(b"hhh".as_slice())),
         )])
         .await
         .unwrap();
@@ -384,22 +384,22 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
 
     local
         .insert(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0hhh"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"hhh"),
             val1.clone(),
             None,
         )
         .unwrap();
     local
         .insert(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0iii"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"iii"),
             val1.clone(),
             None,
         )
         .unwrap();
     local
         .flush(vec![(
-            Bound::Included(Bytes::from(b"\0\0jjj".as_slice())),
-            Bound::Excluded(Bytes::from(b"\0\0kkk".as_slice())),
+            Bound::Included(Bytes::from(b"jjj".as_slice())),
+            Bound::Excluded(Bytes::from(b"kkk".as_slice())),
         )])
         .await
         .unwrap();
@@ -415,14 +415,14 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
 
     local
         .insert(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0lll"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"lll"),
             val1.clone(),
             None,
         )
         .unwrap();
     local
         .insert(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0mmm"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"mmm"),
             val1.clone(),
             None,
         )
@@ -463,7 +463,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     };
     let get_result = storage
         .get(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0hhh"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"hhh"),
             120,
             read_options.clone(),
         )
@@ -472,7 +472,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     assert_eq!(get_result.unwrap(), val1);
     let get_result = storage
         .get(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0ggg"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"ggg"),
             120,
             read_options.clone(),
         )
@@ -481,7 +481,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     assert!(get_result.is_none());
     let get_result = storage
         .get(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0aaa"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"aaa"),
             120,
             read_options.clone(),
         )
@@ -490,7 +490,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     assert_eq!(get_result.unwrap(), val1);
     let get_result = storage
         .get(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0aab"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"aab"),
             120,
             read_options.clone(),
         )
@@ -507,7 +507,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     });
     let get_result = storage
         .get(
-            gen_key_from_bytes(VirtualNode::ZERO, b"\0\0kkk"),
+            gen_key_from_bytes(VirtualNode::ZERO, b"kkk"),
             120,
             read_options.clone(),
         )
