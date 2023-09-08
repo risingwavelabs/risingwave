@@ -64,6 +64,39 @@ impl CompactionTaskValidator {
         CompactionTaskValidator { validation_rules }
     }
 
+    pub fn unused(config: Arc<CompactionConfig>) -> Self {
+        let mut validation_rules: HashMap<
+            ValidationRuleType,
+            Box<dyn CompactionTaskValidationRule>,
+        > = HashMap::default();
+
+        validation_rules.insert(
+            ValidationRuleType::Tier,
+            Box::new(TierCompactionTaskValidationRule {
+                config: config.clone(),
+                enable: false,
+            }),
+        );
+
+        validation_rules.insert(
+            ValidationRuleType::Intra,
+            Box::new(IntraCompactionTaskValidationRule {
+                config: config.clone(),
+                enable: false,
+            }),
+        );
+
+        validation_rules.insert(
+            ValidationRuleType::ToBase,
+            Box::new(BaseCompactionTaskValidationRule {
+                config,
+                enable: false,
+            }),
+        );
+
+        CompactionTaskValidator { validation_rules }
+    }
+
     pub fn valid_compact_task(
         &self,
         input: &CompactionInput,
