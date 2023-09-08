@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod base_level_compaction_picker;
+mod intra_compaction_picker;
 mod manual_compaction_picker;
 mod min_overlap_compaction_picker;
 mod space_reclaim_compaction_picker;
@@ -25,6 +26,7 @@ mod compaction_task_validator;
 
 pub use base_level_compaction_picker::LevelCompactionPicker;
 pub use compaction_task_validator::{CompactionTaskValidator, ValidationRuleType};
+pub use intra_compaction_picker::IntraCompactionPicker;
 pub use manual_compaction_picker::ManualCompactionPicker;
 pub use min_overlap_compaction_picker::MinOverlappingPicker;
 use risingwave_pb::hummock::hummock_version::Levels;
