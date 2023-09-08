@@ -10,13 +10,13 @@ We also utilize the `simulator` to simulate user queries to our `feature`. The `
 
 If we intend to modify our business logic, we simply need to update the materialized view within our `RisingWave` by using SQL statements.
 
-#### Specific case: 
+#### Specific case:
 
-The case in this chapter is a New York taxi fare prediction. We need to predict the taxi fare based on the starting and ending points of the trip. 
+The case in this chapter is a New York taxi fare prediction. We need to predict the taxi fare based on the starting and ending points of the trip.
 
-We use the starting and ending points as primary keys, extract and transform corresponding features, and save them in `RisingWave`. These features are updated based on user behavior. 
+We use the starting and ending points as primary keys, extract and transform corresponding features, and save them in `RisingWave`. These features are updated based on user behavior.
 
-When a user needs to make a prediction using these features, they can retrieve all the features for training. 
+When a user needs to make a prediction using these features, they can retrieve all the features for training.
 
 When a user needs to make a prediction using these features, they can provide their starting and ending points, query the corresponding features in `RisingWave`, and inject them into a machine learning model for real-time fare prediction.
 

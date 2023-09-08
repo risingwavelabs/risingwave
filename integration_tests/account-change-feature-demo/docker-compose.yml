@@ -62,9 +62,9 @@ services:
       file: ../../docker/docker-compose.yml
       service: compute-node-0
     volumes:
-      - "./server/udf.py:/udf.py"
-      - "./mfa-start.sql:/mfa-start.sql"
-      - "./mfa-mock.sql:/mfa-mock.sql"
+      - "../nyc-taxi-feature-store-demo/server/udf.py:/udf.py"
+      - "../nyc-taxi-feature-store-demo/mfa-start.sql:/mfa-start.sql"
+      - "../nyc-taxi-feature-store-demo/mfa-mock.sql:/mfa-mock.sql"
   feature-store:
     image: rust:1.67
     build:
