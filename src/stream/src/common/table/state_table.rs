@@ -581,6 +581,35 @@ where
     S: StateStore,
     SD: ValueRowSerde,
 {
+
+    /// Get a single row from state table.
+    pub async fn get_row_raw_pk(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
+        assert!(pk.len() <= self.pk_indices.len());
+
+        let serialized_pk =
+            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
+        let prefix_hint = None;
+
+        let read_options = ReadOptions {
+            prefix_hint,
+            retention_seconds: self.table_option.retention_seconds,
+            table_id: self.table_id,
+            cache_policy: CachePolicy::Fill(CachePriority::High),
+            ..Default::default()
+        };
+
+        let encoded_row = self.local_store
+            .get(serialized_pk, read_options)
+            .await?;
+        match encoded_row {
+            Some(encoded_row) => {
+                let row = self.row_serde.deserialize(&encoded_row)?;
+                Ok(Some(OwnedRow::new(row)))
+            }
+            None => Ok(None),
+        }
+    }
+
     /// Get a single row from state table.
     pub async fn get_row(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
         let encoded_row: Option<Bytes> = self.get_encoded_row(pk).await?;
@@ -786,6 +815,36 @@ where
             Record::Delete { old_row } => self.delete(old_row),
             Record::Update { old_row, new_row } => self.update(old_row, new_row),
         }
+    }
+
+    /// Do the following check:
+    /// For DELETEs: Check if old row is present
+    /// TODO(kwannoel): We can check other things like double insert.
+    async fn check_chunk_consistency(&mut self, chunk: StreamChunk) {
+        let (chunk, op) = chunk.into_parts();
+
+        let key_chunk = chunk.project(self.pk_indices());
+        let vis = key_chunk.vis();
+        match vis {
+            Vis::Compact(_) => {
+                for (op, key) in izip!(op.iter(), key_chunk.rows()) {
+                    match op {
+                        Op::Delete => {
+                            if !self.get_row_raw_pk(key).await.unwrap().is_none() {
+                                panic!("DELETE MISSING ROW: {:?}", key);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => panic!("should have been compacted...")
+        }
+    }
+
+    pub async fn write_chunk_consistent(&mut self, chunk: StreamChunk) {
+        self.check_chunk_consistency(chunk.clone().compact()).await;
+        self.write_chunk(chunk);
     }
 
     /// Write batch with a `StreamChunk` which should have the same schema with the table.

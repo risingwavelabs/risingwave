@@ -2,4 +2,4 @@
 
 set -euo pipefail
 
-./risedev d; ./risedev psql -f error.sql
+RUST_LOG="info,risingwave_stream=trace" ./risedev d; ./risedev psql -f error.sql
