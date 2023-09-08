@@ -89,20 +89,23 @@ impl ClickHouseSink {
     /// Check that the column names and types of risingwave and clickhouse are identical
     fn check_column_name_and_type(&self, clickhouse_columns_desc: Vec<SystemColumn>) -> Result<()> {
         let rw_fields_name = build_fields_name_type_from_schema(&self.schema)?;
-        let clickhouse_columns_desc:HashMap<String,SystemColumn> = clickhouse_columns_desc.iter().map(|s|{
-            (s.name.clone(),s.clone())
-        }).collect();
+        let clickhouse_columns_desc: HashMap<String, SystemColumn> = clickhouse_columns_desc
+            .iter()
+            .map(|s| (s.name.clone(), s.clone()))
+            .collect();
 
         if !rw_fields_name.len().le(&clickhouse_columns_desc.len()) {
             return Err(SinkError::ClickHouse("Schema len not match".to_string()));
         }
 
         for i in rw_fields_name {
-            let value = clickhouse_columns_desc.get(&i.0).ok_or(SinkError::ClickHouse(format!(
-                "Column name don't find in clickhouse, risingwave is {:?} ",
-                i.0
-            )))?;
-            Self::check_and_correct_column_type(&i.1, &value)?
+            let value = clickhouse_columns_desc
+                .get(&i.0)
+                .ok_or(SinkError::ClickHouse(format!(
+                    "Column name don't find in clickhouse, risingwave is {:?} ",
+                    i.0
+                )))?;
+            Self::check_and_correct_column_type(&i.1, value)?
         }
         Ok(())
     }
@@ -438,7 +441,7 @@ impl SinkWriter for ClickHouseSinkWriter {
     }
 }
 
-#[derive(ClickHouseRow, Deserialize,Clone)]
+#[derive(ClickHouseRow, Deserialize, Clone)]
 struct SystemColumn {
     name: String,
     r#type: String,
