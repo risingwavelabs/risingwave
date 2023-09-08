@@ -119,7 +119,7 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     match opts.is_shared_compactor {
         true => {
             Box::pin(async move {
-                tracing::info!("Compactor node options: {:?}", opts);
+                tracing::info!("Shared compactor pod options: {:?}", opts);
                 tracing::info!("meta address: {}", opts.meta_address.clone());
 
                 let listen_addr = opts.listen_addr.parse().unwrap();
