@@ -18,7 +18,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
-use futures_async_stream::for_await;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
@@ -28,18 +27,18 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_rpc_client::ConnectorClient;
 use serde_derive::{Deserialize, Serialize};
-use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
 
 use super::encoder::{JsonEncoder, SerToBytes};
-use super::formatter::{AppendOnlyFormatter, SinkFormatter, UpsertFormatter};
+use super::formatter::{
+    AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, SinkFormatter, UpsertFormatter,
+};
 use super::utils::TimestampHandlingMode;
 use super::{
     Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
-use crate::sink::utils::{gen_debezium_message_stream, DebeziumAdapterOpts};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
 };
@@ -452,18 +451,6 @@ impl KafkaSinkWriter {
         Err(err)
     }
 
-    async fn write_json_objects(
-        &self,
-        event_key_object: Option<Value>,
-        event_object: Option<Value>,
-    ) -> Result<()> {
-        self.write_encoded_row(
-            event_key_object.map(|v| v.to_string().into_bytes()),
-            event_object.map(|v| v.to_string().into_bytes()),
-        )
-        .await
-    }
-
     async fn write_encoded_row(
         &self,
         event_key_object: Option<Vec<u8>>,
@@ -480,26 +467,6 @@ impl KafkaSinkWriter {
             record = record.payload(&payload);
         }
         self.send_result(record).await?;
-        Ok(())
-    }
-
-    async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
-        let dbz_stream = gen_debezium_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            ts_ms,
-            DebeziumAdapterOpts::default(),
-            &self.db_name,
-            &self.sink_from_name,
-        );
-
-        #[for_await]
-        for msg in dbz_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
-        }
         Ok(())
     }
 
@@ -543,14 +510,18 @@ impl SinkWriterV1 for KafkaSinkWriter {
         } else {
             // Debezium
             if self.config.r#type == SINK_TYPE_DEBEZIUM {
-                self.debezium_update(
-                    chunk,
+                let f = DebeziumJsonFormatter::new(
+                    &self.schema,
+                    &self.pk_indices,
                     SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
                         .as_millis() as u64,
-                )
-                .await
+                    &self.db_name,
+                    &self.sink_from_name,
+                    DebeziumAdapterOpts::default(),
+                );
+                self.write_chunk(chunk, f).await
             } else {
                 // Upsert
                 let f = UpsertFormatter::new(
@@ -589,8 +560,10 @@ mod test {
     use risingwave_common::catalog::Field;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
+    use serde_json::Value;
 
     use super::*;
+    use crate::sink::formatter::schema_to_json;
     use crate::sink::utils::*;
 
     #[test]

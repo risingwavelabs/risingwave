@@ -20,7 +20,6 @@ use aws_sdk_kinesis::error::DisplayErrorContext;
 use aws_sdk_kinesis::operation::put_record::PutRecordOutput;
 use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::Client as KinesisClient;
-use futures_async_stream::for_await;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_rpc_client::ConnectorClient;
@@ -30,11 +29,12 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
 use super::encoder::{JsonEncoder, SerToBytes, SerToString};
-use super::formatter::{AppendOnlyFormatter, SinkFormatter, UpsertFormatter};
+use super::formatter::{
+    AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, SinkFormatter, UpsertFormatter,
+};
 use super::utils::TimestampHandlingMode;
 use super::SinkParam;
 use crate::common::KinesisCommon;
-use crate::sink::utils::{gen_debezium_message_stream, DebeziumAdapterOpts};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterParam,
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -225,22 +225,6 @@ impl KinesisSinkWriter {
         }
         Ok(())
     }
-
-    async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
-        let dbz_stream = gen_debezium_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            ts_ms,
-            DebeziumAdapterOpts::default(),
-            &self.db_name,
-            &self.sink_from_name,
-        );
-
-        crate::impl_load_stream_write_record!(dbz_stream, self.put_record);
-
-        Ok(())
-    }
 }
 
 #[async_trait::async_trait]
@@ -255,14 +239,18 @@ impl SinkWriter for KinesisSinkWriter {
             );
             self.write_chunk(chunk, f).await
         } else if self.config.r#type == SINK_TYPE_DEBEZIUM {
-            self.debezium_update(
-                chunk,
+            let f = DebeziumJsonFormatter::new(
+                &self.schema,
+                &self.pk_indices,
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_millis() as u64,
-            )
-            .await
+                &self.db_name,
+                &self.sink_from_name,
+                DebeziumAdapterOpts::default(),
+            );
+            self.write_chunk(chunk, f).await
         } else if self.config.r#type == SINK_TYPE_UPSERT {
             let f = UpsertFormatter::new(
                 JsonEncoder::new(TimestampHandlingMode::Milli),
@@ -284,24 +272,4 @@ impl SinkWriter for KinesisSinkWriter {
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
         Ok(())
     }
-}
-
-#[macro_export]
-macro_rules! impl_load_stream_write_record {
-    ($stream:ident, $op_fn:stmt) => {
-        #[for_await]
-        for msg in $stream {
-            let (event_key_object, event_object) = msg?;
-            let key_str = event_key_object.unwrap().to_string();
-            $op_fn(
-                &key_str,
-                Blob::new(if let Some(value) = event_object {
-                    value.to_string().into_bytes()
-                } else {
-                    vec![]
-                }),
-            )
-            .await?;
-        }
-    };
 }

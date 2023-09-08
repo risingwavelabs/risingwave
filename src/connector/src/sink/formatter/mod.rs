@@ -17,9 +17,13 @@ use risingwave_common::array::{Op, RowRef};
 use crate::sink::Result;
 
 mod append_only;
+mod debezium_json;
 mod upsert;
 
 pub use append_only::AppendOnlyFormatter;
+#[cfg(test)]
+pub(crate) use debezium_json::schema_to_json;
+pub use debezium_json::{DebeziumAdapterOpts, DebeziumJsonFormatter};
 pub use upsert::UpsertFormatter;
 
 pub trait SinkFormatter {
