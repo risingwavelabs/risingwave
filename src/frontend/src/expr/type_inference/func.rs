@@ -334,6 +334,14 @@ fn infer_type_for_special(
                 .try_collect()?;
             Ok(Some(DataType::Varchar))
         }
+        ExprType::ConcatOp => {
+            let inputs_owned = std::mem::take(inputs);
+            *inputs = inputs_owned
+                .into_iter()
+                .map(|input| input.cast_explicit(DataType::Varchar))
+                .try_collect()?;
+            Ok(Some(DataType::Varchar))
+        }
         ExprType::Format => {
             ensure_arity!("format", 1 <= | inputs |);
             let inputs_owned = std::mem::take(inputs);
