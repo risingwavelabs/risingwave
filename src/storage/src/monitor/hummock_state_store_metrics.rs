@@ -71,18 +71,14 @@ pub struct HummockStateStoreMetrics {
 
 pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: OnceLock<HummockStateStoreMetrics> = OnceLock::new();
 
-pub fn global_hummock_state_store_metrics(
-    storage_metric_level: MetricLevel,
-) -> HummockStateStoreMetrics {
+pub fn global_hummock_state_store_metrics(metric_level: MetricLevel) -> HummockStateStoreMetrics {
     GLOBAL_HUMMOCK_STATE_STORE_METRICS
-        .get_or_init(|| {
-            HummockStateStoreMetrics::new(&GLOBAL_METRICS_REGISTRY, storage_metric_level)
-        })
+        .get_or_init(|| HummockStateStoreMetrics::new(&GLOBAL_METRICS_REGISTRY, metric_level))
         .clone()
 }
 
 impl HummockStateStoreMetrics {
-    pub fn new(registry: &Registry, storage_metric_level: MetricLevel) -> Self {
+    pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
         // 10ms ~ max 2.7h
         let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         let bloom_filter_true_negative_counts = register_int_counter_vec_with_registry!(
@@ -95,7 +91,7 @@ impl HummockStateStoreMetrics {
         let bloom_filter_true_negative_counts = RelabeledCounterVec::with_metric_level(
             MetricLevel::Debug,
             bloom_filter_true_negative_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         let bloom_filter_check_counts = register_int_counter_vec_with_registry!(
@@ -108,7 +104,7 @@ impl HummockStateStoreMetrics {
         let bloom_filter_check_counts = RelabeledCounterVec::with_metric_level(
             MetricLevel::Debug,
             bloom_filter_check_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         // ----- iter -----
@@ -122,7 +118,7 @@ impl HummockStateStoreMetrics {
         let iter_merge_sstable_counts = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Debug,
             iter_merge_sstable_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         // ----- sst store -----
@@ -136,7 +132,7 @@ impl HummockStateStoreMetrics {
         let sst_store_block_request_counts = RelabeledCounterVec::with_metric_level(
             MetricLevel::Critical,
             sst_store_block_request_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         let iter_scan_key_counts = register_int_counter_vec_with_registry!(
@@ -149,7 +145,7 @@ impl HummockStateStoreMetrics {
         let iter_scan_key_counts = RelabeledCounterVec::with_metric_level(
             MetricLevel::Info,
             iter_scan_key_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         let get_shared_buffer_hit_counts = register_int_counter_vec_with_registry!(
@@ -162,7 +158,7 @@ impl HummockStateStoreMetrics {
         let get_shared_buffer_hit_counts = RelabeledCounterVec::with_metric_level(
             MetricLevel::Debug,
             get_shared_buffer_hit_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(
@@ -175,7 +171,7 @@ impl HummockStateStoreMetrics {
         let remote_read_time = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Debug,
             remote_read_time,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(
@@ -188,7 +184,7 @@ impl HummockStateStoreMetrics {
         let iter_fetch_meta_duration = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Info,
             iter_fetch_meta_duration,
-            storage_metric_level,
+            metric_level,
         );
 
         let iter_fetch_meta_cache_unhits = register_int_gauge_with_registry!(
@@ -216,7 +212,7 @@ impl HummockStateStoreMetrics {
         let write_batch_tuple_counts = RelabeledCounterVec::with_metric_level(
             MetricLevel::Debug,
             write_batch_tuple_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(
@@ -229,7 +225,7 @@ impl HummockStateStoreMetrics {
         let write_batch_duration = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Debug,
             write_batch_duration,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(
@@ -242,7 +238,7 @@ impl HummockStateStoreMetrics {
         let write_batch_size = RelabeledHistogramVec::with_metric_level(
             MetricLevel::Debug,
             write_batch_size,
-            storage_metric_level,
+            metric_level,
         );
 
         let merge_imm_task_counts = register_int_counter_vec_with_registry!(
@@ -255,7 +251,7 @@ impl HummockStateStoreMetrics {
         let merge_imm_task_counts = RelabeledCounterVec::with_metric_level(
             MetricLevel::Debug,
             merge_imm_task_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         let merge_imm_batch_memory_sz = register_int_counter_vec_with_registry!(
@@ -268,7 +264,7 @@ impl HummockStateStoreMetrics {
         let merge_imm_batch_memory_sz = RelabeledCounterVec::with_metric_level(
             MetricLevel::Debug,
             merge_imm_batch_memory_sz,
-            storage_metric_level,
+            metric_level,
         );
 
         let spill_task_counts = register_int_counter_vec_with_registry!(
@@ -281,7 +277,7 @@ impl HummockStateStoreMetrics {
         let spill_task_counts = RelabeledCounterVec::with_metric_level(
             MetricLevel::Debug,
             spill_task_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         let spill_task_size = register_int_counter_vec_with_registry!(
@@ -294,7 +290,7 @@ impl HummockStateStoreMetrics {
         let spill_task_size = RelabeledCounterVec::with_metric_level(
             MetricLevel::Debug,
             spill_task_size,
-            storage_metric_level,
+            metric_level,
         );
 
         let uploader_uploading_task_size = GenericGauge::new(
@@ -316,7 +312,7 @@ impl HummockStateStoreMetrics {
         let read_req_bloom_filter_positive_counts = RelabeledCounterVec::with_metric_level(
             MetricLevel::Info,
             read_req_bloom_filter_positive_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         let read_req_positive_but_non_exist_counts = register_int_counter_vec_with_registry!(
@@ -329,7 +325,7 @@ impl HummockStateStoreMetrics {
         let read_req_positive_but_non_exist_counts = RelabeledCounterVec::with_metric_level(
             MetricLevel::Info,
             read_req_positive_but_non_exist_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         let read_req_check_bloom_filter_counts = register_int_counter_vec_with_registry!(
@@ -342,7 +338,7 @@ impl HummockStateStoreMetrics {
         let read_req_check_bloom_filter_counts = RelabeledCounterVec::with_metric_level(
             MetricLevel::Info,
             read_req_check_bloom_filter_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         Self {
