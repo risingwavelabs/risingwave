@@ -563,6 +563,7 @@ mod test {
     use serde_json::Value;
 
     use super::*;
+    use crate::sink::encoder::{EmptyEncoder, SerToString};
     use crate::sink::formatter::schema_to_json;
     use crate::sink::utils::*;
 
@@ -816,7 +817,20 @@ mod test {
             },
         ]);
 
-        let json_chunk = chunk_to_json(chunk, &schema).unwrap();
+        let mut f = AppendOnlyFormatter::new(
+            EmptyEncoder,
+            JsonEncoder::new(TimestampHandlingMode::Milli),
+            &schema,
+            &[],
+        );
+        let json_chunk: Vec<_> = chunk
+            .rows()
+            .flat_map(|(op, row)| {
+                f.format_row(op, row)
+                    .unwrap()
+                    .map(|(_, v)| v.unwrap().ser_to_string().unwrap())
+            })
+            .collect();
         let schema_json = schema_to_json(&schema, "test_db", "test_table");
         assert_eq!(schema_json, serde_json::from_str::<Value>("{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"source\",\"fields\":[{\"field\":\"db\",\"optional\":false,\"type\":\"string\"},{\"field\":\"table\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Source\",\"optional\":false,\"type\":\"struct\"},{\"field\":\"op\",\"optional\":false,\"type\":\"string\"},{\"field\":\"ts_ms\",\"optional\":false,\"type\":\"int64\"}],\"name\":\"RisingWave.test_db.test_table.Envelope\",\"optional\":false,\"type\":\"struct\"}").unwrap());
         assert_eq!(

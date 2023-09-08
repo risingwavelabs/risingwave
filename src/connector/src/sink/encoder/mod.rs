@@ -18,8 +18,10 @@ use risingwave_common::row::Row;
 
 use crate::sink::Result;
 
+mod empty;
 mod json;
 
+pub use empty::EmptyEncoder;
 pub use json::JsonEncoder;
 
 pub trait RowEncoder {

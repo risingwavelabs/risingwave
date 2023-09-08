@@ -25,7 +25,9 @@ use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
-use super::utils::chunk_to_json;
+use super::encoder::{EmptyEncoder, JsonEncoder, SerToBytes};
+use super::formatter::{AppendOnlyFormatter, SinkFormatter};
+use super::utils::TimestampHandlingMode;
 use super::{DummySinkCommitCoordinator, SinkWriter, SinkWriterParam};
 use crate::common::NatsCommon;
 use crate::sink::{Result, Sink, SinkError, SINK_TYPE_APPEND_ONLY};
@@ -126,10 +128,19 @@ impl NatsSinkWriter {
         Retry::spawn(
             ExponentialBackoff::from_millis(100).map(jitter).take(3),
             || async {
-                let data = chunk_to_json(chunk.clone(), &self.schema).unwrap();
-                for item in data {
+                let mut f = AppendOnlyFormatter::new(
+                    EmptyEncoder,
+                    JsonEncoder::new(TimestampHandlingMode::Milli),
+                    &self.schema,
+                    &[],
+                );
+                for (op, row) in chunk.rows() {
+                    let Some((_, item)) = f.format_row(op, row)? else {continue};
                     self.context
-                        .publish(self.config.common.subject.clone(), item.into())
+                        .publish(
+                            self.config.common.subject.clone(),
+                            item.unwrap().ser_to_bytes()?.into(),
+                        )
                         .await
                         .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
                 }

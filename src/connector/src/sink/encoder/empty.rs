@@ -12,23 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::RowRef;
-use risingwave_common::catalog::Field;
-use serde_json::{Map, Value};
+use super::{Field, Result, RowEncoder, RowRef, SerToString};
 
-use super::encoder::{JsonEncoder, RowEncoder};
-use crate::sink::Result;
+#[derive(Default)]
+pub struct EmptyEncoder;
 
-#[derive(Clone, Copy)]
-pub enum TimestampHandlingMode {
-    Milli,
-    String,
+impl RowEncoder for EmptyEncoder {
+    type Output = ();
+
+    fn encode(
+        &self,
+        _row: RowRef<'_>,
+        _schema: &[Field],
+        _col_indices: impl Iterator<Item = usize>,
+    ) -> Result<Self::Output> {
+        Ok(())
+    }
 }
 
-pub fn record_to_json(
-    row: RowRef<'_>,
-    schema: &[Field],
-    timestamp_handling_mode: TimestampHandlingMode,
-) -> Result<Map<String, Value>> {
-    JsonEncoder::new(timestamp_handling_mode).encode_all(row, schema)
+impl SerToString for () {
+    fn ser_to_string(&self) -> Result<String> {
+        Ok("".to_string())
+    }
 }
