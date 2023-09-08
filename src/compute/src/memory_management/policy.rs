@@ -22,7 +22,9 @@ use risingwave_batch::task::BatchManager;
 use risingwave_common::config::AutoDumpHeapProfileConfig;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::task::LocalStreamManager;
-use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, prof as jemalloc_prof, stats as jemalloc_stats};
+use tikv_jemalloc_ctl::{
+    epoch as jemalloc_epoch, opt as jemalloc_opt, prof as jemalloc_prof, stats as jemalloc_stats,
+};
 
 use super::{MemoryControl, MemoryControlStats};
 
@@ -103,9 +105,16 @@ impl JemallocMemoryControl {
         if !self.auto_dump_heap_profile_config.enabled() {
             return;
         }
+
         if cur_used_memory_bytes > self.threshold_auto_dump_heap_profile
             && prev_used_memory_bytes <= self.threshold_auto_dump_heap_profile
         {
+            let opt_prof = jemalloc_opt::prof::read().unwrap();
+            if !opt_prof {
+                tracing::info!("Cannot dump heap profile because Jemalloc prof is not enabled");
+                return;
+            }
+
             let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
             let file_name = format!(
                 "{}.exceed-threshold-aggressive-heap-prof.compute.dump.{}\0",
@@ -124,6 +133,8 @@ impl JemallocMemoryControl {
                 .write(CStr::from_bytes_with_nul(file_path_bytes).unwrap())
             {
                 tracing::warn!("Auto Jemalloc dump heap file failed! {:?}", e);
+            } else {
+                tracing::info!("Successfully dumped heap profile to {}", file_name);
             }
             unsafe { Box::from_raw(file_path_ptr) };
         }
