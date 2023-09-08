@@ -25,6 +25,7 @@ use risingwave_common::catalog::{
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::cdc::{CDC_LATEST_OFFSET_MODE, CDC_SNAPSHOT_MODE_KEY};
 use risingwave_connector::source::external::ExternalTableType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
@@ -480,9 +481,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
         let _offset_index = columns.len();
         columns.push(offset_column);
 
-        const CDC_SNAPSHOT_MODE_KEY: &str = "debezium.snapshot.mode";
         // debezium connector will only consume changelogs from latest offset on this mode
-        properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), "rw_cdc_backfill".into());
+        properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_LATEST_OFFSET_MODE.into());
 
         let pk_column_indices = {
             let mut id_to_idx = HashMap::new();

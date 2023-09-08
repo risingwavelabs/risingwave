@@ -29,6 +29,8 @@ use crate::impl_cdc_source_type;
 use crate::source::ConnectorProperties;
 
 pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
+pub const CDC_SNAPSHOT_MODE_KEY: &str = "debezium.snapshot.mode";
+pub const CDC_LATEST_OFFSET_MODE: &str = "rw_cdc_backfill";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;

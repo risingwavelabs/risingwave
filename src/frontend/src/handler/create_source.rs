@@ -32,7 +32,8 @@ use risingwave_connector::parser::{
     ProtobufParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::cdc::{
-    CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    CDC_LATEST_OFFSET_MODE, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR,
+    POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::filesystem::S3_CONNECTOR;
@@ -1121,6 +1122,7 @@ pub async fn handle_create_source(
     ensure_table_constraints_supported(&stmt.constraints)?;
     let pk_names = bind_pk_names(&stmt.columns, &stmt.constraints)?;
 
+    // TODO: gated the feature with a session variable
     let create_cdc_source_job = is_cdc_connector(&with_properties); // && session.config().get_cdc_backfill();
     let (columns_from_resolve_source, pk_names, source_info) = try_bind_columns_from_source(
         &source_schema,
@@ -1130,6 +1132,11 @@ pub async fn handle_create_source(
         create_cdc_source_job,
     )
     .await?;
+
+    // TODO: set connector to latest offset mode
+    // if create_cdc_source_job {
+    //     with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_LATEST_OFFSET_MODE.into());
+    // }
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
     let mut columns = columns_from_resolve_source.unwrap_or(columns_from_sql);
@@ -1165,8 +1172,6 @@ pub async fn handle_create_source(
     let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 
-    // let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
-
     // resolve privatelink connection for Kafka source
     let mut with_options = WithOptions::new(with_properties);
     let connection_id =
@@ -1196,9 +1201,9 @@ pub async fn handle_create_source(
     let catalog_writer = session.catalog_writer()?;
 
     if create_cdc_source_job {
-        // TODO: create source stream job in ddl service
         let graph = {
             let context = OptimizerContext::from_handler_args(handler_args);
+            // cdc source is an append-only source in plain json format
             let logical_source = LogicalSource::new(
                 Some(Rc::new(SourceCatalog::from(&source))),
                 columns,
@@ -1208,18 +1213,18 @@ pub async fn handle_create_source(
                 context.into(),
             )?;
 
+            // generate stream graph for cdc source job
             let stream_node = logical_source.to_stream(&mut ToStreamContext::new(false))?;
             let mut graph = build_graph(stream_node);
-            graph.parallelism = session
-                .config()
-                .get_streaming_parallelism()
-                .map(|parallelism| Parallelism { parallelism });
+            // set parallelism to 1
+            graph.parallelism = Some(Parallelism { parallelism: 1 });
             graph
         };
         catalog_writer
             .create_source_with_graph(source, graph)
             .await?;
     } else {
+        // For other sources we don't create a streaming job
         catalog_writer.create_source(source).await?;
     }
 
