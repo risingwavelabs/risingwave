@@ -40,7 +40,7 @@ use uuid::Uuid;
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::storage::{MetaStore, MetaStoreError, Transaction, DEFAULT_COLUMN_FAMILY};
+use crate::storage::{MetaStore, MetaStoreError, MetaStoreRef, Transaction, DEFAULT_COLUMN_FAMILY};
 use crate::stream::GlobalStreamManager;
 use crate::{MetaError, MetaResult};
 
@@ -56,10 +56,7 @@ impl From<TableRevision> for u64 {
 }
 
 impl TableRevision {
-    pub async fn get<S>(store: &S) -> MetaResult<Self>
-    where
-        S: MetaStore,
-    {
+    pub async fn get(store: &MetaStoreRef) -> MetaResult<Self> {
         let version = match store
             .get_cf(DEFAULT_COLUMN_FAMILY, TABLE_REVISION_KEY)
             .await
@@ -349,10 +346,7 @@ pub(crate) fn rebalance_actor_vnode(
     result
 }
 
-impl<S> GlobalStreamManager<S>
-where
-    S: MetaStore,
-{
+impl GlobalStreamManager {
     /// Build the context for rescheduling and do some validation for the request.
     async fn build_reschedule_context(
         &self,
@@ -1595,10 +1589,7 @@ where
     }
 }
 
-impl<S> GlobalStreamManager<S>
-where
-    S: MetaStore,
-{
+impl GlobalStreamManager {
     async fn generate_stable_resize_plan(
         &self,
         policy: StableResizePolicy,
@@ -1689,6 +1680,7 @@ where
             include_worker_ids: BTreeSet<WorkerId>,
             exclude_worker_ids: BTreeSet<WorkerId>,
             target_parallelism: Option<usize>,
+            target_parallelism_per_worker: Option<usize>,
         }
 
         let mut fragment_worker_changes: HashMap<_, _> = fragment_worker_changes
@@ -1700,6 +1692,9 @@ where
                         include_worker_ids: changes.include_worker_ids.into_iter().collect(),
                         exclude_worker_ids: changes.exclude_worker_ids.into_iter().collect(),
                         target_parallelism: changes.target_parallelism.map(|p| p as usize),
+                        target_parallelism_per_worker: changes
+                            .target_parallelism_per_worker
+                            .map(|p| p as usize),
                     },
                 )
             })
@@ -1718,6 +1713,7 @@ where
                 include_worker_ids,
                 exclude_worker_ids,
                 target_parallelism,
+                target_parallelism_per_worker,
             },
         ) in fragment_worker_changes
         {
@@ -1757,18 +1753,68 @@ where
                 })
                 .collect();
 
+            let include_worker_parallel_unit_ids = include_worker_ids
+                .iter()
+                .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
+                .cloned()
+                .collect_vec();
+
+            let exclude_worker_parallel_unit_ids = exclude_worker_ids
+                .iter()
+                .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
+                .cloned()
+                .collect_vec();
+
+            fn refilter_parallel_unit_id_by_target_parallelism(
+                worker_parallel_units: &HashMap<u32, HashSet<ParallelUnitId>>,
+                include_worker_ids: &BTreeSet<WorkerId>,
+                include_worker_parallel_unit_ids: &[ParallelUnitId],
+                target_parallel_unit_ids: &mut BTreeSet<ParallelUnitId>,
+                target_parallelism_per_worker: usize,
+            ) {
+                let limited_worker_parallel_unit_ids = include_worker_ids
+                    .iter()
+                    .flat_map(|worker_id| {
+                        worker_parallel_units
+                            .get(worker_id)
+                            .cloned()
+                            .unwrap()
+                            .into_iter()
+                            .sorted()
+                            .take(target_parallelism_per_worker)
+                    })
+                    .collect_vec();
+
+                // remove all the parallel units in the limited workers
+                target_parallel_unit_ids
+                    .retain(|id| !include_worker_parallel_unit_ids.contains(id));
+
+                // then we re-add the limited parallel units from the limited workers
+                target_parallel_unit_ids.extend(limited_worker_parallel_unit_ids.into_iter());
+            }
+
             match fragment.get_distribution_type().unwrap() {
                 FragmentDistributionType::Unspecified => unreachable!(),
                 FragmentDistributionType::Single => {
                     let single_parallel_unit_id =
                         fragment_parallel_unit_ids.iter().exactly_one().unwrap();
 
-                    let target_parallel_unit_ids: BTreeSet<_> = worker_parallel_units
+                    let mut target_parallel_unit_ids: BTreeSet<_> = worker_parallel_units
                         .keys()
                         .filter(|id| !unschedulable_worker_ids.contains(*id))
                         .filter(|id| !exclude_worker_ids.contains(*id))
                         .flat_map(|id| worker_parallel_units.get(id).cloned().unwrap())
                         .collect();
+
+                    if let Some(target_parallelism_per_worker) = target_parallelism_per_worker {
+                        refilter_parallel_unit_id_by_target_parallelism(
+                            &worker_parallel_units,
+                            &include_worker_ids,
+                            &include_worker_parallel_unit_ids,
+                            &mut target_parallel_unit_ids,
+                            target_parallelism_per_worker,
+                        );
+                    }
 
                     if target_parallel_unit_ids.is_empty() {
                         bail!(
@@ -1796,18 +1842,6 @@ where
                     }
                 }
                 FragmentDistributionType::Hash => {
-                    let include_worker_parallel_unit_ids = include_worker_ids
-                        .iter()
-                        .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
-                        .cloned()
-                        .collect_vec();
-
-                    let exclude_worker_parallel_unit_ids = exclude_worker_ids
-                        .iter()
-                        .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
-                        .cloned()
-                        .collect_vec();
-
                     let mut target_parallel_unit_ids: BTreeSet<_> =
                         fragment_parallel_unit_ids.clone();
                     target_parallel_unit_ids.extend(include_worker_parallel_unit_ids.iter());
@@ -1821,15 +1855,30 @@ where
                         );
                     }
 
-                    if let Some(target_parallelism) = target_parallelism {
-                        if target_parallel_unit_ids.len() < target_parallelism {
-                            bail!("Target parallelism {} is greater than schedulable ParallelUnits {}", target_parallelism, target_parallel_unit_ids.len());
+                    match (target_parallelism, target_parallelism_per_worker) {
+                        (Some(_), Some(_)) => {
+                            bail!("Cannot specify both target parallelism and target parallelism per worker");
                         }
+                        (Some(target_parallelism), _) => {
+                            if target_parallel_unit_ids.len() < target_parallelism {
+                                bail!("Target parallelism {} is greater than schedulable ParallelUnits {}", target_parallelism, target_parallel_unit_ids.len());
+                            }
 
-                        target_parallel_unit_ids = target_parallel_unit_ids
-                            .into_iter()
-                            .take(target_parallelism)
-                            .collect();
+                            target_parallel_unit_ids = target_parallel_unit_ids
+                                .into_iter()
+                                .take(target_parallelism)
+                                .collect();
+                        }
+                        (_, Some(target_parallelism_per_worker)) => {
+                            refilter_parallel_unit_id_by_target_parallelism(
+                                &worker_parallel_units,
+                                &include_worker_ids,
+                                &include_worker_parallel_unit_ids,
+                                &mut target_parallel_unit_ids,
+                                target_parallelism_per_worker,
+                            );
+                        }
+                        _ => {}
                     }
 
                     let to_expand_parallel_units = target_parallel_unit_ids

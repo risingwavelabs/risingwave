@@ -839,6 +839,17 @@ def section_streaming(panels):
                 ),
             ],
         ),
+        panels.timeseries_ops(
+            "Earliest In-Flight Barrier Progress",
+            "The number of actors that have processed the earliest in-flight barriers per second. "
+            "This metric helps users to detect potential congestion or stuck in the system.",
+            [
+                panels.target(
+                    f"rate({metric('stream_barrier_manager_progress')}[$__rate_interval])",
+                    "{{instance}}",
+                ),
+            ],
+        ),
     ]
 
 
@@ -1048,6 +1059,10 @@ def section_streaming_actors(outer_panels):
                             "materialize executor cache miss ratio - table {{table_id}} actor {{actor_id}}  {{instance}}",
                         ),
 
+                        panels.target(
+                            f"(sum(rate({metric('stream_over_window_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_over_window_cache_lookup_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Over window cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
                     ],
                 ),
                 panels.timeseries_actor_latency(
@@ -1056,14 +1071,14 @@ def section_streaming_actors(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_barrier_align_duration_bucket')}[$__rate_interval])) by (le, actor_id, wait_side, job, instance))",
-                                f"p{legend} {{{{actor_id}}}}.{{{{wait_side}}}} - {{{{job}}}} @ {{{{instance}}}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_barrier_align_duration_bucket')}[$__rate_interval])) by (le, fragment_id, wait_side, job, instance))",
+                                f"p{legend} - fragment {{{{fragment_id}}}} {{{{wait_side}}}} - {{{{job}}}} @ {{{{instance}}}}",
                             ),
                             [90, 99, 999, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, actor_id, wait_side, job, instance)(rate({metric('stream_join_barrier_align_duration_sum')}[$__rate_interval])) / sum by(le,actor_id,wait_side,job,instance) (rate({metric('stream_join_barrier_align_duration_count')}[$__rate_interval]))",
-                            "avg {{actor_id}}.{{wait_side}} - {{job}} @ {{instance}}",
+                            f"sum by(le, fragment_id, wait_side, job, instance)(rate({metric('stream_join_barrier_align_duration_sum')}[$__rate_interval])) / sum by(le,fragment_id,wait_side,job,instance) (rate({metric('stream_join_barrier_align_duration_count')}[$__rate_interval]))",
+                            "avg - fragment {{fragment_id}} {{wait_side}} - {{job}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -1120,14 +1135,14 @@ def section_streaming_actors(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_matched_join_keys_bucket')}[$__rate_interval])) by (le, actor_id, table_id, job, instance))",
-                                f"p{legend} - actor_id {{{{actor_id}}}} table_id {{{{table_id}}}} - {{{{job}}}} @ {{{{instance}}}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_matched_join_keys_bucket')}[$__rate_interval])) by (le, fragment_id, table_id, job, instance))",
+                                f"p{legend} - fragment {{{{fragment_id}}}} table_id {{{{table_id}}}} - {{{{job}}}} @ {{{{instance}}}}",
                             ),
                             [90, 99, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, job, instance, actor_id, table_id) (rate({metric('stream_join_matched_join_keys_sum')}[$__rate_interval])) / sum by(le, job, instance, actor_id, table_id) (rate({table_metric('stream_join_matched_join_keys_count')}[$__rate_interval]))",
-                            "avg - actor_id {{actor_id}} table_id {{table_id}} - {{job}} @ {{instance}}",
+                            f"sum by(le, job, instance, actor_id, table_id) (rate({metric('stream_join_matched_join_keys_sum')}[$__rate_interval])) / sum by(le, job, instance, fragment_id, table_id) (rate({table_metric('stream_join_matched_join_keys_count')}[$__rate_interval]))",
+                            "avg - fragment {{fragment_id}} table_id {{table_id}} - {{job}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -1219,6 +1234,25 @@ def section_streaming_actors(outer_panels):
                                       "lookup cached count | table {{table_id}} actor {{actor_id}}"),
 
                     ],
+                ),
+
+                panels.timeseries_actor_ops(
+                    "Over Window Executor Cache",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_over_window_cached_entry_count')}[$__rate_interval])",
+                            "cached entry count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                        panels.target(
+                            f"rate({table_metric('stream_over_window_cache_lookup_count')}[$__rate_interval])",
+                            "cache lookup count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                        panels.target(
+                            f"rate({table_metric('stream_over_window_cache_miss_count')}[$__rate_interval])",
+                            "cache miss count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                    ]
                 ),
             ],
         )
@@ -1443,6 +1477,16 @@ def section_streaming_errors(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Source Reader Errors by Type",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('user_source_reader_error_count')}) by (error_type, error_msg, actor_id, source_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: actor_id={{actor_id}}, source_id={{source_id}})",
+                        ),
+                    ],
+                ),
             ],
         ),
     ]
@@ -1644,16 +1688,6 @@ def section_hummock(panels):
                 panels.target(
                     f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
                     "preload iops",
-                ),
-            ],
-        ),
-        panels.timeseries_ops(
-            "File Cache Ops",
-            "",
-            [
-                panels.target(
-                    f"sum(rate({metric('foyer_storage_latency_count')}[$__rate_interval])) by (op, extra, instance)",
-                    "file cache {{op}} {{extra}} @ {{instance}}",
                 ),
             ],
         ),
@@ -1874,14 +1908,10 @@ def section_hummock(panels):
                     f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', data_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', data_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
                     "block cache miss rate - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
-                panels.target(
-                    f"(sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)) / (sum(rate({metric('file_cache_latency_count', file_cache_get_filter)}[$__rate_interval])) by (instance))",
-                    "file cache miss rate @ {{instance}}",
-                ),
             ],
         ),
         panels.timeseries_percentage(
-            "Bloom-Filter Miss Rate",
+            "Bloom-Filter Positive Rate",
             "Positive / Total",
             [
                 panels.target(
@@ -2174,32 +2204,20 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('data_foyer_storage_latency_count')}[$__rate_interval])) by (op, extra, instance)",
-                            "data file cache {{op}} {{extra}} @ {{instance}}",
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('meta_foyer_storage_latency_count')}[$__rate_interval])) by (op, extra, instance)",
-                            "meta cache {{op}} {{extra}} @ {{instance}}",
+                            f"sum(rate({metric('foyer_storage_op_duration_count')}[$__rate_interval])) by (foyer, op, extra, instance)",
+                            "{{foyer}} file cache {{op}} {{extra}} @ {{instance}}",
                         ),
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Latency",
+                    "Duration",
                     "",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('data_foyer_storage_latency_bucket')}[$__rate_interval])) by (le, op, extra, instance))",
-                                f"p{legend} - data file cache" +
-                                " - {{op}} {{extra}} @ {{instance}}",
-                            ),
-                            [50, 90, 99, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('meta_foyer_storage_latency_bucket')}[$__rate_interval])) by (le, op, extra, instance))",
-                                f"p{legend} - meta file cache" +
-                                " - {{op}} {{extra}} @ {{instance}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('foyer_storage_op_duration_bucket')}[$__rate_interval])) by (le, foyer, op, extra, instance))",
+                                f"p{legend}" +
+                                " - {{foyer}} file cache - {{op}} {{extra}} @ {{instance}}",
                             ),
                             [50, 90, 99, "max"],
                         ),
@@ -2210,12 +2228,8 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('data_foyer_storage_bytes')}[$__rate_interval])) by (op, extra, instance)",
-                            "data file cache - {{op}} {{extra}} @ {{instance}}",
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('meta_foyer_storage_bytes')}[$__rate_interval])) by (op, extra, instance)",
-                            "meta file cache - {{op}} {{extra}} @ {{instance}}",
+                            f"sum(rate({metric('foyer_storage_op_bytes')}[$__rate_interval])) by (foyer, op, extra, instance)",
+                            "{{foyer}} file cache - {{op}} {{extra}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -2224,10 +2238,7 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"{metric('data_foyer_storage_size')}", "size @ {{instance}}"
-                        ),
-                            panels.target(
-                            f"{metric('meta_foyer_storage_size')}", "size @ {{instance}}"
+                            f"sum({metric('foyer_storage_total_bytes')}) by (foyer, instance)", "{{foyer}} size @ {{instance}}"
                         ),
                     ],
                 ),
@@ -2236,22 +2247,58 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('data_foyer_storage_latency_count', file_cache_hit_filter)}[$__rate_interval])) by (instance) / (sum(rate({metric('data_foyer_storage_latency_count', file_cache_hit_filter)}[$__rate_interval])) by (instance) + sum(rate({metric('data_foyer_storage_latency_count', file_cache_miss_filter)}[$__rate_interval])) by (instance))",
-                            "data file cache hit ratio @ {{instance}}",
+                            f"sum(rate({metric('foyer_storage_op_duration_count', file_cache_hit_filter)}[$__rate_interval])) by (foyer, instance) / (sum(rate({metric('foyer_storage_op_duration_count', file_cache_hit_filter)}[$__rate_interval])) by (foyer, instance) + sum(rate({metric('foyer_storage_op_duration_count', file_cache_miss_filter)}[$__rate_interval])) by (foyer, instance))",
+                            "{{foyer}} file cache hit ratio @ {{instance}}",
                         ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Refill Queue Length",
+                    "",
+                    [
                         panels.target(
-                            f"sum(rate({metric('meta_foyer_storage_latency_count', file_cache_hit_filter)}[$__rate_interval])) by (instance) / (sum(rate({metric('meta_foyer_storage_latency_count', file_cache_hit_filter)}[$__rate_interval])) by (instance) + sum(rate({metric('meta_foyer_storage_latency_count', file_cache_miss_filter)}[$__rate_interval])) by (instance))",
-                            "meta file cache hit ratio @ {{instance}}",
+                            f"sum(refill_queue_total) by (instance)",
+                            "refill queue length @ {{instance}}",
                         ),
                     ],
                 ),
                 panels.timeseries_ops(
-                    "Refill",
+                    "Refill Ops",
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('compute_refill_data_file_cache_count')}[$__rate_interval])) by (extra, instance)",
-                            "refill data file cache - {{extra}} @ {{instance}}",
+                            f"sum(rate({metric('data_refill_duration_count')}[$__rate_interval])) by (op, instance)",
+                            "data file cache refill - {{op}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('data_refill_filtered_total')}[$__rate_interval])) by (instance)",
+                            "data file cache refill - filtered @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('meta_refill_duration_count')}[$__rate_interval])) by (op, instance)",
+                            "meta file cache refill - {{op}} @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Refill Latency",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('data_refill_duration_bucket')}[$__rate_interval])) by (le, op, instance))",
+                                f"p{legend} - " +
+                                "data file cache refill - {{op}} @ {{instance}}",
+                            ),
+                            [50, 90, 99, "max"],
+                        ),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('meta_refill_duration_bucket')}[$__rate_interval])) by (le, instance))",
+                                f"p{legend} - " +
+                                "meta cache refill @ {{instance}}",
+                            ),
+                            [50, 90, 99, "max"],
                         ),
                     ],
                 ),

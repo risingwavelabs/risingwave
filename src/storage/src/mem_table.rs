@@ -539,12 +539,14 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         self.mem_table.is_dirty()
     }
 
-    fn init(&mut self, epoch: u64) {
+    #[allow(clippy::unused_async)]
+    async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
         assert!(
-            self.epoch.replace(epoch).is_none(),
+            self.epoch.replace(options.epoch.curr).is_none(),
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
+        Ok(())
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {

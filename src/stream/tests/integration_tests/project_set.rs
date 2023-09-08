@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use multimap::MultiMap;
 use risingwave_expr::table_function::repeat;
 use risingwave_stream::executor::ProjectSetExecutor;
 
@@ -29,15 +30,24 @@ fn create_executor() -> (MessageSender, BoxedMessageStream) {
     let (tx, source) = MockSource::channel(schema, PkIndices::new());
 
     let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
+    let test_expr_watermark = build_from_pretty("(add:int8 $0:int8 1:int8)");
     let tf1 = repeat(build_from_pretty("1:int4"), 1);
     let tf2 = repeat(build_from_pretty("2:int4"), 2);
 
     let project_set = Box::new(ProjectSetExecutor::new(
+        ActorContext::create(123),
         Box::new(source),
         vec![],
-        vec![test_expr.into(), tf1.into(), tf2.into()],
+        vec![
+            test_expr.into(),
+            test_expr_watermark.into(),
+            tf1.into(),
+            tf2.into(),
+        ],
         1,
         CHUNK_SIZE,
+        MultiMap::from_iter(std::iter::once((0, 1))),
+        vec![],
     ));
     (tx, project_set.execute())
 }
@@ -52,6 +62,7 @@ async fn test_project_set() {
         + 2 5
         + 3 6",
     ));
+    tx.push_int64_watermark(0, 3);
     tx.push_chunk(StreamChunk::from_pretty(
         " I I
         + 7 8
@@ -62,21 +73,24 @@ async fn test_project_set() {
         &mut project_set,
         expect_test::expect![[r#"
             - !chunk |-
-              +---+---+---+---+---+
-              | + | 0 | 5 | 1 | 2 |
-              | + | 1 | 5 |   | 2 |
-              | + | 0 | 7 | 1 | 2 |
-              | + | 1 | 7 |   | 2 |
-              | + | 0 | 9 | 1 | 2 |
-              | + | 1 | 9 |   | 2 |
-              +---+---+---+---+---+
+              +---+---+---+---+---+---+
+              | + | 0 | 5 | 2 | 1 | 2 |
+              | + | 1 | 5 | 2 |   | 2 |
+              | + | 0 | 7 | 3 | 1 | 2 |
+              | + | 1 | 7 | 3 |   | 2 |
+              | + | 0 | 9 | 4 | 1 | 2 |
+              | + | 1 | 9 | 4 |   | 2 |
+              +---+---+---+---+---+---+
+            - !watermark
+              col_idx: 2
+              val: '4'
             - !chunk |-
-              +---+---+----+---+---+
-              | + | 0 | 15 | 1 | 2 |
-              | + | 1 | 15 |   | 2 |
-              | - | 0 | 9  | 1 | 2 |
-              | - | 1 | 9  |   | 2 |
-              +---+---+----+---+---+
+              +---+---+----+---+---+---+
+              | + | 0 | 15 | 8 | 1 | 2 |
+              | + | 1 | 15 | 8 |   | 2 |
+              | - | 0 | 9  | 4 | 1 | 2 |
+              | - | 1 | 9  | 4 |   | 2 |
+              +---+---+----+---+---+---+
         "#]],
         SnapshotOptions::default(),
     );
