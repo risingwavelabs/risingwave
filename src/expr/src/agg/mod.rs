@@ -16,11 +16,11 @@ use std::fmt::Debug;
 use std::ops::Range;
 
 use downcast_rs::{impl_downcast, Downcast};
+use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::types::{DataType, DataTypeName, Datum};
+use risingwave_common::types::{DataType, Datum};
 
-use crate::sig::FuncSigDebug;
 use crate::{ExprError, Result};
 
 // aggregate definition
@@ -147,26 +147,17 @@ pub fn build_retractable(agg: &AggCall) -> Result<BoxedAggregateFunction> {
 ///
 /// NOTE: This function ignores argument indices, `column_orders`, `filter` and `distinct` in
 /// `AggCall`. Such operations should be done in batch or streaming executors.
-pub fn build(agg: &AggCall, append_only: bool) -> Result<BoxedAggregateFunction> {
-    let args = (agg.args.arg_types().iter())
-        .map(|t| t.into())
-        .collect::<Vec<DataTypeName>>();
-    let ret_type = (&agg.return_type).into();
-    let desc = crate::sig::agg::AGG_FUNC_SIG_MAP
-        .get(agg.kind, &args, ret_type, append_only)
+pub fn build(agg: &AggCall) -> Result<BoxedAggregateFunction> {
+    let desc = crate::sig::FUNC_SIG_MAP
+        .get(agg.kind, agg.args.arg_types(), &agg.return_type)
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(
-                "{:?}",
-                FuncSigDebug {
-                    func: agg.kind,
-                    inputs_type: &args,
-                    ret_type,
-                    set_returning: false,
-                    deprecated: false,
-                    append_only,
-                }
+                "{}({}) -> {}",
+                agg.kind.to_protobuf().as_str_name().to_ascii_lowercase(),
+                agg.args.arg_types().iter().format(", "),
+                agg.return_type,
             ))
         })?;
 
-    (desc.build)(agg)
+    desc.build_aggregate(agg)
 }
