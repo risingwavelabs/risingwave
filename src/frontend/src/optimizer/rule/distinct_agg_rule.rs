@@ -237,7 +237,7 @@ impl DistinctAggRule {
             // append `flag`.
             group_keys.insert(project.schema().len() - 1);
         }
-        Agg::new(agg_calls, group_keys, project)
+        Agg::new(agg_calls, group_keys, project).with_enable_two_phase(false)
     }
 
     fn build_final_agg(
