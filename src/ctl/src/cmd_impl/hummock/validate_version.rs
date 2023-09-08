@@ -12,22 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod list_version;
-pub use list_version::*;
-mod list_kv;
-pub use list_kv::*;
-mod sst_dump;
-pub use sst_dump::*;
-mod compaction_group;
-mod list_version_deltas;
-mod pause_resume;
-mod trigger_full_gc;
-mod trigger_manual_compaction;
-mod validate_version;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext;
+use risingwave_rpc_client::HummockMetaClient;
 
-pub use compaction_group::*;
-pub use list_version_deltas::*;
-pub use pause_resume::*;
-pub use trigger_full_gc::*;
-pub use trigger_manual_compaction::*;
-pub use validate_version::*;
+use crate::CtlContext;
+
+pub async fn validate_version(context: &CtlContext) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    let version = meta_client.get_current_version().await?;
+    let result = hummock_version_ext::validate_version(&version);
+    if !result.is_empty() {
+        println!("Invalid HummockVersion. Violation lists:");
+        for s in result {
+            println!("{}", s);
+        }
+    }
+
+    Ok(())
+}
