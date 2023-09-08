@@ -15,7 +15,6 @@
 #![allow(clippy::needless_question_mark)]
 
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::Component;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
