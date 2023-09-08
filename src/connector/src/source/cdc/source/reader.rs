@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -125,7 +126,7 @@ where
         let (tx, mut rx) = mpsc::channel(1024);
         let tx: Box<GetEventStreamJniSender> = Box::new(tx);
 
-        JVM.as_ref()?;
+        LazyLock::force(&JVM).as_ref()?;
 
         let get_event_stream_request = GetEventStreamRequest {
             source_id: self.source_id,
