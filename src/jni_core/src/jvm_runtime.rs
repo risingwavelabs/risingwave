@@ -23,8 +23,6 @@ use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 
-use crate::run_this_func_to_get_valid_ptr_from_java_binding;
-
 pub static JVM: LazyLock<Result<JavaVM, RwError>> = LazyLock::new(|| {
     let libs_path = if let Ok(libs_path) = std::env::var("CONNECTOR_LIBS_PATH") {
         libs_path
@@ -103,9 +101,6 @@ fn register_native_method_for_jvm(jvm: &JavaVM) {
         .attach_current_thread()
         .inspect_err(|e| tracing::error!("jvm attach thread error: {:?}", e))
         .unwrap();
-
-    // FIXME: remove this function might cause segment fault.
-    run_this_func_to_get_valid_ptr_from_java_binding();
 
     let binding_class = env
         .find_class("com/risingwave/java/binding/Binding")

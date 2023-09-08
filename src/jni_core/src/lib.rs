@@ -828,9 +828,6 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowClose<'a>(
     pointer.drop()
 }
 
-#[inline(never)]
-pub fn run_this_func_to_get_valid_ptr_from_java_binding() {}
-
 /// Send messages to the channel received by `CdcSplitReader`.
 /// If msg is null, just check whether the channel is closed.
 /// Return true if sending is successful, otherwise, return false so that caller can stop
