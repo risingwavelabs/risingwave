@@ -21,7 +21,9 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, Statement, Encode, SourceSchemaV2};
+use risingwave_sqlparser::ast::{
+    AlterTableOperation, ColumnOption, Encode, ObjectName, SourceSchemaV2, Statement,
+};
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_source::get_json_schema_location;
@@ -54,13 +56,6 @@ pub async fn handle_alter_table_column(
             reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
 
         match table.table_type() {
-            // Do not allow altering a table with a connector. It should be done passively according
-            // to the messages from the connector.
-            // TableType::Table if table.has_associated_source() => {
-            //     Err(ErrorCode::InvalidInputSyntax(format!(
-            //         "cannot alter table \"{table_name}\" because it has a connector"
-            //     )))?
-            // }
             TableType::Table => {}
 
             _ => Err(ErrorCode::InvalidInputSyntax(format!(
@@ -93,7 +88,7 @@ pub async fn handle_alter_table_column(
         .map(|source_schema| source_schema.into_source_schema_v2());
 
     if let Some(source_schema) = &source_schema {
-        if schema_has_schema_registry(&source_schema) {
+        if schema_has_schema_registry(source_schema) {
             return Err(RwError::from(ErrorCode::NotImplemented(
                 "Alter table with source having schema registry".into(),
                 None.into(),
@@ -269,13 +264,9 @@ pub async fn handle_alter_table_column(
 pub fn schema_has_schema_registry(schema: &SourceSchemaV2) -> bool {
     match schema.row_encode {
         Encode::Avro | Encode::Protobuf => true,
-        Encode::Json => {            
+        Encode::Json => {
             let mut options = schema.gen_options().unwrap();
-            if let Ok(Some(_)) = get_json_schema_location(&mut options) {
-                true
-            } else {
-                false
-            }
+            matches!(get_json_schema_location(&mut options), Ok(Some(_)))
         }
         _ => false,
     }

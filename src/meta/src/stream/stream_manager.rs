@@ -483,7 +483,10 @@ impl GlobalStreamManager {
 
         let dummy_table_id = table_fragments.table_id();
 
-        let init_split_assignment = self.source_manager.pre_allocate_splits(&dummy_table_id).await?;
+        let init_split_assignment = self
+            .source_manager
+            .pre_allocate_splits(&dummy_table_id)
+            .await?;
 
         if let Err(err) = self
             .barrier_scheduler

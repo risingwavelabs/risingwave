@@ -29,8 +29,8 @@ use risingwave_pb::catalog::{connection, Connection, PbSource, PbTable};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
-use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
@@ -511,7 +511,9 @@ impl DdlService for DdlServiceImpl {
         let mut source = req.source;
         let mut fragment_graph = req.fragment_graph.unwrap();
         let mut table = req.table.unwrap();
-        if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) = table.optional_associated_source_id {
+        if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
+            table.optional_associated_source_id
+        {
             let source = source.as_mut().unwrap();
             let table_id = table.id;
             bind_table_source(source, source_id, &mut table, table_id, &mut fragment_graph);

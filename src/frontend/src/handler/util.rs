@@ -33,13 +33,11 @@ use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_expr::vector_op::timestamptz::timestamptz_to_string;
-use risingwave_sqlparser::ast::{display_comma_separated, SourceSchemaV2, Encode};
+use risingwave_sqlparser::ast::display_comma_separated;
 
 use crate::catalog::IndexCatalog;
 use crate::handler::create_source::{CONNECTION_NAME_KEY, UPSTREAM_SOURCE_KEY};
 use crate::session::SessionImpl;
-
-use super::create_source::get_json_schema_location;
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting

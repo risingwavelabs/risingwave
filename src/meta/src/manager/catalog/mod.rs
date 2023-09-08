@@ -2130,7 +2130,7 @@ impl CatalogManager {
                         relation_info: RelationInfo::Table(table.to_owned()).into(),
                     }]
                     .into_iter()
-                    .chain(source.into_iter().map(|source| Relation {
+                    .chain(source.iter().map(|source| Relation {
                         relation_info: RelationInfo::Source(source.to_owned()).into(),
                     }))
                     .chain(updated_indexes.into_iter().map(|index| Relation {
