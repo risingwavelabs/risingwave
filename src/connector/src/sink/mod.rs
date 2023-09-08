@@ -17,6 +17,7 @@ pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
 pub mod encoder;
+pub mod formatter;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;

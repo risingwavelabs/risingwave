@@ -38,7 +38,7 @@ use super::{
 use crate::common::KafkaCommon;
 use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
-    AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
+    DebeziumAdapterOpts, UpsertAdapterOpts,
 };
 use crate::sink::{
     DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
@@ -509,12 +509,8 @@ impl KafkaSinkWriter {
     }
 
     async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
-        let append_only_stream = gen_append_only_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            AppendOnlyAdapterOpts::default(),
-        );
+        let append_only_stream =
+            gen_append_only_message_stream(&self.schema, &self.pk_indices, chunk);
 
         #[for_await]
         for msg in append_only_stream {

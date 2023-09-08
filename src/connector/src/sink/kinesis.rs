@@ -33,7 +33,7 @@ use super::SinkParam;
 use crate::common::KinesisCommon;
 use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
-    AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
+    DebeziumAdapterOpts, UpsertAdapterOpts,
 };
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterParam,
@@ -214,12 +214,8 @@ impl KinesisSinkWriter {
     }
 
     async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
-        let append_only_stream = gen_append_only_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            AppendOnlyAdapterOpts::default(),
-        );
+        let append_only_stream =
+            gen_append_only_message_stream(&self.schema, &self.pk_indices, chunk);
 
         crate::impl_load_stream_write_record!(append_only_stream, self.put_record);
         Ok(())
