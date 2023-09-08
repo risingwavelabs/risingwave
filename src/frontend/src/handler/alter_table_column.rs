@@ -94,10 +94,6 @@ pub async fn handle_alter_table_column(
                 None.into(),
             )));
         }
-        // Impossible for user
-        if let Encode::Native = source_schema.row_encode {
-            unreachable!()
-        }
     }
 
     match operation {

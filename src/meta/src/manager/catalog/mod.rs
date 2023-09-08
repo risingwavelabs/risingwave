@@ -2165,7 +2165,7 @@ impl CatalogManager {
         if let Some(source) = source {
             let source_key = (source.database_id, source.schema_id, source.name.clone());
             assert!(
-                !database_core.sources.contains_key(&source.id)
+                database_core.sources.contains_key(&source.id)
                     && database_core.has_in_progress_creation(&source_key),
                 "source must exist and must be in altering procedure"
             );
