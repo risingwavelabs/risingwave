@@ -6907,6 +6907,7 @@ dependencies = [
  "num-bigint",
  "opendal",
  "parking_lot 0.12.1",
+ "paste",
  "prometheus",
  "prost",
  "prost-reflect",
@@ -10211,9 +10212,9 @@ dependencies = [
 
 [[package]]
 name = "xxhash-rust"
-version = "0.8.6"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "735a71d46c4d68d71d4b24d03fdc2b98e38cea81730595801db779c04fe80d70"
+checksum = "9828b178da53440fa9c766a3d2f73f7cf5d0ac1fe3980c1e5018d899fd19e07b"
 
 [[package]]
 name = "xz2"

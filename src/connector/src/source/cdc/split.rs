@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
+
 use anyhow::anyhow;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::source::cdc::CdcSourceTypeTrait;
 use crate::source::external::DebeziumOffset;
 use crate::source::{SplitId, SplitMetaData};
 
@@ -119,12 +122,15 @@ impl PostgresCdcSplit {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
-pub struct DebeziumCdcSplit {
+pub struct DebeziumCdcSplit<T: CdcSourceTypeTrait> {
     pub mysql_split: Option<MySqlCdcSplit>,
     pub pg_split: Option<PostgresCdcSplit>,
+
+    #[serde(skip)]
+    pub _phantom: PhantomData<T>,
 }
 
-impl SplitMetaData for DebeziumCdcSplit {
+impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
     fn id(&self) -> SplitId {
         assert!(self.mysql_split.is_some() || self.pg_split.is_some());
         if let Some(split) = &self.mysql_split {
@@ -145,11 +151,12 @@ impl SplitMetaData for DebeziumCdcSplit {
     }
 }
 
-impl DebeziumCdcSplit {
+impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
     pub fn new(mysql_split: Option<MySqlCdcSplit>, pg_split: Option<PostgresCdcSplit>) -> Self {
         Self {
             mysql_split,
             pg_split,
+            _phantom: PhantomData,
         }
     }
 
