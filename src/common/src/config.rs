@@ -370,7 +370,7 @@ pub struct ServerConfig {
     pub unrecognized: Unrecognized<Self>,
 
     /// Enable heap profile dump when memory usage is high.
-    #[serde(default = "default::server::auto_dump_heap_profile")]
+    #[serde(default)]
     pub auto_dump_heap_profile: AutoDumpHeapProfileConfig,
 }
 
@@ -908,7 +908,7 @@ pub mod default {
     }
 
     pub mod server {
-        use crate::config::{AutoDumpHeapProfileConfig, MetricLevel};
+        use crate::config::MetricLevel;
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
@@ -924,10 +924,6 @@ pub mod default {
 
         pub fn telemetry_enabled() -> bool {
             true
-        }
-
-        pub fn auto_dump_heap_profile() -> AutoDumpHeapProfileConfig {
-            Default::default()
         }
     }
 
@@ -1131,7 +1127,7 @@ pub mod default {
 
     pub mod auto_dump_heap_profile {
         pub fn dir() -> String {
-            "".to_string()
+            ".".to_string() // current directory
         }
 
         pub fn threshold() -> f32 {
