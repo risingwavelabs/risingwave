@@ -130,9 +130,8 @@ impl HummockManager {
                 tokio_retry::RetryIf::spawn(
                     retry_strategy.clone(),
                     || async {
-                        let mut compact_task_mut = compact_task.clone();
-                        if let Err(err) = self.cancel_compact_task_impl(&mut compact_task_mut).await
-                        {
+                        let compact_task_mut = compact_task.clone();
+                        if let Err(err) = self.cancel_compact_task_impl(compact_task_mut).await {
                             tracing::warn!(
                                 "Failed to cancel compaction task {}. {}. Will retry.",
                                 compact_task.task_id,

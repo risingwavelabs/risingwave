@@ -654,12 +654,13 @@ impl HummockManager {
         }
         for mut task in canceled_tasks {
             task.set_task_status(TaskStatus::ManualCanceled);
+            let task_id = task.task_id;
             if !self
-                .report_compact_task_impl(&mut task, &mut compaction_guard, None)
+                .report_compact_task_impl(task, &mut compaction_guard, None)
                 .await
                 .unwrap_or(false)
             {
-                warn!("failed to cancel task-{}", task.task_id);
+                warn!("failed to cancel task-{}", task_id);
             }
         }
         // Don't trigger compactions if we enable deterministic compaction

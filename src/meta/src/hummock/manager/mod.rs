@@ -1011,7 +1011,7 @@ impl HummockManager {
     /// Cancels a compaction task no matter it's assigned or unassigned.
     pub async fn cancel_compact_task(
         &self,
-        compact_task: &mut CompactTask,
+        mut compact_task: CompactTask,
         task_status: TaskStatus,
     ) -> Result<bool> {
         compact_task.set_task_status(task_status);
@@ -1022,7 +1022,7 @@ impl HummockManager {
     }
 
     #[named]
-    pub async fn cancel_compact_task_impl(&self, compact_task: &mut CompactTask) -> Result<bool> {
+    pub async fn cancel_compact_task_impl(&self, compact_task: CompactTask) -> Result<bool> {
         assert!(CANCEL_STATUS_SET.contains(&compact_task.task_status()));
         let mut compaction_guard = write_lock!(self, compaction).await;
         let ret = self
@@ -1119,7 +1119,7 @@ impl HummockManager {
     #[named]
     pub async fn report_compact_task(
         &self,
-        compact_task: &mut CompactTask,
+        compact_task: CompactTask,
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
         let mut guard = write_lock!(self, compaction).await;
@@ -1144,10 +1144,12 @@ impl HummockManager {
     #[named]
     pub async fn report_compact_task_impl(
         &self,
-        compact_task: &mut CompactTask,
+        mut compact_task: CompactTask,
         compaction_guard: &mut RwLockWriteGuard<'_, Compaction>,
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
+        let compaction_group_id = compact_task.compaction_group_id;
+        let task_id = compact_task.task_id;
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction = compaction_guard.deref_mut();
         let start_time = Instant::now();
@@ -1156,8 +1158,8 @@ impl HummockManager {
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
 
-        let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(compact_task);
-        let is_trivial_move = CompactStatus::is_trivial_move_task(compact_task);
+        let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
+        let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
 
         // remove task_assignment
         if compact_task_assignment
@@ -1168,7 +1170,7 @@ impl HummockManager {
             return Ok(false);
         }
 
-        {
+        let compact_task = {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
             let versioning = versioning_guard.deref_mut();
@@ -1185,7 +1187,7 @@ impl HummockManager {
 
             match compact_statuses.get_mut(compact_task.compaction_group_id) {
                 Some(mut compact_status) => {
-                    compact_status.report_compact_task(compact_task);
+                    compact_status.report_compact_task(&compact_task);
                 }
                 None => {
                     compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
@@ -1208,22 +1210,19 @@ impl HummockManager {
                 .collect();
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
-                let is_expired = Self::is_compact_task_expired_trx(compact_task, &branched_ssts);
+                let is_expired = Self::is_compact_task_expired_trx(&compact_task, &branched_ssts);
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
-                    let group = current_version
-                        .levels
-                        .get(&compact_task.compaction_group_id)
-                        .unwrap();
+                    let group = current_version.levels.get(&compaction_group_id).unwrap();
                     let input_exist =
                         group.check_deleted_sst_exist(&input_level_ids, input_sst_ids);
                     if !input_exist {
                         compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
                         warn!(
                             "The task may be expired because of group split, task:\n {:?}",
-                            compact_task_to_string(compact_task)
+                            compact_task_to_string(&compact_task)
                         );
                     }
                     input_exist
@@ -1231,14 +1230,16 @@ impl HummockManager {
             } else {
                 false
             };
+
+            let mut compact_tasks = vec![compact_task];
             if is_success {
                 let mut hummock_version_deltas =
                     BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
                 let version_delta = gen_version_delta(
                     &mut branched_ssts,
+                    &compact_tasks,
                     &current_version,
-                    compact_task,
-                    current_version.id + 1,
+                    is_trivial_move,
                 );
 
                 // Don't persist version delta generated by compaction to meta store in
@@ -1285,7 +1286,9 @@ impl HummockManager {
                     compact_task_assignment
                 )?;
             }
-        }
+
+            compact_tasks.pop().unwrap()
+        };
 
         let task_status = compact_task.task_status();
         let task_status_label = task_status.as_str_name();
@@ -1298,8 +1301,7 @@ impl HummockManager {
             // task_type next PR
             "trivial-move"
         } else {
-            self.compactor_manager
-                .remove_task_heartbeat(compact_task.task_id);
+            self.compactor_manager.remove_task_heartbeat(task_id);
             "normal"
         };
 
@@ -1307,7 +1309,7 @@ impl HummockManager {
             .compact_frequency
             .with_label_values(&[
                 label,
-                &compact_task.compaction_group_id.to_string(),
+                &compaction_group_id.to_string(),
                 task_type_label,
                 task_status_label,
             ])
@@ -1315,32 +1317,26 @@ impl HummockManager {
 
         tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",
-            compact_task_to_string(compact_task),
+            compact_task_to_string(&compact_task),
             start_time.elapsed(),
         );
 
         trigger_sst_stat(
             &self.metrics,
-            compaction
-                .compaction_statuses
-                .get(&compact_task.compaction_group_id),
+            compaction.compaction_statuses.get(&compaction_group_id),
             &read_lock!(self, versioning).await.current_version,
-            compact_task.compaction_group_id,
+            compaction_group_id,
         );
 
         if !deterministic_mode
             && matches!(compact_task.task_type(), compact_task::TaskType::Dynamic)
         {
             // only try send Dynamic compaction
-            self.try_send_compaction_request(
-                compact_task.compaction_group_id,
-                compact_task::TaskType::Dynamic,
-            );
+            self.try_send_compaction_request(compaction_group_id, compact_task::TaskType::Dynamic);
         }
 
         if task_status == TaskStatus::Success {
-            self.try_update_write_limits(&[compact_task.compaction_group_id])
-                .await;
+            self.try_update_write_limits(&[compaction_group_id]).await;
         }
 
         Ok(true)
@@ -1439,8 +1435,6 @@ impl HummockManager {
                     unreachable!()
                 };
 
-                let cg_id = compact_task.compaction_group_id;
-
                 if is_success {
                     succ_compact_tasks.push(compact_task);
                 }
@@ -1461,13 +1455,10 @@ impl HummockManager {
                 // // deterministic mode. Because it will override existing version
                 // // delta that has same ID generated in the data ingestion phase.
                 if !deterministic_mode {
-                    let version_delta = gen_version_delta2(
+                    let version_delta = gen_version_delta(
                         &mut branched_ssts,
                         &succ_compact_tasks,
-                        current_version.id,
-                        current_version.id + 1,
-                        current_version.safe_epoch,
-                        current_version.max_committed_epoch,
+                        &current_version,
                         true,
                     );
 
@@ -2376,18 +2367,19 @@ impl HummockManager {
                                     // tasks that compactor has expired.
 
                                     //
-                                    for mut task in
+                                    for task in
                                         compactor_manager.get_expired_tasks(Some(INTERVAL_SEC))
                                     {
+                                        let task_id = task.task_id;
                                         if let Err(e) = hummock_manager
                                             .cancel_compact_task(
-                                                &mut task,
+                                                task,
                                                 TaskStatus::HeartbeatCanceled,
                                             )
                                             .await
                                         {
                                             tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
-                                                until we can successfully report its status. task_id: {}, ERR: {e:?}", task.task_id);
+                                                until we can successfully report its status. task_id: {}, ERR: {e:?}", task_id);
                                         }
                                     }
                                 }
@@ -2800,9 +2792,9 @@ impl HummockManager {
                                 compact_task,
                                 table_stats_change
                             }) => {
-                                if let Some(mut compact_task) = compact_task {
+                                if let Some(compact_task) = compact_task {
                                     if let Err(e) =  hummock_manager
-                                        .report_compact_task(&mut compact_task, Some(table_stats_change))
+                                        .report_compact_task(compact_task, Some(table_stats_change))
                                        .await {
                                         tracing::error!("report compact_tack fail {e:?}");
                                     }
@@ -2816,31 +2808,33 @@ impl HummockManager {
                                 let cancel_tasks = compactor_manager.update_task_heartbeats(&progress);
 
                                 // TODO: task cancellation can be batched
-                                for mut task in cancel_tasks {
+                                for  task in cancel_tasks {
                                     tracing::info!(
                                         "Task with task_id {} with context_id {} has expired due to lack of visible progress",
                                         context_id,
                                         task.task_id
                                     );
 
+                                    let task_id = task.task_id;
+
                                     if let Err(e) =
                                         hummock_manager
-                                        .cancel_compact_task(&mut task, TaskStatus::HeartbeatCanceled)
+                                        .cancel_compact_task(task, TaskStatus::HeartbeatCanceled)
                                         .await
                                     {
                                         tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
-                                                        until we can successfully report its status. task_id: {}, ERR: {e:?}", task.task_id);
+                                                        until we can successfully report its status. task_id: {}, ERR: {e:?}", task_id);
                                     }
 
                                     if let Some(compactor) = compactor_manager.get_compactor(context_id) {
                                         // Forcefully cancel the task so that it terminates
                                         // early on the compactor
                                         // node.
-                                        let _ = compactor.cancel_task(task.task_id);
+                                        let _ = compactor.cancel_task(task_id);
                                         tracing::info!(
                                             "CancelTask operation for task_id {} has been sent to node with context_id {}",
                                             context_id,
-                                            task.task_id
+                                            task_id
                                         );
                                     } else {
                                         compactor_alive = false;
@@ -2935,94 +2929,14 @@ fn drop_sst(
 
 fn gen_version_delta(
     branched_ssts: &mut BTreeMapTransaction<'_, HummockSstableObjectId, BranchedSstInfo>,
-    old_version: &HummockVersion,
-    compact_task: &CompactTask,
-    new_id: u64,
-) -> HummockVersionDelta {
-    let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
-
-    let mut version_delta = HummockVersionDelta {
-        id: new_id,
-        prev_id: old_version.id,
-        max_committed_epoch: old_version.max_committed_epoch,
-        trivial_move,
-        ..Default::default()
-    };
-    let group_deltas = &mut version_delta
-        .group_deltas
-        .entry(compact_task.compaction_group_id)
-        .or_default()
-        .group_deltas;
-    let mut gc_object_ids = vec![];
-    let mut removed_table_ids_map: BTreeMap<u32, Vec<u64>> = BTreeMap::default();
-
-    for level in &compact_task.input_ssts {
-        let level_idx = level.level_idx;
-        let mut removed_table_ids = level
-            .table_infos
-            .iter()
-            .map(|sst| {
-                let object_id = sst.get_object_id();
-                let sst_id = sst.get_sst_id();
-                if !trivial_move
-                    && drop_sst(
-                        branched_ssts,
-                        compact_task.compaction_group_id,
-                        object_id,
-                        sst_id,
-                    )
-                {
-                    gc_object_ids.push(object_id);
-                }
-                sst_id
-            })
-            .collect_vec();
-
-        removed_table_ids_map
-            .entry(level_idx)
-            .or_default()
-            .append(&mut removed_table_ids);
-    }
-
-    for (level_idx, removed_table_ids) in removed_table_ids_map {
-        let group_delta = GroupDelta {
-            delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                level_idx,
-                removed_table_ids,
-                ..Default::default()
-            })),
-        };
-        group_deltas.push(group_delta);
-    }
-
-    let group_delta = GroupDelta {
-        delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-            level_idx: compact_task.target_level,
-            inserted_table_infos: compact_task.sorted_output_ssts.clone(),
-            l0_sub_level_id: compact_task.target_sub_level_id,
-            ..Default::default()
-        })),
-    };
-    group_deltas.push(group_delta);
-    version_delta.gc_object_ids.append(&mut gc_object_ids);
-    version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
-
-    version_delta
-}
-
-fn gen_version_delta2(
-    branched_ssts: &mut BTreeMapTransaction<'_, HummockSstableObjectId, BranchedSstInfo>,
     compact_tasks: &Vec<CompactTask>,
-    prev_id: u64,
-    new_id: u64,
-    safe_epoch: u64,
-    max_committed_epoch: u64,
+    old_version: &HummockVersion,
     is_trivial: bool,
 ) -> HummockVersionDelta {
     let mut version_delta = HummockVersionDelta {
-        id: new_id,
-        prev_id,
-        max_committed_epoch,
+        id: old_version.id + 1,
+        prev_id: old_version.id,
+        max_committed_epoch: old_version.max_committed_epoch,
         trivial_move: is_trivial,
         ..Default::default()
     };
@@ -3073,7 +2987,7 @@ fn gen_version_delta2(
         };
         group_deltas.push(group_delta);
         version_delta.gc_object_ids.append(&mut gc_object_ids);
-        version_delta.safe_epoch = std::cmp::max(safe_epoch, compact_task.watermark);
+        version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
     }
 
     version_delta

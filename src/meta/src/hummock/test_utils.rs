@@ -117,7 +117,7 @@ pub async fn add_test_tables(
     compact_task.sorted_output_ssts = test_tables_2.clone();
     compact_task.set_task_status(TaskStatus::Success);
     let ret = hummock_manager
-        .report_compact_task(&mut compact_task, None)
+        .report_compact_task(compact_task, None)
         .await
         .unwrap();
     assert!(ret);

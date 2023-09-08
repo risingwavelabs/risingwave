@@ -33,11 +33,6 @@ use crate::prost_key_range::KeyRangeExt;
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
 pub struct GroupDeltasSummary {
-    pub delete_sst_levels: Vec<u32>,
-    pub delete_sst_ids_set: HashSet<u64>,
-    pub insert_sst_level_id: u32,
-    pub insert_sub_level_id: u64,
-    pub insert_table_infos: Vec<SstableInfo>,
     pub group_construct: Option<GroupConstruct>,
     pub group_destroy: Option<GroupDestroy>,
     pub group_meta_changes: Vec<GroupMetaChange>,
@@ -45,11 +40,6 @@ pub struct GroupDeltasSummary {
 }
 
 pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary {
-    let mut delete_sst_levels = Vec::with_capacity(group_deltas.group_deltas.len());
-    let mut delete_sst_ids_set = HashSet::new();
-    let mut insert_sst_level_id = u32::MAX;
-    let mut insert_sub_level_id = u64::MAX;
-    let mut insert_table_infos = vec![];
     let mut group_construct = None;
     let mut group_destroy = None;
     let mut group_meta_changes = vec![];
@@ -57,17 +47,6 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
 
     for group_delta in &group_deltas.group_deltas {
         match group_delta.get_delta_type().unwrap() {
-            DeltaType::IntraLevel(intra_level) => {
-                if !intra_level.removed_table_ids.is_empty() {
-                    delete_sst_levels.push(intra_level.level_idx);
-                    delete_sst_ids_set.extend(intra_level.removed_table_ids.iter().clone());
-                }
-                if !intra_level.inserted_table_infos.is_empty() {
-                    insert_sst_level_id = intra_level.level_idx;
-                    insert_sub_level_id = intra_level.l0_sub_level_id;
-                    insert_table_infos.extend(intra_level.inserted_table_infos.iter().cloned());
-                }
-            }
             DeltaType::GroupConstruct(construct_delta) => {
                 assert!(group_construct.is_none());
                 group_construct = Some(construct_delta.clone());
@@ -82,18 +61,12 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
             DeltaType::GroupTableChange(meta_delta) => {
                 group_table_change = Some(meta_delta.clone());
             }
+
+            _ => {}
         }
     }
 
-    delete_sst_levels.sort();
-    delete_sst_levels.dedup();
-
     GroupDeltasSummary {
-        delete_sst_levels,
-        delete_sst_ids_set,
-        insert_sst_level_id,
-        insert_sub_level_id,
-        insert_table_infos,
         group_construct,
         group_destroy,
         group_meta_changes,
@@ -159,6 +132,20 @@ pub trait HummockVersionUpdateExt {
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
     fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo>;
     fn build_sst_delta_infos(&self, version_delta: &HummockVersionDelta) -> Vec<SstDeltaInfo>;
+
+    fn handle_group_construct(
+        &mut self,
+        compaction_group_id: CompactionGroupId,
+        group_construct: &GroupConstruct,
+        sst_split_info: &mut Vec<(u64, u64, u64, u64)>,
+    );
+
+    fn handle_group_table_change(
+        &mut self,
+        compaction_group_id: CompactionGroupId,
+        group_table_change: &GroupTableChange,
+        sst_split_info: &mut Vec<(u64, u64, u64, u64)>,
+    );
 }
 
 impl HummockVersionExt for HummockVersion {
@@ -464,63 +451,93 @@ impl HummockVersionUpdateExt for HummockVersion {
         infos
     }
 
+    fn handle_group_construct(
+        &mut self,
+        compaction_group_id: CompactionGroupId,
+        group_construct: &GroupConstruct,
+        sst_split_info: &mut Vec<(u64, u64, u64, u64)>,
+    ) {
+        let mut new_levels: Levels = build_initial_compaction_group_levels(
+            compaction_group_id,
+            group_construct.get_group_config().unwrap(),
+        );
+        let parent_group_id = group_construct.parent_group_id;
+        new_levels.parent_group_id = parent_group_id;
+        new_levels.member_table_ids = group_construct.table_ids.clone();
+        self.levels.insert(compaction_group_id, new_levels);
+        sst_split_info.extend(self.init_with_parent_group(
+            parent_group_id,
+            compaction_group_id,
+            HashSet::from_iter(group_construct.table_ids.clone()),
+            group_construct.get_new_sst_start_id(),
+            group_construct.version() == CompatibilityVersion::VersionUnspecified,
+        ));
+    }
+
+    fn handle_group_table_change(
+        &mut self,
+        compaction_group_id: CompactionGroupId,
+        group_table_change: &GroupTableChange,
+        sst_split_info: &mut Vec<(u64, u64, u64, u64)>,
+    ) {
+        sst_split_info.extend(self.init_with_parent_group(
+            group_table_change.origin_group_id,
+            group_table_change.target_group_id,
+            HashSet::from_iter(group_table_change.table_ids.clone()),
+            group_table_change.new_sst_start_id,
+            group_table_change.version() == CompatibilityVersion::VersionUnspecified,
+        ));
+
+        let levels = self
+            .levels
+            .get_mut(&group_table_change.origin_group_id)
+            .expect("compaction group should exist");
+        let mut moving_tables = levels
+            .member_table_ids
+            .drain_filter(|t| group_table_change.table_ids.contains(t))
+            .collect_vec();
+        self.levels
+            .get_mut(&compaction_group_id)
+            .expect("compaction group should exist")
+            .member_table_ids
+            .append(&mut moving_tables);
+    }
+
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo> {
         let mut sst_split_info = vec![];
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
-            if let Some(group_construct) = &summary.group_construct {
-                let mut new_levels = build_initial_compaction_group_levels(
-                    *compaction_group_id,
-                    group_construct.get_group_config().unwrap(),
-                );
-                let parent_group_id = group_construct.parent_group_id;
-                new_levels.parent_group_id = parent_group_id;
-                new_levels.member_table_ids = group_construct.table_ids.clone();
-                self.levels.insert(*compaction_group_id, new_levels);
-                sst_split_info.extend(self.init_with_parent_group(
-                    parent_group_id,
-                    *compaction_group_id,
-                    HashSet::from_iter(group_construct.table_ids.clone()),
-                    group_construct.get_new_sst_start_id(),
-                    group_construct.version() == CompatibilityVersion::VersionUnspecified,
-                ));
-            } else if let Some(group_change) = &summary.group_table_change {
-                sst_split_info.extend(self.init_with_parent_group(
-                    group_change.origin_group_id,
-                    group_change.target_group_id,
-                    HashSet::from_iter(group_change.table_ids.clone()),
-                    group_change.new_sst_start_id,
-                    group_change.version() == CompatibilityVersion::VersionUnspecified,
-                ));
-
-                let levels = self
-                    .levels
-                    .get_mut(&group_change.origin_group_id)
-                    .expect("compaction group should exist");
-                let mut moving_tables = levels
-                    .member_table_ids
-                    .drain_filter(|t| group_change.table_ids.contains(t))
-                    .collect_vec();
-                self.levels
-                    .get_mut(compaction_group_id)
-                    .expect("compaction group should exist")
-                    .member_table_ids
-                    .append(&mut moving_tables);
-            }
             let has_destroy = summary.group_destroy.is_some();
+
+            if let Some(group_construct) = &summary.group_construct {
+                self.handle_group_construct(
+                    *compaction_group_id,
+                    group_construct,
+                    &mut sst_split_info,
+                );
+            } else if let Some(group_table_change) = &summary.group_table_change {
+                self.handle_group_table_change(
+                    *compaction_group_id,
+                    group_table_change,
+                    &mut sst_split_info,
+                );
+            }
+
             let levels = self
                 .levels
                 .get_mut(compaction_group_id)
                 .expect("compaction group should exist");
-
-            for group_meta_delta in &summary.group_meta_changes {
-                levels
-                    .member_table_ids
-                    .extend(group_meta_delta.table_ids_add.clone());
-                levels
-                    .member_table_ids
-                    .retain(|t| !group_meta_delta.table_ids_remove.contains(t));
-                levels.member_table_ids.sort();
+            {
+                // group_meta_changes
+                for group_meta_delta in &summary.group_meta_changes {
+                    levels
+                        .member_table_ids
+                        .extend(group_meta_delta.table_ids_add.clone());
+                    levels
+                        .member_table_ids
+                        .retain(|t| !group_meta_delta.table_ids_remove.contains(t));
+                    levels.member_table_ids.sort();
+                }
             }
 
             assert!(
@@ -532,61 +549,10 @@ impl HummockVersionUpdateExt for HummockVersion {
 
             if self.max_committed_epoch < version_delta.max_committed_epoch {
                 // `max_committed_epoch` increases. It must be a `commit_epoch`
-                // let GroupDeltasSummary {
-                //     delete_sst_levels,
-                //     delete_sst_ids_set,
-                //     insert_sst_level_id,
-                //     insert_sub_level_id,
-                //     insert_table_infos,
-                //     ..
-                // } = summary;
-                // assert!(
-                //     insert_sst_level_id == 0 || insert_table_infos.is_empty(),
-                //     "we should only add to L0 when we commit an epoch. Inserting into {} {:?}",
-                //     insert_sst_level_id,
-                //     insert_table_infos
-                // );
-                // assert!(
-                //     delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty() || has_destroy,
-                //     "no sst should be deleted when committing an epoch"
-                // );
-                // if !insert_table_infos.is_empty() {
-                //     insert_new_sub_level(
-                //         levels.l0.as_mut().unwrap(),
-                //         insert_sub_level_id,
-                //         LevelType::Overlapping,
-                //         insert_table_infos,
-                //         None,
-                //     );
-                // }
-
-                for delta in &group_deltas.group_deltas {
-                    if let DeltaType::IntraLevel(intra_level) = delta.get_delta_type().unwrap() {
-                        assert!(
-                            intra_level.level_idx == 0 || intra_level.inserted_table_infos.is_empty(),
-                    "we should only add to L0 when we commit an epoch. Inserting into {} {:?}",
-                    intra_level.level_idx,
-                    intra_level.inserted_table_infos
-                );
-                        assert!(
-                            intra_level.removed_table_ids.is_empty() || has_destroy,
-                            "no sst should be deleted when committing an epoch"
-                        );
-
-                        if !intra_level.inserted_table_infos.is_empty() {
-                            insert_new_sub_level(
-                                levels.l0.as_mut().unwrap(),
-                                intra_level.l0_sub_level_id,
-                                LevelType::Overlapping,
-                                intra_level.inserted_table_infos.clone(),
-                                None,
-                            );
-                        }
-                    }
-                }
+                levels.apply_commit_epoch(group_deltas, has_destroy)
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
-                levels.apply_compact_ssts2(group_deltas);
+                levels.apply_compact_ssts(group_deltas);
             }
 
             if has_destroy {
@@ -638,7 +604,8 @@ pub trait HummockLevelsExt {
     fn get_level(&self, idx: usize) -> &Level;
     fn get_level_mut(&mut self, idx: usize) -> &mut Level;
     fn count_ssts(&self) -> usize;
-    fn apply_compact_ssts2(&mut self, version_delta: &GroupDeltas);
+    fn apply_compact_ssts(&mut self, group_deltas: &GroupDeltas);
+    fn apply_commit_epoch(&mut self, group_deltas: &GroupDeltas, has_destroy: bool);
 
     fn check_deleted_sst_exist(
         &self,
@@ -669,7 +636,36 @@ impl HummockLevelsExt for Levels {
             .sum()
     }
 
-    fn apply_compact_ssts2(&mut self, group_deltas: &GroupDeltas) {
+    fn apply_commit_epoch(&mut self, group_deltas: &GroupDeltas, has_destroy: bool) {
+        for delta in &group_deltas.group_deltas {
+            if let DeltaType::IntraLevel(intra_level) = delta.get_delta_type().unwrap() {
+                assert!(
+                    intra_level.level_idx == 0 || intra_level.inserted_table_infos.is_empty(),
+                    "we should only add to L0 when we commit an epoch. Inserting into {} {:?}",
+                    intra_level.level_idx,
+                    intra_level.inserted_table_infos
+                );
+                assert!(
+                    intra_level.removed_table_ids.is_empty() || has_destroy,
+                    "no sst should be deleted when committing an epoch"
+                );
+
+                if !intra_level.inserted_table_infos.is_empty() {
+                    insert_new_sub_level(
+                        self.l0.as_mut().unwrap(),
+                        intra_level.l0_sub_level_id,
+                        LevelType::Overlapping,
+                        intra_level.inserted_table_infos.clone(),
+                        None,
+                    );
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn apply_compact_ssts(&mut self, group_deltas: &GroupDeltas) {
         let mut has_delete_sst_levels = false;
         for group_delta in group_deltas.get_group_deltas() {
             if let DeltaType::IntraLevel(version_delta) = group_delta.get_delta_type().unwrap() {
@@ -738,6 +734,8 @@ impl HummockLevelsExt for Levels {
                         level_insert_ssts(&mut self.levels[idx], insert_table_infos);
                     }
                 }
+            } else {
+                break;
             }
         }
 

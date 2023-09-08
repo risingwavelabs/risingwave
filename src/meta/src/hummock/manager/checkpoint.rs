@@ -17,9 +17,8 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 
 use function_name::named;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    object_size_map, summarize_group_deltas,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
+use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
 
@@ -95,13 +94,18 @@ impl HummockManager {
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
         {
             for group_deltas in version_delta.group_deltas.values() {
-                let summary = summarize_group_deltas(group_deltas);
-                object_sizes.extend(
-                    summary
-                        .insert_table_infos
-                        .iter()
-                        .map(|t| (t.object_id, t.file_size)),
-                );
+                for group_delta in group_deltas.get_group_deltas() {
+                    if let DeltaType::IntraLevel(intra_level) =
+                        group_delta.get_delta_type().unwrap()
+                    {
+                        object_sizes.extend(
+                            intra_level
+                                .inserted_table_infos
+                                .iter()
+                                .map(|t| (t.object_id, t.file_size)),
+                        );
+                    }
+                }
             }
             let removed_object_ids = version_delta.gc_object_ids.clone();
             if removed_object_ids.is_empty() {

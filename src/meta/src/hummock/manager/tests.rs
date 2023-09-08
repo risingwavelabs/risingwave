@@ -189,7 +189,7 @@ async fn test_hummock_compaction_task() {
     .unwrap();
 
     // Get a compaction task.
-    let mut compact_task = hummock_manager
+    let compact_task = hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
             &mut default_level_selector(),
@@ -209,7 +209,7 @@ async fn test_hummock_compaction_task() {
 
     // Cancel the task and succeed.
     assert!(hummock_manager
-        .cancel_compact_task(&mut compact_task, TaskStatus::ManualCanceled)
+        .cancel_compact_task(compact_task, TaskStatus::ManualCanceled)
         .await
         .unwrap());
 
@@ -227,7 +227,7 @@ async fn test_hummock_compaction_task() {
     compact_task.set_task_status(TaskStatus::Success);
 
     assert!(hummock_manager
-        .report_compact_task(&mut compact_task, None)
+        .report_compact_task(compact_task, None)
         .await
         .unwrap());
 }
@@ -949,7 +949,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     // Cancel the task immediately and succeed.
     compact_task.set_task_status(TaskStatus::ExecuteFailed);
     assert!(hummock_manager
-        .report_compact_task(&mut compact_task, None)
+        .report_compact_task(compact_task, None)
         .await
         .unwrap());
 
@@ -973,7 +973,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     tokio::time::sleep(std::time::Duration::from_secs(32)).await;
 
     assert!(!hummock_manager
-        .report_compact_task(&mut compact_task, None)
+        .report_compact_task(compact_task, None)
         .await
         .unwrap());
     shutdown_tx.send(()).unwrap();
@@ -1224,7 +1224,7 @@ async fn test_version_stats() {
     ]);
     hummock_manager
         .report_compact_task(
-            &mut compact_task,
+            compact_task,
             Some(to_prost_table_stats_map(compact_table_stats_change)),
         )
         .await
@@ -1685,13 +1685,13 @@ async fn test_split_compaction_group_trivial_expired() {
     // delete all reference of sst-10
     task2.task_status = TaskStatus::Success as i32;
     let ret = hummock_manager
-        .report_compact_task(&mut task2, None)
+        .report_compact_task(task2, None)
         .await
         .unwrap();
     assert!(ret);
     task.task_status = TaskStatus::Success as i32;
     let ret = hummock_manager
-        .report_compact_task(&mut task, None)
+        .report_compact_task(task, None)
         .await
         .unwrap();
     // the task has been canceld
@@ -1782,7 +1782,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     ];
     compaction_task.task_status = TaskStatus::Success.into();
     assert!(hummock_manager
-        .report_compact_task(&mut compaction_task, None)
+        .report_compact_task(compaction_task, None)
         .await
         .unwrap());
     let current_version = hummock_manager.get_current_version().await;
@@ -1923,7 +1923,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     let version_1 = hummock_manager.get_current_version().await;
     compaction_task.task_status = TaskStatus::Success.into();
     assert!(!hummock_manager
-        .report_compact_task(&mut compaction_task, None)
+        .report_compact_task(compaction_task, None)
         .await
         .unwrap());
     let version_2 = hummock_manager.get_current_version().await;
@@ -1936,7 +1936,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
     compaction_task.task_status = TaskStatus::Success.into();
     hummock_manager
-        .report_compact_task(&mut compaction_task, None)
+        .report_compact_task(compaction_task, None)
         .await
         .unwrap();
 
@@ -1981,7 +1981,7 @@ async fn test_move_tables_between_compaction_group() {
     ];
     compaction_task.task_status = TaskStatus::Success.into();
     assert!(hummock_manager
-        .report_compact_task(&mut compaction_task, None)
+        .report_compact_task(compaction_task, None)
         .await
         .unwrap());
     let sst_2 = gen_extend_sstable_info(14, 2, 1, vec![101, 102]);
@@ -2037,7 +2037,7 @@ async fn test_move_tables_between_compaction_group() {
     compaction_task.task_status = TaskStatus::Success.into();
 
     let ret = hummock_manager
-        .report_compact_task(&mut compaction_task, None)
+        .report_compact_task(compaction_task, None)
         .await
         .unwrap();
     assert!(ret);
