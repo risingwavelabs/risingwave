@@ -68,6 +68,7 @@ impl FunctionAttr {
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::func::FuncSign };
+        let varargs = self.args.len() == 1 && &self.args[0] == "...";
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
@@ -82,6 +83,7 @@ impl FunctionAttr {
                 unsafe { crate::sig::func::_register(#descriptor_type {
                     func: risingwave_pb::expr::expr_node::Type::#pb_type,
                     inputs_type: &[#(#args),*],
+                    varargs: #varargs,
                     ret_type: #ret,
                     build: #build_fn,
                     deprecated: #deprecated,
@@ -208,6 +210,12 @@ impl FunctionAttr {
             }}
         } else {
             quote! { () }
+        };
+
+        // ensure the number of children matches when arguments are fixed
+        let check_children = match varargs {
+            true => quote! {},
+            false => quote! { crate::ensure!(children.len() == #num_args); },
         };
 
         // evaluate child expressions and
@@ -429,7 +437,7 @@ impl FunctionAttr {
                 use crate::expr::{Context, BoxedExpression};
                 use crate::Result;
 
-                crate::ensure!(children.len() == #num_args);
+                #check_children
                 let prebuilt_arg = #prebuild_const;
                 let context = Context {
                     return_type,
