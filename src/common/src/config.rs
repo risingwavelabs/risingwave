@@ -736,8 +736,9 @@ pub struct BatchDeveloperConfig {
     pub chunk_size: usize,
 }
 
-/// The section `[system]` in `risingwave.toml`. This section is only for testing purpose and should
-/// not be documented.
+/// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
+/// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
+/// documented.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct SystemConfig {
     /// The interval of periodic barrier.
@@ -787,27 +788,23 @@ pub struct SystemConfig {
     pub pause_on_next_bootstrap: Option<bool>,
 }
 
-impl RwConfig {
-    // NOTE(eric): The naming is confusing here. `SystemParams` means the paratmeters that are
-    // persisted in Meta store, while the `SystemConfig` in this file corresponds to the `[system]`
-    // section in `risingwave.toml`
-    pub fn as_initial_system_params(&self) -> SystemParams {
+impl SystemConfig {
+    #![allow(deprecated)]
+    pub fn into_initial_system_params(&self) -> SystemParams {
         SystemParams {
-            barrier_interval_ms: self.system.barrier_interval_ms,
-            checkpoint_frequency: self.system.checkpoint_frequency,
-            sstable_size_mb: self.system.sstable_size_mb,
-            parallel_compact_size_mb: self.system.parallel_compact_size_mb,
-            block_size_kb: self.system.block_size_kb,
-            bloom_false_positive: self.system.bloom_false_positive,
-            state_store: self.system.state_store.clone(),
-            data_directory: self.system.data_directory.clone(),
-            backup_storage_url: self.system.backup_storage_url.clone(),
-            backup_storage_directory: self.system.backup_storage_directory.clone(),
-            max_concurrent_creating_streaming_jobs: self
-                .system
-                .max_concurrent_creating_streaming_jobs,
-            pause_on_next_bootstrap: self.system.pause_on_next_bootstrap,
-            telemetry_enabled: Some(self.server.telemetry_enabled),
+            barrier_interval_ms: self.barrier_interval_ms,
+            checkpoint_frequency: self.checkpoint_frequency,
+            sstable_size_mb: self.sstable_size_mb,
+            parallel_compact_size_mb: self.parallel_compact_size_mb,
+            block_size_kb: self.block_size_kb,
+            bloom_false_positive: self.bloom_false_positive,
+            state_store: self.state_store.clone(),
+            data_directory: self.data_directory.clone(),
+            backup_storage_url: self.backup_storage_url.clone(),
+            backup_storage_directory: self.backup_storage_directory.clone(),
+            max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
+            pause_on_next_bootstrap: self.pause_on_next_bootstrap,
+            telemetry_enabled: None, // deprecated
         }
     }
 }
