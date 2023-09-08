@@ -114,7 +114,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "async"] }
-prost-types = "0.11"
+prost-types = "0.12"
 rand = "0.8"
 tempfile = "3"
 
