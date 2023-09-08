@@ -256,11 +256,9 @@ async fn test_storage_basic() {
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "aa"),
                 epoch1
             ),
             Bytes::copy_from_slice(&b"111"[..])
@@ -269,11 +267,9 @@ async fn test_storage_basic() {
     );
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "bb"),
                 epoch1
             ),
             Bytes::copy_from_slice(&b"222"[..])
@@ -337,11 +333,9 @@ async fn test_storage_basic() {
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "aa"),
                 epoch2
             ),
             Bytes::copy_from_slice(&b"111111"[..])
@@ -350,11 +344,9 @@ async fn test_storage_basic() {
     );
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "bb"),
                 epoch1
             ),
             Bytes::copy_from_slice(&b"222"[..])
@@ -363,11 +355,9 @@ async fn test_storage_basic() {
     );
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "cc"),
                 epoch2
             ),
             Bytes::copy_from_slice(&b"333"[..])
@@ -396,11 +386,9 @@ async fn test_storage_basic() {
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "bb"),
                 epoch1
             ),
             Bytes::copy_from_slice(&b"222"[..])
@@ -409,11 +397,9 @@ async fn test_storage_basic() {
     );
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "cc"),
                 epoch2
             ),
             Bytes::copy_from_slice(&b"333"[..])
@@ -422,11 +408,9 @@ async fn test_storage_basic() {
     );
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"dd".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "dd"),
                 epoch3
             ),
             Bytes::copy_from_slice(&b"444"[..])
@@ -435,11 +419,9 @@ async fn test_storage_basic() {
     );
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"ee".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "ee"),
                 epoch3
             ),
             Bytes::copy_from_slice(&b"555"[..])
@@ -684,11 +666,11 @@ async fn test_state_store_sync() {
         futures::pin_mut!(iter);
 
         let kv_map = [
-            (b"aaaa", "1111", epoch1),
-            (b"bbbb", "2222", epoch1),
-            (b"cccc", "3333", epoch1),
-            (b"dddd", "4444", epoch1),
-            (b"eeee", "6666", epoch2),
+            ("aaaa", "1111", epoch1),
+            ("bbbb", "2222", epoch1),
+            ("cccc", "3333", epoch1),
+            ("dddd", "4444", epoch1),
+            ("eeee", "6666", epoch2),
         ];
 
         for (k, v, e) in kv_map {
@@ -696,13 +678,7 @@ async fn test_state_store_sync() {
             assert_eq!(
                 result,
                 Some((
-                    FullKey::for_test(
-                        TEST_TABLE_ID,
-                        Bytes::from(
-                            [VirtualNode::ZERO.to_be_bytes().as_slice(), k.as_slice()].concat()
-                        ),
-                        e
-                    ),
+                    FullKey::new(TEST_TABLE_ID, gen_key_from_str(VirtualNode::ZERO, k), e),
                     Bytes::from(v)
                 ))
             );

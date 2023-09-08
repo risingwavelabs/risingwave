@@ -795,11 +795,9 @@ async fn test_write_anytime_inner(
             futures::pin_mut!(iter);
             assert_eq!(
                 (
-                    FullKey::for_test(
+                    FullKey::new(
                         TableId::default(),
-                        Bytes::from(
-                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa".as_slice()].concat()
-                        ),
+                        gen_key_from_str(VirtualNode::ZERO, "aa"),
                         epoch
                     ),
                     Bytes::from("111")
@@ -808,11 +806,9 @@ async fn test_write_anytime_inner(
             );
             assert_eq!(
                 (
-                    FullKey::for_test(
+                    FullKey::new(
                         TableId::default(),
-                        Bytes::from(
-                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb".as_slice()].concat()
-                        ),
+                        gen_key_from_str(VirtualNode::ZERO, "bb"),
                         epoch
                     ),
                     Bytes::from("222")
@@ -821,11 +817,9 @@ async fn test_write_anytime_inner(
             );
             assert_eq!(
                 (
-                    FullKey::for_test(
+                    FullKey::new(
                         TableId::default(),
-                        Bytes::from(
-                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc".as_slice()].concat()
-                        ),
+                        gen_key_from_str(VirtualNode::ZERO, "cc"),
                         epoch
                     ),
                     Bytes::from("333")
@@ -931,11 +925,9 @@ async fn test_write_anytime_inner(
             futures::pin_mut!(iter);
             assert_eq!(
                 (
-                    FullKey::for_test(
+                    FullKey::new(
                         TableId::default(),
-                        Bytes::from(
-                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa".as_slice()].concat()
-                        ),
+                        gen_key_from_str(VirtualNode::ZERO, "aa"),
                         epoch
                     ),
                     Bytes::from("111_new")
@@ -944,11 +936,9 @@ async fn test_write_anytime_inner(
             );
             assert_eq!(
                 (
-                    FullKey::for_test(
+                    FullKey::new(
                         TableId::default(),
-                        Bytes::from(
-                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc".as_slice()].concat()
-                        ),
+                        gen_key_from_str(VirtualNode::ZERO, "cc"),
                         epoch
                     ),
                     Bytes::from("333")
