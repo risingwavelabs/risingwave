@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
@@ -33,15 +34,11 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
-use crate::model::{BarrierManagerState, MigrationPlan, PausedReason};
-use crate::storage::MetaStore;
+use crate::model::{BarrierManagerState, MigrationPlan};
 use crate::stream::build_actor_connector_splits;
 use crate::MetaResult;
 
-impl<S> GlobalBarrierManager<S>
-where
-    S: MetaStore,
-{
+impl GlobalBarrierManager {
     // Retry base interval in milliseconds.
     const RECOVERY_RETRY_BASE_INTERVAL: u64 = 20;
     // Retry max interval.

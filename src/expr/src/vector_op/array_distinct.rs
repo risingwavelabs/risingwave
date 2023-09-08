@@ -20,7 +20,7 @@ use risingwave_expr_macro::function;
 /// Returns a new array removing all the duplicates from the input array
 ///
 /// ```sql
-/// array_distinct ( array anyarray) → array
+/// array_distinct (array anyarray) → array
 /// ```
 ///
 /// Examples:

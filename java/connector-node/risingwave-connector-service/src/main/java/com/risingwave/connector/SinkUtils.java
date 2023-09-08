@@ -43,6 +43,8 @@ public class SinkUtils {
                 return new DeltaLakeSinkFactory();
             case "elasticsearch-7":
                 return new EsSink7Factory();
+            case "cassandra":
+                return new CassandraFactory();
             default:
                 throw UNIMPLEMENTED
                         .withDescription("unknown sink type: " + sinkName)
