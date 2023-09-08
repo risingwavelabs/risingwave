@@ -13,31 +13,46 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::fmt::Debug;
+use std::sync::Arc;
 
+use futures::future::select_all;
+use itertools::Itertools;
 use reqwest::{Method, Url};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 
+use crate::parser::schema_registry::util::*;
 use crate::parser::SchemaRegistryAuth;
 
 /// An client for communication with schema registry
 #[derive(Debug)]
 pub struct Client {
     inner: reqwest::Client,
-    url: Url,
+    url: Vec<Url>,
     username: Option<String>,
     password: Option<String>,
 }
 
 impl Client {
-    pub(crate) fn new(url: Url, client_config: &SchemaRegistryAuth) -> Result<Self> {
-        if url.cannot_be_a_base() {
+    pub(crate) fn new(url: Vec<Url>, client_config: &SchemaRegistryAuth) -> Result<Self> {
+        let valid_urls = url
+            .iter()
+            .map(|url| (url.cannot_be_a_base(), url))
+            .filter(|(x, _)| !*x)
+            .map(|(_, url)| url.clone())
+            .collect_vec();
+        if valid_urls.is_empty() {
             return Err(RwError::from(ProtocolError(format!(
-                "{} cannot be a base url",
+                "no valid url provided, got {:?}",
                 url
             ))));
+        } else {
+            tracing::debug!(
+                "schema registry client will use url {:?} to connect",
+                valid_urls
+            );
         }
 
         let inner = reqwest::Client::builder().build().map_err(|e| {
@@ -46,36 +61,60 @@ impl Client {
 
         Ok(Client {
             inner,
-            url,
+            url: valid_urls,
             username: client_config.username.clone(),
             password: client_config.password.clone(),
         })
     }
 
-    fn build_request<P>(&self, method: Method, path: P) -> reqwest::RequestBuilder
+    async fn concurrent_req<'a, T>(
+        &'a self,
+        method: Method,
+        path: &'a [&'a (impl AsRef<str> + ?Sized + Debug + ToString)],
+    ) -> Result<T>
     where
-        P: IntoIterator,
-        P::Item: AsRef<str>,
+        T: DeserializeOwned + Send + Sync + 'static,
     {
-        let mut url = self.url.clone();
-        url.path_segments_mut()
-            .expect("constructor validated URL can be a base")
-            .clear()
-            .extend(path);
-
-        let mut request = self.inner.request(method, url);
-
-        if self.username.is_some() {
-            request = request.basic_auth(self.username.clone().unwrap(), self.password.clone())
+        let mut fut_req = Vec::with_capacity(self.url.len());
+        let mut errs = Vec::with_capacity(self.url.len());
+        let ctx = Arc::new(SchemaRegistryCtx {
+            username: self.username.clone(),
+            password: self.password.clone(),
+            client: self.inner.clone(),
+            path: path.iter().map(|p| p.to_string()).collect_vec(),
+        });
+        for url in &self.url {
+            fut_req.push(tokio::spawn(req_inner(
+                ctx.clone(),
+                url.clone(),
+                method.clone(),
+            )));
         }
 
-        request
+        while !fut_req.is_empty() {
+            let (result, _index, remaining) = select_all(fut_req).await;
+            match result {
+                Ok(Ok(res)) => {
+                    let _ = remaining.iter().map(|ele| ele.abort());
+                    return Ok(res);
+                }
+                Ok(Err(e)) => errs.push(e),
+                Err(e) => errs.push(RwError::from(e)),
+            }
+            fut_req = remaining;
+        }
+
+        Err(RwError::from(ProtocolError(format!(
+            "all request confluent registry all timeout, req path {:?}, urls {:?}, err: {:?}",
+            path, self.url, errs
+        ))))
     }
 
     /// get schema by id
     pub async fn get_schema_by_id(&self, id: i32) -> Result<ConfluentSchema> {
-        let req = self.build_request(Method::GET, &["schemas", "ids", &id.to_string()]);
-        let res: GetByIdResp = request(req).await?;
+        let res: GetByIdResp = self
+            .concurrent_req(Method::GET, &["schemas", "ids", &id.to_string()])
+            .await?;
         Ok(ConfluentSchema {
             id,
             content: res.schema,
@@ -89,8 +128,9 @@ impl Client {
 
     /// get the latest version of the subject
     pub async fn get_subject(&self, subject: &str) -> Result<Subject> {
-        let req = self.build_request(Method::GET, &["subjects", subject, "versions", "latest"]);
-        let res: GetBySubjectResp = request(req).await?;
+        let res: GetBySubjectResp = self
+            .concurrent_req(Method::GET, &["subjects", subject, "versions", "latest"])
+            .await?;
         tracing::debug!("update schema: {:?}", res);
         Ok(Subject {
             schema: ConfluentSchema {
@@ -112,9 +152,9 @@ impl Client {
         let mut queue = vec![(subject.to_owned(), "latest".to_owned())];
         // use bfs to get all references
         while let Some((subject, version)) = queue.pop() {
-            let req =
-                self.build_request(Method::GET, &["subjects", &subject, "versions", &version]);
-            let res: GetBySubjectResp = request(req).await?;
+            let res: GetBySubjectResp = self
+                .concurrent_req(Method::GET, &["subjects", &subject, "versions", &version])
+                .await?;
             let ref_subject = Subject {
                 schema: ConfluentSchema {
                     id: res.id,
@@ -138,98 +178,6 @@ impl Client {
     }
 }
 
-async fn request<T>(req: reqwest::RequestBuilder) -> Result<T>
-where
-    T: DeserializeOwned,
-{
-    let res = req.send().await.map_err(|e| {
-        RwError::from(ProtocolError(format!(
-            "confluent registry send req error {}",
-            e
-        )))
-    })?;
-    let status = res.status();
-    if status.is_success() {
-        res.json().await.map_err(|e| {
-            RwError::from(ProtocolError(format!(
-                "confluent registry parse resp error {}",
-                e
-            )))
-        })
-    } else {
-        let res = res.json::<ErrorResp>().await.map_err(|e| {
-            RwError::from(ProtocolError(format!(
-                "confluent registry resp error {}",
-                e
-            )))
-        })?;
-        Err(RwError::from(ProtocolError(format!(
-            "confluent registry resp error, code: {}, msg {}",
-            res.error_code, res.message
-        ))))
-    }
-}
-
-/// `Schema` format of confluent schema registry
-#[derive(Debug, Eq, PartialEq)]
-pub struct ConfluentSchema {
-    /// The id of the schema
-    pub id: i32,
-    /// The raw text of the schema def
-    pub content: String,
-}
-
-/// `Subject` stored in confluent schema registry
-#[derive(Debug, Eq, PartialEq)]
-pub struct Subject {
-    /// The version of the current schema
-    pub version: i32,
-    /// The name of the schema
-    pub name: String,
-    /// The schema corresponding to that `version`
-    pub schema: ConfluentSchema,
-}
-
-/// One schema can reference another schema
-/// (e.g., import "other.proto" in protobuf)
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SchemaReference {
-    /// The name of the reference.
-    pub name: String,
-    /// The subject that the referenced schema belongs to
-    pub subject: String,
-    /// The version of the referenced schema
-    pub version: i32,
-}
-
-#[derive(Debug, Deserialize)]
-struct GetByIdResp {
-    schema: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct GetBySubjectResp {
-    id: i32,
-    schema: String,
-    version: i32,
-    subject: String,
-    // default to empty/non-reference
-    #[serde(default)]
-    references: Vec<SchemaReference>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ErrorResp {
-    error_code: i32,
-    message: String,
-}
-
-#[derive(Debug)]
-enum ReqResp<T> {
-    Succeed(T),
-    Failed(ErrorResp),
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,7 +187,7 @@ mod tests {
     async fn test_get_subject() {
         let url = Url::parse("http://localhost:8081").unwrap();
         let client = Client::new(
-            url,
+            vec![url],
             &SchemaRegistryAuth {
                 username: None,
                 password: None,
