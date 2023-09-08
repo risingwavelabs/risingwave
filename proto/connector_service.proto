@@ -24,6 +24,8 @@ message SinkParam {
   map<string, string> properties = 2;
   TableSchema table_schema = 3;
   catalog.SinkType sink_type = 4;
+  string db_name = 5;
+  string sink_from_name = 6;
 }
 
 enum SinkPayloadFormat {

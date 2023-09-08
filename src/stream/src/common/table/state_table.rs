@@ -17,7 +17,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use futures::{pin_mut, Stream, StreamExt};
+use futures::{pin_mut, FutureExt, Stream, StreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
@@ -37,7 +37,7 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
 use risingwave_pb::catalog::Table;
-use risingwave_storage::error::StorageError;
+use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::row_serde_util::{
@@ -45,10 +45,11 @@ use risingwave_storage::row_serde::row_serde_util::{
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
+    InitOptions, LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions,
+    StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
-use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, get_second, Distribution};
+use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
 
@@ -148,6 +149,42 @@ pub type WatermarkCacheStateTable<S> =
     StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, true>;
 pub type WatermarkCacheParameterizedStateTable<S, const USE_WATERMARK_CACHE: bool> =
     StateTableInner<S, BasicSerde, false, DefaultWatermarkBufferStrategy, USE_WATERMARK_CACHE>;
+
+// initialize
+impl<S, SD, W, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, W, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+    W: WatermarkBufferStrategy,
+{
+    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+    /// async interface only used for replicated state table,
+    /// as it needs to wait for prev epoch to be committed.
+    pub async fn init_epoch(&mut self, epoch: EpochPair) -> StorageResult<()> {
+        self.local_store
+            .init(InitOptions::new_with_epoch(epoch))
+            .await
+    }
+}
+
+// initialize
+impl<S, SD, W, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, false, W, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+    W: WatermarkBufferStrategy,
+{
+    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
+    /// No need to `wait_for_epoch`, so it should complete immediately.
+    pub fn init_epoch(&mut self, epoch: EpochPair) {
+        self.local_store
+            .init(InitOptions::new_with_epoch(epoch))
+            .now_or_never()
+            .expect("non-replicated state store should start immediately.")
+            .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
+    }
+}
 
 // initialize
 impl<S, SD, const IS_REPLICATED: bool, W, const USE_WATERMARK_CACHE: bool>
@@ -472,11 +509,6 @@ where
         } else {
             self.dist_key_in_pk_indices.is_empty()
         }
-    }
-
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
-    pub fn init_epoch(&mut self, epoch: EpochPair) {
-        self.local_store.init(epoch.curr)
     }
 
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
@@ -883,11 +915,7 @@ where
                     let mut streams = vec![];
                     for vnode in self.vnodes().iter_vnodes() {
                         let stream = self
-                            .iter_key_and_val_with_pk_range(
-                                &range,
-                                vnode,
-                                PrefetchOptions::default(),
-                            )
+                            .iter_row_with_pk_range(&range, vnode, PrefetchOptions::default())
                             .await?;
                         streams.push(Box::pin(stream));
                     }
@@ -896,8 +924,8 @@ where
 
                     #[for_await]
                     for entry in merged_stream.take(self.watermark_cache.capacity()) {
-                        let (pk, _row) = entry?;
-                        let (_, pk) = deserialize_pk_with_vnode(&pk[..], &self.pk_serde)?;
+                        let keyed_row = entry?;
+                        let pk = self.pk_serde.deserialize(keyed_row.key())?;
                         if !pk.is_null_at(0) {
                             pks.push(pk);
                         }
@@ -1046,93 +1074,68 @@ where
     SD: ValueRowSerde,
 {
     /// This function scans rows from the relational table.
-    pub async fn iter(
+    pub async fn iter_row(
         &self,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
-        self.iter_with_pk_prefix(row::empty(), prefetch_options)
+    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+        self.iter_row_with_pk_prefix(row::empty(), prefetch_options)
             .await
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
-    pub async fn iter_with_pk_prefix(
+    /// `pk_prefix` is used to identify the exact vnode the scan should perform on.
+    pub async fn iter_row_with_pk_prefix(
         &self,
         pk_prefix: impl Row,
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
-        Ok(self
-            .iter_key_and_val(pk_prefix, prefetch_options)
-            .await?
-            .map(get_second))
+    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+        Ok(deserialize_keyed_row_stream(
+            self.iter_kv_with_pk_prefix(pk_prefix, prefetch_options)
+                .await?,
+            &self.row_serde,
+        ))
     }
 
-    /// This function scans rows from the relational table with specific `pk_prefix`.
-    async fn iter_with_pk_range_inner(
+    /// This function scans rows from the relational table with specific `pk_range` under the same
+    /// `vnode`.
+    pub async fn iter_row_with_pk_range(
         &self,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+        Ok(deserialize_keyed_row_stream(
+            self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
+                .await?,
+            &self.row_serde,
+        ))
+    }
+
+    async fn iter_kv(
+        &self,
+        key_range: (Bound<Bytes>, Bound<Bytes>),
+        prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
-        let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
+        let read_options = ReadOptions {
+            prefix_hint,
+            ignore_range_tombstone: false,
+            retention_seconds: self.table_option.retention_seconds,
+            table_id: self.table_id,
+            read_version_from_backup: false,
+            prefetch_options,
+            cache_policy: CachePolicy::Fill(CachePriority::High),
+        };
 
-        let memcomparable_range_with_vnode =
-            prefixed_range(memcomparable_range, &vnode.to_be_bytes());
-
-        // TODO: provide a trace of useful params.
-        self.iter_inner(memcomparable_range_with_vnode, None, prefetch_options)
-            .await
-            .map_err(StreamExecutorError::from)
+        Ok(self.local_store.iter(key_range, read_options).await?)
     }
 
-    pub async fn iter_with_pk_range(
-        &self,
-        pk_range: &(Bound<impl Row>, Bound<impl Row>),
-        // Optional vnode that returns an iterator only over the given range under that vnode.
-        // For now, we require this parameter, and will panic. In the future, when `None`, we can
-        // iterate over each vnode that the `StateTableInner` owns.
-        vnode: VirtualNode,
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
-        Ok(self
-            .iter_key_and_val_with_pk_range(pk_range, vnode, prefetch_options)
-            .await?
-            .map(get_second))
-    }
-
-    pub async fn iter_key_and_val_with_pk_range(
-        &self,
-        pk_range: &(Bound<impl Row>, Bound<impl Row>),
-        // Optional vnode that returns an iterator only over the given range under that vnode.
-        // For now, we require this parameter, and will panic. In the future, when `None`, we can
-        // iterate over each vnode that the `StateTableInner` owns.
-        vnode: VirtualNode,
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<RowStreamWithPk<'_, S, SD>> {
-        Ok(deserialize_row_stream(
-            self.iter_with_pk_range_inner(pk_range, vnode, prefetch_options)
-                .await?,
-            &self.row_serde,
-        ))
-    }
-
-    /// This function scans rows from the relational table with specific `pk_prefix`, return both
-    /// key and value.
-    pub async fn iter_key_and_val(
-        &self,
-        pk_prefix: impl Row,
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<RowStreamWithPk<'_, S, SD>> {
-        Ok(deserialize_row_stream(
-            self.iter_with_pk_prefix_inner(pk_prefix, prefetch_options)
-                .await?,
-            &self.row_serde,
-        ))
-    }
-
-    async fn iter_with_pk_prefix_inner(
+    /// This function scans raw key-values from the relational table with specific `pk_prefix`.
+    /// `pk_prefix` is used to identify the exact vnode the scan should perform on.
+    async fn iter_kv_with_pk_prefix(
         &self,
         pk_prefix: impl Row,
         prefetch_options: PrefetchOptions,
@@ -1171,27 +1174,30 @@ where
             "storage_iter_with_prefix"
         );
 
-        self.iter_inner(encoded_key_range_with_vnode, prefix_hint, prefetch_options)
+        self.iter_kv(encoded_key_range_with_vnode, prefix_hint, prefetch_options)
             .await
     }
 
-    async fn iter_inner(
+    /// This function scans raw key-values from the relational table with specific `pk_range` under
+    /// the same `vnode`.
+    async fn iter_kv_with_pk_range(
         &self,
-        key_range: (Bound<Bytes>, Bound<Bytes>),
-        prefix_hint: Option<Bytes>,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+        // Optional vnode that returns an iterator only over the given range under that vnode.
+        // For now, we require this parameter, and will panic. In the future, when `None`, we can
+        // iterate over each vnode that the `StateTableInner` owns.
+        vnode: VirtualNode,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
-        let read_options = ReadOptions {
-            prefix_hint,
-            ignore_range_tombstone: false,
-            retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
-            read_version_from_backup: false,
-            prefetch_options,
-            cache_policy: CachePolicy::Fill(CachePriority::High),
-        };
+        let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
 
-        Ok(self.local_store.iter(key_range, read_options).await?)
+        let memcomparable_range_with_vnode =
+            prefixed_range(memcomparable_range, &vnode.to_be_bytes());
+
+        // TODO: provide a trace of useful params.
+        self.iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
+            .await
+            .map_err(StreamExecutorError::from)
     }
 
     pub fn get_vnodes(&self) -> Arc<Bitmap> {
@@ -1250,23 +1256,21 @@ where
     }
 }
 
-pub type RowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
-    impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
-pub type RowStreamWithPk<'a, S: StateStore, SD: ValueRowSerde + 'a> =
-    impl Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + 'a;
+pub type KeyedRowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
+    impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
 
-fn deserialize_row_stream<'a>(
+fn deserialize_keyed_row_stream<'a>(
     stream: impl StateStoreIterItemStream + 'a,
     deserializer: &'a impl ValueRowSerde,
-) -> impl Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + 'a {
+) -> impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {
     stream.map(move |result| {
         result
             .map_err(StreamExecutorError::from)
             .and_then(|(key, value)| {
-                Ok(deserializer
-                    .deserialize(&value)
-                    .map(OwnedRow::new)
-                    .map(move |row| (key.user_key.table_key.0, row))?)
+                Ok(KeyedRow::new(
+                    key.user_key.table_key,
+                    deserializer.deserialize(&value).map(OwnedRow::new)?,
+                ))
             })
     })
 }

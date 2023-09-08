@@ -8,6 +8,11 @@ disallowed-methods = [
     { path = "num_traits::sign::Signed::is_positive", reason = "This returns true for 0.0 but false for 0." },
     { path = "num_traits::sign::Signed::is_negative", reason = "This returns true for -0.0 but false for 0." },
     { path = "num_traits::sign::Signed::signum", reason = "This returns 1.0 for 0.0 but 0 for 0." },
+    { path = "speedate::DateTime::parse_str", reason = "Please use `parse_str_rfc3339` instead." },
+    { path = "speedate::DateTime::parse_bytes", reason = "Please use `parse_bytes_rfc3339` instead." },
+    { path = "speedate::DateTime::parse_bytes_with_config", reason = "Please use `parse_bytes_rfc3339_with_config` instead." },
+    { path = "speedate::Date::parse_str", reason = "Please use `parse_str_rfc3339` instead." },
+    { path = "speedate::Date::parse_bytes", reason = "Please use `parse_bytes_rfc3339` instead." },
 ]
 disallowed-types = [
     { path = "num_traits::AsPrimitive", reason = "Please use `From` or `TryFrom` with `OrderedFloat` instead." },

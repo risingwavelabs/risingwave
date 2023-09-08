@@ -501,6 +501,8 @@ mod tests {
             table.commit(epoch).await.unwrap();
         }
 
+        drop(deduplicater);
+
         // test recovery
         let mut deduplicater = DistinctDeduplicater::new(
             &agg_calls,

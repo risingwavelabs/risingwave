@@ -133,7 +133,7 @@ impl std::error::Error for ParserError {}
 type ColumnsDefTuple = (Vec<ColumnDef>, Vec<TableConstraint>, Vec<SourceWatermark>);
 
 /// Reference:
-/// https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE
+/// <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE>
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
     Zero = 0,
@@ -549,7 +549,7 @@ impl Parser {
         }));
 
         let token = self.next_token();
-        let expr = match token.token {
+        let expr = match token.token.clone() {
             Token::Word(w) => match w.keyword {
                 Keyword::TRUE | Keyword::FALSE | Keyword::NULL => {
                     self.prev_token();
@@ -593,7 +593,7 @@ impl Parser {
                     })
                 }
                 k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
-                    parser_err!(format!("syntax error at or near \"{w}\""))
+                    parser_err!(format!("syntax error at or near {token}"))
                 }
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
@@ -1093,7 +1093,7 @@ impl Parser {
         })
     }
 
-    /// POSITION(<expr> IN <expr>)
+    /// `POSITION(<expr> IN <expr>)`
     pub fn parse_position_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
 
@@ -1112,7 +1112,7 @@ impl Parser {
         })
     }
 
-    /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
+    /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
     pub fn parse_overlay_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
 
@@ -1139,8 +1139,8 @@ impl Parser {
         })
     }
 
-    /// TRIM ([WHERE] ['text'] FROM 'text')\
-    /// TRIM ([WHERE] [FROM] 'text' [, 'text'])
+    /// `TRIM ([WHERE] ['text'] FROM 'text')`\
+    /// `TRIM ([WHERE] [FROM] 'text' [, 'text'])`
     pub fn parse_trim_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
         let mut trim_where = None;
@@ -1232,7 +1232,7 @@ impl Parser {
                 // for keyword 'array'
                 self.prev_token();
             }
-            parser_err!(format!("syntax error at or near '{}'", self.peek_token()))?
+            parser_err!(format!("syntax error at or near {}", self.peek_token()))?
         } else {
             Ok(())
         }
@@ -1540,8 +1540,8 @@ impl Parser {
         }
     }
 
-    /// We parse both array[1,9][1], array[1,9][1:2], array[1,9][:2], array[1,9][1:] and
-    /// array[1,9][:] in this function.
+    /// We parse both `array[1,9][1]`, `array[1,9][1:2]`, `array[1,9][:2]`, `array[1,9][1:]` and
+    /// `array[1,9][:]` in this function.
     pub fn parse_array_index(&mut self, expr: Expr) -> Result<Expr, ParserError> {
         let new_expr = match self.peek_token().token {
             Token::Colon => {
@@ -3435,10 +3435,10 @@ impl Parser {
     /// Parse a simple one-word identifier (possibly quoted, possibly a non-reserved keyword)
     pub fn parse_identifier_non_reserved(&mut self) -> Result<Ident, ParserError> {
         let token = self.next_token();
-        match token.token {
+        match token.token.clone() {
             Token::Word(w) => {
                 match keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&w.keyword) {
-                    true => parser_err!(format!("syntax error at or near \"{w}\"")),
+                    true => parser_err!(format!("syntax error at or near {token}")),
                     false => Ok(w.to_ident()?),
                 }
             }

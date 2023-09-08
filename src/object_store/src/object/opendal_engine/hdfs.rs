@@ -25,8 +25,6 @@ impl OpendalObjectStore {
         let mut builder = Hdfs::default();
         // Set the name node for hdfs.
         builder.name_node(&namenode);
-        // Set the root for hdfs, all operations will happen under this root.
-        // NOTE: the root must be absolute path.
         builder.root(&root);
 
         let op: Operator = Operator::new(builder)?

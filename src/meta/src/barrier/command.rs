@@ -21,12 +21,12 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, Dispatcher, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
+    AddMutation, Dispatcher, Dispatchers, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
     StopMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
@@ -38,7 +38,6 @@ use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::storage::MetaStore;
 use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
 use crate::MetaResult;
 
@@ -79,6 +78,15 @@ pub enum Command {
     /// Barriers from all actors marked as `Created` state will be collected.
     /// After the barrier is collected, it does nothing.
     Plain(Option<Mutation>),
+
+    /// `Pause` command generates a `Pause` barrier with the provided [`PausedReason`] **only if**
+    /// the cluster is not already paused. Otherwise, a barrier with no mutation will be generated.
+    Pause(PausedReason),
+
+    /// `Resume` command generates a `Resume` barrier with the provided [`PausedReason`] **only
+    /// if** the cluster is paused with the same reason. Otherwise, a barrier with no mutation
+    /// will be generated.
+    Resume(PausedReason),
 
     /// `DropStreamingJobs` command generates a `Stop` barrier by the given
     /// [`HashSet<TableId>`]. The catalog has ensured that these streaming jobs are safe to be
@@ -130,6 +138,7 @@ pub enum Command {
         old_table_fragments: TableFragments,
         new_table_fragments: TableFragments,
         merge_updates: Vec<MergeUpdate>,
+        dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
     },
 
     /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
@@ -142,18 +151,20 @@ impl Command {
         Self::Plain(None)
     }
 
-    pub fn pause() -> Self {
-        Self::Plain(Some(Mutation::Pause(PauseMutation {})))
+    pub fn pause(reason: PausedReason) -> Self {
+        Self::Pause(reason)
     }
 
-    pub fn resume() -> Self {
-        Self::Plain(Some(Mutation::Resume(ResumeMutation {})))
+    pub fn resume(reason: PausedReason) -> Self {
+        Self::Resume(reason)
     }
 
     /// Changes to the actors to be sent or collected after this command is committed.
     pub fn changes(&self) -> CommandChanges {
         match self {
             Command::Plain(_) => CommandChanges::None,
+            Command::Pause(_) => CommandChanges::None,
+            Command::Resume(_) => CommandChanges::None,
             Command::CreateStreamingJob {
                 table_fragments, ..
             } => CommandChanges::CreateTable(table_fragments.table_id()),
@@ -189,22 +200,22 @@ impl Command {
     /// injection. return true.
     pub fn should_pause_inject_barrier(&self) -> bool {
         // Note: the meaning for `Pause` is not pausing the periodic barrier injection, but for
-        // pausing the sources on compute nodes. However, `Pause` is used for configuration change
-        // like scaling and migration, which must pause the concurrent checkpoint to ensure the
+        // pausing the sources on compute nodes. However, when `Pause` is used for configuration
+        // change like scaling and migration, it must pause the concurrent checkpoint to ensure the
         // previous checkpoint has been done.
-        matches!(self, Self::Plain(Some(Mutation::Pause(_))))
+        matches!(self, Self::Pause(PausedReason::ConfigChange))
     }
 
     pub fn need_checkpoint(&self) -> bool {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
-        !matches!(self, Command::Plain(None | Some(Mutation::Resume(_))))
+        !matches!(self, Command::Plain(None) | Command::Resume(_))
     }
 }
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
-pub struct CommandContext<S: MetaStore> {
-    fragment_manager: FragmentManagerRef<S>,
+pub struct CommandContext {
+    fragment_manager: FragmentManagerRef,
 
     client_pool: StreamClientPoolRef,
 
@@ -215,11 +226,13 @@ pub struct CommandContext<S: MetaStore> {
     pub prev_epoch: TracedEpoch,
     pub curr_epoch: TracedEpoch,
 
+    pub current_paused_reason: Option<PausedReason>,
+
     pub command: Command,
 
     pub kind: BarrierKind,
 
-    source_manager: SourceManagerRef<S>,
+    source_manager: SourceManagerRef,
 
     /// The tracing span of this command.
     ///
@@ -229,17 +242,18 @@ pub struct CommandContext<S: MetaStore> {
     pub span: tracing::Span,
 }
 
-impl<S: MetaStore> CommandContext<S> {
+impl CommandContext {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
-        fragment_manager: FragmentManagerRef<S>,
+        fragment_manager: FragmentManagerRef,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
         prev_epoch: TracedEpoch,
         curr_epoch: TracedEpoch,
+        current_paused_reason: Option<PausedReason>,
         command: Command,
         kind: BarrierKind,
-        source_manager: SourceManagerRef<S>,
+        source_manager: SourceManagerRef,
         span: tracing::Span,
     ) -> Self {
         Self {
@@ -248,6 +262,7 @@ impl<S: MetaStore> CommandContext<S> {
             info: Arc::new(info),
             prev_epoch,
             curr_epoch,
+            current_paused_reason,
             command,
             kind,
             source_manager,
@@ -256,14 +271,29 @@ impl<S: MetaStore> CommandContext<S> {
     }
 }
 
-impl<S> CommandContext<S>
-where
-    S: MetaStore,
-{
+impl CommandContext {
     /// Generate a mutation for the given command.
     pub async fn to_mutation(&self) -> MetaResult<Option<Mutation>> {
         let mutation = match &self.command {
             Command::Plain(mutation) => mutation.clone(),
+
+            Command::Pause(_) => {
+                // Only pause when the cluster is not already paused.
+                if self.current_paused_reason.is_none() {
+                    Some(Mutation::Pause(PauseMutation {}))
+                } else {
+                    None
+                }
+            }
+
+            Command::Resume(reason) => {
+                // Only resume when the cluster is paused with the same reason.
+                if self.current_paused_reason == Some(*reason) {
+                    Some(Mutation::Resume(ResumeMutation {}))
+                } else {
+                    None
+                }
+            }
 
             Command::SourceSplitAssignment(change) => {
                 let mut diff = HashMap::new();
@@ -308,6 +338,8 @@ where
                     actor_dispatchers,
                     added_actors,
                     actor_splits,
+                    // If the cluster is already paused, the new actors should be paused too.
+                    pause: self.current_paused_reason.is_some(),
                 }))
             }
 
@@ -319,11 +351,25 @@ where
             Command::ReplaceTable {
                 old_table_fragments,
                 merge_updates,
+                dispatchers,
                 ..
             } => {
                 let dropped_actors = old_table_fragments.actor_ids();
 
+                let actor_new_dispatchers = dispatchers
+                    .iter()
+                    .map(|(&actor_id, dispatchers)| {
+                        (
+                            actor_id,
+                            Dispatchers {
+                                dispatchers: dispatchers.clone(),
+                            },
+                        )
+                    })
+                    .collect();
+
                 Some(Mutation::Update(UpdateMutation {
+                    actor_new_dispatchers,
                     merge_update: merge_updates.clone(),
                     dropped_actors,
                     ..Default::default()
@@ -445,12 +491,16 @@ where
                     }
                 }
 
+                // we don't create dispatchers in reschedule scenario
+                let actor_new_dispatchers = HashMap::new();
+
                 let mutation = Mutation::Update(UpdateMutation {
                     dispatcher_update,
                     merge_update,
                     actor_vnode_bitmap_update,
                     dropped_actors,
                     actor_splits,
+                    actor_new_dispatchers,
                 });
                 tracing::debug!("update mutation: {mutation:#?}");
                 Some(mutation)
@@ -458,6 +508,31 @@ where
         };
 
         Ok(mutation)
+    }
+
+    /// Returns the paused reason after executing the current command.
+    pub fn next_paused_reason(&self) -> Option<PausedReason> {
+        match &self.command {
+            Command::Pause(reason) => {
+                // Only pause when the cluster is not already paused.
+                if self.current_paused_reason.is_none() {
+                    Some(*reason)
+                } else {
+                    self.current_paused_reason
+                }
+            }
+
+            Command::Resume(reason) => {
+                // Only resume when the cluster is paused with the same reason.
+                if self.current_paused_reason == Some(*reason) {
+                    None
+                } else {
+                    self.current_paused_reason
+                }
+            }
+
+            _ => self.current_paused_reason,
+        }
     }
 
     /// For `CreateStreamingJob`, returns the actors of the `Chain` nodes. For other commands,
@@ -474,7 +549,6 @@ where
                 .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
                 .chain(table_fragments.values_actor_ids().into_iter())
                 .collect(),
-
             _ => Default::default(),
         }
     }
@@ -545,18 +619,19 @@ where
     /// the given command.
     pub async fn post_collect(&self) -> MetaResult<()> {
         match &self.command {
-            #[allow(clippy::single_match)]
-            Command::Plain(mutation) => match mutation {
-                // After the `Pause` barrier is collected and committed, we must ensure that the
-                // storage version with this epoch is synced to all compute nodes before the
-                // execution of the next command of `Update`, as some newly created operators may
-                // immediately initialize their states on that barrier.
-                Some(Mutation::Pause(..)) => {
+            Command::Plain(_) => {}
+
+            Command::Pause(reason) => {
+                if let PausedReason::ConfigChange = reason {
+                    // After the `Pause` barrier is collected and committed, we must ensure that the
+                    // storage version with this epoch is synced to all compute nodes before the
+                    // execution of the next command of `Update`, as some newly created operators
+                    // may immediately initialize their states on that barrier.
                     self.wait_epoch_commit(self.prev_epoch.value().0).await?;
                 }
+            }
 
-                _ => {}
-            },
+            Command::Resume(_) => {}
 
             Command::SourceSplitAssignment(split_assignment) => {
                 self.fragment_manager
@@ -685,6 +760,7 @@ where
                 old_table_fragments,
                 new_table_fragments,
                 merge_updates,
+                dispatchers,
             } => {
                 let table_ids = HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
 
@@ -695,9 +771,10 @@ where
                 // Drop fragment info in meta store.
                 self.fragment_manager
                     .post_replace_table(
-                        old_table_fragments.table_id(),
-                        new_table_fragments.table_id(),
+                        old_table_fragments,
+                        new_table_fragments,
                         merge_updates,
+                        dispatchers,
                     )
                     .await?;
             }

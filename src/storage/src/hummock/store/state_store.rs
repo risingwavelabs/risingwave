@@ -38,7 +38,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::utils::{
     cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
-    do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
+    do_update_sanity_check, filter_with_delete_range, wait_for_epoch, ENABLE_SANITY_CHECK,
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{MemoryLimiter, SstableIterator};
@@ -84,6 +84,8 @@ pub struct LocalHummockStorage {
     stats: Arc<HummockStateStoreMetrics>,
 
     write_limiter: WriteLimiterRef,
+
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 }
 
 impl LocalHummockStorage {
@@ -113,6 +115,10 @@ impl LocalHummockStorage {
         self.hummock_version_reader
             .get(table_key, epoch, read_options, read_snapshot)
             .await
+    }
+
+    pub async fn wait_for_epoch(&self, wait_epoch: u64) -> StorageResult<()> {
+        wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
     }
 
     pub async fn iter_inner(
@@ -323,12 +329,17 @@ impl LocalStateStore for LocalHummockStorage {
         self.mem_table.is_dirty()
     }
 
-    fn init(&mut self, epoch: u64) {
+    async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+        let epoch = options.epoch;
+        if self.is_replicated {
+            self.wait_for_epoch(epoch.prev).await?;
+        }
         assert!(
-            self.epoch.replace(epoch).is_none(),
+            self.epoch.replace(epoch.curr).is_none(),
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
+        Ok(())
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -440,6 +451,7 @@ impl LocalHummockStorage {
         memory_limiter: Arc<MemoryLimiter>,
         write_limiter: WriteLimiterRef,
         option: NewLocalOptions,
+        version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
         Self {
@@ -456,6 +468,7 @@ impl LocalHummockStorage {
             hummock_version_reader,
             stats,
             write_limiter,
+            version_update_notifier_tx,
         }
     }
 

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::{Error, ErrorKind, Result};
-
 use prometheus::core::{Collector, Desc};
 use prometheus::{proto, IntCounter, IntGauge, Opts, Registry};
 
@@ -22,15 +20,13 @@ use super::{CLOCK_TICK, PAGESIZE};
 use crate::util::resource_util;
 
 /// Monitors current process.
-pub fn monitor_process(registry: &Registry) -> Result<()> {
+pub fn monitor_process(registry: &Registry) {
     let pc = ProcessCollector::new();
-    registry
-        .register(Box::new(pc))
-        .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
+    registry.register(Box::new(pc)).unwrap()
 }
 
 /// A collector to collect process metrics.
-pub struct ProcessCollector {
+struct ProcessCollector {
     descs: Vec<Desc>,
     cpu_total: IntCounter,
     vsize: IntGauge,
@@ -45,7 +41,7 @@ impl Default for ProcessCollector {
 }
 
 impl ProcessCollector {
-    pub fn new() -> Self {
+    fn new() -> Self {
         let mut descs = Vec::new();
 
         let cpu_total = IntCounter::with_opts(Opts::new(

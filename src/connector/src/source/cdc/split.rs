@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::marker::PhantomData;
 
 use anyhow::anyhow;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::source::cdc::CdcSourceTypeTrait;
+use crate::source::external::DebeziumOffset;
 use crate::source::{SplitId, SplitMetaData};
 
 /// The base states of a CDC split, which will be persisted to checkpoint.
@@ -37,37 +39,6 @@ impl CdcSplitBase {
             snapshot_done: false,
         }
     }
-}
-
-// Example debezium offset for Postgres:
-// {
-//     "sourcePartition":
-//     {
-//         "server": "RW_CDC_public.te"
-//     },
-//     "sourceOffset":
-//     {
-//         "last_snapshot_record": false,
-//         "lsn": 29973552,
-//         "txId": 1046,
-//         "ts_usec": 1670826189008456,
-//         "snapshot": true
-//     }
-// }
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DebeziumOffset {
-    #[serde(rename = "sourcePartition")]
-    source_partition: HashMap<String, String>,
-    #[serde(rename = "sourceOffset")]
-    source_offset: DebeziumSourceOffset,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct DebeziumSourceOffset {
-    // postgres snapshot progress
-    last_snapshot_record: Option<bool>,
-    // mysql snapshot progress
-    snapshot: Option<bool>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
@@ -151,12 +122,15 @@ impl PostgresCdcSplit {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
-pub struct DebeziumCdcSplit {
+pub struct DebeziumCdcSplit<T: CdcSourceTypeTrait> {
     pub mysql_split: Option<MySqlCdcSplit>,
     pub pg_split: Option<PostgresCdcSplit>,
+
+    #[serde(skip)]
+    pub _phantom: PhantomData<T>,
 }
 
-impl SplitMetaData for DebeziumCdcSplit {
+impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
     fn id(&self) -> SplitId {
         assert!(self.mysql_split.is_some() || self.pg_split.is_some());
         if let Some(split) = &self.mysql_split {
@@ -177,11 +151,12 @@ impl SplitMetaData for DebeziumCdcSplit {
     }
 }
 
-impl DebeziumCdcSplit {
+impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
     pub fn new(mysql_split: Option<MySqlCdcSplit>, pg_split: Option<PostgresCdcSplit>) -> Self {
         Self {
             mysql_split,
             pg_split,
+            _phantom: PhantomData,
         }
     }
 
