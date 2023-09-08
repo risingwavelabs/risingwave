@@ -41,7 +41,9 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
-clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "622501c1c98c80baaf578c716d6903dde947804e", features = ["time"] }
+clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "622501c1c98c80baaf578c716d6903dde947804e", features = [
+    "time",
+] }
 csv = "1.2"
 duration-str = "0.5.1"
 enum-as-inner = "0.6"
@@ -56,8 +58,12 @@ itertools = "0.11"
 jsonschema-transpiler = "1.10.0"
 maplit = "1.0.2"
 moka = { version = "0.11", features = ["future"] }
-mysql_async = { version = "0.31", default-features = false, features = ["default"] }
-mysql_common = { version = "0.29.2", default-features = false, features = ["chrono"] }
+mysql_async = { version = "0.31", default-features = false, features = [
+    "default",
+] }
+mysql_common = { version = "0.29.2", default-features = false, features = [
+    "chrono",
+] }
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
 opendal = "0.39"
@@ -109,6 +115,9 @@ tonic = { workspace = true }
 tracing = "0.1"
 url = "2"
 urlencoding = "2"
+time = "0.3.28"
+
+
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 

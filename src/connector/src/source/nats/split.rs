@@ -18,6 +18,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::source::{SplitId, SplitMetaData};
 
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub enum NatsOffset {
+    Earliest,
+    Latest,
+    SequenceNumber(String),
+    Timestamp(i128),
+    None,
+}
+
 /// The states of a NATS split, which will be persisted to checkpoint.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct NatsSplit {
@@ -25,7 +34,7 @@ pub struct NatsSplit {
     // TODO: to simplify the logic, return 1 split for first version. May use parallelism in
     // future.
     pub(crate) split_num: i32,
-    pub(crate) start_sequence: Option<u64>,
+    pub(crate) start_sequence: NatsOffset,
 }
 
 impl SplitMetaData for NatsSplit {
@@ -44,7 +53,7 @@ impl SplitMetaData for NatsSplit {
 }
 
 impl NatsSplit {
-    pub fn new(subject: String, split_num: i32, start_sequence: Option<u64>) -> Self {
+    pub fn new(subject: String, split_num: i32, start_sequence: NatsOffset) -> Self {
         Self {
             subject,
             split_num,
@@ -53,7 +62,12 @@ impl NatsSplit {
     }
 
     pub fn update_with_offset(&mut self, start_sequence: String) -> anyhow::Result<()> {
-        self.start_sequence = Some(start_sequence.as_str().parse::<u64>().unwrap());
+        let start_sequence = if start_sequence.is_empty() {
+            NatsOffset::Earliest
+        } else {
+            NatsOffset::SequenceNumber(start_sequence)
+        };
+        self.start_sequence = start_sequence;
         Ok(())
     }
 }

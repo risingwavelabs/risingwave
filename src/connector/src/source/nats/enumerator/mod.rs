@@ -15,7 +15,7 @@
 use anyhow;
 use async_trait::async_trait;
 
-use super::source::NatsSplit;
+use super::source::{NatsSplit, NatsOffset};
 use super::NatsProperties;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
@@ -45,7 +45,7 @@ impl SplitEnumerator for NatsSplitEnumerator {
         let nats_split = NatsSplit {
             subject: self.subject.clone(),
             split_num: 0, // be the same as `from_nats_jetstream_message`
-            start_sequence: None,
+            start_sequence: NatsOffset::None,
         };
 
         Ok(vec![nats_split])

@@ -26,11 +26,12 @@ use risingwave_common::error::anyhow_error;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::json::JsonString;
 use serde_with::{serde_as, DisplayFromStr};
+use time::OffsetDateTime;
 
 use crate::aws_auth::AwsAuthProps;
 use crate::deserialize_duration_from_string;
 use crate::sink::SinkError;
-
+use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
 
@@ -395,7 +396,7 @@ impl NatsCommon {
     pub(crate) async fn build_consumer(
         &self,
         split_id: i32,
-        start_sequence: Option<u64>,
+        start_sequence: NatsOffset,
     ) -> anyhow::Result<
         async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
     > {
@@ -406,23 +407,28 @@ impl NatsCommon {
             ack_policy: jetstream::consumer::AckPolicy::None,
             ..Default::default()
         };
-        match start_sequence {
-            Some(v) => {
-                let consumer = stream
-                    .get_or_create_consumer(&name, {
-                        config.deliver_policy = DeliverPolicy::ByStartSequence {
-                            start_sequence: v + 1,
-                        };
-                        config
-                    })
-                    .await?;
-                Ok(consumer)
+
+        let deliver_policy = match start_sequence {
+            NatsOffset::Earliest => DeliverPolicy::All,
+            NatsOffset::Latest => DeliverPolicy::Last,
+            NatsOffset::SequenceNumber(v) => {
+                let parsed = v.parse::<u64>()?;
+                DeliverPolicy::ByStartSequence {
+                    start_sequence: 1 + parsed,
+                }
             }
-            None => {
-                let consumer = stream.get_or_create_consumer(&name, config).await?;
-                Ok(consumer)
-            }
-        }
+            NatsOffset::Timestamp(v) => DeliverPolicy::ByStartTime {
+                start_time: OffsetDateTime::from_unix_timestamp_nanos(v * 1_000_000)?,
+            },
+            NatsOffset::None => DeliverPolicy::All,
+        };
+        let consumer = stream
+            .get_or_create_consumer(&name, {
+                config.deliver_policy = deliver_policy;
+                config
+            })
+            .await?;
+        Ok(consumer)
     }
 
     pub(crate) async fn build_or_get_stream(
