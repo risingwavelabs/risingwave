@@ -28,12 +28,12 @@ use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
-use super::encoder::{Base64Adapter, JsonEncoder, ProtoEncoder, SerToBytes, SerToString};
+use super::encoder::{Base64Adapter, JsonEncoder, ProtoEncoder};
 use super::formatter::{
-    AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, SinkFormatter, UpsertFormatter,
+    AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, UpsertFormatter,
 };
 use super::utils::TimestampHandlingMode;
-use super::SinkParam;
+use super::{MessageSink, SinkParam};
 use crate::common::KinesisCommon;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterParam,
@@ -200,29 +200,16 @@ impl KinesisSinkWriter {
             ))
         })
     }
+}
 
-    async fn write_chunk<
-        K: SerToString,
-        V: SerToBytes,
-        F: SinkFormatter<K = Option<K>, V = Option<V>>,
-    >(
-        &self,
-        chunk: StreamChunk,
-        mut formatter: F,
-    ) -> Result<()> {
-        for (op, row) in chunk.rows() {
-            let Some((event_key_object, event_object)) = formatter.format_row(op, row)? else {continue};
-            self.put_record(
-                &event_key_object.unwrap().ser_to_string()?,
-                Blob::new(
-                    event_object
-                        .map(|x| x.ser_to_bytes())
-                        .transpose()?
-                        .unwrap_or_default(),
-                ),
-            )
+#[async_trait::async_trait]
+impl MessageSink for KinesisSinkWriter {
+    type K = String;
+    type V = Vec<u8>;
+
+    async fn write_one(&self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
+        self.put_record(&k.unwrap(), Blob::new(v.unwrap_or_default()))
             .await?;
-        }
         Ok(())
     }
 }

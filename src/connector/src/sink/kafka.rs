@@ -29,14 +29,14 @@ use risingwave_rpc_client::ConnectorClient;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
-use super::encoder::{JsonEncoder, SerToBytes};
+use super::encoder::JsonEncoder;
 use super::formatter::{
-    AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, SinkFormatter, UpsertFormatter,
+    AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, UpsertFormatter,
 };
 use super::utils::TimestampHandlingMode;
 use super::{
-    Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
+    MessageSink, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM,
+    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
 use crate::sink::{
@@ -450,11 +450,17 @@ impl KafkaSinkWriter {
 
         Err(err)
     }
+}
 
-    async fn write_encoded_row(
+#[async_trait::async_trait]
+impl MessageSink for KafkaSinkWriter {
+    type K = Vec<u8>;
+    type V = Vec<u8>;
+
+    async fn write_one(
         &self,
-        event_key_object: Option<Vec<u8>>,
-        event_object: Option<Vec<u8>>,
+        event_key_object: Option<Self::K>,
+        event_object: Option<Self::V>,
     ) -> Result<()> {
         // here we assume the key part always exists and value part is optional.
         // if value is None, we will skip the payload part.
@@ -467,30 +473,6 @@ impl KafkaSinkWriter {
             record = record.payload(&payload);
         }
         self.send_result(record).await?;
-        Ok(())
-    }
-
-    async fn write_chunk<
-        K: SerToBytes,
-        V: SerToBytes,
-        F: SinkFormatter<K = Option<K>, V = Option<V>>,
-    >(
-        &self,
-        chunk: StreamChunk,
-        mut formatter: F,
-    ) -> Result<()> {
-        for (op, row) in chunk.rows() {
-            let Some((event_key_object, event_object)) = formatter.format_row(op, row)? else {continue};
-            self.write_encoded_row(
-                event_key_object
-                    .map(|x| SerToBytes::ser_to_bytes(&x))
-                    .transpose()?,
-                event_object
-                    .map(|x| SerToBytes::ser_to_bytes(&x))
-                    .transpose()?,
-            )
-            .await?;
-        }
         Ok(())
     }
 }
@@ -564,7 +546,7 @@ mod test {
 
     use super::*;
     use crate::sink::encoder::{EmptyEncoder, SerToString};
-    use crate::sink::formatter::schema_to_json;
+    use crate::sink::formatter::{schema_to_json, SinkFormatter};
     use crate::sink::utils::*;
 
     #[test]

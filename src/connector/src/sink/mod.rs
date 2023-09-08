@@ -48,6 +48,8 @@ pub use tracing;
 
 use self::catalog::SinkType;
 use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
+use self::encoder::{SerToBytes, SerToString};
+use self::formatter::SinkFormatter;
 use self::iceberg::{IcebergSink, ICEBERG_SINK, REMOTE_ICEBERG_SINK};
 use crate::sink::boxed::BoxSink;
 use crate::sink::catalog::{SinkCatalog, SinkId};
@@ -201,6 +203,46 @@ pub trait SinkWriterV1: Send + 'static {
     // aborts the current transaction because some error happens. we should rollback to the last
     // commit point.
     async fn abort(&mut self) -> Result<()>;
+}
+
+#[async_trait]
+pub trait MessageSink {
+    type K: Send;
+    type V: Send;
+    async fn write_one(&self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()>;
+
+    async fn write_chunk<
+        K0: SerTo<Self::K> + Send,
+        V0: SerTo<Self::V> + Send,
+        F: SinkFormatter<K = Option<K0>, V = Option<V0>> + Send,
+    >(
+        &self,
+        chunk: StreamChunk,
+        mut formatter: F,
+    ) -> Result<()> {
+        for (op, row) in chunk.rows() {
+            let Some((event_key_object, event_object)) = formatter.format_row(op, row)? else {continue};
+            self.write_one(
+                event_key_object.map(|x| x.ser_to()).transpose()?,
+                event_object.map(|x| x.ser_to()).transpose()?,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+}
+pub trait SerTo<T> {
+    fn ser_to(&self) -> Result<T>;
+}
+impl<T: SerToBytes> SerTo<Vec<u8>> for T {
+    fn ser_to(&self) -> Result<Vec<u8>> {
+        self.ser_to_bytes()
+    }
+}
+impl<T: SerToString> SerTo<String> for T {
+    fn ser_to(&self) -> Result<String> {
+        self.ser_to_string()
+    }
 }
 
 pub struct SinkWriterV1Adapter<W: SinkWriterV1> {
