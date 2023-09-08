@@ -47,10 +47,6 @@ impl SplitReader for NatsSplitReader {
     ) -> Result<Self> {
         // TODO: to simplify the logic, return 1 split for first version
         assert!(splits.len() == 1);
-        let splits = splits
-            .into_iter()
-            .map(|split| split.into_nats().unwrap())
-            .collect::<Vec<NatsSplit>>();
         let consumer = properties
             .common
             .build_consumer(0, splits[0].start_sequence)

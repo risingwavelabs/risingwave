@@ -193,25 +193,18 @@ impl<P: SourceProperties> ConnectorSourceWorker<P> {
                 .with_label_values(&[self.source_id.to_string().as_str(), &self.source_name])
                 .set(res);
         };
-        let splits = self
-            .enumerator
-            .list_splits()
-            .await
-            .map_err(|e| {
-                source_is_up(0);
-                self.fail_cnt += 1;
-                e
-            })?
-            .into_iter()
-            .map(P::Split::into)
-            .collect_vec();
+        let splits = self.enumerator.list_splits().await.map_err(|e| {
+            source_is_up(0);
+            self.fail_cnt += 1;
+            e
+        })?;
         source_is_up(1);
         self.fail_cnt = 0;
         let mut current_splits = self.current_splits.lock().await;
         current_splits.splits.replace(
             splits
                 .into_iter()
-                .map(|split| (split.id(), split))
+                .map(|split| (split.id(), P::Split::into(split)))
                 .collect(),
         );
 
