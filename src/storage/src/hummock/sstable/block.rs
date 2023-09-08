@@ -164,6 +164,11 @@ impl Debug for Block {
 }
 
 impl Block {
+    pub fn get_algorithm(buf: &Bytes) -> HummockResult<CompressionAlgorithm> {
+        let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
+        Ok(compression)
+    }
+
     pub fn decode(buf: Bytes, uncompressed_capacity: usize) -> HummockResult<Self> {
         // Verify checksum.
 
@@ -467,7 +472,14 @@ impl BlockBuilder {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
                 KeyComparator::compare_encoded_full_key(&self.last_key[..], &key[..]),
-                Ordering::Less
+                Ordering::Less,
+                "epoch: {}, table key: {}",
+                full_key.epoch,
+                u64::from_be_bytes(
+                    full_key.user_key.table_key.as_ref()[0..8]
+                        .try_into()
+                        .unwrap()
+                ),
             );
         }
         // Update restart point if needed and calculate diff key.
@@ -624,6 +636,7 @@ impl BlockBuilder {
         self.compression_algorithm.encode(&mut self.buf);
         let checksum = xxhash64_checksum(&self.buf);
         self.buf.put_u64_le(checksum);
+        assert!(self.buf.len() < (u32::MAX) as usize);
 
         self.buf.as_ref()
     }

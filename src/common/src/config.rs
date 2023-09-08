@@ -563,6 +563,8 @@ pub struct StorageConfig {
     pub compact_iter_recreate_timeout_ms: u64,
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
+    #[serde(default = "default::storage::enable_fast_compaction")]
+    pub enable_fast_compaction: bool,
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -1035,6 +1037,10 @@ pub mod default {
 
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
+        }
+
+        pub fn enable_fast_compaction() -> bool {
+            true
         }
     }
 

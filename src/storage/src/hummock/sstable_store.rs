@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::clone::Clone;
+use std::future::Future;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -386,15 +387,12 @@ impl SstableStore {
         self.meta_file_cache.clear_without_wait();
     }
 
-    /// Returns `table_holder`, `local_cache_meta_block_miss` (1 if cache miss) and
-    /// `local_cache_meta_block_unhit` (1 if not cache hit).
-    pub async fn sstable_syncable(
+    /// Returns `table_holder`
+    pub fn sstable(
         &self,
         sst: &SstableInfo,
-        stats: &StoreLocalStatistic,
-    ) -> HummockResult<(TableHolder, u64, u64)> {
-        let mut local_cache_meta_block_miss = 0;
-        let mut local_cache_meta_block_unhit = 0;
+        stats: &mut StoreLocalStatistic,
+    ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
         let object_id = sst.get_object_id();
         let lookup_response = self
             .meta_cache
@@ -406,7 +404,6 @@ impl SstableStore {
                     let meta_file_cache = self.meta_file_cache.clone();
                     let store = self.store.clone();
                     let meta_path = self.get_sst_data_path(object_id);
-                    local_cache_meta_block_miss += 1;
                     let stats_ptr = stats.remote_io_time.clone();
                     let loc = BlockLocation {
                         offset: sst.meta_offset as usize,
@@ -428,6 +425,7 @@ impl SstableStore {
                             .await
                             .map_err(HummockError::object_io_error)?;
                         let meta = SstableMeta::decode(&mut &buf[..])?;
+
                         let sst = Sstable::new(object_id, meta);
                         let charge = sst.estimate_size();
                         let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
@@ -436,32 +434,14 @@ impl SstableStore {
                     }
                 },
             );
-        if !matches!(lookup_response, LookupResponse::Cached(..)) {
-            local_cache_meta_block_unhit += 1;
+        match &lookup_response {
+            LookupResponse::Miss(_) | LookupResponse::WaitPendingRequest(_) => {
+                stats.cache_meta_block_miss += 1;
+            }
+            _ => (),
         }
-        let result = lookup_response
-            .verbose_instrument_await("meta_cache_lookup")
-            .await;
-        result.map(|table_holder| {
-            (
-                table_holder,
-                local_cache_meta_block_miss,
-                local_cache_meta_block_unhit,
-            )
-        })
-    }
-
-    pub async fn sstable(
-        &self,
-        sst: &SstableInfo,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<TableHolder> {
-        self.sstable_syncable(sst, stats).await.map(
-            |(table_holder, local_cache_meta_block_miss, ..)| {
-                stats.apply_meta_fetch(local_cache_meta_block_miss);
-                table_holder
-            },
-        )
+        stats.cache_meta_block_total += 1;
+        lookup_response.verbose_instrument_await("sstable")
     }
 
     pub async fn list_object_metadata_from_object_store(
@@ -734,6 +714,15 @@ impl SstableWriter for BatchUploadWriter {
         Ok(())
     }
 
+    async fn send_block(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()> {
+        self.buf.extend_from_slice(&block);
+        if let CachePolicy::Fill(_) = self.policy {
+            self.block_info
+                .push(Block::decode(block, meta.uncompressed_size as usize)?);
+        }
+        Ok(())
+    }
+
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
         fail_point!("data_upload_err");
         let join_handle = tokio::spawn(async move {
@@ -825,6 +814,18 @@ impl SstableWriter for StreamingUploadWriter {
         }
         self.object_uploader
             .write_bytes(block_data)
+            .await
+            .map_err(HummockError::object_io_error)
+    }
+
+    async fn send_block(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()> {
+        self.data_len += block.len();
+        if let CachePolicy::Fill(_) = self.policy {
+            let block = Block::decode(block.clone(), meta.uncompressed_size as usize)?;
+            self.blocks.push(block);
+        }
+        self.object_uploader
+            .write_bytes(block)
             .await
             .map_err(HummockError::object_io_error)
     }
@@ -923,7 +924,7 @@ pub struct BlockStream {
     /// not contain the size of blocks which precede the first streamed block. That is, if
     /// streaming starts at block 2 of a given SST, then the list does not contain information
     /// about block 0 and block 1.
-    block_size_vec: Vec<(usize, usize)>,
+    block_metas: Vec<BlockMeta>,
 }
 
 impl BlockStream {
@@ -945,28 +946,22 @@ impl BlockStream {
         // Avoids panicking if `block_index` is too large.
         let block_index = std::cmp::min(block_index, metas.len());
 
-        let mut block_len_vec = Vec::with_capacity(metas.len() - block_index);
-        metas[block_index..].iter().for_each(|b_meta| {
-            block_len_vec.push((b_meta.len as usize, b_meta.uncompressed_size as usize))
-        });
-
         Self {
             byte_stream,
             block_idx: 0,
-            block_size_vec: block_len_vec,
+            block_metas: metas[block_index..].to_vec(),
         }
     }
 
     /// Reads the next block from the stream and returns it. Returns `None` if there are no blocks
     /// left to read.
-    pub async fn next(&mut self) -> HummockResult<Option<Box<Block>>> {
-        if self.block_idx >= self.block_size_vec.len() {
+    pub async fn next(&mut self) -> HummockResult<Option<(Bytes, BlockMeta)>> {
+        if self.block_idx >= self.block_metas.len() {
             return Ok(None);
         }
 
-        let (block_stream_size, block_full_size) =
-            *self.block_size_vec.get(self.block_idx).unwrap();
-        let mut buffer = vec![0; block_stream_size];
+        let block_meta = &self.block_metas[self.block_idx];
+        let mut buffer = vec![0; block_meta.len as usize];
         fail_point!("stream_read_err", |_| Err(HummockError::object_io_error(
             ObjectError::internal("stream read error")
         )));
@@ -977,17 +972,26 @@ impl BlockStream {
             .await
             .map_err(|e| HummockError::object_io_error(ObjectError::internal(e)))?;
 
-        if bytes_read != block_stream_size {
+        if bytes_read != block_meta.len as usize {
             return Err(HummockError::decode_error(ObjectError::internal(format!(
                 "unexpected number of bytes: expected: {} read: {}",
-                block_stream_size, bytes_read
+                block_meta.len, bytes_read
             ))));
         }
 
-        let boxed_block = Box::new(Block::decode(Bytes::from(buffer), block_full_size)?);
         self.block_idx += 1;
 
-        Ok(Some(boxed_block))
+        Ok(Some((Bytes::from(buffer), block_meta.clone())))
+    }
+
+    pub async fn next_block(&mut self) -> HummockResult<Option<Box<Block>>> {
+        match self.next().await? {
+            None => Ok(None),
+            Some((buf, meta)) => Ok(Some(Box::new(Block::decode(
+                buf,
+                meta.uncompressed_size as usize,
+            )?))),
+        }
     }
 }
 

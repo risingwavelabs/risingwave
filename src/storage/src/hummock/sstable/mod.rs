@@ -27,8 +27,9 @@ pub use block_iterator::*;
 mod bloom;
 mod xor_filter;
 pub use bloom::BloomFilterBuilder;
-use xor_filter::XorFilterReader;
-pub use xor_filter::{BlockedXor16FilterBuilder, Xor16FilterBuilder, Xor8FilterBuilder};
+pub use xor_filter::{
+    BlockedXor16FilterBuilder, Xor16FilterBuilder, Xor8FilterBuilder, XorFilterReader,
+};
 pub mod builder;
 pub use builder::*;
 pub mod writer;
@@ -71,7 +72,8 @@ use crate::store::ReadOptions;
 
 const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
-const VERSION: u32 = 1;
+const OLD_VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 // delete keys located in [start_user_key, end_user_key)
@@ -247,7 +249,6 @@ impl Sstable {
     pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
         let filter_reader = XorFilterReader::new(&filter_data, &meta.block_metas);
-
         Self {
             id,
             meta,
@@ -317,12 +318,14 @@ impl Sstable {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
 pub struct BlockMeta {
     pub smallest_key: Vec<u8>,
     pub offset: u32,
     pub len: u32,
     pub uncompressed_size: u32,
+    pub total_key_count: u32,
+    pub stale_key_count: u32,
 }
 
 impl BlockMeta {
@@ -335,6 +338,8 @@ impl BlockMeta {
         buf.put_u32_le(self.offset);
         buf.put_u32_le(self.len);
         buf.put_u32_le(self.uncompressed_size);
+        buf.put_u32_le(self.total_key_count);
+        buf.put_u32_le(self.stale_key_count);
         put_length_prefixed_slice(buf, &self.smallest_key);
     }
 
@@ -342,18 +347,40 @@ impl BlockMeta {
         let offset = buf.get_u32_le();
         let len = buf.get_u32_le();
         let uncompressed_size = buf.get_u32_le();
+
+        let total_key_count = buf.get_u32_le();
+        let stale_key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
         Self {
             smallest_key,
             offset,
             len,
             uncompressed_size,
+            total_key_count,
+            stale_key_count,
+        }
+    }
+
+    pub fn decode_from_v1(buf: &mut &[u8]) -> Self {
+        let offset = buf.get_u32_le();
+        let len = buf.get_u32_le();
+        let uncompressed_size = buf.get_u32_le();
+        let total_key_count = 0;
+        let stale_key_count = 0;
+        let smallest_key = get_length_prefixed_slice(buf);
+        Self {
+            smallest_key,
+            offset,
+            len,
+            uncompressed_size,
+            total_key_count,
+            stale_key_count,
         }
     }
 
     #[inline]
     pub fn encoded_size(&self) -> usize {
-        16 /* offset + len + key len + uncompressed size */ + self.smallest_key.len()
+        24 /* offset + len + key len + uncompressed size + total key count + stale key count */ + self.smallest_key.len()
     }
 
     pub fn table_id(&self) -> TableId {
@@ -361,7 +388,7 @@ impl BlockMeta {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
 pub struct SstableMeta {
     pub block_metas: Vec<BlockMeta>,
     pub bloom_filter: Vec<u8>,
@@ -444,7 +471,7 @@ impl SstableMeta {
 
         cursor -= 4;
         let version = (&buf[cursor..cursor + 4]).get_u32_le();
-        if version != VERSION {
+        if version != VERSION && version != OLD_VERSION {
             return Err(HummockError::invalid_format_version(version));
         }
 
@@ -455,9 +482,16 @@ impl SstableMeta {
 
         let block_meta_count = buf.get_u32_le() as usize;
         let mut block_metas = Vec::with_capacity(block_meta_count);
-        for _ in 0..block_meta_count {
-            block_metas.push(BlockMeta::decode(buf));
+        if version == OLD_VERSION {
+            for _ in 0..block_meta_count {
+                block_metas.push(BlockMeta::decode_from_v1(buf));
+            }
+        } else {
+            for _ in 0..block_meta_count {
+                block_metas.push(BlockMeta::decode(buf));
+            }
         }
+
         let bloom_filter = get_length_prefixed_slice(buf);
         let estimated_size = buf.get_u32_le();
         let key_count = buf.get_u32_le();
@@ -538,15 +572,14 @@ mod tests {
             block_metas: vec![
                 BlockMeta {
                     smallest_key: b"0-smallest-key".to_vec(),
-                    offset: 0,
                     len: 100,
-                    uncompressed_size: 0,
+                    ..Default::default()
                 },
                 BlockMeta {
                     smallest_key: b"5-some-key".to_vec(),
                     offset: 100,
                     len: 100,
-                    uncompressed_size: 0,
+                    ..Default::default()
                 },
             ],
             bloom_filter: b"0123456789".to_vec(),

@@ -22,7 +22,7 @@ use xxhash_rust::xxh64;
 
 use super::{HummockError, HummockResult};
 
-unsafe fn u64(ptr: *const u8) -> u64 {
+unsafe fn read_u64(ptr: *const u8) -> u64 {
     ptr::read_unaligned(ptr as *const u64)
 }
 
@@ -36,7 +36,7 @@ pub fn bytes_diff_below_max_key_length<'a>(base: &[u8], target: &'a [u8]) -> &'a
     let mut i = 0;
     unsafe {
         while i + 8 <= end {
-            if u64(base.as_ptr().add(i)) != u64(target.as_ptr().add(i)) {
+            if read_u64(base.as_ptr().add(i)) != read_u64(target.as_ptr().add(i)) {
                 break;
             }
             i += 8;

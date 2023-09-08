@@ -35,8 +35,8 @@ use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtrac
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, DeleteRangeTombstone, FilterBuilder, LruCache, Sstable, SstableBuilder,
-    SstableBuilderOptions, SstableStoreRef, SstableWriter, Xor16FilterBuilder,
+    BlockedXor16FilterBuilder, CachePolicy, DeleteRangeTombstone, FilterBuilder, LruCache, Sstable,
+    SstableBuilder, SstableBuilderOptions, SstableStoreRef, SstableWriter, Xor16FilterBuilder,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
@@ -200,11 +200,11 @@ pub async fn put_sst(
 pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: FilterBuilder>(
     opts: SstableBuilderOptions,
     object_id: HummockSstableObjectId,
-    kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
+    kv_iter: impl IntoIterator<Item = (FullKey<B>, HummockValue<B>)>,
     range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
-) -> (Sstable, SstableInfo) {
+) -> SstableInfo {
     let writer_opts = SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
@@ -268,14 +268,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     b.add_monotonic_deletes(create_monotonic_events(range_tombstones));
     let output = b.finish().await.unwrap();
     output.writer_output.await.unwrap().unwrap();
-    let table = sstable_store
-        .sstable(
-            &output.sst_info.sst_info,
-            &mut StoreLocalStatistic::default(),
-        )
-        .await
-        .unwrap();
-    (table.value().as_ref().clone(), output.sst_info.sst_info)
+    output.sst_info.sst_info
 }
 
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -285,26 +278,30 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+    let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
         vec![],
-        sstable_store,
+        sstable_store.clone(),
         CachePolicy::NotFill,
     )
-    .await
-    .0
+    .await;
+    let table = sstable_store
+        .sstable(&sst_info, &mut StoreLocalStatistic::default())
+        .await
+        .unwrap();
+    table.value().as_ref().clone()
 }
 
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
-pub async fn gen_test_sstable_and_info<B: AsRef<[u8]> + Clone + Default + Eq>(
+pub async fn gen_test_sstable_info<B: AsRef<[u8]> + Clone + Default + Eq>(
     opts: SstableBuilderOptions,
     object_id: HummockSstableObjectId,
-    kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
+    kv_iter: impl IntoIterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
-) -> (Sstable, SstableInfo) {
-    gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+) -> SstableInfo {
+    gen_test_sstable_impl::<_, BlockedXor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
@@ -323,16 +320,20 @@ pub async fn gen_test_sstable_with_range_tombstone(
     range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+    let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
         range_tombstones,
-        sstable_store,
+        sstable_store.clone(),
         CachePolicy::NotFill,
     )
-    .await
-    .0
+    .await;
+    let table = sstable_store
+        .sstable(&sst_info, &mut StoreLocalStatistic::default())
+        .await
+        .unwrap();
+    table.value().as_ref().clone()
 }
 
 /// Generates a user key with table id 0 and the given `table_key`

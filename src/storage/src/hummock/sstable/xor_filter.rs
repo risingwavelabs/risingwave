@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
+use risingwave_common::must_match;
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
 use xorf::{Filter, Xor16, Xor8};
 
@@ -57,6 +58,21 @@ impl Xor16FilterBuilder {
         };
         Self { key_hash_entries }
     }
+
+    fn build_from_xor16(xor_filter: &Xor16) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() * 2 + 1);
+        buf.put_u64_le(xor_filter.seed);
+        buf.put_u32_le(xor_filter.block_length as u32);
+        xor_filter
+            .fingerprints
+            .iter()
+            .for_each(|x| buf.put_u16_le(*x));
+        // We add an extra byte so we can distinguish bloom filter and xor filter by the last
+        // byte(255 indicates a xor16 filter, 254 indicates a xor8 filter and others indicate a
+        // bloom filter).
+        buf.put_u8(FOOTER_XOR16);
+        buf
+    }
 }
 
 impl FilterBuilder for Xor16FilterBuilder {
@@ -79,18 +95,7 @@ impl FilterBuilder for Xor16FilterBuilder {
 
         let xor_filter = Xor16::from(&self.key_hash_entries);
         self.key_hash_entries.clear();
-        let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() * 2 + 1);
-        buf.put_u64_le(xor_filter.seed);
-        buf.put_u32_le(xor_filter.block_length as u32);
-        xor_filter
-            .fingerprints
-            .iter()
-            .for_each(|x| buf.put_u16_le(*x));
-        // We add an extra byte so we can distinguish bloom filter and xor filter by the last
-        // byte(255 indicates a xor16 filter, 254 indicates a xor8 filter and others indicate a
-        // bloom filter).
-        buf.put_u8(FOOTER_XOR16);
-        buf
+        Self::build_from_xor16(&xor_filter)
     }
 
     fn create(_fpr: f64, capacity: usize) -> Self {
@@ -193,6 +198,17 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
 
     fn approximate_building_memory(&self) -> usize {
         self.current.approximate_building_memory()
+    }
+
+    fn add_raw_data(&mut self, raw: Vec<u8>) {
+        assert!(self.current.key_hash_entries.is_empty());
+        self.data.put_u32_le(raw.len() as u32);
+        self.data.extend(raw);
+        self.block_count += 1;
+    }
+
+    fn support_blocked_raw_data(&self) -> bool {
+        true
     }
 }
 
@@ -388,6 +404,15 @@ impl XorFilterReader {
                 XorFilter::BlockXor16(reader) => reader.may_exist(user_key_range, h),
             }
         }
+    }
+
+    pub fn get_block_raw_filter(&self, block_index: usize) -> Vec<u8> {
+        let reader = must_match!(&self.filter, XorFilter::BlockXor16(reader) => reader);
+        Xor16FilterBuilder::build_from_xor16(&reader.filters[block_index].1)
+    }
+
+    pub fn is_block_based_filter(&self) -> bool {
+        matches!(self.filter, XorFilter::BlockXor16(_))
     }
 }
 

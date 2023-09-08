@@ -15,14 +15,14 @@
 #[cfg(test)]
 pub(crate) mod tests {
 
-    use std::collections::{BTreeSet, HashMap};
+    use std::collections::{BTreeSet, HashMap, VecDeque};
     use std::ops::Bound;
     use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
 
     use bytes::{BufMut, Bytes, BytesMut};
     use itertools::Itertools;
-    use rand::Rng;
+    use rand::{Rng, RngCore, SeedableRng};
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
@@ -30,7 +30,8 @@ pub(crate) mod tests {
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::key::{next_key, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::key::{next_key, FullKey, TableKey, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
@@ -40,20 +41,28 @@ pub(crate) mod tests {
     };
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
     use risingwave_pb::common::{HostAddress, WorkerType};
-    use risingwave_pb::hummock::{HummockVersion, TableOption};
+    use risingwave_pb::hummock::{CompactTask, HummockVersion, InputLevel, KeyRange, TableOption};
     use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::filter_key_extractor::{
         FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
         FixedLengthFilterKeyExtractor, FullKeyFilterKeyExtractor,
     };
-    use risingwave_storage::hummock::compactor::compactor_runner::compact;
-    use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
+    use risingwave_storage::hummock::compactor::compactor_runner::{compact, CompactorRunner};
+    use risingwave_storage::hummock::compactor::fast_compactor_runner::CompactorRunner as FastCompactorRunner;
+    use risingwave_storage::hummock::compactor::{
+        CompactionExecutor, Compactor, CompactorContext, DummyCompactionFilter, TaskProgress,
+    };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
+    use risingwave_storage::hummock::iterator::UserIterator;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
+    use risingwave_storage::hummock::test_utils::gen_test_sstable_info;
+    use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
-        CachePolicy, HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
-        SstableObjectIdManager,
+        CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
+        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
+        SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions, SstableIterator,
+        SstableIteratorReadOptions, SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
     use risingwave_storage::opts::StorageOpts;
@@ -1320,5 +1329,253 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(1, output_level_info.table_infos.len());
         assert_eq!(252, output_level_info.table_infos[0].total_key_count);
+    }
+
+    type KeyValue = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>);
+
+    async fn test_fast_compact_impl(
+        data1: Vec<KeyValue>,
+        data2: Vec<KeyValue>,
+        data3: Vec<KeyValue>,
+    ) {
+        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+            setup_compute_env(8080).await;
+        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+            hummock_manager_ref.clone(),
+            worker_node.id,
+        ));
+        let existing_table_id: u32 = 1;
+        let storage = get_hummock_storage(
+            hummock_meta_client.clone(),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+            &hummock_manager_ref,
+            TableId::from(existing_table_id),
+        )
+        .await;
+        hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
+        let compact_ctx = prepare_compactor_and_filter(&storage, existing_table_id);
+
+        let sstable_store = compact_ctx.sstable_store.clone();
+        let capacity = 4 * 1024 * 1024;
+        let mut options = SstableBuilderOptions {
+            capacity,
+            block_capacity: 2048,
+            restart_interval: 16,
+            bloom_false_positive: 0.1,
+            ..Default::default()
+        };
+        let sst1 = gen_test_sstable_info(options.clone(), 1, data1, sstable_store.clone()).await;
+        let sst2 = gen_test_sstable_info(options.clone(), 2, data2, sstable_store.clone()).await;
+        options.compression_algorithm = CompressionAlgorithm::Lz4;
+        let sst3 = gen_test_sstable_info(options, 3, data3, sstable_store.clone()).await;
+        let read_options = Arc::new(SstableIteratorReadOptions::default());
+
+        let task = CompactTask {
+            input_ssts: vec![
+                InputLevel {
+                    level_idx: 5,
+                    level_type: 1,
+                    table_infos: vec![sst1.clone()],
+                },
+                InputLevel {
+                    level_idx: 6,
+                    level_type: 1,
+                    table_infos: vec![sst2, sst3],
+                },
+            ],
+            existing_table_ids: vec![1],
+            task_id: 1,
+            watermark: 1000,
+            splits: vec![KeyRange::inf()],
+            target_level: 6,
+            base_level: 4,
+            target_file_size: capacity as u64,
+            compression_algorithm: 1,
+            gc_delete_keys: true,
+            ..Default::default()
+        };
+        let deg = Arc::new(CompactionDeleteRanges::default());
+        let multi_filter_key_extractor =
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
+        let compaction_filter = DummyCompactionFilter {};
+        let slow_compact_runner = CompactorRunner::new(
+            0,
+            compact_ctx.clone(),
+            task.clone(),
+            Box::new(SharedComapctorObjectIdManager::new(VecDeque::from_iter([
+                4, 5, 6, 7,
+            ]))),
+        );
+        let fast_compact_runner = FastCompactorRunner::new(
+            compact_ctx.clone(),
+            task.clone(),
+            multi_filter_key_extractor.clone(),
+            Box::new(SharedComapctorObjectIdManager::new(VecDeque::from_iter([
+                8, 9, 10, 11,
+            ]))),
+            Arc::new(TaskProgress::default()),
+        );
+        let (_, mut ret1, _) = slow_compact_runner
+            .run(
+                compaction_filter,
+                multi_filter_key_extractor,
+                deg,
+                Arc::new(TaskProgress::default()),
+            )
+            .await
+            .unwrap();
+        let fast_ret = fast_compact_runner.run().await.unwrap();
+        let mut fast_ret = Compactor::report_progress(compact_ctx.clone(), None, fast_ret)
+            .await
+            .unwrap();
+        assert_eq!(ret1.len(), 1);
+        assert_eq!(fast_ret.len(), 1);
+        let normal_ret = ret1.pop().unwrap();
+        let fast_sst = fast_ret.pop().unwrap();
+        println!(
+            "{}.file size={} {}.file size={}",
+            normal_ret.sst_info.object_id,
+            normal_ret.sst_info.file_size,
+            fast_sst.sst_info.object_id,
+            fast_sst.sst_info.file_size,
+        );
+        let mut stats = StoreLocalStatistic::default();
+
+        compact_ctx
+            .sstable_store
+            .delete_cache(fast_sst.sst_info.object_id);
+        compact_ctx
+            .sstable_store
+            .delete_cache(normal_ret.sst_info.object_id);
+        let normal_table = compact_ctx
+            .sstable_store
+            .sstable(&normal_ret.sst_info, &mut stats)
+            .await
+            .unwrap();
+        let mut normal_iter = UserIterator::for_test(
+            SstableIterator::new(
+                normal_table,
+                compact_ctx.sstable_store.clone(),
+                read_options.clone(),
+            ),
+            (Bound::Unbounded, Bound::Unbounded),
+        );
+        let fast_table = compact_ctx
+            .sstable_store
+            .sstable(&fast_sst.sst_info, &mut stats)
+            .await
+            .unwrap();
+        let mut fast_iter = UserIterator::for_test(
+            SstableIterator::new(fast_table, compact_ctx.sstable_store.clone(), read_options),
+            (Bound::Unbounded, Bound::Unbounded),
+        );
+        let fast_table = compact_ctx
+            .sstable_store
+            .sstable(&fast_sst.sst_info, &mut stats)
+            .await
+            .unwrap();
+        let normal_table = compact_ctx
+            .sstable_store
+            .sstable(&normal_ret.sst_info, &mut stats)
+            .await
+            .unwrap();
+        normal_iter.rewind().await.unwrap();
+        fast_iter.rewind().await.unwrap();
+        let mut count = 0;
+        while normal_iter.is_valid() {
+            assert_eq!(
+                normal_iter.key(),
+                fast_iter.key(),
+                "not equal in {}, len: {} {} vs {}",
+                count,
+                normal_iter.key().user_key.table_key.as_ref().len(),
+                u64::from_be_bytes(
+                    normal_iter.key().user_key.table_key.as_ref()[0..8]
+                        .try_into()
+                        .unwrap()
+                ),
+                u64::from_be_bytes(
+                    fast_iter.key().user_key.table_key.as_ref()[0..8]
+                        .try_into()
+                        .unwrap()
+                ),
+            );
+            let hash = Sstable::hash_for_bloom_filter(
+                fast_iter.key().user_key.encode().as_slice(),
+                fast_iter.key().user_key.table_id.table_id,
+            );
+            assert_eq!(normal_iter.value(), fast_iter.value());
+            let key_ref = fast_iter.key().user_key.as_ref();
+            assert!(normal_table
+                .value()
+                .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash));
+            assert!(
+                fast_table
+                    .value()
+                    .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash),
+                "not found key at {}",
+                count
+            );
+            normal_iter.next().await.unwrap();
+            fast_iter.next().await.unwrap();
+            count += 1;
+        }
+        assert_eq!(fast_sst.sst_info.key_range, normal_ret.sst_info.key_range);
+    }
+
+    #[tokio::test]
+    async fn test_fast_compact() {
+        const KEY_COUNT: usize = 10000;
+        let mut data1 = Vec::with_capacity(KEY_COUNT);
+        let mut last_k: u64 = 0;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        );
+        for _ in 0..KEY_COUNT {
+            let rand_v = rng.next_u32() % 100;
+            let k = if rand_v == 0 {
+                last_k + 2000
+            } else {
+                last_k + 1
+            };
+            let epoch = 400;
+            let key = k.to_be_bytes().to_vec();
+            let key = FullKey::new(TableId::new(1), TableKey(key), epoch);
+            let rand_v = rng.next_u32() % 10;
+            let v = if rand_v == 1 {
+                HummockValue::delete()
+            } else {
+                HummockValue::put(format!("sst1-{}", epoch).into_bytes())
+            };
+            data1.push((key, v));
+            last_k = k;
+        }
+        let mut data2 = Vec::with_capacity(KEY_COUNT);
+        let mut data3 = Vec::with_capacity(KEY_COUNT);
+        let mut last_k: u64 = 0;
+
+        for _ in 0..KEY_COUNT * 2 {
+            let rand_v = rng.next_u32() % 100;
+            let k = if rand_v == 0 {
+                last_k + 1100
+            } else {
+                last_k + 1
+            };
+            let epoch = 300;
+            let key = k.to_be_bytes().to_vec();
+            let key = FullKey::new(TableId::new(1), TableKey(key), epoch);
+            let v = HummockValue::put(format!("sst2-{}", epoch).into_bytes());
+            if data2.len() + 1 < KEY_COUNT {
+                data2.push((key, v));
+            } else {
+                data3.push((key, v));
+            }
+            last_k = k;
+        }
+
+        test_fast_compact_impl(data1, data2, data3).await;
     }
 }

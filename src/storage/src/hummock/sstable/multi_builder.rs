@@ -16,6 +16,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use num_integer::Integer;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
@@ -28,7 +29,7 @@ use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BatchUploadWriter, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
+    BatchUploadWriter, BlockMeta, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
     SstableBuilderOptions, SstableWriter, SstableWriterOptions, Xor16FilterBuilder,
 };
 use crate::monitor::CompactorMetrics;
@@ -148,6 +149,30 @@ where
         is_new_user_key: bool,
     ) -> HummockResult<()> {
         self.add_full_key(full_key, value, is_new_user_key).await
+    }
+
+    pub async fn add_raw_block(
+        &mut self,
+        buf: Bytes,
+        filter_data: Vec<u8>,
+        smallest_key: FullKey<Vec<u8>>,
+        largest_key: Vec<u8>,
+        block_meta: BlockMeta,
+    ) -> HummockResult<()> {
+        if self.current_builder.is_none() {
+            if let Some(progress) = &self.task_progress {
+                progress
+                    .num_pending_write_io
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            let builder = self.builder_factory.open_builder().await?;
+            self.current_builder = Some(builder);
+        }
+
+        let builder = self.current_builder.as_mut().unwrap();
+        builder
+            .add_raw_block(buf, filter_data, smallest_key, largest_key, block_meta)
+            .await
     }
 
     /// Adds a key-value pair to the underlying builders.

@@ -228,7 +228,6 @@ impl CacheRefillTask {
         context: &CacheRefillContext,
         delta: &SstDeltaInfo,
     ) -> HummockResult<Vec<TableHolder>> {
-        let stats = StoreLocalStatistic::default();
         let tasks = delta
             .insert_sst_infos
             .iter()
@@ -236,11 +235,11 @@ impl CacheRefillTask {
                 let _timer = GLOBAL_CACHE_REFILL_METRICS
                     .meta_refill_duration
                     .start_timer();
-                context.sstable_store.sstable_syncable(info, &stats).await
+                let mut stats = StoreLocalStatistic::default();
+                context.sstable_store.sstable(info, &mut stats).await
             })
             .collect_vec();
-        let res = try_join_all(tasks).await?;
-        let holders = res.into_iter().map(|(holder, _, _)| holder).collect_vec();
+        let holders = try_join_all(tasks).await?;
         Ok(holders)
     }
 

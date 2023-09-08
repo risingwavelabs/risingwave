@@ -17,6 +17,7 @@ mod compaction_filter;
 pub mod compaction_utils;
 pub mod compactor_runner;
 mod context;
+pub mod fast_compactor_runner;
 mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
@@ -190,6 +191,35 @@ impl Compactor {
 
         compact_timer.observe_duration();
 
+        let ssts =
+            Self::report_progress(self.context.clone(), task_progress, split_table_outputs).await?;
+
+        self.context
+            .compactor_metrics
+            .get_table_id_total_time_duration
+            .observe(self.get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
+
+        debug_assert!(ssts
+            .iter()
+            .all(|table_info| table_info.sst_info.get_table_ids().is_sorted()));
+
+        if task_id.is_some() {
+            // skip shared buffer compaction
+            tracing::info!(
+                "Finish Task {:?} split_index {:?} sst count {}",
+                task_id,
+                split_index,
+                ssts.len()
+            );
+        }
+        Ok((ssts, table_stats_map))
+    }
+
+    pub async fn report_progress(
+        context: CompactorContext,
+        task_progress: Option<Arc<TaskProgress>>,
+        split_table_outputs: Vec<SplitTableOutput>,
+    ) -> HummockResult<Vec<LocalSstableInfo>> {
         let mut ssts = Vec::with_capacity(split_table_outputs.len());
         let mut upload_join_handles = vec![];
 
@@ -202,7 +232,7 @@ impl Compactor {
             ssts.push(sst_info);
 
             let tracker_cloned = task_progress.clone();
-            let context_cloned = self.context.clone();
+            let context_cloned = context.clone();
             upload_join_handles.push(async move {
                 upload_join_handle
                     .verbose_instrument_await("upload")
@@ -233,25 +263,7 @@ impl Compactor {
         try_join_all(upload_join_handles)
             .verbose_instrument_await("join")
             .await?;
-        self.context
-            .compactor_metrics
-            .get_table_id_total_time_duration
-            .observe(self.get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
-
-        debug_assert!(ssts
-            .iter()
-            .all(|table_info| table_info.sst_info.get_table_ids().is_sorted()));
-
-        if task_id.is_some() {
-            // skip shared buffer compaction
-            tracing::info!(
-                "Finish Task {:?} split_index {:?} sst count {}",
-                task_id,
-                split_index,
-                ssts.len()
-            );
-        }
-        Ok((ssts, table_stats_map))
+        Ok(ssts)
     }
 
     async fn compact_key_range_impl<F: SstableWriterFactory, B: FilterBuilder>(
