@@ -168,6 +168,7 @@ mod tests {
     use risingwave_common::row::Row;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::ToOwnedDatum;
+    use risingwave_common::util::iter_util::ZipEqDebug;
 
     use crate::expr::build_from_pretty;
 
@@ -178,7 +179,7 @@ mod tests {
             "T          T       T       T
              Hello%s    World   .       HelloWorld
              %s%s       Hello   World   HelloWorld
-             %I         &&              \"%%\"
+             %I         &&      .       \"&&\"
              .          a       b       .",
         )
         .split_column_at(3);
@@ -188,7 +189,7 @@ mod tests {
         assert_eq!(&output, expected.column_at(0));
 
         // test eval_row
-        for (row, expected) in input.rows().zip(expected.rows()) {
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
             let result = format.eval_row(&row.to_owned_row()).await.unwrap();
             assert_eq!(result, expected.datum_at(0).to_owned_datum());
         }

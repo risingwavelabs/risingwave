@@ -128,11 +128,10 @@ mod tests {
         // convert FUNC_SIG_MAP to a more convenient map for testing
         let mut new_map: BTreeMap<PbType, BTreeMap<Vec<DataTypeName>, Vec<FuncSign>>> =
             BTreeMap::new();
-        for ((func, num_args), sigs) in &FUNC_SIG_MAP.0 {
+        for (func, sigs) in &FUNC_SIG_MAP.0 {
             for sig in sigs {
                 // validate the FUNC_SIG_MAP is consistent
                 assert_eq!(func, &sig.func);
-                assert_eq!(num_args, &sig.inputs_type.len());
                 // exclude deprecated functions
                 if sig.deprecated {
                     continue;

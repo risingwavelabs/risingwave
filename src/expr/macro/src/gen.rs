@@ -219,7 +219,7 @@ impl FunctionAttr {
         };
 
         // evaluate child expressions and
-        // - build a chunk if arguments are varibale
+        // - build a chunk if arguments are variable
         // - downcast arrays if arguments are fixed
         let eval_children = if varargs {
             quote! {
@@ -238,7 +238,7 @@ impl FunctionAttr {
             }
         };
         // evaluate child expressions and
-        // - build a row if arguments are varibale
+        // - build a row if arguments are variable
         // - downcast scalars if arguments are fixed
         let eval_row_children = if varargs {
             quote! {

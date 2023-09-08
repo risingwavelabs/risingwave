@@ -1195,6 +1195,7 @@ mod tests {
                 sig_map.insert(FuncSign {
                     func: DUMMY_FUNC,
                     inputs_type: formals,
+                    varargs: false,
                     ret_type: DUMMY_RET,
                     build: |_, _| unreachable!(),
                     deprecated: false,
