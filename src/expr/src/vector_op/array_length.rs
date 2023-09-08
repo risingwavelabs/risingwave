@@ -17,7 +17,7 @@ use std::fmt::Write;
 use risingwave_common::array::ListRef;
 use risingwave_expr_macro::function;
 
-use crate::ExprError;
+use crate::{ExprError, Result};
 
 /// Returns the length of an array.
 ///
@@ -61,9 +61,9 @@ use crate::ExprError;
 /// query error Cannot implicitly cast
 /// select array_length(null);
 /// ```
-#[function("array_length(list) -> int32")]
-#[function("array_length(list) -> int64", deprecated)]
-fn array_length<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T, ExprError> {
+#[function("array_length(anyarray) -> int32")]
+#[function("array_length(anyarray) -> int64", deprecated)]
+fn array_length<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T> {
     array
         .len()
         .try_into()
@@ -129,8 +129,8 @@ fn array_length<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T, ExprError> {
 /// statement error
 /// select array_length(array[null, array[2]], 2);
 /// ```
-#[function("array_length(list, int32) -> int32")]
-fn array_length_of_dim(array: ListRef<'_>, d: i32) -> Result<Option<i32>, ExprError> {
+#[function("array_length(anyarray, int32) -> int32")]
+fn array_length_of_dim(array: ListRef<'_>, d: i32) -> Result<Option<i32>> {
     match d {
         ..=0 => Ok(None),
         1 => array_length(array).map(Some),
@@ -186,7 +186,7 @@ fn array_length_of_dim(array: ListRef<'_>, d: i32) -> Result<Option<i32>, ExprEr
 /// statement error
 /// select array_dims(array[array[]::int[]]); -- would be `[1:1][1:0]` after multidimensional support
 /// ```
-#[function("array_dims(list) -> varchar")]
+#[function("array_dims(anyarray) -> varchar")]
 fn array_dims(array: ListRef<'_>, writer: &mut impl Write) {
     write!(writer, "[1:{}]", array.len()).unwrap();
 }

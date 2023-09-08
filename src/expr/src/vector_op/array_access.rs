@@ -18,19 +18,14 @@ use risingwave_expr_macro::function;
 
 use crate::Result;
 
-#[function("array_access(list, int32) -> *")]
-pub fn array_access<T: Scalar>(list: ListRef<'_>, index: i32) -> Result<Option<T>> {
+#[function("array_access(anyarray, int32) -> any")]
+fn array_access(list: ListRef<'_>, index: i32) -> DatumRef<'_> {
     // index must be greater than 0 following a one-based numbering convention for arrays
     if index < 1 {
-        return Ok(None);
+        return None;
     }
     // returns `NULL` if index is out of bounds
-    let datum_ref = list.elem_at(index as usize - 1).flatten();
-    if let Some(scalar) = datum_ref.to_owned_datum() {
-        Ok(Some(scalar.try_into()?))
-    } else {
-        Ok(None)
-    }
+    list.elem_at(index as usize - 1).flatten();
 }
 
 #[cfg(test)]

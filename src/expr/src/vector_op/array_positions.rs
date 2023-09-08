@@ -68,10 +68,10 @@ use crate::Result;
 /// ----
 /// 2
 /// ```
-#[function("array_position(list, *) -> int32")]
-fn array_position<'a, T: ScalarRef<'a>>(
+#[function("array_position(anyarray, any) -> int32")]
+fn array_position(
     array: Option<ListRef<'_>>,
-    element: Option<T>,
+    element: Option<ScalarRefImpl<'_>>,
 ) -> Result<Option<i32>> {
     array_position_common(array, element, 0)
 }
@@ -99,10 +99,10 @@ fn array_position<'a, T: ScalarRef<'a>>(
 ///  4    4
 ///  5 NULL
 /// ```
-#[function("array_position(list, *, int32) -> int32")]
-fn array_position_start<'a, T: ScalarRef<'a>>(
+#[function("array_position(anyarray, any, int32) -> int32")]
+fn array_position_start(
     array: Option<ListRef<'_>>,
-    element: Option<T>,
+    element: Option<ScalarRefImpl<'_>>,
     start: Option<i32>,
 ) -> Result<Option<i32>> {
     let start = match start {
@@ -117,9 +117,9 @@ fn array_position_start<'a, T: ScalarRef<'a>>(
     array_position_common(array, element, start)
 }
 
-fn array_position_common<'a, T: ScalarRef<'a>>(
+fn array_position_common(
     array: Option<ListRef<'_>>,
-    element: Option<T>,
+    element: Option<ScalarRefImpl<'_>>,
     skip: usize,
 ) -> Result<Option<i32>> {
     let Some(left) = array else { return Ok(None) };
@@ -130,7 +130,7 @@ fn array_position_common<'a, T: ScalarRef<'a>>(
     Ok(left
         .iter()
         .skip(skip)
-        .position(|item| item == element.map(Into::into))
+        .position(|item| item == element)
         .map(|idx| (idx + 1 + skip) as _))
 }
 
@@ -184,25 +184,23 @@ fn array_position_common<'a, T: ScalarRef<'a>>(
 /// statement error
 /// select array_positions(ARRAY[array[1],array[2],array[3],array[2],null], array[true]);
 /// ```
-#[function("array_positions(list, *) -> list")]
-fn array_positions<'a, T: ScalarRef<'a>>(
+#[function("array_positions(anyarray, any) -> int32[]")]
+fn array_positions(
     array: Option<ListRef<'_>>,
-    element: Option<T>,
+    element: Option<ScalarRefImpl<'_>>,
 ) -> Result<Option<ListValue>> {
-    match array {
-        Some(left) => {
-            let values = left.iter();
-            match TryInto::<i32>::try_into(values.len()) {
-                Ok(_) => Ok(Some(ListValue::new(
-                    values
-                        .enumerate()
-                        .filter(|(_, item)| item == &element.map(|x| x.into()))
-                        .map(|(idx, _)| Some(ScalarImpl::Int32((idx + 1) as _)))
-                        .collect(),
-                ))),
-                Err(_) => Err(ExprError::CastOutOfRange("invalid array length")),
-            }
-        }
-        _ => Ok(None),
+    let Some(array) = array else {
+        return Ok(None);
+    };
+    let values = array.iter();
+    if values.len() - 1 > i32::MAX as usize {
+        return Err(ExprError::CastOutOfRange("invalid array length"));
     }
+    Ok(Some(ListValue::new(
+        values
+            .enumerate()
+            .filter(|(_, item)| item == &element)
+            .map(|(idx, _)| Some(ScalarImpl::Int32((idx + 1) as _)))
+            .collect(),
+    )))
 }

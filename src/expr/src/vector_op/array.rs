@@ -17,7 +17,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_expr_macro::function;
 
-#[function("array(...) -> list")]
+#[function("array(...) -> anyarray")]
 fn array(row: impl Row) -> ListValue {
     ListValue::new(row.iter().map(|d| d.to_owned_datum()).collect())
 }

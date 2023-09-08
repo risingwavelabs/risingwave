@@ -18,20 +18,21 @@ use risingwave_expr_macro::function;
 
 use crate::Result;
 
-/// FIXME: #[`function("array_min(list`) -> any")] supports
-/// In this way we could avoid manual macro expansion
-#[function("array_min(list) -> *int")]
-#[function("array_min(list) -> *float")]
-#[function("array_min(list) -> decimal")]
-#[function("array_min(list) -> serial")]
-#[function("array_min(list) -> int256")]
-#[function("array_min(list) -> date")]
-#[function("array_min(list) -> time")]
-#[function("array_min(list) -> timestamp")]
-#[function("array_min(list) -> timestamptz")]
-#[function("array_min(list) -> varchar")]
-#[function("array_min(list) -> bytea")]
-pub fn array_min<T: Scalar>(list: ListRef<'_>) -> Result<Option<T>> {
+#[function("array_min(int16[]) -> int16")]
+#[function("array_min(int32[]) -> int32")]
+#[function("array_min(int64[]) -> int64")]
+#[function("array_min(float32[]) -> float32")]
+#[function("array_min(float64[]) -> float64")]
+#[function("array_min(decimal[]) -> decimal")]
+#[function("array_min(serial[]) -> serial")]
+#[function("array_min(int256[]) -> int256")]
+#[function("array_min(date[]) -> date")]
+#[function("array_min(time[]) -> time")]
+#[function("array_min(timestamp[]) -> timestamp")]
+#[function("array_min(timestamptz[]) -> timestamptz")]
+#[function("array_min(varchar[]) -> varchar")]
+#[function("array_min(bytea[]) -> bytea")]
+pub fn array_min(list: ListRef<'_>) -> Result<Option<impl Scalar>> {
     let min_value = list.iter().flatten().map(DefaultOrdered).min();
     match min_value.map(|v| v.0).to_owned_datum() {
         Some(s) => Ok(Some(s.try_into()?)),

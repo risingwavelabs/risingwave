@@ -58,13 +58,13 @@ use super::*;
 /// ----
 /// 1
 /// ```
-#[function("generate_subscripts(list, int32, boolean) -> setof int32")]
+#[function("generate_subscripts(anyarray, int32, boolean) -> setof int32")]
 fn generate_subscripts_reverse(
     array: ListRef<'_>,
     dim: i32,
     reverse: bool,
-) -> Result<impl Iterator<Item = i32>> {
-    Ok(generate_subscripts_iterator(array, dim, reverse))
+) -> impl Iterator<Item = i32> {
+    generate_subscripts_iterator(array, dim, reverse)
 }
 
 /// ```slt
@@ -106,9 +106,9 @@ fn generate_subscripts_reverse(
 /// ----
 /// 1
 /// ```
-#[function("generate_subscripts(list, int32) -> setof int32")]
-fn generate_subscripts(array: ListRef<'_>, dim: i32) -> Result<impl Iterator<Item = i32>> {
-    Ok(generate_subscripts_iterator(array, dim, false))
+#[function("generate_subscripts(anyarray, int32) -> setof int32")]
+fn generate_subscripts(array: ListRef<'_>, dim: i32) -> impl Iterator<Item = i32> {
+    generate_subscripts_iterator(array, dim, false)
 }
 
 #[auto_enum(Iterator)]

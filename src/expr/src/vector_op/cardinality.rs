@@ -59,8 +59,8 @@ use crate::ExprError;
 /// query error Cannot implicitly cast
 /// select cardinality(null);
 /// ```
-#[function("cardinality(list) -> int32")]
-#[function("cardinality(list) -> int64", deprecated)]
+#[function("cardinality(anyarray) -> int32")]
+#[function("cardinality(anyarray) -> int64", deprecated)]
 fn cardinality<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T, ExprError> {
     array
         .flatten()

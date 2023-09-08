@@ -54,37 +54,19 @@ use risingwave_expr_macro::function;
 /// statement error
 /// select array_replace(array[array[array[0, 1], array[2, 3]], array[array[4, 5], array[6, 7]]], array[4, 5], array[8, 9]);
 /// ```
-#[function("array_replace(list, boolean, boolean) -> list")]
-#[function("array_replace(list, int16, int16) -> list")]
-#[function("array_replace(list, int32, int32) -> list")]
-#[function("array_replace(list, int64, int64) -> list")]
-#[function("array_replace(list, decimal, decimal) -> list")]
-#[function("array_replace(list, float32, float32) -> list")]
-#[function("array_replace(list, float64, float64) -> list")]
-#[function("array_replace(list, varchar, varchar) -> list")]
-#[function("array_replace(list, bytea, bytea) -> list")]
-#[function("array_replace(list, time, time) -> list")]
-#[function("array_replace(list, interval, interval) -> list")]
-#[function("array_replace(list, date, date) -> list")]
-#[function("array_replace(list, timestamp, timestamp) -> list")]
-#[function("array_replace(list, timestamptz, timestamptz) -> list")]
-#[function("array_replace(list, list, list) -> list")]
-#[function("array_replace(list, struct, struct) -> list")]
-#[function("array_replace(list, jsonb, jsonb) -> list")]
-#[function("array_replace(list, int256, int256) -> list")]
-fn array_replace<'a, T: ScalarRef<'a>>(
-    arr: Option<ListRef<'_>>,
-    elem_from: Option<T>,
-    elem_to: Option<T>,
+#[function("array_replace(anyarray, any, any) -> anyarray")]
+fn array_replace(
+    array: Option<ListRef<'_>>,
+    elem_from: Option<ScalarRefImpl<'_>>,
+    elem_to: Option<ScalarRefImpl<'_>>,
 ) -> Option<ListValue> {
-    arr.map(|arr| {
-        ListValue::new(
-            arr.iter()
-                .map(|x| match x == elem_from.map(Into::into) {
-                    true => elem_to.map(Into::into).to_owned_datum(),
-                    false => x.to_owned_datum(),
-                })
-                .collect(),
-        )
-    })
+    Some(ListValue::new(
+        array?
+            .iter()
+            .map(|x| match x == elem_from {
+                true => elem_to.to_owned_datum(),
+                false => x.to_owned_datum(),
+            })
+            .collect(),
+    ))
 }

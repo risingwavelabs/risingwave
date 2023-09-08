@@ -50,7 +50,7 @@ use risingwave_expr_macro::function;
 /// select array_distinct(null);
 /// ```
 
-#[function("array_distinct(list) -> list")]
+#[function("array_distinct(anyarray) -> anyarray")]
 pub fn array_distinct(list: ListRef<'_>) -> ListValue {
     ListValue::new(list.iter().unique().map(|x| x.to_owned_datum()).collect())
 }

@@ -35,39 +35,33 @@ fn string_to_array_inner<'a>(
 }
 
 // Use cases shown in `e2e_test/batch/functions/string_to_array.slt.part`
-#[function("string_to_array(varchar, varchar) -> list")]
+#[function("string_to_array(varchar, varchar) -> varchar[]")]
 pub fn string_to_array2(s: Option<&str>, sep: Option<&str>) -> Option<ListValue> {
-    s.map(|s| {
-        ListValue::new(
-            string_to_array_inner(s, sep)
-                .map(|x| Some(ScalarImpl::Utf8(x.into())))
-                .collect_vec(),
-        )
-    })
+    Some(ListValue::new(
+        string_to_array_inner(s?, sep)
+            .map(|x| Some(ScalarImpl::Utf8(x.into())))
+            .collect_vec(),
+    ))
 }
 
-#[function("string_to_array(varchar, varchar, varchar) -> list")]
+#[function("string_to_array(varchar, varchar, varchar) -> varchar[]")]
 pub fn string_to_array3(
     s: Option<&str>,
     sep: Option<&str>,
     null: Option<&str>,
 ) -> Option<ListValue> {
-    s.map(|s| {
-        null.map_or_else(
-            || string_to_array2(Some(s), sep).unwrap(),
-            |null| {
-                ListValue::new(
-                    string_to_array_inner(s, sep)
-                        .map(|x| {
-                            if x == null {
-                                None
-                            } else {
-                                Some(ScalarImpl::Utf8(x.into()))
-                            }
-                        })
-                        .collect_vec(),
-                )
-            },
-        )
-    })
+    let Some(null) = null else {
+        return string_to_array2(s, sep);
+    };
+    Some(ListValue::new(
+        string_to_array_inner(s?, sep)
+            .map(|x| {
+                if x == null {
+                    None
+                } else {
+                    Some(ScalarImpl::Utf8(x.into()))
+                }
+            })
+            .collect_vec(),
+    ))
 }

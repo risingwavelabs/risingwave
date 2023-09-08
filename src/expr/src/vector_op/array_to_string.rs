@@ -82,7 +82,7 @@ use crate::expr::Context;
 /// ----
 /// one,*,three,four
 /// ```
-#[function("array_to_string(list, varchar) -> varchar")]
+#[function("array_to_string(anyarray, varchar) -> varchar")]
 fn array_to_string(array: ListRef<'_>, delimiter: &str, ctx: &Context, writer: &mut impl Write) {
     let element_data_type = ctx.arg_types[0].unnest_list();
     let mut first = true;
@@ -97,7 +97,7 @@ fn array_to_string(array: ListRef<'_>, delimiter: &str, ctx: &Context, writer: &
     }
 }
 
-#[function("array_to_string(list, varchar, varchar) -> varchar")]
+#[function("array_to_string(anyarray, varchar, varchar) -> varchar")]
 fn array_to_string_with_null(
     array: ListRef<'_>,
     delimiter: &str,
