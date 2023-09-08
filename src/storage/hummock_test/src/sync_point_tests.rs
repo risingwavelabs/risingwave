@@ -261,7 +261,7 @@ pub async fn compact_once(
     .await;
 
     hummock_manager_ref
-        .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+        .report_compact_task(result_task, Some(to_prost_table_stats_map(task_stats)))
         .await
         .unwrap();
 }
