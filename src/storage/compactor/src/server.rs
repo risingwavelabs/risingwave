@@ -23,6 +23,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
@@ -35,6 +36,8 @@ use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
+use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
+use risingwave_pb::meta::GetSystemParamsRequest;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::filter_key_extractor::{
@@ -62,15 +65,22 @@ use crate::CompactorOpts;
 
 pub async fn prepare_start_parameters(
     config: RwConfig,
-
-    storage_opts: Arc<StorageOpts>,
     object_metrics: Arc<object_metrics::ObjectStoreMetrics>,
-    state_store_url: &str,
+    system_params_reader: SystemParamsReader,
 ) -> (
     Arc<SstableStore>,
     Arc<MemoryLimiter>,
     Option<Arc<RwLock<await_tree::Registry<String>>>>,
+    Arc<StorageOpts>,
 ) {
+    let state_store_url = system_params_reader.state_store();
+
+    let storage_memory_config = extract_storage_memory_config(&config);
+    let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::from((
+        &config,
+        &system_params_reader,
+        &storage_memory_config,
+    )));
     let total_memory_available_bytes =
         (resource_util::memory::total_memory_available_bytes() as f64
             * config.storage.compactor_memory_available_proportion) as usize;
@@ -140,7 +150,7 @@ pub async fn prepare_start_parameters(
     let await_tree_reg: Option<
         Arc<parking_lot::lock_api::RwLock<parking_lot::RawRwLock, await_tree::Registry<_>>>,
     > = await_tree_config.map(|c| Arc::new(RwLock::new(await_tree::Registry::new(c))));
-    (sstable_store, memory_limiter, await_tree_reg)
+    (sstable_store, memory_limiter, await_tree_reg, storage_opts)
 }
 
 /// Fetches and runs compaction tasks.
@@ -182,22 +192,9 @@ pub async fn compactor_serve(
         hummock_metrics.clone(),
     ));
 
-    let state_store_url = system_params_reader.state_store();
-
-    let storage_memory_config = extract_storage_memory_config(&config);
-    let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::from((
-        &config,
-        &system_params_reader,
-        &storage_memory_config,
-    )));
-
-    let (sstable_store, memory_limiter, await_tree_reg) = prepare_start_parameters(
-        config.clone(),
-        storage_opts.clone(),
-        object_metrics,
-        state_store_url,
-    )
-    .await;
+    let (sstable_store, memory_limiter, await_tree_reg, storage_opts) =
+        prepare_start_parameters(config.clone(), object_metrics, system_params_reader.clone())
+            .await;
 
     let telemetry_enabled = system_params_reader.telemetry_enabled();
 
@@ -316,8 +313,15 @@ pub async fn shared_compactor_serve(
     let endpoint: &'static str = Box::leak(opts.proxy_rpc_endpoint.clone().into_boxed_str());
     let channel = Channel::from_static(endpoint).connect().await.unwrap();
 
-    let client: HummockManagerServiceClient<Channel> = HummockManagerServiceClient::new(channel);
+    let client: HummockManagerServiceClient<Channel> =
+        HummockManagerServiceClient::new(channel.clone());
+    let mut system_params_client = SystemParamsServiceClient::new(channel.clone());
+    let system_params_response = system_params_client
+        .get_system_params(GetSystemParamsRequest {})
+        .await
+        .unwrap();
 
+    let system_params = system_params_response.into_inner().params.unwrap();
     let config = load_config(&opts.config_path, &opts);
     info!("Starting Serverless compactor node",);
     info!("> config: {:?}", config);
@@ -339,26 +343,8 @@ pub async fn shared_compactor_serve(
     let object_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
     let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
 
-    let storage_memory_config = extract_storage_memory_config(&config);
-
-    let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::new(
-        &config,
-        &storage_memory_config,
-        opts.parallel_compact_size_mb,
-        opts.sstable_size_mb,
-        opts.block_size_kb,
-        opts.bloom_false_positive,
-        &opts.data_directory,
-        &opts.state_store_url,
-    ));
-
-    let (sstable_store, memory_limiter, await_tree_reg) = prepare_start_parameters(
-        config.clone(),
-        storage_opts.clone(),
-        object_metrics,
-        &opts.state_store_url,
-    )
-    .await;
+    let (sstable_store, memory_limiter, await_tree_reg, storage_opts) =
+        prepare_start_parameters(config.clone(), object_metrics, system_params.into()).await;
     let (sender, receiver) = mpsc::unbounded_channel();
     let compactor_srv: CompactorServiceImpl = CompactorServiceImpl::new(sender);
 

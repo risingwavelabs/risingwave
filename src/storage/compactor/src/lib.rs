@@ -95,18 +95,6 @@ pub struct CompactorOpts {
 
     #[clap(long, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
     pub proxy_rpc_endpoint: String,
-    #[clap(long, env = "RW_PARALLEL_COMPACT_SIZE_MB")]
-    parallel_compact_size_mb: u32,
-    #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
-    sstable_size_mb: u32,
-    #[clap(long, env = "RW_BLOCK_SIZE_KB")]
-    block_size_kb: u32,
-    #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
-    bloom_false_positive: f64,
-    #[clap(long, env = "RW_STATE_STORE_URL")]
-    state_store_url: String,
-    #[clap(long, env = "RW_DATA_DIRECTORY")]
-    data_directory: String,
 }
 
 use std::future::Future;
