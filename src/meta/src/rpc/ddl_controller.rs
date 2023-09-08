@@ -311,7 +311,7 @@ impl DdlController {
         }
 
         self.catalog_manager
-            .finish_create_source_procedure(source)
+            .finish_create_source_procedure(source, vec![])
             .await
     }
 
@@ -744,7 +744,7 @@ impl DdlController {
             }
             StreamingJob::Source(source) => {
                 self.catalog_manager
-                    .finish_create_source_procedure(source)
+                    .finish_create_source_procedure(source, internal_tables)
                     .await?
             }
         };
