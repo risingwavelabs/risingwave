@@ -206,6 +206,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
             .collect_vec();
 
+        #[derive(Debug)]
         enum LogConsumerState {
             /// Mark that the log consumer is not initialized yet
             Uninitialized,
@@ -221,6 +222,16 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         loop {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
+            if let LogStoreReadItem::UpdateVnodeBitmap(_) = &item {
+                match &state {
+                    LogConsumerState::BarrierReceived { .. } => {}
+                    _ => unreachable!(
+                        "update vnode bitmap can be accepted only right after \
+                    barrier, but current state is {:?}",
+                        state
+                    ),
+                }
+            }
             // begin_epoch when not previously began
             state = match state {
                 LogConsumerState::Uninitialized => {
@@ -277,6 +288,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         _ => unreachable!("epoch must have begun before handling barrier"),
                     };
                     state = LogConsumerState::BarrierReceived { prev_epoch }
+                }
+                LogStoreReadItem::UpdateVnodeBitmap(vnode_bitmap) => {
+                    sink_writer.update_vnode_bitmap(vnode_bitmap).await?;
                 }
             }
         }

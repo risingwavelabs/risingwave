@@ -359,11 +359,9 @@ pub struct ServerConfig {
     #[serde(default = "default::server::connection_pool_size")]
     pub connection_pool_size: u16,
 
-    #[serde(default = "default::server::metrics_level")]
     /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
-    pub metrics_level: u32,
+    #[serde(default = "default::server::metrics_level")]
+    pub metrics_level: MetricLevel,
 
     #[serde(default = "default::server::telemetry_enabled")]
     pub telemetry_enabled: bool,
@@ -419,9 +417,6 @@ pub struct StreamingConfig {
     /// Max unique user stream errors per actor
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
-
-    #[serde(default = "default::streaming::streaming_metric_level")]
-    pub streaming_metric_level: MetricLevel,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -568,10 +563,6 @@ pub struct StorageConfig {
     pub compact_iter_recreate_timeout_ms: u64,
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
-
-    #[serde(default = "default::storage::storage_metric_level")]
-    pub storage_metric_level: MetricLevel,
-
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -917,7 +908,7 @@ pub mod default {
     }
 
     pub mod server {
-        use crate::config::AutoDumpHeapProfileConfig;
+        use crate::config::{AutoDumpHeapProfileConfig, MetricLevel};
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
@@ -927,8 +918,8 @@ pub mod default {
             16
         }
 
-        pub fn metrics_level() -> u32 {
-            0
+        pub fn metrics_level() -> MetricLevel {
+            MetricLevel::Info
         }
 
         pub fn telemetry_enabled() -> bool {
@@ -941,8 +932,6 @@ pub mod default {
     }
 
     pub mod storage {
-        use crate::config::MetricLevel;
-
         pub fn share_buffers_sync_parallelism() -> u32 {
             1
         }
@@ -1047,14 +1036,10 @@ pub mod default {
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
-
-        pub fn storage_metric_level() -> MetricLevel {
-            MetricLevel::Info
-        }
     }
 
     pub mod streaming {
-        use crate::config::{AsyncStackTraceOption, MetricLevel};
+        use crate::config::AsyncStackTraceOption;
 
         pub fn in_flight_barrier_nums() -> usize {
             // quick fix
@@ -1068,10 +1053,6 @@ pub mod default {
 
         pub fn unique_user_stream_errors() -> usize {
             10
-        }
-
-        pub fn streaming_metric_level() -> MetricLevel {
-            MetricLevel::Info
         }
     }
 

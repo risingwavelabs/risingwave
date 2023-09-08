@@ -62,6 +62,7 @@ checkpoint_frequency = 1
 
 [server]
 telemetry_enabled = false
+metrics_level = \"Disabled\"
         "
             .as_bytes(),
         )

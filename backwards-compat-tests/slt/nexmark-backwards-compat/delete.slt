@@ -1,0 +1,8 @@
+statement ok
+DELETE FROM person;
+
+statement ok
+DELETE FROM auction;
+
+statement ok
+DELETE FROM bid;

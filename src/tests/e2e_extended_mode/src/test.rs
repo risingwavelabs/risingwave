@@ -187,7 +187,7 @@ impl TestSuite {
             );
         }
 
-        let timestamptz = DateTime::<Utc>::from_utc(
+        let timestamptz = DateTime::<Utc>::from_naive_utc_and_offset(
             NaiveDate::from_ymd_opt(2022, 1, 1)
                 .unwrap()
                 .and_hms_opt(10, 0, 0)

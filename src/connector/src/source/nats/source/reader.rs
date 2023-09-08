@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::Result;
+use async_nats::jetstream::consumer;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -26,7 +27,7 @@ use crate::source::{
 };
 
 pub struct NatsSplitReader {
-    subscriber: async_nats::Subscriber,
+    consumer: consumer::Consumer<consumer::pull::Config>,
     properties: NatsProperties,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
@@ -46,9 +47,16 @@ impl SplitReader for NatsSplitReader {
     ) -> Result<Self> {
         // TODO: to simplify the logic, return 1 split for first version
         assert!(splits.len() == 1);
-        let subscriber = properties.common.build_subscriber().await?;
+        let splits = splits
+            .into_iter()
+            .map(|split| split.into_nats().unwrap())
+            .collect::<Vec<NatsSplit>>();
+        let consumer = properties
+            .common
+            .build_consumer(0, splits[0].start_sequence)
+            .await?;
         Ok(Self {
-            subscriber,
+            consumer,
             properties,
             parser_config,
             source_ctx,
@@ -66,11 +74,12 @@ impl CommonSplitReader for NatsSplitReader {
     #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
         let capacity = self.source_ctx.source_ctrl_opts.chunk_size;
+        let messages = self.consumer.messages().await?;
         #[for_await]
-        for msgs in self.subscriber.ready_chunks(capacity) {
+        for msgs in messages.ready_chunks(capacity) {
             let mut msg_vec = Vec::with_capacity(capacity);
             for msg in msgs {
-                msg_vec.push(SourceMessage::from_nats_message(msg));
+                msg_vec.push(SourceMessage::from_nats_jetstream_message(msg?));
             }
             yield msg_vec;
         }
