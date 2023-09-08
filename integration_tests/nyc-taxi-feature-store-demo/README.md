@@ -1,6 +1,6 @@
 # Description
 
-#### Feature store demo.
+Feature store demo.
 
 We use `simulators` to simulate data input.
 
@@ -10,7 +10,8 @@ We also utilize the `simulator` to simulate user queries to our `feature`. The `
 
 If we intend to modify our business logic, we simply need to update the materialized view within our `RisingWave` by using SQL statements.
 
-#### Specific case:
+# Nyc taxi feature store
+#### Case Description
 
 The case in this chapter is a New York taxi fare prediction. We need to predict the taxi fare based on the starting and ending points of the trip.
 
@@ -20,7 +21,7 @@ When a user needs to make a prediction using these features, they can retrieve a
 
 When a user needs to make a prediction using these features, they can provide their starting and ending points, query the corresponding features in `RisingWave`, and inject them into a machine learning model for real-time fare prediction.
 
-## Installation
+#### Installation
 
 1. Build docker. Kafka RisingWave and Feature Store.
 
@@ -36,6 +37,25 @@ The Feature Store system performs several tasks in sequence:
 - Writes simulated online feature data into `Kafka`→`RisingWave`.
 
 - Uses `do_location_id` (destination location) and `pu_location_id` (pickup location) to query the latest online features in RisingWave and utilizes these online features along with the trained model for predictions.
+
+2. Then we can get the simulation results for Feature store in `.log`.
+
+```cat .log/simulator_log```
+
+# Account change feature store
+#### Case Description
+
+This chapter is a simple demo of feature extraction in `RisingWave`, primarily showcasing the real-time feature aggregation and updating capabilities of `RisingWave`. 
+
+In this case, we need to calculate the frequency and count of user account changes over a period of time. We mainly use SQL aggregation functions and UDFs (User-Defined Functions) to achieve this.
+
+Due to the similarity between the code in this demo and another code, the implementation code is located in the `nyc-taxi-feature-store-demo` folder.
+
+#### Installation
+
+1. Build docker. Kafka RisingWave and Feature Store.
+
+```docker compose build --build-arg BUILD_ARG=mfa```
 
 2. Then we can get the simulation results for Feature store in `.log`.
 
