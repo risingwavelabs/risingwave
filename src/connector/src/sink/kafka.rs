@@ -41,7 +41,7 @@ use super::{
 use crate::common::KafkaCommon;
 use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
-    DebeziumAdapterOpts, UpsertAdapterOpts,
+    DebeziumAdapterOpts,
 };
 use crate::sink::{
     DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
@@ -552,12 +552,7 @@ impl KafkaSinkWriter {
         let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
         // Initialize the upsert_stream
-        let upsert_stream = gen_upsert_message_stream(
-            chunk,
-            UpsertAdapterOpts::default(),
-            key_encoder,
-            val_encoder,
-        );
+        let upsert_stream = gen_upsert_message_stream(chunk, key_encoder, val_encoder);
 
         #[for_await]
         for msg in upsert_stream {

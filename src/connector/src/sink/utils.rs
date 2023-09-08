@@ -20,7 +20,7 @@ use serde_json::{json, Map, Value};
 use tracing::warn;
 
 use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
-use super::formatter::{AppendOnlyFormatter, SinkFormatter};
+use super::formatter::{AppendOnlyFormatter, SinkFormatter, UpsertFormatter};
 use crate::sink::{Result, SinkError};
 
 const DEBEZIUM_NAME_FIELD_PREFIX: &str = "RisingWave";
@@ -251,28 +251,19 @@ pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>>
     Ok(records)
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct UpsertAdapterOpts {}
-
 #[try_stream(ok = (Option<Value>, Option<Value>), error = SinkError)]
 pub async fn gen_upsert_message_stream<'a>(
     chunk: StreamChunk,
-    _opts: UpsertAdapterOpts,
     key_encoder: JsonEncoder<'a>,
     val_encoder: JsonEncoder<'a>,
 ) {
+    let mut f = UpsertFormatter::new(key_encoder, val_encoder);
     for (op, row) in chunk.rows() {
-        let event_key_object = Some(Value::Object(key_encoder.encode(row)?));
-
-        let event_object = match op {
-            Op::Insert => Some(Value::Object(val_encoder.encode(row)?)),
-            Op::Delete => Some(Value::Null),
-            Op::UpdateDelete => {
-                // upsert semantic does not require update delete event
-                continue;
-            }
-            Op::UpdateInsert => Some(Value::Object(val_encoder.encode(row)?)),
+        let Some((event_key_object, event_object)) = f.format_row(op, row)? else {
+            continue;
         };
+        let event_key_object = event_key_object.map(Value::Object);
+        let event_object = event_object.map(Value::Object);
 
         yield (event_key_object, event_object);
     }

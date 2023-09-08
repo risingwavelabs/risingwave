@@ -34,7 +34,7 @@ use crate::common::KinesisCommon;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
-    DebeziumAdapterOpts, UpsertAdapterOpts,
+    DebeziumAdapterOpts,
 };
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterParam,
@@ -209,12 +209,7 @@ impl KinesisSinkWriter {
             TimestampHandlingMode::Milli,
         );
         let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
-        let upsert_stream = gen_upsert_message_stream(
-            chunk,
-            UpsertAdapterOpts::default(),
-            key_encoder,
-            val_encoder,
-        );
+        let upsert_stream = gen_upsert_message_stream(chunk, key_encoder, val_encoder);
 
         crate::impl_load_stream_write_record!(upsert_stream, self.put_record);
         Ok(())

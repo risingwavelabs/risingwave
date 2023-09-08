@@ -18,8 +18,10 @@ use risingwave_common::row::Row;
 use crate::sink::Result;
 
 mod append_only;
+mod upsert;
 
 pub use append_only::AppendOnlyFormatter;
+pub use upsert::UpsertFormatter;
 
 pub trait SinkFormatter {
     type K;
