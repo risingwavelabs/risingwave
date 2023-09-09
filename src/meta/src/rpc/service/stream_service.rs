@@ -24,35 +24,28 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
-use crate::barrier::BarrierScheduler;
+use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv};
-use crate::storage::MetaStore;
 use crate::stream::GlobalStreamManagerRef;
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
 #[derive(Clone)]
-pub struct StreamServiceImpl<S>
-where
-    S: MetaStore,
-{
-    env: MetaSrvEnv<S>,
-    barrier_scheduler: BarrierScheduler<S>,
-    stream_manager: GlobalStreamManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
+pub struct StreamServiceImpl {
+    env: MetaSrvEnv,
+    barrier_scheduler: BarrierScheduler,
+    stream_manager: GlobalStreamManagerRef,
+    catalog_manager: CatalogManagerRef,
+    fragment_manager: FragmentManagerRef,
 }
 
-impl<S> StreamServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl StreamServiceImpl {
     pub fn new(
-        env: MetaSrvEnv<S>,
-        barrier_scheduler: BarrierScheduler<S>,
-        stream_manager: GlobalStreamManagerRef<S>,
-        catalog_manager: CatalogManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        env: MetaSrvEnv,
+        barrier_scheduler: BarrierScheduler,
+        stream_manager: GlobalStreamManagerRef,
+        catalog_manager: CatalogManagerRef,
+        fragment_manager: FragmentManagerRef,
     ) -> Self {
         StreamServiceImpl {
             env,
@@ -65,10 +58,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> StreamManagerService for StreamServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl StreamManagerService for StreamServiceImpl {
     #[cfg_attr(coverage, no_coverage)]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         self.env.idle_manager().record_activity();
@@ -78,6 +68,30 @@ where
         Ok(Response::new(FlushResponse {
             status: None,
             snapshot: Some(snapshot),
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
+        let i = self
+            .barrier_scheduler
+            .run_command(Command::pause(PausedReason::Manual))
+            .await?;
+        Ok(Response::new(PauseResponse {
+            prev: i.prev_paused_reason.map(Into::into),
+            curr: i.curr_paused_reason.map(Into::into),
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
+        let i = self
+            .barrier_scheduler
+            .run_command(Command::resume(PausedReason::Manual))
+            .await?;
+        Ok(Response::new(ResumeResponse {
+            prev: i.prev_paused_reason.map(Into::into),
+            curr: i.curr_paused_reason.map(Into::into),
         }))
     }
 

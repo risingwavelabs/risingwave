@@ -447,6 +447,7 @@ impl WatermarkAnalyzer {
             ExprImpl::InputRef(inner) => WatermarkDerivation::Watermark(inner.index()),
             ExprImpl::Literal(_) => WatermarkDerivation::Constant,
             ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+            ExprImpl::FunctionCallWithLambda(inner) => self.visit_function_call(inner.base()),
             ExprImpl::TableFunction(_) => WatermarkDerivation::None,
             ExprImpl::Subquery(_)
             | ExprImpl::AggCall(_)

@@ -631,13 +631,9 @@ async fn open_hummock_iters(
                 range.clone(),
                 epoch,
                 ReadOptions {
-                    prefix_hint: None,
                     table_id: TableId { table_id },
-                    retention_seconds: None,
-                    ignore_range_tombstone: false,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await?;

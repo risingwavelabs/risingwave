@@ -437,34 +437,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_task_cancel_for_block() {
-        let manager = Arc::new(BatchManager::new(
-            BatchConfig::default(),
-            BatchManagerMetrics::for_test(),
-        ));
-        let plan = PlanFragment {
-            root: Some(PlanNode {
-                children: vec![],
-                identity: "".to_string(),
-                node_body: Some(NodeBody::BlockExecutor(true)),
-            }),
-            exchange_info: Some(ExchangeInfo {
-                mode: DistributionMode::Single as i32,
-                distribution: None,
-            }),
-        };
-        let task_id = PbTaskId {
-            query_id: "".to_string(),
-            stage_id: 0,
-            task_id: 0,
-        };
-        manager.fire_task_for_test(&task_id, plan).await.unwrap();
-        manager.cancel_task(&task_id);
-        let task_id = TaskId::from(&task_id);
-        assert!(!manager.tasks.lock().contains_key(&task_id));
-    }
-
-    #[tokio::test]
     async fn test_task_abort_for_busy_loop() {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
@@ -475,39 +447,6 @@ mod tests {
                 children: vec![],
                 identity: "".to_string(),
                 node_body: Some(NodeBody::BusyLoopExecutor(true)),
-            }),
-            exchange_info: Some(ExchangeInfo {
-                mode: DistributionMode::Single as i32,
-                distribution: None,
-            }),
-        };
-        let task_id = PbTaskId {
-            query_id: "".to_string(),
-            stage_id: 0,
-            task_id: 0,
-        };
-        manager.fire_task_for_test(&task_id, plan).await.unwrap();
-        let task_id = TaskId::from(&task_id);
-        manager
-            .tasks
-            .lock()
-            .get(&task_id)
-            .unwrap()
-            .abort("Abort Test".to_owned());
-        assert!(manager.wait_until_task_aborted(&task_id).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_task_abort_for_block() {
-        let manager = Arc::new(BatchManager::new(
-            BatchConfig::default(),
-            BatchManagerMetrics::for_test(),
-        ));
-        let plan = PlanFragment {
-            root: Some(PlanNode {
-                children: vec![],
-                identity: "".to_string(),
-                node_body: Some(NodeBody::BlockExecutor(true)),
             }),
             exchange_info: Some(ExchangeInfo {
                 mode: DistributionMode::Single as i32,

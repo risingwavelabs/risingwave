@@ -239,6 +239,8 @@ enum HummockCommands {
         #[clap(short, long = "verbose", default_value_t = false)]
         verbose: bool,
     },
+    /// Validate the current HummockVersion.
+    ValidateVersion,
 }
 
 #[derive(Subcommand)]
@@ -261,9 +263,8 @@ enum TableCommands {
     List,
 }
 
-#[derive(clap::Args, Debug)]
-#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers", "target_parallelism"])))]
-pub struct ScaleResizeCommands {
+#[derive(clap::Args, Debug, Clone)]
+pub struct ScaleHorizonCommands {
     /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
     /// supported
     #[clap(
@@ -288,6 +289,12 @@ pub struct ScaleResizeCommands {
     #[clap(long)]
     target_parallelism: Option<u32>,
 
+    #[command(flatten)]
+    common: ScaleCommon,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ScaleCommon {
     /// Will generate a plan supported by the `reschedule` command and save it to the provided path
     /// by the `--output`.
     #[clap(long, default_value_t = false)]
@@ -307,12 +314,37 @@ pub struct ScaleResizeCommands {
     fragments: Option<Vec<u32>>,
 }
 
+#[derive(clap::Args, Debug, Clone)]
+pub struct ScaleVerticalCommands {
+    #[command(flatten)]
+    common: ScaleCommon,
+
+    /// The worker that needs to be scheduled, worker_id and worker_host are both
+    /// supported
+    #[clap(
+        long,
+        value_delimiter = ',',
+        value_name = "all or worker_id or worker_host, ..."
+    )]
+    workers: Option<Vec<String>>,
+
+    /// The target parallelism per worker, requires `workers` to be set.
+    #[clap(long, requires = "workers")]
+    target_parallelism_per_worker: Option<u32>,
+}
+
 #[derive(Subcommand, Debug)]
 enum ScaleCommands {
-    /// The resize command scales the cluster by specifying the workers to be included and
-    /// excluded.
-    Resize(ScaleResizeCommands),
-    /// mark a compute node as unschedulable
+    /// Scale the compute nodes horizontally, alias of `horizon`
+    Resize(ScaleHorizonCommands),
+
+    /// Scale the compute nodes horizontally
+    Horizon(ScaleHorizonCommands),
+
+    /// Scale the compute nodes vertically
+    Vertical(ScaleVerticalCommands),
+
+    /// Mark a compute node as unschedulable
     #[clap(verbatim_doc_comment)]
     Cordon {
         /// Workers that need to be cordoned, both id and host are supported.
@@ -354,12 +386,14 @@ enum MetaCommands {
     /// `added` when both are provided.
     ///
     /// For example, for plan `100-[1,2,3]+[4,5]` the follow request will be generated:
+    /// ```text
     /// {
     ///     100: Reschedule {
     ///         added_parallel_units: [4,5],
     ///         removed_parallel_units: [1,2,3],
     ///     }
     /// }
+    /// ```
     /// Use ; to separate multiple fragment
     #[clap(verbatim_doc_comment)]
     #[clap(group(clap::ArgGroup::new("input_group").required(true).args(&["plan", "from"])))]
@@ -556,6 +590,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::ListCompactionStatus { verbose }) => {
             cmd_impl::hummock::list_compaction_status(context, verbose).await?;
         }
+        Commands::Hummock(HummockCommands::ValidateVersion) => {
+            cmd_impl::hummock::validate_version(context).await?;
+        }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?
         }
@@ -605,8 +642,12 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Profile(ProfileCommands::Heap { dir }) => {
             cmd_impl::profile::heap_profile(context, dir).await?
         }
-        Commands::Scale(ScaleCommands::Resize(resize)) => {
-            cmd_impl::scale::resize(context, resize).await?
+        Commands::Scale(ScaleCommands::Horizon(resize))
+        | Commands::Scale(ScaleCommands::Resize(resize)) => {
+            cmd_impl::scale::resize(context, resize.into()).await?
+        }
+        Commands::Scale(ScaleCommands::Vertical(resize)) => {
+            cmd_impl::scale::resize(context, resize.into()).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)

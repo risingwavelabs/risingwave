@@ -944,7 +944,7 @@ mod tests {
                     assert_eq!(row.to_owned_row(), rows[i]);
                 }
             }
-            LogStoreReadItem::Barrier { .. } => unreachable!(),
+            _ => unreachable!(),
         }
 
         let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
@@ -957,7 +957,7 @@ mod tests {
                     assert_eq!(row.to_owned_row(), rows[i + CHUNK_SIZE]);
                 }
             }
-            LogStoreReadItem::Barrier { .. } => unreachable!(),
+            _ => unreachable!(),
         }
 
         let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
@@ -967,6 +967,7 @@ mod tests {
             LogStoreReadItem::Barrier { is_checkpoint } => {
                 assert!(!is_checkpoint);
             }
+            _ => unreachable!(),
         }
 
         assert!(poll_fn(|cx| Poll::Ready(stream.poll_next_unpin(cx)))
@@ -985,7 +986,7 @@ mod tests {
                     assert_eq!(row.to_owned_row(), rows[i]);
                 }
             }
-            LogStoreReadItem::Barrier { .. } => unreachable!(),
+            _ => unreachable!(),
         }
 
         let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
@@ -998,7 +999,7 @@ mod tests {
                     assert_eq!(row.to_owned_row(), rows[i + CHUNK_SIZE]);
                 }
             }
-            LogStoreReadItem::Barrier { .. } => unreachable!(),
+            _ => unreachable!(),
         }
 
         let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
@@ -1008,6 +1009,7 @@ mod tests {
             LogStoreReadItem::Barrier { is_checkpoint } => {
                 assert!(is_checkpoint);
             }
+            _ => unreachable!(),
         }
 
         assert!(stream.next().await.is_none());

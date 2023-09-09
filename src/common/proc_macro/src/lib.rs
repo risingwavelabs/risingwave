@@ -43,6 +43,7 @@ mod estimate_size;
 ///
 /// will generate
 ///
+/// ```ignore
 /// impl OverrideConfig for Opts {
 ///     fn r#override(self, config: &mut RwConfig) {
 ///         if let Some(v) = self.required_str {

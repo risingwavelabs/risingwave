@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, OnceLock};
 
-use prometheus::core::{
-    AtomicU64, Collector, Desc, GenericCounter, GenericCounterVec, GenericGauge,
-};
+use prometheus::core::{AtomicU64, Collector, Desc, GenericCounter, GenericGauge};
 use prometheus::{
     exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_with_registry, Gauge, HistogramVec,
-    IntGauge, Opts, Registry,
+    register_int_counter_vec_with_registry, register_int_gauge_with_registry, Gauge, IntGauge,
+    Opts, Registry,
 };
+use risingwave_common::config::MetricLevel;
+use risingwave_common::metrics::{RelabeledCounterVec, RelabeledHistogramVec};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use tracing::warn;
 
@@ -32,29 +32,29 @@ use tracing::warn;
 /// job or an executor should be collected by views like `StateStats` and `JobStats`.
 #[derive(Debug, Clone)]
 pub struct HummockStateStoreMetrics {
-    pub bloom_filter_true_negative_counts: GenericCounterVec<AtomicU64>,
-    pub bloom_filter_check_counts: GenericCounterVec<AtomicU64>,
-    pub iter_merge_sstable_counts: HistogramVec,
-    pub sst_store_block_request_counts: GenericCounterVec<AtomicU64>,
-    pub iter_scan_key_counts: GenericCounterVec<AtomicU64>,
-    pub get_shared_buffer_hit_counts: GenericCounterVec<AtomicU64>,
-    pub remote_read_time: HistogramVec,
-    pub iter_fetch_meta_duration: HistogramVec,
+    pub bloom_filter_true_negative_counts: RelabeledCounterVec,
+    pub bloom_filter_check_counts: RelabeledCounterVec,
+    pub iter_merge_sstable_counts: RelabeledHistogramVec,
+    pub sst_store_block_request_counts: RelabeledCounterVec,
+    pub iter_scan_key_counts: RelabeledCounterVec,
+    pub get_shared_buffer_hit_counts: RelabeledCounterVec,
+    pub remote_read_time: RelabeledHistogramVec,
+    pub iter_fetch_meta_duration: RelabeledHistogramVec,
     pub iter_fetch_meta_cache_unhits: IntGauge,
     pub iter_slow_fetch_meta_cache_unhits: IntGauge,
 
-    pub read_req_bloom_filter_positive_counts: GenericCounterVec<AtomicU64>,
-    pub read_req_positive_but_non_exist_counts: GenericCounterVec<AtomicU64>,
-    pub read_req_check_bloom_filter_counts: GenericCounterVec<AtomicU64>,
+    pub read_req_bloom_filter_positive_counts: RelabeledCounterVec,
+    pub read_req_positive_but_non_exist_counts: RelabeledCounterVec,
+    pub read_req_check_bloom_filter_counts: RelabeledCounterVec,
 
-    pub write_batch_tuple_counts: GenericCounterVec<AtomicU64>,
-    pub write_batch_duration: HistogramVec,
-    pub write_batch_size: HistogramVec,
+    pub write_batch_tuple_counts: RelabeledCounterVec,
+    pub write_batch_duration: RelabeledHistogramVec,
+    pub write_batch_size: RelabeledHistogramVec,
 
     // finished task counts
-    pub merge_imm_task_counts: GenericCounterVec<AtomicU64>,
+    pub merge_imm_task_counts: RelabeledCounterVec,
     // merge imm ops
-    pub merge_imm_batch_memory_sz: GenericCounterVec<AtomicU64>,
+    pub merge_imm_batch_memory_sz: RelabeledCounterVec,
 
     // spill task counts from unsealed
     pub spill_task_counts_from_unsealed: GenericCounter<AtomicU64>,
@@ -69,11 +69,16 @@ pub struct HummockStateStoreMetrics {
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
 }
 
-pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: LazyLock<HummockStateStoreMetrics> =
-    LazyLock::new(|| HummockStateStoreMetrics::new(&GLOBAL_METRICS_REGISTRY));
+pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: OnceLock<HummockStateStoreMetrics> = OnceLock::new();
+
+pub fn global_hummock_state_store_metrics(metric_level: MetricLevel) -> HummockStateStoreMetrics {
+    GLOBAL_HUMMOCK_STATE_STORE_METRICS
+        .get_or_init(|| HummockStateStoreMetrics::new(&GLOBAL_METRICS_REGISTRY, metric_level))
+        .clone()
+}
 
 impl HummockStateStoreMetrics {
-    fn new(registry: &Registry) -> Self {
+    pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
         // 10ms ~ max 2.7h
         let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         let bloom_filter_true_negative_counts = register_int_counter_vec_with_registry!(
@@ -83,6 +88,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let bloom_filter_true_negative_counts = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Debug,
+            bloom_filter_true_negative_counts,
+            metric_level,
+        );
 
         let bloom_filter_check_counts = register_int_counter_vec_with_registry!(
             "state_store_bloom_filter_check_counts",
@@ -91,6 +101,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let bloom_filter_check_counts = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Debug,
+            bloom_filter_check_counts,
+            metric_level,
+        );
 
         // ----- iter -----
         let opts = histogram_opts!(
@@ -100,6 +115,11 @@ impl HummockStateStoreMetrics {
         );
         let iter_merge_sstable_counts =
             register_histogram_vec_with_registry!(opts, &["table_id", "type"], registry).unwrap();
+        let iter_merge_sstable_counts = RelabeledHistogramVec::with_metric_level(
+            MetricLevel::Debug,
+            iter_merge_sstable_counts,
+            metric_level,
+        );
 
         // ----- sst store -----
         let sst_store_block_request_counts = register_int_counter_vec_with_registry!(
@@ -109,6 +129,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let sst_store_block_request_counts = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Critical,
+            sst_store_block_request_counts,
+            metric_level,
+        );
 
         let iter_scan_key_counts = register_int_counter_vec_with_registry!(
             "state_store_iter_scan_key_counts",
@@ -117,6 +142,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let iter_scan_key_counts = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Info,
+            iter_scan_key_counts,
+            metric_level,
+        );
 
         let get_shared_buffer_hit_counts = register_int_counter_vec_with_registry!(
             "state_store_get_shared_buffer_hit_counts",
@@ -125,6 +155,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let get_shared_buffer_hit_counts = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Debug,
+            get_shared_buffer_hit_counts,
+            metric_level,
+        );
 
         let opts = histogram_opts!(
             "state_store_remote_read_time_per_task",
@@ -133,6 +168,11 @@ impl HummockStateStoreMetrics {
         );
         let remote_read_time =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let remote_read_time = RelabeledHistogramVec::with_metric_level(
+            MetricLevel::Debug,
+            remote_read_time,
+            metric_level,
+        );
 
         let opts = histogram_opts!(
             "state_store_iter_fetch_meta_duration",
@@ -141,6 +181,11 @@ impl HummockStateStoreMetrics {
         );
         let iter_fetch_meta_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let iter_fetch_meta_duration = RelabeledHistogramVec::with_metric_level(
+            MetricLevel::Info,
+            iter_fetch_meta_duration,
+            metric_level,
+        );
 
         let iter_fetch_meta_cache_unhits = register_int_gauge_with_registry!(
             "state_store_iter_fetch_meta_cache_unhits",
@@ -164,6 +209,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let write_batch_tuple_counts = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Debug,
+            write_batch_tuple_counts,
+            metric_level,
+        );
 
         let opts = histogram_opts!(
                 "state_store_write_batch_duration",
@@ -172,6 +222,11 @@ impl HummockStateStoreMetrics {
             );
         let write_batch_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let write_batch_duration = RelabeledHistogramVec::with_metric_level(
+            MetricLevel::Debug,
+            write_batch_duration,
+            metric_level,
+        );
 
         let opts = histogram_opts!(
             "state_store_write_batch_size",
@@ -180,6 +235,11 @@ impl HummockStateStoreMetrics {
         );
         let write_batch_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let write_batch_size = RelabeledHistogramVec::with_metric_level(
+            MetricLevel::Debug,
+            write_batch_size,
+            metric_level,
+        );
 
         let merge_imm_task_counts = register_int_counter_vec_with_registry!(
             "state_store_merge_imm_task_counts",
@@ -188,6 +248,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let merge_imm_task_counts = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Debug,
+            merge_imm_task_counts,
+            metric_level,
+        );
 
         let merge_imm_batch_memory_sz = register_int_counter_vec_with_registry!(
             "state_store_merge_imm_memory_sz",
@@ -196,6 +261,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let merge_imm_batch_memory_sz = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Debug,
+            merge_imm_batch_memory_sz,
+            metric_level,
+        );
 
         let spill_task_counts = register_int_counter_vec_with_registry!(
             "state_store_spill_task_counts",
@@ -204,6 +274,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let spill_task_counts = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Debug,
+            spill_task_counts,
+            metric_level,
+        );
 
         let spill_task_size = register_int_counter_vec_with_registry!(
             "state_store_spill_task_size",
@@ -212,6 +287,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let spill_task_size = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Debug,
+            spill_task_size,
+            metric_level,
+        );
 
         let uploader_uploading_task_size = GenericGauge::new(
             "state_store_uploader_uploading_task_size",
@@ -229,6 +309,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let read_req_bloom_filter_positive_counts = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Info,
+            read_req_bloom_filter_positive_counts,
+            metric_level,
+        );
 
         let read_req_positive_but_non_exist_counts = register_int_counter_vec_with_registry!(
             "state_store_read_req_positive_but_non_exist_counts",
@@ -237,6 +322,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let read_req_positive_but_non_exist_counts = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Info,
+            read_req_positive_but_non_exist_counts,
+            metric_level,
+        );
 
         let read_req_check_bloom_filter_counts = register_int_counter_vec_with_registry!(
             "state_store_read_req_check_bloom_filter_counts",
@@ -245,6 +335,11 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+        let read_req_check_bloom_filter_counts = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Info,
+            read_req_check_bloom_filter_counts,
+            metric_level,
+        );
 
         Self {
             bloom_filter_true_negative_counts,
@@ -274,7 +369,7 @@ impl HummockStateStoreMetrics {
     }
 
     pub fn unused() -> Self {
-        GLOBAL_HUMMOCK_STATE_STORE_METRICS.clone()
+        global_hummock_state_store_metrics(MetricLevel::Disabled)
     }
 }
 

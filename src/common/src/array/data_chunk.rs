@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Display;
 use std::hash::BuildHasher;
 use std::sync::Arc;
 use std::{fmt, usize};
 
 use bytes::Bytes;
+use either::Either;
 use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -65,6 +67,8 @@ pub struct DataChunk {
 }
 
 impl DataChunk {
+    pub(crate) const PRETTY_TABLE_PRESET: &str = "||--+-++|    ++++++";
+
     /// Create a `DataChunk` with `columns` and visibility. The visibility can either be a `Bitmap`
     /// or a simple cardinality number.
     pub fn new<V: Into<Vis>>(columns: Vec<ArrayRef>, vis: V) -> Self {
@@ -392,24 +396,31 @@ impl DataChunk {
         RowRef::new(self, pos)
     }
 
-    /// `to_pretty_string` returns a table-like text representation of the `DataChunk`.
-    pub fn to_pretty_string(&self) -> String {
+    /// Returns a table-like text representation of the `DataChunk`.
+    pub fn to_pretty(&self) -> impl Display {
         use comfy_table::Table;
+
+        if self.cardinality() == 0 {
+            return Either::Left("(empty)");
+        }
+
         let mut table = Table::new();
-        table.load_preset("||--+-++|    ++++++\n");
+        table.load_preset(Self::PRETTY_TABLE_PRESET);
+
         for row in self.rows() {
             let cells: Vec<_> = row
                 .iter()
                 .map(|v| {
                     match v {
-                        None => "".to_owned(), // null
+                        None => "".to_owned(), // NULL
                         Some(scalar) => scalar.to_text(),
                     }
                 })
                 .collect();
             table.add_row(cells);
         }
-        table.to_string()
+
+        Either::Right(table)
     }
 
     /// Keep the specified columns and set the rest elements to null.
@@ -624,7 +635,7 @@ impl fmt::Debug for DataChunk {
             "DataChunk {{ cardinality = {}, capacity = {}, data = \n{} }}",
             self.cardinality(),
             self.capacity(),
-            self.to_pretty_string()
+            self.to_pretty()
         )
     }
 }
@@ -1005,7 +1016,7 @@ mod tests {
             4,
         );
         assert_eq!(
-            chunk.to_pretty_string(),
+            chunk.to_pretty().to_string(),
             "\
 +---+---+
 | 1 | 6 |

@@ -23,26 +23,19 @@ use risingwave_pb::backup_service::{
 use tonic::{Request, Response, Status};
 
 use crate::backup_restore::BackupManagerRef;
-use crate::storage::MetaStore;
 
-pub struct BackupServiceImpl<S>
-where
-    S: MetaStore,
-{
-    backup_manager: BackupManagerRef<S>,
+pub struct BackupServiceImpl {
+    backup_manager: BackupManagerRef,
 }
 
-impl<S: MetaStore> BackupServiceImpl<S> {
-    pub fn new(backup_manager: BackupManagerRef<S>) -> Self {
+impl BackupServiceImpl {
+    pub fn new(backup_manager: BackupManagerRef) -> Self {
         Self { backup_manager }
     }
 }
 
 #[async_trait::async_trait]
-impl<S> BackupService for BackupServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl BackupService for BackupServiceImpl {
     async fn backup_meta(
         &self,
         _request: Request<BackupMetaRequest>,

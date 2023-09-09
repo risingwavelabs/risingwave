@@ -579,7 +579,53 @@ description = "Kill RisingWave dev cluster"
 script = '''
 #!/usr/bin/env bash
 
-tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+set -euo pipefail
+
+wait_kafka_exit() {
+  # Follow kafka-server-stop.sh
+  while [[ -n "$(ps ax | grep ' kafka\.Kafka ' | grep java | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for kafka to exit"
+    sleep 1
+  done
+}
+
+wait_zookeeper_exit() {
+  # Follow zookeeper-server-stop.sh
+  while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for zookeeper to exit"
+    sleep 1
+  done
+}
+
+kill_kafka() {
+  ${PREFIX_BIN}/kafka/bin/kafka-server-stop.sh
+  wait_kafka_exit
+}
+
+kill_zookeeper() {
+  ${PREFIX_BIN}/kafka/bin/zookeeper-server-stop.sh
+  wait_zookeeper_exit
+}
+
+# Kill other components
+tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
+| grep -v 'kafka' \
+| grep -v 'zookeeper' \
+| awk '{ print $2 }' \
+| xargs -I {} tmux send-keys -t {} C-c C-d
+
+if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
+then
+  echo "kill kafka"
+  kill_kafka
+
+  echo "kill zookeeper"
+  kill_zookeeper
+
+  # Kill their tmux sessions
+  tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+fi
+
 tmux kill-session -t risedev
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
@@ -671,7 +717,7 @@ script = """
 set -e
 
 export CARGO_TARGET_DIR=target/coverage
-cargo llvm-cov nextest --html
+cargo llvm-cov nextest --html --workspace --exclude risingwave_simulation
 """
 description = "Run unit tests and report coverage"
 
@@ -682,7 +728,7 @@ script = """
 #!/usr/bin/env bash
 set -e
 
-cargo nextest run "$@"
+cargo nextest run --workspace --exclude risingwave_simulation "$@"
 """
 description = "🌟 Run unit tests"
 
@@ -1238,3 +1284,8 @@ cat << EOF > src/config/example.toml
 EOF
 cargo run -p risingwave_common --bin example-config >> src/config/example.toml
 '''
+
+[tasks.backwards-compat-test]
+category = "RiseDev - Backwards Compatibility Test"
+description = "Run backwards compatibility test"
+script = "./backwards-compat-tests/scripts/run_local.sh"

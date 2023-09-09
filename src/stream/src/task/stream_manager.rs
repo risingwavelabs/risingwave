@@ -27,7 +27,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::config::StreamingConfig;
+use risingwave_common::config::{MetricLevel, StreamingConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -694,61 +694,63 @@ impl LocalStreamManagerCore {
             };
             self.handles.insert(actor_id, handle);
 
-            let actor_id_str = actor_id.to_string();
-
-            let metrics = self.streaming_metrics.clone();
-            let actor_monitor_task = self.runtime.spawn(async move {
-                loop {
-                    let task_metrics = monitor.cumulative();
-                    metrics
-                        .actor_execution_time
-                        .with_label_values(&[&actor_id_str])
-                        .set(task_metrics.total_poll_duration.as_secs_f64());
-                    metrics
-                        .actor_fast_poll_duration
-                        .with_label_values(&[&actor_id_str])
-                        .set(task_metrics.total_fast_poll_duration.as_secs_f64());
-                    metrics
-                        .actor_fast_poll_cnt
-                        .with_label_values(&[&actor_id_str])
-                        .set(task_metrics.total_fast_poll_count as i64);
-                    metrics
-                        .actor_slow_poll_duration
-                        .with_label_values(&[&actor_id_str])
-                        .set(task_metrics.total_slow_poll_duration.as_secs_f64());
-                    metrics
-                        .actor_slow_poll_cnt
-                        .with_label_values(&[&actor_id_str])
-                        .set(task_metrics.total_slow_poll_count as i64);
-                    metrics
-                        .actor_poll_duration
-                        .with_label_values(&[&actor_id_str])
-                        .set(task_metrics.total_poll_duration.as_secs_f64());
-                    metrics
-                        .actor_poll_cnt
-                        .with_label_values(&[&actor_id_str])
-                        .set(task_metrics.total_poll_count as i64);
-                    metrics
-                        .actor_idle_duration
-                        .with_label_values(&[&actor_id_str])
-                        .set(task_metrics.total_idle_duration.as_secs_f64());
-                    metrics
-                        .actor_idle_cnt
-                        .with_label_values(&[&actor_id_str])
-                        .set(task_metrics.total_idled_count as i64);
-                    metrics
-                        .actor_scheduled_duration
-                        .with_label_values(&[&actor_id_str])
-                        .set(task_metrics.total_scheduled_duration.as_secs_f64());
-                    metrics
-                        .actor_scheduled_cnt
-                        .with_label_values(&[&actor_id_str])
-                        .set(task_metrics.total_scheduled_count as i64);
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-            });
-            self.actor_monitor_tasks
-                .insert(actor_id, actor_monitor_task);
+            if self.streaming_metrics.level >= MetricLevel::Debug {
+                tracing::info!("Tokio metrics are enabled because metrics_level >= Debug");
+                let actor_id_str = actor_id.to_string();
+                let metrics = self.streaming_metrics.clone();
+                let actor_monitor_task = self.runtime.spawn(async move {
+                    loop {
+                        let task_metrics = monitor.cumulative();
+                        metrics
+                            .actor_execution_time
+                            .with_label_values(&[&actor_id_str])
+                            .set(task_metrics.total_poll_duration.as_secs_f64());
+                        metrics
+                            .actor_fast_poll_duration
+                            .with_label_values(&[&actor_id_str])
+                            .set(task_metrics.total_fast_poll_duration.as_secs_f64());
+                        metrics
+                            .actor_fast_poll_cnt
+                            .with_label_values(&[&actor_id_str])
+                            .set(task_metrics.total_fast_poll_count as i64);
+                        metrics
+                            .actor_slow_poll_duration
+                            .with_label_values(&[&actor_id_str])
+                            .set(task_metrics.total_slow_poll_duration.as_secs_f64());
+                        metrics
+                            .actor_slow_poll_cnt
+                            .with_label_values(&[&actor_id_str])
+                            .set(task_metrics.total_slow_poll_count as i64);
+                        metrics
+                            .actor_poll_duration
+                            .with_label_values(&[&actor_id_str])
+                            .set(task_metrics.total_poll_duration.as_secs_f64());
+                        metrics
+                            .actor_poll_cnt
+                            .with_label_values(&[&actor_id_str])
+                            .set(task_metrics.total_poll_count as i64);
+                        metrics
+                            .actor_idle_duration
+                            .with_label_values(&[&actor_id_str])
+                            .set(task_metrics.total_idle_duration.as_secs_f64());
+                        metrics
+                            .actor_idle_cnt
+                            .with_label_values(&[&actor_id_str])
+                            .set(task_metrics.total_idled_count as i64);
+                        metrics
+                            .actor_scheduled_duration
+                            .with_label_values(&[&actor_id_str])
+                            .set(task_metrics.total_scheduled_duration.as_secs_f64());
+                        metrics
+                            .actor_scheduled_cnt
+                            .with_label_values(&[&actor_id_str])
+                            .set(task_metrics.total_scheduled_count as i64);
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                });
+                self.actor_monitor_tasks
+                    .insert(actor_id, actor_monitor_task);
+            }
         }
 
         Ok(())

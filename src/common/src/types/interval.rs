@@ -1025,7 +1025,7 @@ impl Interval {
     /// Converts str to interval
     ///
     /// The input str must have the following format:
-    /// P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
+    /// `P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S`
     ///
     /// Example
     /// - P1Y2M3DT4H5M6.78S

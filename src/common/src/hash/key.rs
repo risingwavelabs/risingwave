@@ -254,6 +254,8 @@ pub type XxHash64HashCode = HashCode<XxHash64Builder>;
 /// hasher.
 ///
 /// WARN: This should ONLY be used along with [`HashKey`].
+///
+/// [`HashKey`]: crate::hash::HashKey
 #[derive(Default)]
 pub struct PrecomputedHasher {
     hash_code: u64,

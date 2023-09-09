@@ -199,6 +199,8 @@ impl TtlReclaimCompactionPicker {
         });
 
         Some(CompactionInput {
+            select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+            total_file_count: select_input_ssts.len() as _,
             input_levels: vec![
                 InputLevel {
                     level_idx: reclaimed_level.level_idx,
@@ -212,7 +214,7 @@ impl TtlReclaimCompactionPicker {
                 },
             ],
             target_level: reclaimed_level.level_idx as usize,
-            target_sub_level_id: 0,
+            ..Default::default()
         })
     }
 }

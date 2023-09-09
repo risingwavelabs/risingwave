@@ -195,9 +195,10 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         res
     }
 
-    fn init(&mut self, epoch: u64) {
-        let _span = TraceSpan::new_local_storage_init_span(epoch, self.storage_type);
-        self.inner.init(epoch)
+    async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+        let _span =
+            TraceSpan::new_local_storage_init_span(options.clone().into(), self.storage_type);
+        self.inner.init(options).await
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {

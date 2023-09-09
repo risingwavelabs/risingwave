@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,6 +21,7 @@ use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use itertools::Itertools;
 use regex::Regex;
+use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -81,7 +81,10 @@ use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
 use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::serving::ServingVnodeMapping;
-use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
+use crate::storage::{
+    EtcdMetaStore, MemStore, MetaStore, MetaStoreBoxExt, MetaStoreRef,
+    WrappedEtcdClient as EtcdClient,
+};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
 use crate::{hummock, serving, MetaError, MetaResult};
@@ -141,7 +144,7 @@ pub async fn rpc_serve(
                 EtcdClient::connect(endpoints.clone(), Some(options.clone()), auth_enabled)
                     .await
                     .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
-            let meta_store = Arc::new(EtcdMetaStore::new(client));
+            let meta_store = EtcdMetaStore::new(client).into_ref();
 
             // `with_keep_alive` option will break the long connection in election client.
             let mut election_options = ConnectOptions::default();
@@ -170,7 +173,7 @@ pub async fn rpc_serve(
             )
         }
         MetaStoreBackend::Mem => {
-            let meta_store = Arc::new(MemStore::new());
+            let meta_store = MemStore::new().into_ref();
             rpc_serve_with_store(
                 meta_store,
                 None,
@@ -185,8 +188,8 @@ pub async fn rpc_serve(
 }
 
 #[expect(clippy::type_complexity)]
-pub fn rpc_serve_with_store<S: MetaStore>(
-    meta_store: Arc<S>,
+pub fn rpc_serve_with_store(
+    meta_store: MetaStoreRef,
     election_client: Option<ElectionClientRef>,
     address_info: AddressInfo,
     max_cluster_heartbeat_interval: Duration,
@@ -304,26 +307,33 @@ pub async fn start_service_as_election_follower(
         .layer(TracingExtractLayer::new())
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(HealthServer::new(health_srv))
-        .serve_with_shutdown(address_info.listen_addr, async move {
-            tokio::select! {
-                // shutdown service if all services should be shut down
-                res = svc_shutdown_rx.changed() => {
-                    match res {
-                        Ok(_) => tracing::info!("Shutting down services"),
-                        Err(_) => tracing::error!("Service shutdown sender dropped")
-                    }
-                },
-                // shutdown service if follower becomes leader
-                res = follower_shutdown_rx => {
-                    match res {
-                        Ok(_) => tracing::info!("Shutting down follower services"),
-                        Err(_) => tracing::error!("Follower service shutdown sender dropped")
-                    }
-                },
-            }
-        })
-        .await
-        .unwrap();
+        .monitored_serve_with_shutdown(
+            address_info.listen_addr,
+            "grpc-meta-follower-service",
+            TcpConfig {
+                tcp_nodelay: true,
+                keepalive_duration: None,
+            },
+            async move {
+                tokio::select! {
+                    // shutdown service if all services should be shut down
+                    res = svc_shutdown_rx.changed() => {
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down services"),
+                            Err(_) => tracing::error!("Service shutdown sender dropped")
+                        }
+                    },
+                    // shutdown service if follower becomes leader
+                    res = follower_shutdown_rx => {
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down follower services"),
+                            Err(_) => tracing::error!("Follower service shutdown sender dropped")
+                        }
+                    },
+                }
+            },
+        )
+        .await;
 }
 
 /// Starts all services needed for the meta leader node
@@ -332,8 +342,8 @@ pub async fn start_service_as_election_follower(
 ///
 /// ## Returns
 /// Returns an error if the service initialization failed
-pub async fn start_service_as_election_leader<S: MetaStore>(
-    meta_store: Arc<S>,
+pub async fn start_service_as_election_leader(
+    meta_store: MetaStoreRef,
     address_info: AddressInfo,
     max_cluster_heartbeat_interval: Duration,
     opts: MetaOpts,
@@ -343,7 +353,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let env = MetaSrvEnv::<S>::new(opts, init_system_params, meta_store.clone()).await?;
+    let env = MetaSrvEnv::new(opts, init_system_params, meta_store.clone()).await?;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
 
     let system_params_manager = env.system_params_manager_ref();
@@ -512,7 +522,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         aws_cli = Some(cli);
     }
 
-    let ddl_srv = DdlServiceImpl::<S>::new(
+    let ddl_srv = DdlServiceImpl::new(
         env.clone(),
         aws_cli.clone(),
         catalog_manager.clone(),
@@ -525,19 +535,19 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     )
     .await;
 
-    let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
+    let user_srv = UserServiceImpl::new(env.clone(), catalog_manager.clone());
 
-    let scale_srv = ScaleServiceImpl::<S>::new(
-        barrier_scheduler.clone(),
+    let scale_srv = ScaleServiceImpl::new(
         fragment_manager.clone(),
         cluster_manager.clone(),
         source_manager,
         catalog_manager.clone(),
         stream_manager.clone(),
+        barrier_manager.clone(),
     );
 
-    let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
-    let stream_srv = StreamServiceImpl::<S>::new(
+    let cluster_srv = ClusterServiceImpl::new(cluster_manager.clone());
+    let stream_srv = StreamServiceImpl::new(
         env.clone(),
         barrier_scheduler.clone(),
         stream_manager.clone(),
@@ -565,7 +575,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
-    let cloud_srv = CloudServiceImpl::<S>::new(catalog_manager.clone(), aws_cli);
+    let cloud_srv = CloudServiceImpl::new(catalog_manager.clone(), aws_cli);
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
@@ -689,9 +699,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     // Persist params before starting services so that invalid params that cause meta node
     // to crash will not be persisted.
     system_params_manager.flush_params().await?;
-    env.cluster_id()
-        .put_at_meta_store(meta_store.deref())
-        .await?;
+    env.cluster_id().put_at_meta_store(&meta_store).await?;
 
     tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
     tracing::info!("Starting meta services");
@@ -717,22 +725,29 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
-        .serve_with_shutdown(address_info.listen_addr, async move {
-            tokio::select! {
-                res = svc_shutdown_rx.changed() => {
-                    match res {
-                        Ok(_) => tracing::info!("Shutting down services"),
-                        Err(_) => tracing::error!("Service shutdown receiver dropped")
-                    }
-                    shutdown_all.await;
-                },
-                _ = idle_recv => {
-                    shutdown_all.await;
-                },
-            }
-        })
-        .await
-        .unwrap();
+        .monitored_serve_with_shutdown(
+            address_info.listen_addr,
+            "grpc-meta-leader-service",
+            TcpConfig {
+                tcp_nodelay: true,
+                keepalive_duration: None,
+            },
+            async move {
+                tokio::select! {
+                    res = svc_shutdown_rx.changed() => {
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down services"),
+                            Err(_) => tracing::error!("Service shutdown receiver dropped")
+                        }
+                        shutdown_all.await;
+                    },
+                    _ = idle_recv => {
+                        shutdown_all.await;
+                    },
+                }
+            },
+        )
+        .await;
 
     #[cfg(not(madsim))]
     if let Some(dashboard_task) = dashboard_task {

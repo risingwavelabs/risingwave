@@ -17,6 +17,7 @@
 #![feature(bound_map)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_bounds)]
+#![feature(return_position_impl_trait_in_trait)]
 
 #[cfg(test)]
 mod compactor_tests;
@@ -39,4 +40,9 @@ mod hummock_storage_tests;
 mod mock_notification_client;
 #[cfg(all(test, feature = "sync_point"))]
 mod sync_point_tests;
+
+// Not feature gated by #[cfg(test)] because it is used by test binaries e.g. compaction_test,
+// not just tests.
+pub mod local_state_store_test_utils;
+
 pub use mock_notification_client::get_notification_client_for_test;

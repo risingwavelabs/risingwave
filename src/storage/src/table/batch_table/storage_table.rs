@@ -39,14 +39,12 @@ use tracing::trace;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
-use crate::row_serde::row_serde_util::{
-    parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
-};
+use crate::row_serde::row_serde_util::{serialize_pk, serialize_pk_with_vnode};
 use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{PrefetchOptions, ReadOptions};
 use crate::table::merge_sort::merge_sort;
-use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
+use crate::table::{compute_vnode, Distribution, KeyedRow, TableIter, DEFAULT_VNODE};
 use crate::StateStore;
 
 /// [`StorageTableInner`] is the interface accessing relational data in KV(`StateStore`) with
@@ -285,7 +283,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         self.table_id
     }
 }
-
 /// Point get
 impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     /// Get vnode value with given primary key.
@@ -380,7 +377,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     }
 }
 
-pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, OwnedRow)>> + Send;
+pub trait PkAndRowStream = Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send;
 
 /// The row iterator of the storage table.
 /// The wrapper of [`StorageTableInnerIter`] if pk is not persisted.
@@ -392,7 +389,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
         self.next()
             .await
             .transpose()
-            .map(|r| r.map(|(_pk, row)| row))
+            .map(|r| r.map(|keyed_row| keyed_row.into_owned_row()))
     }
 }
 
@@ -709,20 +706,18 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
     }
 
     /// Yield a row with its primary key.
-    #[try_stream(ok = (Vec<u8>, OwnedRow), error = StorageError)]
+    #[try_stream(ok = KeyedRow<Bytes>, error = StorageError)]
     async fn into_stream(self) {
         use futures::TryStreamExt;
 
         // No need for table id and epoch.
-        let iter = self.iter.map_ok(|(k, v)| (k.user_key.table_key.0, v));
+        let iter = self.iter.map_ok(|(k, v)| (k.user_key.table_key, v));
         futures::pin_mut!(iter);
-        while let Some((raw_key, value)) = iter
+        while let Some((table_key, value)) = iter
             .try_next()
             .verbose_instrument_await("storage_table_iter_next")
             .await?
         {
-            let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
-
             let full_row = self.row_deserializer.deserialize(&value)?;
             let result_row_in_value = self
                 .mapping
@@ -732,7 +727,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                 Some(key_output_indices) => {
                     let result_row_in_key = match self.pk_serializer.clone() {
                         Some(pk_serializer) => {
-                            let pk = pk_serializer.deserialize(key)?;
+                            let pk = pk_serializer.deserialize(table_key.key_part().as_ref())?;
 
                             pk.project(&self.output_row_in_key_indices).into_owned_row()
                         }
@@ -761,9 +756,17 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                     }
                     let row = OwnedRow::new(result_row_vec);
 
-                    yield (key.to_vec(), row)
+                    yield KeyedRow {
+                        vnode_prefixed_key: table_key,
+                        row,
+                    }
                 }
-                None => yield (key.to_vec(), result_row_in_value),
+                None => {
+                    yield KeyedRow {
+                        vnode_prefixed_key: table_key,
+                        row: result_row_in_value,
+                    }
+                }
             }
         }
     }

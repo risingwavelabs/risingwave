@@ -871,7 +871,7 @@ pub struct PgStream<S> {
 ///  * `integer_datetimes`
 ///  * `standard_conforming_string`
 ///
-/// See: https://www.postgresql.org/docs/9.2/static/protocol-flow.html#PROTOCOL-ASYNC.
+/// See: <https://www.postgresql.org/docs/9.2/static/protocol-flow.html#PROTOCOL-ASYNC>.
 #[derive(Debug, Default, Clone)]
 pub struct ParameterStatus {
     pub application_name: Option<String>,

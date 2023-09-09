@@ -32,12 +32,12 @@ use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker, INVALID_EXPIRE_AT};
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::{MetaStore, MetaStoreRef, Transaction};
 use crate::{MetaError, MetaResult};
 
 pub type WorkerId = u32;
 pub type WorkerLocations = HashMap<WorkerId, WorkerNode>;
-pub type ClusterManagerRef<S> = Arc<ClusterManager<S>>;
+pub type ClusterManagerRef = Arc<ClusterManager>;
 
 #[derive(Clone, Debug)]
 pub struct WorkerKey(pub HostAddress);
@@ -61,19 +61,16 @@ impl Hash for WorkerKey {
 pub const META_NODE_ID: u32 = 0;
 
 /// [`ClusterManager`] manager cluster/worker meta data in [`MetaStore`].
-pub struct ClusterManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct ClusterManager {
+    env: MetaSrvEnv,
 
     max_heartbeat_interval: Duration,
 
     core: RwLock<ClusterManagerCore>,
 }
 
-impl<S> ClusterManager<S>
-where
-    S: MetaStore,
-{
-    pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> MetaResult<Self> {
+impl ClusterManager {
+    pub async fn new(env: MetaSrvEnv, max_heartbeat_interval: Duration) -> MetaResult<Self> {
         let core = ClusterManagerCore::new(env.meta_store_ref()).await?;
 
         Ok(Self {
@@ -333,7 +330,7 @@ where
     }
 
     pub fn start_heartbeat_checker(
-        cluster_manager: ClusterManagerRef<S>,
+        cluster_manager: ClusterManagerRef,
         check_interval: Duration,
     ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -518,11 +515,8 @@ impl ClusterManagerCore {
     pub const MAX_WORKER_REUSABLE_ID_BITS: usize = 10;
     pub const MAX_WORKER_REUSABLE_ID_COUNT: usize = 1 << Self::MAX_WORKER_REUSABLE_ID_BITS;
 
-    async fn new<S>(meta_store: Arc<S>) -> MetaResult<Self>
-    where
-        S: MetaStore,
-    {
-        let mut workers = Worker::list(&*meta_store).await?;
+    async fn new(meta_store: MetaStoreRef) -> MetaResult<Self> {
+        let mut workers = Worker::list(&meta_store).await?;
 
         let used_transactional_ids: HashSet<_> = workers
             .iter()
@@ -729,7 +723,6 @@ impl ClusterManagerCore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::MemStore;
 
     #[tokio::test]
     async fn test_cluster_manager() -> MetaResult<()> {
@@ -889,10 +882,7 @@ mod tests {
         Ok(())
     }
 
-    async fn assert_cluster_manager(
-        cluster_manager: &ClusterManager<MemStore>,
-        parallel_count: usize,
-    ) {
+    async fn assert_cluster_manager(cluster_manager: &ClusterManager, parallel_count: usize) {
         let parallel_units = cluster_manager.list_active_streaming_parallel_units().await;
         assert_eq!(parallel_units.len(), parallel_count);
     }

@@ -19,7 +19,6 @@ use anyhow::anyhow;
 use clickhouse::{Client, Row as ClickHouseRow};
 use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarRefImpl, Serial};
@@ -437,14 +436,6 @@ impl SinkWriter for ClickHouseSinkWriter {
     }
 
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }

@@ -16,6 +16,7 @@ use std::backtrace::Backtrace;
 use std::error::request_ref;
 
 use risingwave_common::array::ArrayError;
+use risingwave_connector::error::ConnectorError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_storage::error::StorageError;
@@ -119,6 +120,12 @@ impl From<PbFieldNotFound> for StreamError {
             "Failed to decode prost: field not found `{}`",
             err.0
         ))
+    }
+}
+
+impl From<ConnectorError> for StreamError {
+    fn from(err: ConnectorError) -> Self {
+        StreamExecutorError::from(err).into()
     }
 }
 

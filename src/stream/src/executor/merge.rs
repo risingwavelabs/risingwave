@@ -138,7 +138,7 @@ impl MergeExecutor {
                 }
                 Message::Barrier(barrier) => {
                     tracing::trace!(
-                        target: "events::barrier::path",
+                        target: "events::stream::barrier::path",
                         actor_id = actor_id,
                         "receiver receives barrier from path: {:?}",
                         barrier.passed_actors
