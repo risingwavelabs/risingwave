@@ -8978,7 +8978,7 @@ dependencies = [
 [[package]]
 name = "tikv-jemalloc-ctl"
 version = "0.5.4"
-source = "git+https://github.com/yuhao-su/jemallocator.git?rev=a0911601bb7bb263ca55c7ea161ef308fdc623f8#a0911601bb7bb263ca55c7ea161ef308fdc623f8"
+source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=b7f9f3#b7f9f34664dcfea190e64bef64587e23f9f2710c"
 dependencies = [
  "libc",
  "paste",
@@ -8988,7 +8988,7 @@ dependencies = [
 [[package]]
 name = "tikv-jemalloc-sys"
 version = "0.5.4+5.3.0-patched"
-source = "git+https://github.com/yuhao-su/jemallocator.git?rev=a0911601bb7bb263ca55c7ea161ef308fdc623f8#a0911601bb7bb263ca55c7ea161ef308fdc623f8"
+source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=b7f9f3#b7f9f34664dcfea190e64bef64587e23f9f2710c"
 dependencies = [
  "cc",
  "libc",
@@ -8997,7 +8997,7 @@ dependencies = [
 [[package]]
 name = "tikv-jemallocator"
 version = "0.5.4"
-source = "git+https://github.com/yuhao-su/jemallocator.git?rev=a0911601bb7bb263ca55c7ea161ef308fdc623f8#a0911601bb7bb263ca55c7ea161ef308fdc623f8"
+source = "git+https://github.com/risingwavelabs/jemallocator.git?rev=b7f9f3#b7f9f34664dcfea190e64bef64587e23f9f2710c"
 dependencies = [
  "libc",
  "tikv-jemalloc-sys",
