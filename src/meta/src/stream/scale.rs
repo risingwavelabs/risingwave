@@ -1903,7 +1903,7 @@ impl GlobalStreamManager {
         }
 
         target_plan.retain(|_, plan| {
-            !plan.added_parallel_units.is_empty() && plan.removed_parallel_units.is_empty()
+            !(plan.added_parallel_units.is_empty() && plan.removed_parallel_units.is_empty())
         });
 
         Ok(target_plan)
