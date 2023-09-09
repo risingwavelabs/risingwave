@@ -15,7 +15,6 @@
 use std::backtrace::Backtrace;
 use std::collections::HashSet;
 use std::convert::Infallible;
-use std::error::request_ref;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Error as IoError;
 use std::time::{Duration, SystemTime};
@@ -235,7 +234,7 @@ impl Debug for RwError {
             "{}\n{}",
             self.inner,
             // Use inner error's backtrace by default, otherwise use the generated one in `From`.
-            request_ref::<Backtrace>(&self.inner).unwrap_or(&*self.backtrace)
+            std::error::request_ref::<Backtrace>(&self.inner).unwrap_or(&*self.backtrace)
         )
     }
 }

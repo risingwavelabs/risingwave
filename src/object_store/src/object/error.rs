@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::backtrace::Backtrace;
-use std::error::request_ref;
 use std::io;
 use std::marker::{Send, Sync};
 
@@ -58,7 +57,7 @@ impl std::fmt::Debug for ObjectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.inner)?;
         writeln!(f)?;
-        if let Some(backtrace) = request_ref::<Backtrace>(&self.inner) {
+        if let Some(backtrace) = std::error::request_ref::<Backtrace>(&self.inner) {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(f, "  backtrace of `ObjectError`:\n{}", self.backtrace)?;

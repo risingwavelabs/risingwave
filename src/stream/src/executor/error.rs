@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::backtrace::Backtrace;
-use std::error::request_ref;
 
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, Error, TrackingIssue};
@@ -125,7 +124,9 @@ impl std::fmt::Debug for StreamExecutorError {
 
         write!(f, "{}", self.inner.kind)?;
         writeln!(f)?;
-        if let Some(backtrace) = request_ref::<Backtrace>(&self.inner.kind as &dyn Error) {
+        if let Some(backtrace) =
+            std::error::request_ref::<Backtrace>(&self.inner.kind as &dyn Error)
+        {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(
