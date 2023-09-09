@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Borrow;
 use std::sync::Arc;
 
 pub use risingwave_common::catalog::TableOption;
@@ -78,7 +77,7 @@ impl MetadataModel for CompactionGroup {
     }
 
     fn to_protobuf(&self) -> Self::PbType {
-        self.borrow().into()
+        self.into()
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {

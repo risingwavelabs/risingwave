@@ -317,7 +317,7 @@ impl LogicalMultiJoin {
 impl PlanTreeNode for LogicalMultiJoin {
     fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
         let mut vec = smallvec::SmallVec::new();
-        vec.extend(self.inputs.clone().into_iter());
+        vec.extend(self.inputs.clone());
         vec
     }
 

@@ -25,7 +25,6 @@ use risingwave_meta::hummock::test_utils::{
 };
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
-use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::catalog::{PbTable, Table};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::version_update_payload;
@@ -50,8 +49,8 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use crate::mock_notification_client::get_notification_client_for_test;
 
 pub async fn prepare_first_valid_version(
-    env: MetaSrvEnv<MemStore>,
-    hummock_manager_ref: HummockManagerRef<MemStore>,
+    env: MetaSrvEnv,
+    hummock_manager_ref: HummockManagerRef,
     worker_node: WorkerNode,
 ) -> (
     PinnedVersion,
@@ -181,9 +180,9 @@ pub fn update_filter_key_extractor_for_table_ids(
     }
 }
 
-pub async fn register_tables_with_id_for_test<S: MetaStore>(
+pub async fn register_tables_with_id_for_test(
     filter_key_extractor_manager: &FilterKeyExtractorManager,
-    hummock_manager_ref: &HummockManagerRef<S>,
+    hummock_manager_ref: &HummockManagerRef,
     table_ids: &[u32],
 ) {
     update_filter_key_extractor_for_table_ids(filter_key_extractor_manager, table_ids);
@@ -212,9 +211,9 @@ pub fn update_filter_key_extractor_for_tables(
         )
     }
 }
-pub async fn register_tables_with_catalog_for_test<S: MetaStore>(
+pub async fn register_tables_with_catalog_for_test(
     filter_key_extractor_manager: &FilterKeyExtractorManager,
-    hummock_manager_ref: &HummockManagerRef<S>,
+    hummock_manager_ref: &HummockManagerRef,
     tables: &[Table],
 ) {
     update_filter_key_extractor_for_tables(filter_key_extractor_manager, tables);
@@ -229,7 +228,7 @@ pub async fn register_tables_with_catalog_for_test<S: MetaStore>(
 
 pub struct HummockTestEnv {
     pub storage: HummockStorage,
-    pub manager: HummockManagerRef<MemStore>,
+    pub manager: HummockManagerRef,
     pub meta_client: Arc<MockHummockMetaClient>,
 }
 

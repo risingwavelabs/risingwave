@@ -143,7 +143,6 @@ impl SstableStreamIterator {
             if !block_iter.is_valid() {
                 // `seek_key` is larger than everything in the first block.
                 self.next_block().await?;
-            } else {
             }
         }
 
