@@ -205,7 +205,7 @@ impl CheckpointControl {
     async fn finish_commands(&mut self, checkpoint: bool) -> MetaResult<bool> {
         for command in self
             .finished_commands
-            .drain_filter(|c| checkpoint || c.context.kind.is_barrier())
+            .extract_if(|c| checkpoint || c.context.kind.is_barrier())
         {
             // The command is ready to finish. We can now call `pre_finish`.
             command.context.pre_finish().await?;
@@ -516,7 +516,7 @@ impl GlobalBarrierManager {
         }
     }
 
-    pub async fn start(barrier_manager: BarrierManagerRef) -> (JoinHandle<()>, Sender<()>) {
+    pub fn start(barrier_manager: BarrierManagerRef) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             barrier_manager.run(shutdown_rx).await;
@@ -1123,7 +1123,7 @@ fn collect_synced_ssts(
 ) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
     let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
-    for resp in resps.iter_mut() {
+    for resp in &mut *resps {
         let mut t: Vec<ExtendedSstableInfo> = resp
             .synced_sstables
             .iter_mut()

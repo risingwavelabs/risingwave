@@ -47,3 +47,6 @@ test = false
 [[test]]
 name = "planner_test_runner"
 harness = false
+
+[lints]
+workspace = true

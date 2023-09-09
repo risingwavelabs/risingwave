@@ -324,7 +324,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                 );
                 sub_level
                     .table_infos
-                    .drain_filter(|sst_info| sst_info.table_ids.is_empty())
+                    .extract_if(|sst_info| sst_info.table_ids.is_empty())
                     .for_each(|sst_info| {
                         sub_level.total_file_size -= sst_info.file_size;
                         sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
@@ -377,7 +377,7 @@ impl HummockVersionUpdateExt for HummockVersion {
             assert!(can_concat(&cur_levels.levels[idx].table_infos));
             level
                 .table_infos
-                .drain_filter(|sst_info| sst_info.table_ids.is_empty())
+                .extract_if(|sst_info| sst_info.table_ids.is_empty())
                 .for_each(|sst_info| {
                     level.total_file_size -= sst_info.file_size;
                     level.uncompressed_file_size -= sst_info.uncompressed_file_size;
@@ -502,7 +502,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                     .expect("compaction group should exist");
                 let mut moving_tables = levels
                     .member_table_ids
-                    .drain_filter(|t| group_change.table_ids.contains(t))
+                    .extract_if(|t| group_change.table_ids.contains(t))
                     .collect_vec();
                 self.levels
                     .get_mut(compaction_group_id)

@@ -188,7 +188,7 @@ fn make_materialize_table(id: u32) -> PbTable {
 fn make_stream_fragments() -> Vec<StreamFragment> {
     let mut fragments = vec![];
     // table source node
-    let column_ids = vec![1, 2, 0];
+    let column_ids = [1, 2, 0];
     let columns = column_ids
         .iter()
         .map(|column_id| ColumnCatalog {
