@@ -167,34 +167,9 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c0fdddc3fdac97394ffcc5c89c634faa9c1c166ced54189af34e407c97b6ee7"
-dependencies = [
- "apache-avro-derive",
- "byteorder",
- "digest 0.10.7",
- "lazy_static",
- "libflate",
- "log",
- "num-bigint",
- "quad-rand",
- "rand",
- "regex",
- "serde",
- "serde_json",
- "strum 0.25.0",
- "strum_macros 0.25.2",
- "thiserror",
- "typed-builder",
- "uuid",
- "zerocopy",
-]
-
-[[package]]
-name = "apache-avro"
-version = "0.15.0"
 source = "git+https://github.com/risingwavelabs/avro?branch=idx0dev/resolved_schema#89c2c128de93586465a7ea85b0a1c1a53082bba2"
 dependencies = [
+ "apache-avro-derive",
  "byteorder",
  "bzip2",
  "crc32fast",
@@ -222,14 +197,13 @@ dependencies = [
 [[package]]
 name = "apache-avro-derive"
 version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6686cd705badba064ec2322b9c3d72f5c70db8394e486bbb56e84fbdb3fa158c"
+source = "git+https://github.com/risingwavelabs/avro?branch=idx0dev/resolved_schema#89c2c128de93586465a7ea85b0a1c1a53082bba2"
 dependencies = [
- "darling 0.20.3",
+ "darling 0.14.4",
  "proc-macro2",
  "quote",
  "serde_json",
- "syn 2.0.31",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -3671,7 +3645,7 @@ version = "0.0.9"
 source = "git+https://github.com/icelake-io/icelake?rev=a6790d17094754959e351fac1e11147e37643e97#a6790d17094754959e351fac1e11147e37643e97"
 dependencies = [
  "anyhow",
- "apache-avro 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apache-avro",
  "arrow-arith",
  "arrow-array",
  "arrow-buffer",
@@ -6868,7 +6842,7 @@ name = "risingwave_connector"
 version = "1.1.0-alpha"
 dependencies = [
  "anyhow",
- "apache-avro 0.15.0 (git+https://github.com/risingwavelabs/avro?branch=idx0dev/resolved_schema)",
+ "apache-avro",
  "arrow-array",
  "arrow-schema",
  "async-nats",

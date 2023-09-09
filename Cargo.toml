@@ -220,3 +220,4 @@ tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev =
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "d55550a" }
+apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "idx0dev/resolved_schema" }
