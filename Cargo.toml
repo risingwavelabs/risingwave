@@ -143,9 +143,31 @@ risingwave_variables = { path = "./src/utils/variables" }
 risingwave_java_binding = { path = "./src/java_binding" }
 risingwave_jni_core = { path = "src/jni_core" }
 
+[workspace.lints.rust]
+# `forbid` will also prevent the misuse of `#[allow(unused)]`
+unused_must_use = "forbid"
+future_incompatible = "warn"
+nonstandard_style = "warn"
+rust_2018_idioms = "warn"
+
+[workspace.lints.clippy]
+uninlined_format_args = "allow"
+dbg_macro = "warn"
+disallowed_methods = "warn"
+disallowed_types = "warn"
+doc_markdown = "warn"
+explicit_into_iter_loop = "warn"
+explicit_iter_loop = "warn"
+inconsistent_struct_constructor = "warn"
+unused_async = "warn"
+map_flatten = "warn"
+no_effect_underscore_binding = "warn"
+await_holding_lock = "warn"
+
 [workspace.lints.rustdoc]
-private-intra-doc-links = "allow"
-redundant-explicit-links = "allow"
+private_intra_doc_links = "allow"
+# Explicit lints don't hurt, and sometimes rust-analyzer works better with explicit links.
+redundant_explicit_links = "allow"
 
 [profile.dev]
 lto = 'off'
