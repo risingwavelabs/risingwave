@@ -32,8 +32,7 @@ use risingwave_connector::parser::{
     ProtobufParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::cdc::{
-    CDC_LATEST_OFFSET_MODE, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR,
-    POSTGRES_CDC_CONNECTOR,
+    CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::filesystem::S3_CONNECTOR;
@@ -431,6 +430,7 @@ pub(crate) async fn try_bind_columns_from_source(
                     format: FormatType::Plain as i32,
                     row_encode: EncodeType::Json as i32,
                     use_schema_registry,
+                    cdc_source: create_cdc_source_job,
                     ..Default::default()
                 },
             )

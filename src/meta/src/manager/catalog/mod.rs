@@ -826,6 +826,7 @@ impl CatalogManager {
         let mut all_sink_ids: HashSet<SinkId> = HashSet::default();
         let mut all_source_ids: HashSet<SourceId> = HashSet::default();
         let mut all_view_ids: HashSet<ViewId> = HashSet::default();
+        let mut all_cdc_source_ids: HashSet<SourceId> = HashSet::default();
 
         let relations_depend_on = |relation_id: RelationId| -> Vec<RelationInfo> {
             let tables_depend_on = tables
@@ -1079,6 +1080,12 @@ impl CatalogManager {
                     if !all_source_ids.insert(source.id) {
                         continue;
                     }
+
+                    // add cdc source id
+                    if let Some(info) = source.info && info.cdc_source {
+                        all_cdc_source_ids.insert(source.id);
+                    }
+
                     if let Some(ref_count) =
                         database_core.relation_ref_count.get(&source.id).cloned()
                     {
@@ -1300,6 +1307,7 @@ impl CatalogManager {
             .into_iter()
             .map(|id| id.into())
             .chain(all_sink_ids.into_iter().map(|id| id.into()))
+            .chain(all_cdc_source_ids.into_iter().map(|id| id.into()))
             .collect_vec();
 
         Ok((version, catalog_deleted_ids))
@@ -2183,6 +2191,10 @@ impl CatalogManager {
 
     pub async fn list_sources(&self) -> Vec<Source> {
         self.core.lock().await.database.list_sources()
+    }
+
+    pub async fn get_source(&self, source_id: SourceId) -> Option<Source> {
+        self.core.lock().await.database.get_source(source_id)
     }
 
     pub async fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {

@@ -320,20 +320,34 @@ impl DdlController {
         source_id: SourceId,
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
+        let cdc_source_job = if let Some(source) = self.catalog_manager.get_source(source_id).await
+                && let Some(info) = &source.info {
+            info.cdc_source
+        } else {
+            false
+        };
+
         // 1. Drop source in catalog.
-        let version = self
+        let (version, streaming_job_ids) = self
             .catalog_manager
             .drop_relation(
                 RelationIdEnum::Source(source_id),
                 self.fragment_manager.clone(),
                 drop_mode,
             )
-            .await?
-            .0;
+            .await?;
+
         // 2. Unregister source connector worker.
         self.source_manager
             .unregister_sources(vec![source_id])
             .await;
+
+        // 3. drop streaming job if it is cdc source
+        if cdc_source_job {
+            self.stream_manager
+                .drop_streaming_jobs(streaming_job_ids)
+                .await;
+        }
 
         Ok(version)
     }

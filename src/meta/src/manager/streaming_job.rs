@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::catalog::{Index, PbSource, Sink, Source, Table};
+use risingwave_pb::catalog::{Index, PbSource, Sink, Table};
 
 use crate::model::FragmentId;
 
@@ -26,7 +26,7 @@ use crate::model::FragmentId;
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink),
-    Table(Option<Source>, Table),
+    Table(Option<PbSource>, Table),
     Index(Index, Table),
     Source(PbSource),
 }

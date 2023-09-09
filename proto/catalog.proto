@@ -46,6 +46,7 @@ message StreamSourceInfo {
   SchemaRegistryNameStrategy name_strategy = 10;
   optional string key_message_name = 11;
   plan_common.StorageTableDesc upstream_table = 12;
+  bool cdc_source = 13;
 }
 
 message Source {
