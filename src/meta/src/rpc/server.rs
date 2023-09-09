@@ -22,7 +22,6 @@ use futures::future::join_all;
 use itertools::Itertools;
 use regex::Regex;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
-use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -648,10 +647,7 @@ pub async fn start_service_as_election_leader(
     });
     sub_tasks.push((stream_abort_handler, abort_sender));
 
-    let local_system_params_manager = LocalSystemParamsManager::new(system_params_reader.clone());
-
-    let mgr = TelemetryManager::new(
-        local_system_params_manager.watch_params(),
+    let telemetry_manager = TelemetryManager::new(
         Arc::new(MetaTelemetryInfoFetcher::new(env.cluster_id().clone())),
         Arc::new(MetaReportCreator::new(
             cluster_manager,
@@ -661,10 +657,7 @@ pub async fn start_service_as_election_leader(
 
     // May start telemetry reporting
     if env.opts.telemetry_enabled && telemetry_env_enabled() {
-        if system_params_reader.telemetry_enabled() {
-            mgr.start_telemetry_reporting().await;
-        }
-        sub_tasks.push(mgr.watch_params_change());
+        sub_tasks.push(telemetry_manager.start().await);
     } else {
         tracing::info!("Telemetry didn't start due to meta backend or config");
     }

@@ -251,8 +251,6 @@ impl FrontendEnv {
             user_info_updated_rx,
         ));
 
-        let telemetry_enabled = system_params_reader.telemetry_enabled();
-
         let system_params_manager =
             Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
         let frontend_observer_node = FrontendObserverNode::new(
@@ -285,7 +283,6 @@ impl FrontendEnv {
         let host = opts.health_check_listener_addr.clone();
 
         let telemetry_manager = TelemetryManager::new(
-            system_params_manager.watch_params(),
             Arc::new(meta_client.clone()),
             Arc::new(FrontendTelemetryCreator::new()),
         );
@@ -293,14 +290,9 @@ impl FrontendEnv {
         // if the toml config file or env variable disables telemetry, do not watch system params
         // change because if any of configs disable telemetry, we should never start it
         if config.server.telemetry_enabled && telemetry_env_enabled() {
-            if telemetry_enabled {
-                telemetry_manager.start_telemetry_reporting().await;
-            }
-            let (telemetry_join_handle, telemetry_shutdown_sender) =
-                telemetry_manager.watch_params_change();
-
-            join_handles.push(telemetry_join_handle);
-            shutdown_senders.push(telemetry_shutdown_sender);
+            let (join_handle, shutdown_sender) = telemetry_manager.start().await;
+            join_handles.push(join_handle);
+            shutdown_senders.push(shutdown_sender);
         } else {
             tracing::info!("Telemetry didn't start due to config");
         }
