@@ -1,6 +1,8 @@
 [meta]
 vacuum_interval_sec = 10
 
-[system]
+[server]
 telemetry_enabled = false
+
+[system]
 max_concurrent_creating_streaming_jobs = 0

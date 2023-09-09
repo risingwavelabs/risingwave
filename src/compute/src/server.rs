@@ -302,8 +302,6 @@ pub async fn compute_node_serve(
     // of lru manager.
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
 
-    let telemetry_enabled = system_params.telemetry_enabled();
-
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::new(
@@ -379,7 +377,6 @@ pub async fn compute_node_serve(
     let health_srv = HealthServiceImpl::new();
 
     let telemetry_manager = TelemetryManager::new(
-        system_params_manager.watch_params(),
         Arc::new(meta_client.clone()),
         Arc::new(ComputeTelemetryCreator::new()),
     );
@@ -387,12 +384,7 @@ pub async fn compute_node_serve(
     // if the toml config file or env variable disables telemetry, do not watch system params change
     // because if any of configs disable telemetry, we should never start it
     if config.server.telemetry_enabled && telemetry_env_enabled() {
-        // if all configs are true, start reporting
-        if telemetry_enabled {
-            telemetry_manager.start_telemetry_reporting().await;
-        }
-        // if config and env are true, starting watching
-        sub_tasks.push(telemetry_manager.watch_params_change());
+        sub_tasks.push(telemetry_manager.start().await);
     } else {
         tracing::info!("Telemetry didn't start due to config");
     }
