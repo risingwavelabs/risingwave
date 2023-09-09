@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![expect(clippy::arc_with_non_send_sync, reason = "FIXME: later")]
+
 pub mod compaction_config;
 mod level_selector;
 mod overlap_strategy;
+mod tombstone_compaction_selector;
 use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
@@ -39,6 +42,7 @@ pub use crate::hummock::compaction::level_selector::{
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::{CompactionInput, LocalPickerStatistic};
+pub use crate::hummock::compaction::tombstone_compaction_selector::TombstoneCompactionSelector;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
@@ -245,25 +249,25 @@ impl LocalSelectorStatistic {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "write-amp"])
-                    .inc_by(stats.skip_by_write_amp_limit);
+                    .inc();
             }
             if stats.skip_by_count_limit > 0 {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "count"])
-                    .inc_by(stats.skip_by_count_limit);
+                    .inc();
             }
             if stats.skip_by_pending_files > 0 {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "pending-files"])
-                    .inc_by(stats.skip_by_pending_files);
+                    .inc();
             }
             if stats.skip_by_overlapping > 0 {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "overlapping"])
-                    .inc_by(stats.skip_by_overlapping);
+                    .inc();
             }
             metrics
                 .compact_skip_frequency

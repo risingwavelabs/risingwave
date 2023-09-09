@@ -41,11 +41,7 @@ impl PartialEq<Self> for SortedBoundary {
 
 impl PartialOrd for SortedBoundary {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let ret = other
-            .user_key
-            .cmp(&self.user_key)
-            .then_with(|| other.sequence.cmp(&self.sequence));
-        Some(ret)
+        Some(self.cmp(other))
     }
 }
 

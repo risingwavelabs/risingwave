@@ -65,7 +65,9 @@ use tokio_stream::wrappers::IntervalStream;
 use tonic::Streaming;
 use tracing::warn;
 
-use crate::hummock::compaction::{CompactStatus, LocalSelectorStatistic, ManualCompactionOption};
+use crate::hummock::compaction::{
+    CompactStatus, LocalSelectorStatistic, ManualCompactionOption, TombstoneCompactionSelector,
+};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     trigger_delta_log_stats, trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
@@ -81,7 +83,7 @@ use crate::model::{
     VarTransaction,
 };
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::{MetaStore, MetaStoreRef, Transaction};
 
 mod compaction_group_manager;
 mod context;
@@ -98,19 +100,19 @@ mod worker;
 use compaction::*;
 
 type Snapshot = ArcSwap<HummockSnapshot>;
-const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 32;
+const HISTORY_TABLE_INFO_STATISTIC_TIME: usize = 240;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
 // - Make changes on the ValTransaction.
 // - Call `commit_multi_var` to commit the changes via meta store transaction. If transaction
 //   succeeds, the in-mem state will be updated by the way.
-pub struct HummockManager<S: MetaStore> {
-    pub env: MetaSrvEnv<S>,
-    pub cluster_manager: ClusterManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
+pub struct HummockManager {
+    pub env: MetaSrvEnv,
+    pub cluster_manager: ClusterManagerRef,
+    catalog_manager: CatalogManagerRef,
 
-    fragment_manager: FragmentManagerRef<S>,
+    fragment_manager: FragmentManagerRef,
     // `CompactionGroupManager` manages `CompactionGroup`'s members.
     // Note that all hummock state store user should register to `CompactionGroupManager`. It
     // includes all state tables of streaming jobs except sink.
@@ -141,7 +143,7 @@ pub struct HummockManager<S: MetaStore> {
     pub compaction_state: CompactionState,
 }
 
-pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
+pub type HummockManagerRef = Arc<HummockManager>;
 
 /// Commit multiple `ValTransaction`s to state store and upon success update the local in-mem state
 /// by the way
@@ -250,22 +252,19 @@ pub enum CompactionResumeTrigger {
     TaskReport { original_task_num: usize },
 }
 
-impl<S> HummockManager<S>
-where
-    S: MetaStore,
-{
+impl HummockManager {
     pub(crate) async fn new(
-        env: MetaSrvEnv<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        env: MetaSrvEnv,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
-        catalog_manager: CatalogManagerRef<S>,
+        catalog_manager: CatalogManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
-    ) -> Result<HummockManagerRef<S>> {
+    ) -> Result<HummockManagerRef> {
         let compaction_group_manager = Self::build_compaction_group_manager(&env).await?;
         Self::new_impl(
             env,
@@ -282,9 +281,9 @@ where
 
     #[cfg(any(test, feature = "test"))]
     pub(super) async fn with_config(
-        env: MetaSrvEnv<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        env: MetaSrvEnv,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         config: CompactionConfig,
@@ -292,7 +291,7 @@ where
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
-    ) -> HummockManagerRef<S> {
+    ) -> HummockManagerRef {
         use crate::manager::CatalogManager;
         let compaction_group_manager =
             Self::build_compaction_group_manager_with_config(&env, config)
@@ -314,18 +313,18 @@ where
     }
 
     async fn new_impl(
-        env: MetaSrvEnv<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        env: MetaSrvEnv,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
-        catalog_manager: CatalogManagerRef<S>,
+        catalog_manager: CatalogManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
-    ) -> Result<HummockManagerRef<S>> {
+    ) -> Result<HummockManagerRef> {
         let sys_params_manager = env.system_params_manager();
         let sys_params = sys_params_manager.get_params().await;
         let state_store_url = sys_params.state_store();
@@ -538,7 +537,7 @@ where
     /// call `release_contexts` even if it has removed `context_id` from cluster manager.
     async fn commit_trx(
         &self,
-        meta_store: &S,
+        meta_store: &MetaStoreRef,
         trx: Transaction,
         context_id: Option<HummockContextId>,
     ) -> Result<()> {
@@ -1662,9 +1661,19 @@ where
 
     /// Gets current version without pinning it.
     /// Should not be called inside [`HummockManager`], because it requests locks internally.
+    ///
+    /// Note: this method can hurt performance because it will clone a large object.
     #[named]
     pub async fn get_current_version(&self) -> HummockVersion {
         read_lock!(self, versioning).await.current_version.clone()
+    }
+
+    #[named]
+    pub async fn get_current_max_committed_epoch(&self) -> HummockEpoch {
+        read_lock!(self, versioning)
+            .await
+            .current_version
+            .max_committed_epoch
     }
 
     /// Gets branched sstable infos
@@ -1914,7 +1923,7 @@ where
         assignment_ref.get(&task_id).cloned()
     }
 
-    pub fn cluster_manager(&self) -> &ClusterManagerRef<S> {
+    pub fn cluster_manager(&self) -> &ClusterManagerRef {
         &self.cluster_manager
     }
 
@@ -1941,7 +1950,7 @@ where
     }
 
     #[named]
-    pub async fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+    pub fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         use futures::{FutureExt, StreamExt};
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -1959,6 +1968,7 @@ where
                 DynamicCompactionTrigger,
                 SpaceReclaimCompactionTrigger,
                 TtlCompactionTrigger,
+                TombstoneCompactionTrigger,
 
                 FullGc,
             }
@@ -2028,6 +2038,19 @@ where
             let full_gc_trigger =
                 IntervalStream::new(full_gc_interval).map(|_| HummockTimerEvent::FullGc);
 
+            let mut tombstone_reclaim_trigger_interval =
+                tokio::time::interval(Duration::from_secs(
+                    hummock_manager
+                        .env
+                        .opts
+                        .periodic_tombstone_reclaim_compaction_interval_sec,
+                ));
+            tombstone_reclaim_trigger_interval
+                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            tombstone_reclaim_trigger_interval.reset();
+            let tombstone_reclaim_trigger = IntervalStream::new(tombstone_reclaim_trigger_interval)
+                .map(|_| HummockTimerEvent::TombstoneCompactionTrigger);
+
             let mut triggers: Vec<BoxStream<'static, HummockTimerEvent>> = vec![
                 Box::pin(check_compact_trigger),
                 Box::pin(stat_report_trigger),
@@ -2036,6 +2059,7 @@ where
                 Box::pin(space_reclaim_trigger),
                 Box::pin(ttl_reclaim_trigger),
                 Box::pin(full_gc_trigger),
+                Box::pin(tombstone_reclaim_trigger),
             ];
 
             let periodic_check_split_group_interval_sec = hummock_manager
@@ -2222,6 +2246,19 @@ where
                                         .await;
                                 }
 
+                                HummockTimerEvent::TombstoneCompactionTrigger => {
+                                    // Disable periodic trigger for compaction_deterministic_test.
+                                    if hummock_manager.env.opts.compaction_deterministic_test {
+                                        continue;
+                                    }
+
+                                    hummock_manager
+                                        .on_handle_trigger_multi_group(
+                                            compact_task::TaskType::Tombstone,
+                                        )
+                                        .await;
+                                }
+
                                 HummockTimerEvent::FullGc => {
                                     if hummock_manager
                                         .start_full_gc(Duration::from_secs(3600))
@@ -2325,7 +2362,7 @@ where
             let throughput = (stat.total_value_size + stat.total_key_size) as u64;
             let entry = table_infos.entry(table_id).or_default();
             entry.push_back(throughput);
-            if entry.len() > HISTORY_TABLE_INFO_WINDOW_SIZE {
+            if entry.len() > HISTORY_TABLE_INFO_STATISTIC_TIME {
                 entry.pop_front();
             }
         }
@@ -2347,6 +2384,8 @@ where
             1,
             params.checkpoint_frequency() * barrier_interval_ms / 1000,
         );
+        let created_tables = self.catalog_manager.get_created_table_ids().await;
+        let created_tables: HashSet<u32> = HashSet::from_iter(created_tables);
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
@@ -2354,16 +2393,20 @@ where
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
         let partition_vnode_count = self.env.opts.partition_vnode_count;
+        let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / (checkpoint_secs as usize);
         for group in &group_infos {
             if group.table_statistic.len() == 1 {
                 continue;
             }
 
             for (table_id, table_size) in &group.table_statistic {
+                if !created_tables.contains(table_id) {
+                    continue;
+                }
                 let mut is_high_write_throughput = false;
                 let mut is_low_write_throughput = true;
                 if let Some(history) = table_write_throughput.get(table_id) {
-                    if history.len() >= HISTORY_TABLE_INFO_WINDOW_SIZE {
+                    if history.len() >= window_size {
                         is_high_write_throughput = history.iter().all(|throughput| {
                             *throughput / checkpoint_secs
                                 > self.env.opts.table_write_throughput_threshold
@@ -2409,11 +2452,8 @@ where
                     )
                     .await;
                 match ret {
-                    Ok(_) => {
-                        tracing::info!(
-                        "move state table [{}] from group-{} success, Allow split by table: false",
-                        table_id, parent_group_id
-                    );
+                    Ok(new_group_id) => {
+                        tracing::info!("move state table [{}] from group-{} to group-{} success, Allow split by table: false", table_id, parent_group_id, new_group_id);
                         return;
                     }
                     Err(e) => {
@@ -2429,7 +2469,7 @@ where
         }
     }
 
-    pub async fn compaction_event_loop(
+    pub fn compaction_event_loop(
         hummock_manager: Arc<Self>,
         mut compactor_streams_change_rx: UnboundedReceiver<(
             u32,
@@ -2732,34 +2772,47 @@ fn gen_version_delta<'a>(
         .or_default()
         .group_deltas;
     let mut gc_object_ids = vec![];
+    let mut removed_table_ids_map: BTreeMap<u32, Vec<u64>> = BTreeMap::default();
+
     for level in &compact_task.input_ssts {
+        let level_idx = level.level_idx;
+        let mut removed_table_ids = level
+            .table_infos
+            .iter()
+            .map(|sst| {
+                let object_id = sst.get_object_id();
+                let sst_id = sst.get_sst_id();
+                if !trivial_move
+                    && drop_sst(
+                        branched_ssts,
+                        compact_task.compaction_group_id,
+                        object_id,
+                        sst_id,
+                    )
+                {
+                    gc_object_ids.push(object_id);
+                }
+                sst_id
+            })
+            .collect_vec();
+
+        removed_table_ids_map
+            .entry(level_idx)
+            .or_default()
+            .append(&mut removed_table_ids);
+    }
+
+    for (level_idx, removed_table_ids) in removed_table_ids_map {
         let group_delta = GroupDelta {
             delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                level_idx: level.level_idx,
-                removed_table_ids: level
-                    .table_infos
-                    .iter()
-                    .map(|sst| {
-                        let object_id = sst.get_object_id();
-                        let sst_id = sst.get_sst_id();
-                        if !trivial_move
-                            && drop_sst(
-                                branched_ssts,
-                                compact_task.compaction_group_id,
-                                object_id,
-                                sst_id,
-                            )
-                        {
-                            gc_object_ids.push(object_id);
-                        }
-                        sst_id
-                    })
-                    .collect_vec(),
+                level_idx,
+                removed_table_ids,
                 ..Default::default()
             })),
         };
         group_deltas.push(group_delta);
     }
+
     let group_delta = GroupDelta {
         delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
             level_idx: compact_task.target_level,
@@ -2823,6 +2876,10 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn LevelSelector>> {
     compaction_selectors.insert(
         compact_task::TaskType::Ttl,
         Box::<TtlCompactionSelector>::default(),
+    );
+    compaction_selectors.insert(
+        compact_task::TaskType::Tombstone,
+        Box::<TombstoneCompactionSelector>::default(),
     );
     compaction_selectors
 }

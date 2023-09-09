@@ -17,6 +17,7 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -245,6 +246,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
+    #[serde(default = "default::meta::periodic_tombstone_reclaim_compaction_interval_sec")]
+    pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
+
     #[serde(default = "default::meta::periodic_split_compact_group_interval_sec")]
     pub periodic_split_compact_group_interval_sec: u64,
 
@@ -355,11 +359,9 @@ pub struct ServerConfig {
     #[serde(default = "default::server::connection_pool_size")]
     pub connection_pool_size: u16,
 
-    #[serde(default = "default::server::metrics_level")]
     /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
-    pub metrics_level: u32,
+    #[serde(default = "default::server::metrics_level")]
+    pub metrics_level: MetricLevel,
 
     #[serde(default = "default::server::telemetry_enabled")]
     pub telemetry_enabled: bool,
@@ -418,6 +420,27 @@ pub struct StreamingConfig {
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+}
+
+#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
+pub enum MetricLevel {
+    #[default]
+    Disabled = 0,
+    Critical = 1,
+    Info = 2,
+    Debug = 3,
+}
+
+impl PartialEq<Self> for MetricLevel {
+    fn eq(&self, other: &Self) -> bool {
+        (*self as u8).eq(&(*other as u8))
+    }
+}
+
+impl PartialOrd for MetricLevel {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (*self as u8).partial_cmp(&(*other as u8))
+    }
 }
 
 /// The section `[storage]` in `risingwave.toml`.
@@ -493,6 +516,9 @@ pub struct StorageConfig {
     #[serde(default)]
     pub meta_file_cache: FileCacheConfig,
 
+    #[serde(default)]
+    pub cache_refill: CacheRefillConfig,
+
     /// Whether to enable streaming upload for sstable.
     #[serde(default = "default::storage::min_sst_size_for_streaming_upload")]
     pub min_sst_size_for_streaming_upload: u64,
@@ -535,17 +561,30 @@ pub struct StorageConfig {
     pub compactor_max_sst_key_count: u64,
     #[serde(default = "default::storage::compact_iter_recreate_timeout_ms")]
     pub compact_iter_recreate_timeout_ms: u64,
-
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
+    #[serde(default, flatten)]
+    pub unrecognized: Unrecognized<Self>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct CacheRefillConfig {
+    #[serde(default = "default::cache_refill::data_refill_levels")]
+    pub data_refill_levels: Vec<u32>,
+
+    #[serde(default = "default::cache_refill::timeout_ms")]
+    pub timeout_ms: u64,
+
+    #[serde(default = "default::cache_refill::concurrency")]
+    pub concurrency: usize,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
 
-/// The subsection `[storage.file_cache]` in `risingwave.toml`.
+/// The subsection `[storage.data_file_cache]` and `[storage.meta_file_cache]` in `risingwave.toml`.
 ///
-/// It's put at [`StorageConfig::file_cache`].
+/// It's put at [`StorageConfig::data_file_cache`] and  [`StorageConfig::meta_file_cache`].
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
@@ -589,9 +628,6 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::reclaim_rate_limit_mb")]
     pub reclaim_rate_limit_mb: usize,
-
-    #[serde(default = "default::file_cache::refill_levels")]
-    pub refill_levels: Vec<u32>,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -700,8 +736,9 @@ pub struct BatchDeveloperConfig {
     pub chunk_size: usize,
 }
 
-/// The section `[system]` in `risingwave.toml`. This section is only for testing purpose and should
-/// not be documented.
+/// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
+/// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
+/// documented.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct SystemConfig {
     /// The interval of periodic barrier.
@@ -742,15 +779,17 @@ pub struct SystemConfig {
     #[serde(default = "default::system::backup_storage_directory")]
     pub backup_storage_directory: Option<String>,
 
-    #[serde(default = "default::system::telemetry_enabled")]
-    pub telemetry_enabled: Option<bool>,
-
     /// Max number of concurrent creating streaming jobs.
     #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
     pub max_concurrent_creating_streaming_jobs: Option<u32>,
+
+    /// Whether to pause all data sources on next bootstrap.
+    #[serde(default = "default::system::pause_on_next_bootstrap")]
+    pub pause_on_next_bootstrap: Option<bool>,
 }
 
 impl SystemConfig {
+    #![allow(deprecated)]
     pub fn into_init_system_params(self) -> SystemParams {
         SystemParams {
             barrier_interval_ms: self.barrier_interval_ms,
@@ -763,8 +802,9 @@ impl SystemConfig {
             data_directory: self.data_directory,
             backup_storage_url: self.backup_storage_url,
             backup_storage_directory: self.backup_storage_directory,
-            telemetry_enabled: self.telemetry_enabled,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
+            pause_on_next_bootstrap: self.pause_on_next_bootstrap,
+            telemetry_enabled: None, // deprecated
         }
     }
 }
@@ -837,6 +877,10 @@ pub mod default {
             180 // 3mi
         }
 
+        pub fn periodic_tombstone_reclaim_compaction_interval_sec() -> u64 {
+            600
+        }
+
         pub fn move_table_size_limit() -> u64 {
             10 * 1024 * 1024 * 1024 // 10GB
         }
@@ -863,7 +907,7 @@ pub mod default {
     }
 
     pub mod server {
-        use crate::config::AutoDumpHeapProfileConfig;
+        use crate::config::{AutoDumpHeapProfileConfig, MetricLevel};
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
@@ -873,8 +917,8 @@ pub mod default {
             16
         }
 
-        pub fn metrics_level() -> u32 {
-            0
+        pub fn metrics_level() -> MetricLevel {
+            MetricLevel::Info
         }
 
         pub fn telemetry_enabled() -> bool {
@@ -887,7 +931,6 @@ pub mod default {
     }
 
     pub mod storage {
-
         pub fn share_buffers_sync_parallelism() -> u32 {
             1
         }
@@ -962,7 +1005,7 @@ pub mod default {
         }
 
         pub fn max_preload_wait_time_mill() -> u64 {
-            10
+            0
         }
 
         pub fn object_store_streaming_read_timeout_ms() -> u64 {
@@ -1069,9 +1112,19 @@ pub mod default {
         pub fn reclaim_rate_limit_mb() -> usize {
             0
         }
+    }
 
-        pub fn refill_levels() -> Vec<u32> {
+    pub mod cache_refill {
+        pub fn data_refill_levels() -> Vec<u32> {
             vec![]
+        }
+
+        pub fn timeout_ms() -> u64 {
+            6000
+        }
+
+        pub fn concurrency() -> usize {
+            100
         }
     }
 
@@ -1129,60 +1182,12 @@ pub mod default {
     }
 
     pub mod system {
-        use crate::system_param;
-
-        pub fn barrier_interval_ms() -> Option<u32> {
-            system_param::default::barrier_interval_ms()
-        }
-
-        pub fn checkpoint_frequency() -> Option<u64> {
-            system_param::default::checkpoint_frequency()
-        }
-
-        pub fn parallel_compact_size_mb() -> Option<u32> {
-            system_param::default::parallel_compact_size_mb()
-        }
-
-        pub fn sstable_size_mb() -> Option<u32> {
-            system_param::default::sstable_size_mb()
-        }
-
-        pub fn block_size_kb() -> Option<u32> {
-            system_param::default::block_size_kb()
-        }
-
-        pub fn bloom_false_positive() -> Option<f64> {
-            system_param::default::bloom_false_positive()
-        }
-
-        pub fn state_store() -> Option<String> {
-            system_param::default::state_store()
-        }
-
-        pub fn data_directory() -> Option<String> {
-            system_param::default::data_directory()
-        }
-
-        pub fn backup_storage_url() -> Option<String> {
-            system_param::default::backup_storage_url()
-        }
-
-        pub fn backup_storage_directory() -> Option<String> {
-            system_param::default::backup_storage_directory()
-        }
-
-        pub fn telemetry_enabled() -> Option<bool> {
-            system_param::default::telemetry_enabled()
-        }
-
-        pub fn max_concurrent_creating_streaming_jobs() -> Option<u32> {
-            system_param::default::max_concurrent_creating_streaming_jobs()
-        }
+        pub use crate::system_param::default::*;
     }
 
     pub mod batch {
         pub fn enable_barrier_read() -> bool {
-            true
+            false
         }
     }
 
@@ -1201,6 +1206,7 @@ pub mod default {
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
+        const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1242,6 +1248,9 @@ pub mod default {
         }
         pub fn level0_max_compact_file_number() -> u64 {
             DEFAULT_MAX_COMPACTION_FILE_COUNT
+        }
+        pub fn tombstone_reclaim_ratio() -> u32 {
+            DEFAULT_TOMBSTONE_RATIO_PERCENT
         }
     }
 
@@ -1366,6 +1375,8 @@ pub struct CompactionConfig {
     pub max_space_reclaim_bytes: u64,
     #[serde(default = "default::compaction_config::level0_max_compact_file_number")]
     pub level0_max_compact_file_number: u64,
+    #[serde(default = "default::compaction_config::tombstone_reclaim_ratio")]
+    pub tombstone_reclaim_ratio: u32,
 }
 
 #[cfg(test)]

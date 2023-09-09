@@ -193,7 +193,10 @@ impl StreamingUploader for OpenDalStreamingUploader {
     async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
         match self.writer.close().await {
             Ok(_) => (),
-            Err(_) => self.writer.abort().await?,
+            Err(err) => {
+                self.writer.abort().await?;
+                return Err(err.into());
+            }
         };
 
         Ok(())
@@ -402,7 +405,7 @@ mod tests {
             .unwrap();
         let metadata = store.metadata("test.obj").await.unwrap();
         assert_eq!(payload.len(), metadata.total_size);
-        let test_loc = vec![(0, 1000), (10000, 1000), (20000, 1000)];
+        let test_loc = [(0, 1000), (10000, 1000), (20000, 1000)];
         let read_data = store
             .readv(
                 "test.obj",

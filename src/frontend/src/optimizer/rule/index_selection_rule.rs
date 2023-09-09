@@ -255,7 +255,7 @@ impl IndexSelectionRule {
                         .clone(),
                 )
             })
-            .chain(new_predicate.into_iter())
+            .chain(new_predicate)
             .collect_vec();
         let on = Condition { conjunctions };
         let join: PlanRef = LogicalJoin::new(
@@ -351,7 +351,7 @@ impl IndexSelectionRule {
                     primary_table_desc.columns[y.column_index].data_type.clone(),
                 )
             })
-            .chain(new_predicate.into_iter())
+            .chain(new_predicate)
             .collect_vec();
 
         let on = Condition { conjunctions };

@@ -99,5 +99,10 @@
             <artifactId>risingwave-sink-es-7</artifactId>
             <scope>provided</scope>
         </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>risingwave-sink-cassandra</artifactId>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
 </project>

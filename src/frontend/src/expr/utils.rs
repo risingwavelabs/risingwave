@@ -307,7 +307,7 @@ pub fn factorization_expr(expr: ExprImpl) -> Vec<ExprImpl> {
     let (last, remaining) = disjunctions.split_last_mut().unwrap();
     // now greatest_common_factor == [C, D]
     let greatest_common_divider: Vec<_> = last
-        .drain_filter(|factor| remaining.iter().all(|expr| expr.contains(factor)))
+        .extract_if(|factor| remaining.iter().all(|expr| expr.contains(factor)))
         .collect();
     for disjunction in remaining {
         // remove common factors
@@ -447,6 +447,7 @@ impl WatermarkAnalyzer {
             ExprImpl::InputRef(inner) => WatermarkDerivation::Watermark(inner.index()),
             ExprImpl::Literal(_) => WatermarkDerivation::Constant,
             ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+            ExprImpl::FunctionCallWithLambda(inner) => self.visit_function_call(inner.base()),
             ExprImpl::TableFunction(_) => WatermarkDerivation::None,
             ExprImpl::Subquery(_)
             | ExprImpl::AggCall(_)

@@ -71,9 +71,9 @@
     sql parser error: Expected ), found: minutes at line:1, column:62
     Near "(t, x, interval '10'"
 - input: SELECT 1, FROM t
-  error_msg: 'sql parser error: syntax error at or near "FROM"'
+  error_msg: 'sql parser error: syntax error at or near FROM at line:1, column:15'
 - input: SELECT 1, WHERE true
-  error_msg: 'sql parser error: syntax error at or near "WHERE"'
+  error_msg: 'sql parser error: syntax error at or near WHERE at line:1, column:16'
 - input: SELECT timestamp with time zone '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_sql: SELECT TIMESTAMP WITH TIME ZONE '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(AtTimeZone { timestamp: TypedString { data_type: Timestamp(true), value: "2022-10-01 12:00:00Z" }, time_zone: "US/Pacific" })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
@@ -117,3 +117,18 @@
 - input: select 'apple' !~~* 'app%'
   formatted_sql: SELECT 'apple' NOT ILIKE 'app%'
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: NotILike, right: Value(SingleQuotedString("app%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS JSON;
+  formatted_sql: SELECT '123' IS JSON
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: false, item_type: Value, unique_keys: false })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS JSON VALUE WITHOUT UNIQUE KEYS;
+  formatted_sql: SELECT '123' IS JSON
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: false, item_type: Value, unique_keys: false })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS NOT JSON ARRAY WITH UNIQUE KEYS;
+  formatted_sql: SELECT '123' IS NOT JSON ARRAY WITH UNIQUE KEYS
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: true, item_type: Array, unique_keys: true })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS NOT JSON OBJECT WITH UNIQUE;
+  formatted_sql: SELECT '123' IS NOT JSON OBJECT WITH UNIQUE KEYS
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: true, item_type: Object, unique_keys: true })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS NOT JSON SCALAR WITHOUT UNIQUE;
+  formatted_sql: SELECT '123' IS NOT JSON SCALAR
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: true, item_type: Scalar, unique_keys: false })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'

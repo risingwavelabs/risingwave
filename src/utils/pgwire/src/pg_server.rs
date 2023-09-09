@@ -56,7 +56,7 @@ pub trait Session: Send + Sync {
     type Portal: Send + Clone + std::fmt::Display + 'static;
 
     /// The str sql can not use the unparse from AST: There is some problem when dealing with create
-    /// view, see  https://github.com/risingwavelabs/risingwave/issues/6801.
+    /// view, see <https://github.com/risingwavelabs/risingwave/issues/6801>.
     fn run_one_query(
         self: Arc<Self>,
         sql: Statement,
@@ -232,7 +232,6 @@ mod tests {
         type PreparedStatement = String;
         type ValuesStream = BoxStream<'static, RowSetResult>;
 
-        #[expect(clippy::unused_async)]
         async fn run_one_query(
             self: Arc<Self>,
             _sql: Statement,
@@ -270,7 +269,6 @@ mod tests {
             Ok(String::new())
         }
 
-        #[expect(clippy::unused_async)]
         async fn execute(
             self: Arc<Self>,
             _portal: String,

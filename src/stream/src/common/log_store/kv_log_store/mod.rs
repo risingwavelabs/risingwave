@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
 use std::sync::Arc;
 
 use risingwave_common::buffer::Bitmap;
@@ -72,39 +71,36 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
     type Reader = KvLogStoreReader<S>;
     type Writer = KvLogStoreWriter<S::Local>;
 
-    type BuildFuture = impl Future<Output = (Self::Reader, Self::Writer)>;
+    async fn build(self) -> (Self::Reader, Self::Writer) {
+        let table_id = TableId::new(self.table_catalog.id);
+        let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes);
+        let local_state_store = self
+            .state_store
+            .new_local(NewLocalOptions {
+                table_id: TableId {
+                    table_id: self.table_catalog.id,
+                },
+                is_consistent_op: false,
+                table_option: TableOption {
+                    retention_seconds: None,
+                },
+                is_replicated: false,
+            })
+            .await;
 
-    fn build(self) -> Self::BuildFuture {
-        async move {
-            let table_id = TableId::new(self.table_catalog.id);
-            let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes);
-            let local_state_store = self
-                .state_store
-                .new_local(NewLocalOptions {
-                    table_id: TableId {
-                        table_id: self.table_catalog.id,
-                    },
-                    is_consistent_op: false,
-                    table_option: TableOption {
-                        retention_seconds: None,
-                    },
-                    is_replicated: false,
-                })
-                .await;
+        let (tx, rx) = new_log_store_buffer(self.max_stream_chunk_count);
 
-            let (tx, rx) = new_log_store_buffer(self.max_stream_chunk_count);
+        let reader = KvLogStoreReader::new(table_id, self.state_store, serde.clone(), rx);
 
-            let reader = KvLogStoreReader::new(table_id, self.state_store, serde.clone(), rx);
+        let writer = KvLogStoreWriter::new(table_id, local_state_store, serde, tx);
 
-            let writer = KvLogStoreWriter::new(table_id, local_state_store, serde, tx);
-
-            (reader, writer)
-        }
+        (reader, writer)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::store::SyncResult;
@@ -147,7 +143,10 @@ mod tests {
             .version()
             .max_committed_epoch
             + 1;
-        writer.init(epoch1).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch1))
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
         writer.flush_current_epoch(epoch2, false).await.unwrap();
@@ -222,7 +221,10 @@ mod tests {
             .version()
             .max_committed_epoch
             + 1;
-        writer.init(epoch1).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch1))
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
         writer.flush_current_epoch(epoch2, false).await.unwrap();
@@ -282,7 +284,10 @@ mod tests {
             max_stream_chunk_count,
         );
         let (mut reader, mut writer) = factory.build().await;
-        writer.init(epoch3).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch3))
+            .await
+            .unwrap();
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::StreamChunk(read_stream_chunk)) => {
@@ -345,7 +350,10 @@ mod tests {
             .version()
             .max_committed_epoch
             + 1;
-        writer.init(epoch1).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch1))
+            .await
+            .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
         writer.flush_current_epoch(epoch2, true).await.unwrap();
@@ -409,7 +417,10 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
 
-        writer.init(epoch3).await.unwrap();
+        writer
+            .init(EpochPair::new_test_epoch(epoch3))
+            .await
+            .unwrap();
         let stream_chunk3 = gen_stream_chunk(20);
         writer.write_chunk(stream_chunk3.clone()).await.unwrap();
 

@@ -131,7 +131,7 @@ pub async fn handle_alter_table_column(
             // Locate the column by name and remove it.
             let column_name = column_name.real_value();
             let removed_column = columns
-                .drain_filter(|c| c.name.real_value() == column_name)
+                .extract_if(|c| c.name.real_value() == column_name)
                 .at_most_one()
                 .ok()
                 .unwrap();

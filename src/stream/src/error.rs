@@ -15,6 +15,7 @@
 use std::backtrace::Backtrace;
 
 use risingwave_common::array::ArrayError;
+use risingwave_connector::error::ConnectorError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_storage::error::StorageError;
@@ -67,7 +68,9 @@ impl std::fmt::Debug for StreamError {
 
         write!(f, "{}", self.inner.kind)?;
         writeln!(f)?;
-        if let Some(backtrace) = (&self.inner.kind as &dyn Error).request_ref::<Backtrace>() {
+        if let Some(backtrace) =
+            std::error::request_ref::<Backtrace>(&self.inner.kind as &dyn Error)
+        {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(f, "  backtrace of `StreamError`:\n{}", self.inner.backtrace)?;
@@ -118,6 +121,12 @@ impl From<PbFieldNotFound> for StreamError {
             "Failed to decode prost: field not found `{}`",
             err.0
         ))
+    }
+}
+
+impl From<ConnectorError> for StreamError {
+    fn from(err: ConnectorError) -> Self {
+        StreamExecutorError::from(err).into()
     }
 }
 

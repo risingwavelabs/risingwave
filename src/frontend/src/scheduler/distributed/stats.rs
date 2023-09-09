@@ -12,40 +12,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use prometheus::core::{AtomicI64, AtomicU64, GenericCounter, GenericGauge};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_with_registry,
     register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, Registry,
 };
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
+#[derive(Clone)]
 pub struct DistributedQueryMetrics {
-    pub registry: Registry,
     pub running_query_num: GenericGauge<AtomicI64>,
     pub rejected_query_counter: GenericCounter<AtomicU64>,
     pub completed_query_counter: GenericCounter<AtomicU64>,
     pub query_latency: Histogram,
 }
 
+pub static GLOBAL_DISTRIBUTED_QUERY_METRICS: LazyLock<DistributedQueryMetrics> =
+    LazyLock::new(|| DistributedQueryMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
 impl DistributedQueryMetrics {
-    pub fn new(registry: Registry) -> Self {
+    fn new(registry: &Registry) -> Self {
         let running_query_num = register_int_gauge_with_registry!(
             "distributed_running_query_num",
             "The number of running query of distributed execution mode",
-            &registry
+            registry
         )
         .unwrap();
 
         let rejected_query_counter = register_int_counter_with_registry!(
             "distributed_rejected_query_counter",
             "The number of rejected query in distributed execution mode. ",
-            &registry
+            registry
         )
         .unwrap();
 
         let completed_query_counter = register_int_counter_with_registry!(
             "distributed_completed_query_counter",
             "The number of query ended successfully in distributed execution mode",
-            &registry
+            registry
         )
         .unwrap();
 
@@ -55,10 +61,9 @@ impl DistributedQueryMetrics {
             exponential_buckets(0.01, 2.0, 23).unwrap()
         );
 
-        let query_latency = register_histogram_with_registry!(opts, &registry).unwrap();
+        let query_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
         Self {
-            registry,
             running_query_num,
             rejected_query_counter,
             completed_query_counter,
@@ -68,6 +73,6 @@ impl DistributedQueryMetrics {
 
     /// Create a new `DistributedQueryMetrics` instance used in tests or other places.
     pub fn for_test() -> Self {
-        Self::new(prometheus::Registry::new())
+        GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()
     }
 }

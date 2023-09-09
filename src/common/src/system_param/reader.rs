@@ -76,8 +76,8 @@ impl SystemParamsReader {
         self.prost.max_concurrent_creating_streaming_jobs.unwrap()
     }
 
-    pub fn telemetry_enabled(&self) -> bool {
-        self.prost.telemetry_enabled.unwrap()
+    pub fn pause_on_next_bootstrap(&self) -> bool {
+        self.prost.pause_on_next_bootstrap.unwrap_or(false)
     }
 
     pub fn to_kv(&self) -> Vec<(String, String)> {

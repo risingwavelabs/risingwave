@@ -45,7 +45,7 @@ use user::*;
 
 use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob};
 use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction};
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::Transaction;
 use crate::{MetaError, MetaResult};
 
 pub type DatabaseId = u32;
@@ -75,6 +75,7 @@ macro_rules! commit_meta_with_trx {
     ($manager:expr, $trx:ident, $($val_txn:expr),*) => {
         {
             use tracing::Instrument;
+            use $crate::storage::meta_store::MetaStore;
             async {
                 // Apply the change in `ValTransaction` to trx
                 $(
@@ -112,8 +113,9 @@ macro_rules! commit_meta {
 
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
 use risingwave_pb::meta::relation::RelationInfo;
-use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
+use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
 use crate::manager::catalog::utils::{
@@ -122,7 +124,7 @@ use crate::manager::catalog::utils::{
 };
 use crate::rpc::ddl_controller::DropMode;
 
-pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
+pub type CatalogManagerRef = Arc<CatalogManager>;
 
 /// `CatalogManager` manages database catalog information and user information, including
 /// authentication and privileges.
@@ -130,8 +132,8 @@ pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 /// It only has some basic validation for the user information.
 /// Other authorization relate to the current session user should be done in Frontend before passing
 /// to Meta.
-pub struct CatalogManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct CatalogManager {
+    env: MetaSrvEnv,
     core: Mutex<CatalogManagerCore>,
 }
 
@@ -141,18 +143,15 @@ pub struct CatalogManagerCore {
 }
 
 impl CatalogManagerCore {
-    async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+    async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let database = DatabaseManager::new(env.clone()).await?;
         let user = UserManager::new(env.clone(), &database).await?;
         Ok(Self { database, user })
     }
 }
 
-impl<S> CatalogManager<S>
-where
-    S: MetaStore,
-{
-    pub async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+impl CatalogManager {
+    pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let core = Mutex::new(CatalogManagerCore::new(env.clone()).await?);
         let catalog_manager = Self { env, core };
         catalog_manager.init().await?;
@@ -171,10 +170,7 @@ where
 }
 
 // Database catalog related methods
-impl<S> CatalogManager<S>
-where
-    S: MetaStore,
-{
+impl CatalogManager {
     async fn init_database(&self) -> MetaResult<()> {
         let mut database = Database {
             name: DEFAULT_DATABASE_NAME.to_string(),
@@ -794,7 +790,7 @@ where
     pub async fn drop_relation(
         &self,
         relation: RelationIdEnum,
-        fragment_manager: FragmentManagerRef<S>,
+        fragment_manager: FragmentManagerRef,
         drop_mode: DropMode,
     ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
         let core = &mut *self.core.lock().await;
@@ -1546,6 +1542,28 @@ where
         .await
     }
 
+    pub async fn alter_source_column(&self, source: Source) -> MetaResult<NotificationVersion> {
+        let source_id = source.get_id();
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_source_id(source_id)?;
+
+        let original_source = database_core.sources.get(&source_id).unwrap().clone();
+        if original_source.get_version() + 1 != source.get_version() {
+            bail!("source version is stale");
+        }
+
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        sources.insert(source_id, source.clone());
+        commit_meta!(self, sources)?;
+
+        let version = self
+            .notify_frontend_relation_info(Operation::Update, RelationInfo::Source(source))
+            .await;
+
+        Ok(version)
+    }
+
     pub async fn alter_index_name(
         &self,
         index_id: IndexId,
@@ -2221,13 +2239,20 @@ where
         }
         tables
     }
+
+    pub async fn get_created_table_ids(&self) -> Vec<u32> {
+        let guard = self.core.lock().await;
+        guard
+            .database
+            .tables
+            .values()
+            .map(|table| table.id)
+            .collect()
+    }
 }
 
 // User related methods
-impl<S> CatalogManager<S>
-where
-    S: MetaStore,
-{
+impl CatalogManager {
     async fn init_user(&self) -> MetaResult<()> {
         let core = &mut self.core.lock().await.user;
         for (user, id) in [

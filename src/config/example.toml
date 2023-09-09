@@ -3,7 +3,7 @@
 [server]
 heartbeat_interval_ms = 1000
 connection_pool_size = 16
-metrics_level = 0
+metrics_level = "Info"
 telemetry_enabled = true
 
 [server.auto_dump_heap_profile]
@@ -29,6 +29,7 @@ node_num_monitor_interval_sec = 10
 backend = "Mem"
 periodic_space_reclaim_compaction_interval_sec = 3600
 periodic_ttl_reclaim_compaction_interval_sec = 1800
+periodic_tombstone_reclaim_compaction_interval_sec = 600
 periodic_split_compact_group_interval_sec = 180
 move_table_size_limit = 10737418240
 split_group_size_limit = 68719476736
@@ -52,9 +53,10 @@ level0_sub_level_compact_level_count = 3
 level0_overlapping_sub_level_compact_level_count = 6
 max_space_reclaim_bytes = 536870912
 level0_max_compact_file_number = 96
+tombstone_reclaim_ratio = 40
 
 [batch]
-enable_barrier_read = true
+enable_barrier_read = false
 
 [batch.developer]
 batch_connector_message_buffer_size = 16
@@ -90,7 +92,7 @@ sstable_id_remote_fetch_number = 10
 min_sst_size_for_streaming_upload = 33554432
 max_sub_compaction = 4
 max_concurrent_compaction_task_number = 16
-max_preload_wait_time_mill = 10
+max_preload_wait_time_mill = 0
 object_store_streaming_read_timeout_ms = 600000
 object_store_streaming_upload_timeout_ms = 600000
 object_store_upload_timeout_ms = 3600000
@@ -119,7 +121,6 @@ lfu_tiny_lru_capacity_ratio = 0.01
 rated_random_rate_mb = 0
 flush_rate_limit_mb = 0
 reclaim_rate_limit_mb = 0
-refill_levels = []
 
 [storage.meta_file_cache]
 dir = ""
@@ -135,7 +136,11 @@ lfu_tiny_lru_capacity_ratio = 0.01
 rated_random_rate_mb = 0
 flush_rate_limit_mb = 0
 reclaim_rate_limit_mb = 0
-refill_levels = []
+
+[storage.cache_refill]
+data_refill_levels = []
+timeout_ms = 6000
+concurrency = 100
 
 [system]
 barrier_interval_ms = 1000
@@ -146,5 +151,5 @@ block_size_kb = 64
 bloom_false_positive = 0.001
 backup_storage_url = "memory"
 backup_storage_directory = "backup"
-telemetry_enabled = true
 max_concurrent_creating_streaming_jobs = 1
+pause_on_next_bootstrap = false

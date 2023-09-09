@@ -71,7 +71,7 @@ type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): us
 ///
 /// Basic idea:
 ///
-/// ```ignore
+/// ```text
 /// ──────────────┬────────────────────────────────────────────────────── curr evict row
 ///               │ROWS BETWEEN 5 PRECEDING AND 1 PRECEDING
 ///        (1)    │ ─┬─
@@ -181,7 +181,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
     }
 
     async fn ensure_key_in_cache(
-        this: &mut ExecutorInner<S>,
+        this: &ExecutorInner<S>,
         cache: &mut PartitionCache,
         partition_key: impl Row,
         encoded_partition_key: &MemcmpEncoded,
@@ -198,12 +198,12 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         // Recover states from state table.
         let table_iter = this
             .state_table
-            .iter_with_pk_prefix(partition_key, PrefetchOptions::new_for_exhaust_iter())
+            .iter_row_with_pk_prefix(partition_key, PrefetchOptions::new_for_exhaust_iter())
             .await?;
 
         #[for_await]
-        for row in table_iter {
-            let row: OwnedRow = row?;
+        for keyed_row in table_iter {
+            let row = keyed_row?.into_owned_row();
             let order_key_enc = memcmp_encoding::encode_row(
                 row::once(Some(
                     row.datum_at(this.order_key_index)

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::pending;
 use std::io::Write;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
@@ -22,7 +21,6 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use itertools::Itertools;
-use madsim::time::{sleep, timeout};
 use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
@@ -30,6 +28,7 @@ use risingwave_connector::sink::boxed::{BoxCoordinator, BoxWriter};
 use risingwave_connector::sink::test_sink::registry_build_sink;
 use risingwave_connector::sink::{Sink, SinkWriter, SinkWriterParam};
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
+use tokio::time::sleep;
 
 struct TestWriter {
     row_counter: Arc<AtomicUsize>,
@@ -56,17 +55,6 @@ impl SinkWriter for TestWriter {
         _is_checkpoint: bool,
     ) -> risingwave_connector::sink::Result<Self::CommitMetadata> {
         sleep(Duration::from_millis(100)).await;
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> risingwave_connector::sink::Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(
-        &mut self,
-        _vnode_bitmap: Bitmap,
-    ) -> risingwave_connector::sink::Result<()> {
         Ok(())
     }
 }
@@ -106,7 +94,7 @@ impl Sink for TestSink {
     }
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_sink_basic() -> Result<()> {
     let config_path = {
         let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");
@@ -133,7 +121,7 @@ async fn test_sink_basic() -> Result<()> {
     let _sink_guard = registry_build_sink({
         let row_counter = row_counter.clone();
         let parallelism_counter = parallelism_counter.clone();
-        move |param| {
+        move |_param| {
             Ok(Box::new(TestSink {
                 row_counter: row_counter.clone(),
                 parallelism_counter: parallelism_counter.clone(),
@@ -178,13 +166,10 @@ async fn test_sink_basic() -> Result<()> {
     Ok(())
 }
 
-#[madsim::test]
+#[tokio::test]
 async fn test_sink_decouple_basic() -> Result<()> {
     let config_path = {
-        let mut file = tempfile::NamedTempFile::new().expect(
-            "failed to create temp config
-file",
-        );
+        let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");
         file.write_all(include_bytes!("../../../../../config/ci-sim.toml"))
             .expect("failed to write config file");
         file.into_temp_path()
@@ -208,7 +193,7 @@ file",
     let _sink_guard = registry_build_sink({
         let row_counter = row_counter.clone();
         let parallelism_counter = parallelism_counter.clone();
-        move |param| {
+        move |_param| {
             Ok(Box::new(TestSink {
                 row_counter: row_counter.clone(),
                 parallelism_counter: parallelism_counter.clone(),

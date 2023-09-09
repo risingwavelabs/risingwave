@@ -31,12 +31,9 @@ use crate::hummock::manager::{commit_multi_var, read_lock, write_lock, ResponseE
 use crate::hummock::HummockManager;
 use crate::manager::ClusterManagerRef;
 use crate::model::{BTreeMapTransaction, ValTransaction};
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::Transaction;
 
-impl<S> HummockManager<S>
-where
-    S: MetaStore,
-{
+impl HummockManager {
     /// Gets SST objects that is safe to be deleted from object store.
     #[named]
     pub async fn get_objects_to_delete(&self) -> Vec<HummockSstableObjectId> {
@@ -204,15 +201,12 @@ where
 ///
 /// Returns a global GC watermark. The watermark only guards SSTs created before this
 /// invocation.
-pub async fn collect_global_gc_watermark<S>(
-    cluster_manager: ClusterManagerRef<S>,
+pub async fn collect_global_gc_watermark(
+    cluster_manager: ClusterManagerRef,
     spin_interval: Duration,
-) -> Result<HummockSstableObjectId>
-where
-    S: MetaStore,
-{
+) -> Result<HummockSstableObjectId> {
     let mut global_watermark = HummockSstableObjectId::MAX;
-    let workers = vec![
+    let workers = [
         cluster_manager.list_active_streaming_compute_nodes().await,
         cluster_manager
             .list_worker_node(WorkerType::Compactor, Some(Running))
