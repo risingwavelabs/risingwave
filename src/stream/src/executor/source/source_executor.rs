@@ -257,7 +257,7 @@ impl<S: StateStore> SourceExecutor<S> {
         // fetch the newest offset, either it's in cache (before barrier)
         // or in state table (just after barrier)
         let target_state = if core.state_cache.is_empty() {
-            for ele in split_info.iter_mut() {
+            for ele in &mut *split_info {
                 if let Some(recover_state) = core
                     .split_state_store
                     .try_recover_from_state_store(ele)

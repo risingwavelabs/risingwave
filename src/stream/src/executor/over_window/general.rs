@@ -307,7 +307,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             match record {
                 Record::Insert { new_row } => {
                     let part_key = this.get_partition_key(new_row).into();
-                    let part_delta = deltas.entry(part_key).or_insert(PartitionDelta::new());
+                    let part_delta = deltas.entry(part_key).or_default();
                     part_delta.insert(
                         this.row_to_cache_key(new_row)?,
                         Change::Insert(new_row.into_owned_row()),
@@ -315,7 +315,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 }
                 Record::Delete { old_row } => {
                     let part_key = this.get_partition_key(old_row).into();
-                    let part_delta = deltas.entry(part_key).or_insert(PartitionDelta::new());
+                    let part_delta = deltas.entry(part_key).or_default();
                     part_delta.insert(this.row_to_cache_key(old_row)?, Change::Delete);
                 }
                 Record::Update { old_row, new_row } => {
@@ -325,15 +325,13 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     let new_state_key = this.row_to_cache_key(new_row)?;
                     if old_part_key == new_part_key && old_state_key == new_state_key {
                         // not a key-change update
-                        let part_delta =
-                            deltas.entry(old_part_key).or_insert(PartitionDelta::new());
+                        let part_delta = deltas.entry(old_part_key).or_default();
                         part_delta.insert(old_state_key, Change::Insert(new_row.into_owned_row()));
                     } else if old_part_key == new_part_key {
                         // order-change update, split into delete + insert, will be merged after
                         // building changes
                         key_change_updated_pks.insert(this.get_input_pk(old_row));
-                        let part_delta =
-                            deltas.entry(old_part_key).or_insert(PartitionDelta::new());
+                        let part_delta = deltas.entry(old_part_key).or_default();
                         part_delta.insert(old_state_key, Change::Delete);
                         part_delta.insert(new_state_key, Change::Insert(new_row.into_owned_row()));
                     } else {
@@ -341,11 +339,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
                         // NOTE(rc): Since we append partition key to logical pk, we can't merge the
                         // delete + insert back to update later.
                         // TODO: IMO this behavior is problematic. Deep discussion is needed.
-                        let old_part_delta =
-                            deltas.entry(old_part_key).or_insert(PartitionDelta::new());
+                        let old_part_delta = deltas.entry(old_part_key).or_default();
                         old_part_delta.insert(old_state_key, Change::Delete);
-                        let new_part_delta =
-                            deltas.entry(new_part_key).or_insert(PartitionDelta::new());
+                        let new_part_delta = deltas.entry(new_part_key).or_default();
                         new_part_delta
                             .insert(new_state_key, Change::Insert(new_row.into_owned_row()));
                     }

@@ -104,8 +104,7 @@ impl<S> TracedStateStore<S> {
     }
 }
 
-type TracedStateStoreIterStream<S: StateStoreIterItemStream> =
-    impl StateStoreIterItemStream;
+type TracedStateStoreIterStream<S: StateStoreIterItemStream> = impl StateStoreIterItemStream;
 
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     type IterStream<'a> = impl StateStoreIterItemStream + 'a;
