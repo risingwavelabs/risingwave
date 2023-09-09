@@ -23,6 +23,7 @@ anyhow = { version = "1", features = ["backtrace"] }
 aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
 aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
 aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
+base64 = { version = "0.21", features = ["alloc"] }
 bitflags = { version = "2", default-features = false, features = ["std"] }
 byteorder = { version = "1", features = ["i128"] }
 bytes = { version = "1", features = ["serde"] }
@@ -91,6 +92,7 @@ serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc"] }
 serde_with = { version = "3", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
+socket2 = { version = "0.5", default-features = false, features = ["all"] }
 subtle = { version = "2" }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
@@ -98,6 +100,8 @@ tokio = { version = "1", features = ["full", "stats", "tracing"] }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6", features = ["with-chrono-0_4"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
+toml_datetime = { version = "0.6", default-features = false, features = ["serde"] }
+toml_edit = { version = "0.19", features = ["serde"] }
 tonic = { version = "0.9", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }
@@ -116,6 +120,7 @@ auto_enums = { version = "0.8", features = ["futures03"] }
 aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
 aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
 aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
+base64 = { version = "0.21", features = ["alloc"] }
 bitflags = { version = "2", default-features = false, features = ["std"] }
 byteorder = { version = "1", features = ["i128"] }
 bytes = { version = "1", features = ["serde"] }
@@ -126,8 +131,6 @@ clap_builder = { version = "4", default-features = false, features = ["cargo", "
 combine = { version = "4" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-darling = { version = "0.14" }
-darling_core = { version = "0.14", default-features = false, features = ["suggestions"] }
 deranged = { version = "0.3", default-features = false, features = ["serde", "std"] }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
@@ -188,9 +191,10 @@ serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc"] }
 serde_with = { version = "3", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
+socket2 = { version = "0.5", default-features = false, features = ["all"] }
 subtle = { version = "2" }
-syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "full", "visit", "visit-mut"] }
+syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 time-macros = { version = "0.2", default-features = false, features = ["formatting", "parsing", "serde"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
@@ -198,6 +202,8 @@ tokio = { version = "1", features = ["full", "stats", "tracing"] }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6", features = ["with-chrono-0_4"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
+toml_datetime = { version = "0.6", default-features = false, features = ["serde"] }
+toml_edit = { version = "0.19", features = ["serde"] }
 tonic = { version = "0.9", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }
