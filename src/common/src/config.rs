@@ -658,16 +658,17 @@ impl AsyncStackTraceOption {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct AutoDumpHeapProfileConfig {
+    /// Enable to auto dump heap profile when memory usage is high
+    #[serde(default = "default::auto_dump_heap_profile::enabled")]
+    pub enabled: bool,
+
+    /// The directory to dump heap profile. If empty, the prefix in `MALLOC_CONF` will be used
     #[serde(default = "default::auto_dump_heap_profile::dir")]
     pub dir: String,
+
+    /// The proportion (number between 0 and 1) of memory usage to trigger heap profile dump
     #[serde(default = "default::auto_dump_heap_profile::threshold")]
     pub threshold: f32,
-}
-
-impl AutoDumpHeapProfileConfig {
-    pub fn enabled(&self) -> bool {
-        !self.dir.is_empty()
-    }
 }
 
 serde_with::with_prefix!(streaming_prefix "stream_");
@@ -1126,8 +1127,12 @@ pub mod default {
     }
 
     pub mod auto_dump_heap_profile {
+        pub fn enabled() -> bool {
+            true
+        }
+
         pub fn dir() -> String {
-            ".".to_string() // current directory
+            "".to_string()
         }
 
         pub fn threshold() -> f32 {
