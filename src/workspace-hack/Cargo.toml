@@ -210,6 +210,3 @@ uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 zeroize = { version = "1", features = ["zeroize_derive"] }
 
 ### END HAKARI SECTION
-
-[lints]
-workspace = true
