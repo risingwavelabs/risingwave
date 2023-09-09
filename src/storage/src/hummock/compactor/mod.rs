@@ -32,7 +32,6 @@ pub(super) mod task_progress;
 
 use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
-use std::ops::Div;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -61,7 +60,6 @@ use risingwave_pb::hummock::{
 };
 use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::{compact, merge_imms_in_memory};
-use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
@@ -328,12 +326,11 @@ pub fn start_compactor(
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let stream_retry_interval = Duration::from_secs(30);
-    let task_progress = compactor_context.task_progress_manager.clone();
+    let task_progress: Arc<
+        parking_lot::lock_api::Mutex<parking_lot::RawMutex, HashMap<u64, Arc<TaskProgress>>>,
+    > = compactor_context.task_progress_manager.clone();
     let periodic_event_update_interval = Duration::from_millis(1000);
     let cpu_core_num = compactor_context.compaction_executor.worker_num() as u32;
-    let mut system =
-        System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
-    let pid = sysinfo::get_current_pid().unwrap();
     let running_task_count = compactor_context.running_task_count.clone();
     let pull_task_ack = Arc::new(AtomicBool::new(true));
 
@@ -349,7 +346,6 @@ pub fn start_compactor(
         let shutdown_map = CompactionShutdownMap::default();
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
-        let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
 
         // This outer loop is to recreate stream.
         'start_stream: loop {
@@ -385,7 +381,7 @@ pub fn start_compactor(
 
             let executor = compactor_context.compaction_executor.clone();
             let sstable_object_id_manager = sstable_object_id_manager.clone();
-            let mut last_workload = CompactorWorkload::default();
+            let last_workload = CompactorWorkload::default();
 
             // This inner loop is to consume stream or report task progress.
             let mut event_loop_iteration_now = Instant::now();
@@ -404,17 +400,8 @@ pub fn start_compactor(
                 let request_sender = request_sender.clone();
                 let event: Option<Result<SubscribeCompactionEventResponse, _>> = tokio::select! {
                     _ = periodic_event_interval.tick() => {
-                        let mut progress_list = Vec::new();
-                        for (&task_id, progress) in task_progress.lock().iter() {
-                            progress_list.push(CompactTaskProgress {
-                                task_id,
-                                num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
-                                num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
-                                num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
-                                num_pending_read_io: progress.num_pending_read_io.load(Ordering::Relaxed) as u64,
-                                num_pending_write_io: progress.num_pending_write_io.load(Ordering::Relaxed) as u64,
-                            });
-                        }
+                        let progress_list = get_task_progress(task_progress.clone());
+
 
                         if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
                             event: Some(RequestEvent::HeartBeat(
@@ -473,25 +460,6 @@ pub fn start_compactor(
                         continue;
                     }
 
-                    _ = workload_collect_interval.tick() => {
-                        let refresh_result = system.refresh_process_specifics(pid, ProcessRefreshKind::new().with_cpu());
-                        debug_assert!(refresh_result);
-                        let cpu = if let Some(process) = system.process(pid) {
-                            process.cpu_usage().div(cpu_core_num as f32) as u32
-                        } else {
-                            tracing::warn!("fail to get process pid {:?}", pid);
-                            0
-                        };
-
-                        tracing::debug!("compactor cpu usage {cpu}");
-                        let workload = CompactorWorkload {
-                            cpu,
-                        };
-
-                        last_workload = workload.clone();
-
-                        continue;
-                    }
 
                     event = response_event_stream.next() => {
                         event
@@ -657,29 +625,18 @@ pub fn start_shared_compactor(
     let task_progress = context.task_progress_manager.clone();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let periodic_event_update_interval = Duration::from_millis(1000);
-
+    let report_task_client = client.clone();
+    let mut report_heartbeat_client = client;
     let join_handle = tokio::spawn(async move {
         let shutdown_map = CompactionShutdownMap::default();
-        let report_client = client.clone();
+
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
         let executor = context.compaction_executor.clone();
-        let mut heart_beat_client = client.clone();
 
         'consume_stream: loop {
             let request: Option<Request<DispatchCompactionTaskRequest>> = tokio::select! {
                 _ = periodic_event_interval.tick() => {
-                    let mut progress_list = Vec::new();
-                    for (&task_id, progress) in task_progress.lock().iter() {
-                        progress_list.push(CompactTaskProgress {
-                            task_id,
-                            num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
-                            num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
-                            num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
-                            num_pending_read_io: progress.num_pending_read_io.load(Ordering::Relaxed) as u64,
-                            num_pending_write_io: progress.num_pending_write_io.load(Ordering::Relaxed) as u64,
-                        });
-                    }
-
+                    let progress_list = get_task_progress(task_progress.clone());
                     let report_compaction_task_request = ReportCompactionTaskRequest{
                         event: Some(ReportCompactionTaskEvent::HeartBeat(
                             SharedHeartBeat {
@@ -688,7 +645,7 @@ pub fn start_shared_compactor(
                         )),
                      };
 
-                     match heart_beat_client.report_compaction_task(report_compaction_task_request).await{
+                    match report_heartbeat_client.report_compaction_task(report_compaction_task_request).await{
                         Ok(_) => {},
                         Err(_) => tracing::warn!("Failed to report heartbeat"),
                     };
@@ -710,7 +667,7 @@ pub fn start_shared_compactor(
                 Some(request) => {
                     let context = context.clone();
                     let shutdown = shutdown_map.clone();
-                    let mut report_client = report_client.clone();
+                    let mut report_task_client = report_task_client.clone();
                     executor.spawn(async move {
                         let DispatchCompactionTaskRequest {
                             tables,
@@ -756,7 +713,7 @@ pub fn start_shared_compactor(
                                         })),
                                     };
 
-                                    match report_client
+                                    match report_task_client
                                         .report_compaction_task(report_compaction_task_request)
                                         .await
                                     {
@@ -775,7 +732,7 @@ pub fn start_shared_compactor(
                                             let report_vacuum_task_request = ReportVacuumTaskRequest {
                                                 vacuum_task: Some(vacuum_task),
                                             };
-                                            match report_client.report_vacuum_task(report_vacuum_task_request).await {
+                                            match report_task_client.report_vacuum_task(report_vacuum_task_request).await {
                                                 Ok(_) => tracing::info!("Finished vacuuming SSTs"),
                                                 Err(e) => tracing::warn!("Failed to report vacuum task: {:#?}", e),
                                             }
@@ -795,7 +752,7 @@ pub fn start_shared_compactor(
                                                 total_object_count,
                                                 total_object_size,
                                             };
-                                            match report_client
+                                            match report_task_client
                                                 .report_full_scan_task(report_full_scan_task_request)
                                                 .await
                                             {
@@ -838,4 +795,23 @@ pub fn start_shared_compactor(
         }
     });
     (join_handle, shutdown_tx)
+}
+
+fn get_task_progress(
+    task_progress: Arc<
+        parking_lot::lock_api::Mutex<parking_lot::RawMutex, HashMap<u64, Arc<TaskProgress>>>,
+    >,
+) -> Vec<CompactTaskProgress> {
+    let mut progress_list = Vec::new();
+    for (&task_id, progress) in task_progress.lock().iter() {
+        progress_list.push(CompactTaskProgress {
+            task_id,
+            num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
+            num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
+            num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
+            num_pending_read_io: progress.num_pending_read_io.load(Ordering::Relaxed) as u64,
+            num_pending_write_io: progress.num_pending_write_io.load(Ordering::Relaxed) as u64,
+        });
+    }
+    progress_list
 }
