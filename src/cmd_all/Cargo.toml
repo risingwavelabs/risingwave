@@ -64,3 +64,6 @@ tikv-jemallocator = { git = "https://github.com/yuhao-su/jemallocator.git", feat
 [[bin]]
 name = "risingwave"
 path = "src/bin/risingwave.rs"
+
+[lints]
+workspace = true

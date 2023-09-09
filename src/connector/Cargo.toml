@@ -124,3 +124,6 @@ prost-build = "0.11"
 [[bench]]
 name = "parser"
 harness = false
+
+[lints]
+workspace = true

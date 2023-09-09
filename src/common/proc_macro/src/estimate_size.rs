@@ -41,7 +41,7 @@ fn has_nested_flag_attribute(
         if let Some(ident) = meta.path().get_ident() {
             if *ident == name {
                 if let syn::Meta::List(list) = meta {
-                    for nested in list.nested.iter() {
+                    for nested in &list.nested {
                         if let syn::NestedMeta::Meta(syn::Meta::Path(path)) = nested {
                             let path = path
                                 .get_ident()
@@ -65,7 +65,7 @@ pub fn has_nested_flag_attribute_list(
     name: &'static str,
     flag: &'static str,
 ) -> bool {
-    for attr in list.iter() {
+    for attr in list {
         if has_nested_flag_attribute(attr, name, flag) {
             return true;
         }
@@ -77,7 +77,7 @@ pub fn has_nested_flag_attribute_list(
 pub fn extract_ignored_generics_list(list: &[syn::Attribute]) -> Vec<String> {
     let mut collection = Vec::new();
 
-    for attr in list.iter() {
+    for attr in list {
         let mut list = extract_ignored_generics(attr);
 
         collection.append(&mut list);
@@ -95,7 +95,7 @@ pub fn extract_ignored_generics(attr: &syn::Attribute) -> Vec<String> {
                 return collection;
             }
             if let syn::Meta::List(list) = meta {
-                for nested in list.nested.iter() {
+                for nested in &list.nested {
                     if let syn::NestedMeta::Meta(nmeta) = nested {
                         let ident = nmeta
                             .path()
@@ -109,7 +109,7 @@ pub fn extract_ignored_generics(attr: &syn::Attribute) -> Vec<String> {
                         }
 
                         if let syn::Meta::List(list) = nmeta {
-                            for nested in list.nested.iter() {
+                            for nested in &list.nested {
                                 if let syn::NestedMeta::Meta(syn::Meta::Path(path)) = nested {
                                     let path = path
                                         .get_ident()
@@ -134,7 +134,7 @@ pub fn add_trait_bounds(mut generics: syn::Generics, ignored: &[String]) -> syn:
         if let syn::GenericParam::Type(type_param) = param {
             let name = type_param.ident.to_string();
             let mut found = false;
-            for ignored in ignored.iter() {
+            for ignored in ignored {
                 if ignored == &name {
                     found = true;
                     break;

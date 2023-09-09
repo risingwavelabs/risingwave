@@ -170,7 +170,6 @@ pub async fn rpc_serve(
                 opts,
                 init_system_params,
             )
-            .await
         }
         MetaStoreBackend::Mem => {
             let meta_store = MemStore::new().into_ref();
@@ -183,12 +182,12 @@ pub async fn rpc_serve(
                 opts,
                 init_system_params,
             )
-            .await
         }
     }
 }
 
-pub async fn rpc_serve_with_store(
+#[expect(clippy::type_complexity)]
+pub fn rpc_serve_with_store(
     meta_store: MetaStoreRef,
     election_client: Option<ElectionClientRef>,
     address_info: AddressInfo,
@@ -607,11 +606,14 @@ pub async fn start_service_as_election_leader(
         )
         .await,
     );
-    sub_tasks.push(SystemParamsManager::start_params_notifier(system_params_manager.clone()).await);
-    sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager.clone()).await);
-    sub_tasks.push(
-        HummockManager::compaction_event_loop(hummock_manager, compactor_streams_change_rx).await,
-    );
+    sub_tasks.push(SystemParamsManager::start_params_notifier(
+        system_params_manager.clone(),
+    ));
+    sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager.clone()));
+    sub_tasks.push(HummockManager::compaction_event_loop(
+        hummock_manager,
+        compactor_streams_change_rx,
+    ));
     sub_tasks.push(
         serving::start_serving_vnode_mapping_worker(
             env.notification_manager_ref(),
@@ -623,20 +625,18 @@ pub async fn start_service_as_election_leader(
     );
 
     if cfg!(not(test)) {
-        sub_tasks.push(
-            ClusterManager::start_heartbeat_checker(
-                cluster_manager.clone(),
-                Duration::from_secs(1),
-            )
-            .await,
-        );
-        sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
+        sub_tasks.push(ClusterManager::start_heartbeat_checker(
+            cluster_manager.clone(),
+            Duration::from_secs(1),
+        ));
+        sub_tasks.push(GlobalBarrierManager::start(barrier_manager));
     }
     let (idle_send, idle_recv) = tokio::sync::oneshot::channel();
-    sub_tasks.push(
-        IdleManager::start_idle_checker(env.idle_manager_ref(), Duration::from_secs(30), idle_send)
-            .await,
-    );
+    sub_tasks.push(IdleManager::start_idle_checker(
+        env.idle_manager_ref(),
+        Duration::from_secs(30),
+        idle_send,
+    ));
 
     let (abort_sender, abort_recv) = tokio::sync::oneshot::channel();
     let notification_mgr = env.notification_manager_ref();

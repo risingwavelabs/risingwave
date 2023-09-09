@@ -382,7 +382,7 @@ impl GlobalStreamManager {
             })
             .collect();
 
-        for (fragment_id, reschedule) in reschedule.iter() {
+        for (fragment_id, reschedule) in &*reschedule {
             for parallel_unit_id in &reschedule.added_parallel_units {
                 if let Some(worker_id) = unschedulable_parallel_unit_ids.get(parallel_unit_id) {
                     bail!(
@@ -475,7 +475,7 @@ impl GlobalStreamManager {
                 added_parallel_units,
                 removed_parallel_units,
             },
-        ) in reschedule.iter()
+        ) in &*reschedule
         {
             let fragment = fragment_map
                 .get(fragment_id)
@@ -682,7 +682,7 @@ impl GlobalStreamManager {
                     if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
                         fragment_dispatcher_map
                             .entry(actor.fragment_id as FragmentId)
-                            .or_insert(HashMap::new())
+                            .or_default()
                             .insert(
                                 downstream_actor.fragment_id as FragmentId,
                                 dispatcher.r#type(),
@@ -1549,7 +1549,7 @@ impl GlobalStreamManager {
                     {
                         dispatcher
                             .downstream_actor_id
-                            .drain_filter(|id| downstream_actors_to_remove.contains_key(id));
+                            .retain(|id| !downstream_actors_to_remove.contains_key(id));
                     }
 
                     if let Some(downstream_actors_to_create) = downstream_fragment_actors_to_create
@@ -1902,8 +1902,8 @@ impl GlobalStreamManager {
             }
         }
 
-        target_plan.drain_filter(|_, plan| {
-            plan.added_parallel_units.is_empty() && plan.removed_parallel_units.is_empty()
+        target_plan.retain(|_, plan| {
+            !(plan.added_parallel_units.is_empty() && plan.removed_parallel_units.is_empty())
         });
 
         Ok(target_plan)

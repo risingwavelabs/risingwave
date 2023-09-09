@@ -100,3 +100,6 @@ harness = false
 [[bench]]
 name = "limit"
 harness = false
+
+[lints]
+workspace = true

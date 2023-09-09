@@ -6,6 +6,8 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+RUST_TOOLCHAIN=$(cat rust-toolchain)
+
 QUERY_DIR="/risingwave/ci/scripts/sql/nexmark"
 
 # TODO(kwannoel): This is a workaround since workdir is `/risingwave` in the docker container.
@@ -79,7 +81,7 @@ install_all() {
   git clone https://github.com/gimli-rs/addr2line
   pushd addr2line
   git checkout 0.20.0
-  echo "nightly-2023-04-07" > rust-toolchain
+  echo "$RUST_TOOLCHAIN" > rust-toolchain
   cargo b --examples -r
   mv ./target/release/examples/addr2line $(which addr2line)
   popd

@@ -52,3 +52,6 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
+
+[lints]
+workspace = true

@@ -51,3 +51,6 @@ tokio = { version = "0.2.23", package = "madsim-tokio" }
 tokio-postgres = "0.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints]
+workspace = true

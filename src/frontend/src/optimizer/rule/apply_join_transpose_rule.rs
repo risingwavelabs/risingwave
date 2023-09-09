@@ -435,7 +435,7 @@ impl ApplyJoinTransposeRule {
                 .clone()
                 .into_iter()
                 .map(|expr| rewriter.rewrite_expr(expr))
-                .chain(natural_conjunctions.into_iter())
+                .chain(natural_conjunctions)
                 .collect_vec(),
         };
 

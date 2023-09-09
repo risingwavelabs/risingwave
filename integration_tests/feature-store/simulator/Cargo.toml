@@ -20,3 +20,6 @@ prost = "0.10"
 serde = { version = "1", features = ["derive"] }
 futures = "0.3.0"
 csv = "1.2.2"
+
+[lints]
+workspace = true
