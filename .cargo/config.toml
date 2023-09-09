@@ -57,3 +57,6 @@ rustflags = [
     "-Wnonstandard_style",
     "-Wrust_2018_idioms",
 ]
+
+[unstable]
+lints = true

@@ -208,5 +208,7 @@ unicode-normalization = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 zeroize = { version = "1", features = ["zeroize_derive"] }
-
 ### END HAKARI SECTION
+
+[lints]
+workspace = true

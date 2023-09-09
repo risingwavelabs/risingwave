@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rustdoc::private_intra_doc_links)]
+#![expect(
+    refining_impl_trait,
+    reason = "Some of the Row::iter() implementations returns ExactSizeIterator. Is this reasonable?"
+)]
 #![feature(extract_if)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]

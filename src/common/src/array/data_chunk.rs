@@ -67,7 +67,7 @@ pub struct DataChunk {
 }
 
 impl DataChunk {
-    pub(crate) const PRETTY_TABLE_PRESET: &str = "||--+-++|    ++++++";
+    pub(crate) const PRETTY_TABLE_PRESET: &'static str = "||--+-++|    ++++++";
 
     /// Create a `DataChunk` with `columns` and visibility. The visibility can either be a `Bitmap`
     /// or a simple cardinality number.

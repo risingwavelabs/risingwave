@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![allow(rustdoc::private_intra_doc_links)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
