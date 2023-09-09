@@ -5508,7 +5508,7 @@ dependencies = [
  "risingwave_sqlparser",
  "thiserror",
  "tokio-openssl",
- "tokio-postgres 0.7.8",
+ "tokio-postgres",
  "tracing",
  "workspace-hack",
 ]
@@ -5675,16 +5675,16 @@ checksum = "31114a898e107c51bb1609ffaf55a0e011cf6a4d7f1170d0015a165082c0338b"
 
 [[package]]
 name = "postgres"
-version = "0.19.7"
+version = "0.19.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7915b33ed60abc46040cbcaa25ffa1c7ec240668e0477c4f3070786f5916d451"
+checksum = "0bed5017bc2ff49649c0075d0d7a9d676933c1292480c1d137776fb205b5cd18"
 dependencies = [
  "bytes",
  "fallible-iterator",
  "futures-util",
  "log",
  "tokio",
- "tokio-postgres 0.7.10",
+ "tokio-postgres",
 ]
 
 [[package]]
@@ -6994,7 +6994,7 @@ dependencies = [
  "madsim-tokio",
  "pg_interval",
  "rust_decimal",
- "tokio-postgres 0.7.8",
+ "tokio-postgres",
  "tracing",
  "tracing-subscriber",
 ]
@@ -7466,7 +7466,7 @@ dependencies = [
  "sqllogictest",
  "tempfile",
  "tikv-jemallocator",
- "tokio-postgres 0.7.8",
+ "tokio-postgres",
  "tracing",
  "tracing-subscriber",
 ]
@@ -7541,7 +7541,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_sqlparser",
  "similar",
- "tokio-postgres 0.7.8",
+ "tokio-postgres",
  "tracing",
  "tracing-subscriber",
  "workspace-hack",
@@ -7560,7 +7560,7 @@ dependencies = [
  "risingwave_rt",
  "serde",
  "serde_with 3.3.0",
- "tokio-postgres 0.7.8",
+ "tokio-postgres",
  "tokio-stream",
  "toml 0.7.8",
  "tracing",
@@ -9181,32 +9181,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-postgres"
-version = "0.7.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d340244b32d920260ae7448cb72b6e238bddc3d4f7603394e7dd46ed8e48f5b8"
-dependencies = [
- "async-trait",
- "byteorder",
- "bytes",
- "fallible-iterator",
- "futures-channel",
- "futures-util",
- "log",
- "parking_lot 0.12.1",
- "percent-encoding",
- "phf",
- "pin-project-lite",
- "postgres-protocol",
- "postgres-types",
- "rand",
- "socket2 0.5.3",
- "tokio",
- "tokio-util",
- "whoami",
-]
-
-[[package]]
 name = "tokio-retry"
 version = "0.3.0"
 source = "git+https://github.com/madsim-rs/rust-tokio-retry.git?rev=95e2fd3#95e2fd3c31047093869346f5253335c3876a483f"
@@ -9906,16 +9880,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "whoami"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22fc3756b8a9133049b26c7f61ab35416c130e8c09b660f5b3958b446f52cc50"
-dependencies = [
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10206,7 +10170,7 @@ dependencies = [
  "time-macros",
  "tinyvec",
  "tokio",
- "tokio-postgres 0.7.8",
+ "tokio-postgres",
  "tokio-stream",
  "tokio-util",
  "toml_datetime",
