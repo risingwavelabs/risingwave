@@ -87,7 +87,7 @@ fn shrink(sql: &str) -> Result<String> {
     let sql = reduced_statements
         .iter()
         .fold(String::new(), |mut output, s| {
-            let _ = write!(output, "{s};\n");
+            let _ = writeln!(output, "{s};");
             output
         });
 
