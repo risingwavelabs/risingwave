@@ -66,15 +66,40 @@ RUN apt-get -y install maven
 RUN mkdir -p /risingwave
 WORKDIR /risingwave/java
 
-# TODO: cache dependencies for java before building
+# 1. add pom.xml only here
+# generated via: fd pom.xml | xargs -I {} echo 'COPY {} /risingwave/{}'
+COPY java/common-utils/pom.xml /risingwave/java/common-utils/pom.xml
+COPY java/connector-node/assembly/pom.xml /risingwave/java/connector-node/assembly/pom.xml
+COPY java/connector-node/connector-api/pom.xml /risingwave/java/connector-node/connector-api/pom.xml
+COPY java/connector-node/risingwave-connector-service/pom.xml /risingwave/java/connector-node/risingwave-connector-service/pom.xml
+COPY java/connector-node/risingwave-connector-test/pom.xml /risingwave/java/connector-node/risingwave-connector-test/pom.xml
+COPY java/connector-node/risingwave-sink-cassandra/pom.xml /risingwave/java/connector-node/risingwave-sink-cassandra/pom.xml
+COPY java/connector-node/risingwave-sink-deltalake/pom.xml /risingwave/java/connector-node/risingwave-sink-deltalake/pom.xml
+COPY java/connector-node/risingwave-sink-es-7/pom.xml /risingwave/java/connector-node/risingwave-sink-es-7/pom.xml
+COPY java/connector-node/risingwave-sink-iceberg/pom.xml /risingwave/java/connector-node/risingwave-sink-iceberg/pom.xml
+COPY java/connector-node/risingwave-sink-jdbc/pom.xml /risingwave/java/connector-node/risingwave-sink-jdbc/pom.xml
+COPY java/connector-node/risingwave-source-cdc/pom.xml /risingwave/java/connector-node/risingwave-source-cdc/pom.xml
+COPY java/connector-node/s3-common/pom.xml /risingwave/java/connector-node/s3-common/pom.xml
+COPY java/java-binding/pom.xml /risingwave/java/java-binding/pom.xml
+COPY java/java-binding-benchmark/pom.xml /risingwave/java/java-binding-benchmark/pom.xml
+COPY java/java-binding-integration-test/pom.xml /risingwave/java/java-binding-integration-test/pom.xml
+COPY java/pom.xml /risingwave/java/pom.xml
+COPY java/proto/pom.xml /risingwave/java/proto/pom.xml
+COPY java/udf/pom.xml /risingwave/java/udf/pom.xml
+COPY java/udf-example/pom.xml /risingwave/java/udf-example/pom.xml
 
-COPY ./src/java_binding /risingwave/java_binding
-COPY Cargo.toml Cargo.lock /risingwave/
-COPY ./java /risingwave/java
+# 2. start downloading dependencies
+RUN mvn dependency:go-offline --fail-never
+
+# 3. add all source code and start compiling
+# TODO: only add java related code so that changing rust code won't recompile java code
+# Currently java-binding depends on the workspace Cargo.toml, which depends on the whole rust codebase
+# Besides, rust-maven-plugin sets --target-dir, so the dependencies are built twice. How to dedup?
+COPY ./ /risingwave
 
 RUN mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true
 RUN mkdir -p /risingwave/bin/connector-node && \
-    tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
+  tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
 FROM base AS runtime
 
