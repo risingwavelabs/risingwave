@@ -11,18 +11,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Check free space
+      - name: Check free space before maximizing
         run: df -h
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 512
-          swap-size-mb: 1024
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
-      - name: Check free space after cleaning
-        run: df -h
       - uses: actions/checkout@v3
       - name: Setup Rust toolchain
         run: |
