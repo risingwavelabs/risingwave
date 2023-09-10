@@ -101,7 +101,7 @@ RUN mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true
 RUN mkdir -p /risingwave/bin/connector-node && \
   tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
-FROM base AS runtime
+FROM base AS risingwave
 
 LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
 
