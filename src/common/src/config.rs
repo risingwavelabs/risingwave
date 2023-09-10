@@ -736,8 +736,9 @@ pub struct BatchDeveloperConfig {
     pub chunk_size: usize,
 }
 
-/// The section `[system]` in `risingwave.toml`. This section is only for testing purpose and should
-/// not be documented.
+/// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
+/// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
+/// documented.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct SystemConfig {
     /// The interval of periodic barrier.
@@ -778,9 +779,6 @@ pub struct SystemConfig {
     #[serde(default = "default::system::backup_storage_directory")]
     pub backup_storage_directory: Option<String>,
 
-    #[serde(default = "default::system::telemetry_enabled")]
-    pub telemetry_enabled: Option<bool>,
-
     /// Max number of concurrent creating streaming jobs.
     #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
     pub max_concurrent_creating_streaming_jobs: Option<u32>,
@@ -791,6 +789,7 @@ pub struct SystemConfig {
 }
 
 impl SystemConfig {
+    #![allow(deprecated)]
     pub fn into_init_system_params(self) -> SystemParams {
         SystemParams {
             barrier_interval_ms: self.barrier_interval_ms,
@@ -803,9 +802,9 @@ impl SystemConfig {
             data_directory: self.data_directory,
             backup_storage_url: self.backup_storage_url,
             backup_storage_directory: self.backup_storage_directory,
-            telemetry_enabled: self.telemetry_enabled,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
             pause_on_next_bootstrap: self.pause_on_next_bootstrap,
+            telemetry_enabled: None, // deprecated
         }
     }
 }

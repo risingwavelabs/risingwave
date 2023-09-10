@@ -13,8 +13,8 @@
 // limitations under the License.
 
 #![feature(async_closure)]
-#![feature(drain_filter)]
-#![feature(hash_drain_filter)]
+#![feature(extract_if)]
+#![feature(hash_extract_if)]
 #![feature(lint_reasons)]
 #![feature(map_many_mut)]
 #![feature(bound_map)]

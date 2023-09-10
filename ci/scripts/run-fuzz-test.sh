@@ -8,7 +8,7 @@ export RUST_LOG=info
 
 if [[ $RUN_SQLSMITH_FRONTEND -eq "1" ]]; then
     echo "--- Run sqlsmith frontend tests"
-     NEXTEST_PROFILE=ci cargo nextest run --package risingwave_sqlsmith --features "enable_sqlsmith_unit_test" 2> >(tee);
+    NEXTEST_PROFILE=ci cargo nextest run --package risingwave_sqlsmith --features "enable_sqlsmith_unit_test"
 fi
 
 extract_error_sql() {

@@ -135,3 +135,6 @@ harness = false
 [[bench]]
 name = "bench_row"
 harness = false
+
+[lints]
+workspace = true

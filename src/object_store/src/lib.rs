@@ -17,7 +17,6 @@
 #![feature(lazy_cell)]
 #![feature(lint_reasons)]
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
 #![feature(let_chains)]
 
 pub mod object;
