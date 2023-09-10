@@ -59,7 +59,7 @@ RUN mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /rising
   mkdir -p /risingwave/lib && cargo clean
 
 # We use rust-maven-plugin to build java-binding. So it's FROM rust-base
-FROM rust-base as java-builder
+FROM rust-base AS java-builder
 
 RUN apt-get -y install maven
 
