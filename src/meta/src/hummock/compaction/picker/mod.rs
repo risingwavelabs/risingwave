@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod partition_level_compaction_picker;
 mod base_level_compaction_picker;
-mod intral_sub_level_picker;
 mod intra_compaction_picker;
 mod manual_compaction_picker;
 mod min_overlap_compaction_picker;
+mod partition_intral_sub_level_picker;
+mod partition_level_compaction_picker;
 mod space_reclaim_compaction_picker;
 mod tier_compaction_picker;
 mod tombstone_reclaim_compaction_picker;
 mod trivial_move_compaction_picker;
 mod ttl_reclaim_compaction_picker;
 
+pub use partition_intral_sub_level_picker::*;
 pub use partition_level_compaction_picker::PartitionLevelCompactionPicker;
-pub use intral_sub_level_picker::*;
 mod compaction_task_validator;
 
 pub use base_level_compaction_picker::LevelCompactionPicker;

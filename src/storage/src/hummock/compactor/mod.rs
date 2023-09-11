@@ -62,12 +62,9 @@ use super::{
     SstableObjectIdManager, Xor16FilterBuilder,
 };
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
-use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
-};
+use crate::hummock::builder::SplitTableOutput;
 use crate::hummock::compactor::compactor_runner::compact_and_build_sst;
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::multi_builder::SplitTableOutput;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
     validate_ssts, BatchSstableWriterFactory, BlockedXor16FilterBuilder, FilterBuilder,
@@ -339,7 +336,7 @@ impl Compactor {
             .verbose_instrument_await("builder_finish")
             .await?;
 
-        Ok((ssts, compaction_statistics))
+        HummockResult::Ok((ssts, compaction_statistics))
     }
 }
 

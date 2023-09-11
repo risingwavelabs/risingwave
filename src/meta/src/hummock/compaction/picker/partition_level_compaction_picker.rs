@@ -22,14 +22,14 @@ use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, Ove
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::create_overlap_strategy;
 use crate::hummock::compaction::picker::{
-    partition_sub_levels, IntraSubLevelPicker, SubLevelPartition, TrivialMovePicker,
+    partition_sub_levels, LevelPartition, PartitionIntraSubLevelPicker, TrivialMovePicker,
 };
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct PartitionLevelCompactionPicker {
     target_level: usize,
     config: Arc<CompactionConfig>,
-    base_level_partitions: Vec<SubLevelPartition>,
+    base_level_partitions: Vec<LevelPartition>,
 }
 
 impl CompactionPicker for PartitionLevelCompactionPicker {
@@ -74,19 +74,10 @@ impl CompactionPicker for PartitionLevelCompactionPicker {
 }
 
 impl PartitionLevelCompactionPicker {
-    #[cfg(test)]
-    pub fn for_test(target_level: usize, config: Arc<CompactionConfig>) -> PartitionLevelCompactionPicker {
-        PartitionLevelCompactionPicker {
-            target_level,
-            config,
-            base_level_partitions: vec![],
-        }
-    }
-
     pub fn new(
         target_level: usize,
         config: Arc<CompactionConfig>,
-        base_level_partitions: Vec<SubLevelPartition>,
+        base_level_partitions: Vec<LevelPartition>,
     ) -> PartitionLevelCompactionPicker {
         PartitionLevelCompactionPicker {
             target_level,
@@ -118,7 +109,7 @@ impl PartitionLevelCompactionPicker {
         &self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
-        l0_partitions: Vec<SubLevelPartition>,
+        l0_partitions: Vec<LevelPartition>,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let l0 = levels.l0.as_ref().unwrap();
@@ -134,8 +125,7 @@ impl PartitionLevelCompactionPicker {
             .min()
             .unwrap_or(0);
         let vnode_partition_count = levels.vnode_partition_count;
-        if min_sub_level_id > 0 && !self.base_level_partitions.is_empty()
-        {
+        if min_sub_level_id > 0 && !self.base_level_partitions.is_empty() {
             let partitions_score = self
                 .base_level_partitions
                 .iter()
@@ -223,7 +213,8 @@ impl PartitionLevelCompactionPicker {
                         target_sub_level_id: 0,
                         select_input_size: total_file_size,
                         target_input_size: target_part.total_file_size,
-                        total_file_count: total_file_count + (target_part.right_idx - target_part.left_idx) as u64,
+                        total_file_count: total_file_count
+                            + (target_part.right_idx - target_part.left_idx) as u64,
                         vnode_partition_count,
                     });
                 }
@@ -278,7 +269,7 @@ impl PartitionLevelCompactionPicker {
                 target_sub_level_id: 0,
                 select_input_size: total_file_size,
                 target_input_size: target_level.total_file_size,
-                total_file_count: total_file_count + target_level.table_infos.len(),
+                total_file_count: total_file_count + target_level.table_infos.len() as u64,
                 vnode_partition_count,
             });
         }
@@ -291,10 +282,10 @@ impl PartitionLevelCompactionPicker {
         &self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
-        partitions: Vec<SubLevelPartition>,
+        partitions: Vec<LevelPartition>,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let mut picker = IntraSubLevelPicker::new(self.config.clone(), partitions);
+        let mut picker = PartitionIntraSubLevelPicker::new(self.config.clone(), partitions);
         picker.pick_compaction(levels, level_handlers, stats)
     }
 }

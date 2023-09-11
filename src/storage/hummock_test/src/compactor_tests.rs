@@ -44,7 +44,7 @@ pub(crate) mod tests {
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use risingwave_meta::hummock::compaction::{
         default_level_selector, partition_level, partition_sub_levels, CompactStatus,
-        LevelSelector, LocalSelectorStatistic, ManualCompactionOption, SubLevelPartition,
+        LevelPartition, LevelSelector, LocalSelectorStatistic, ManualCompactionOption,
     };
     use risingwave_meta::hummock::model::CompactionGroup;
     use risingwave_meta::hummock::test_utils::{
@@ -52,7 +52,6 @@ pub(crate) mod tests {
         unregister_table_ids_from_compaction_group,
     };
     use risingwave_meta::hummock::{HummockManagerRef, LevelHandler, MockHummockMetaClient};
-    use risingwave_meta::storage::MetaStore;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::hummock::compact_task::TaskStatus;
     use risingwave_pb::hummock::hummock_version::Levels;
@@ -65,12 +64,13 @@ pub(crate) mod tests {
         FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
         FixedLengthFilterKeyExtractor, FullKeyFilterKeyExtractor,
     };
-    use risingwave_storage::hummock::compactor::{
-        CompactionExecutor, Compactor, CompactorContext, ConcatSstableIterator,
-        DummyCompactionFilter, TaskConfig, TaskProgress,
+    use risingwave_storage::hummock::compactor::compactor_runner::{
+        compact, compact_and_build_sst,
     };
-
-    use risingwave_storage::hummock::compactor::compactor_runner::compact;
+    use risingwave_storage::hummock::compactor::{
+        CompactionExecutor, CompactorContext, ConcatSstableIterator, DummyCompactionFilter,
+        TaskConfig, TaskProgress,
+    };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::iterator::UnorderedMergeIteratorInner;
     use risingwave_storage::hummock::multi_builder::{
@@ -1416,7 +1416,7 @@ pub(crate) mod tests {
             uncompressed_file_size: 100,
             vnode_partition_count,
         };
-        let mut partitions = vec![SubLevelPartition::default(); vnode_partition_count as usize];
+        let mut partitions = vec![LevelPartition::default(); vnode_partition_count as usize];
         assert!(partition_level(
             table_id.table_id,
             vnode_partition_count as usize,
@@ -1769,7 +1769,7 @@ pub(crate) mod tests {
                 task.split_weight_by_vnode,
             );
             let iter = UnorderedMergeIteratorInner::for_compactor(table_iters);
-            Compactor::compact_and_build_sst(
+            compact_and_build_sst(
                 &mut sst_builder,
                 Arc::new(CompactionDeleteRanges::default()),
                 &TaskConfig {

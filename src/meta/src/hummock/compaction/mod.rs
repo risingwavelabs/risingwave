@@ -28,7 +28,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use picker::{PartitionLevelCompactionPicker, ManualCompactionPicker, TierCompactionPicker};
+use picker::{ManualCompactionPicker, PartitionLevelCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::{
     can_concat, CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
 };
@@ -45,7 +45,7 @@ use crate::hummock::compaction::picker::{
     can_partition_level, CompactionInput, LocalPickerStatistic,
 };
 pub use crate::hummock::compaction::picker::{
-    partition_level, partition_sub_levels, SubLevelPartition,
+    partition_level, partition_sub_levels, LevelPartition,
 };
 pub use crate::hummock::compaction::tombstone_compaction_selector::TombstoneCompactionSelector;
 use crate::hummock::level_handler::LevelHandler;

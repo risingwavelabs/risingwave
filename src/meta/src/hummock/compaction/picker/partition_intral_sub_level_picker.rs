@@ -31,7 +31,7 @@ use crate::hummock::compaction::picker::{
 use crate::hummock::level_handler::LevelHandler;
 
 #[derive(Default, Clone, Debug)]
-pub struct PartitionInfo {
+pub struct PartitionLevelInfo {
     pub level_id: u32,
     pub sub_level_id: u64,
     pub left_idx: usize,
@@ -40,18 +40,18 @@ pub struct PartitionInfo {
 }
 
 #[derive(Default, Clone, Debug)]
-pub struct SubLevelPartition {
-    pub sub_levels: Vec<PartitionInfo>,
+pub struct LevelPartition {
+    pub sub_levels: Vec<PartitionLevelInfo>,
     pub total_file_size: u64,
 }
 
-pub struct IntraSubLevelPicker {
+pub struct PartitionIntraSubLevelPicker {
     config: Arc<CompactionConfig>,
-    partitions: Vec<SubLevelPartition>,
+    partitions: Vec<LevelPartition>,
 }
 
-impl IntraSubLevelPicker {
-    pub fn new(config: Arc<CompactionConfig>, partitions: Vec<SubLevelPartition>) -> Self {
+impl PartitionIntraSubLevelPicker {
+    pub fn new(config: Arc<CompactionConfig>, partitions: Vec<LevelPartition>) -> Self {
         Self { config, partitions }
     }
 
@@ -125,19 +125,21 @@ impl IntraSubLevelPicker {
                 target_level: 0,
                 target_sub_level_id: l0.sub_levels[target_level_idx].sub_level_id,
                 vnode_partition_count: 0,
+                ..Default::default()
             });
         }
         None
     }
 }
 
-impl CompactionPicker for IntraSubLevelPicker {
+impl CompactionPicker for PartitionIntraSubLevelPicker {
     fn pick_compaction(
         &mut self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
+        assert!(levels.can_partition_by_vnode());
         let l0 = levels.l0.as_ref().unwrap();
         let max_sub_level_id = self
             .partitions
@@ -210,9 +212,7 @@ impl CompactionPicker for IntraSubLevelPicker {
             }
 
             if input_levels.len() < self.config.level0_sub_level_compact_level_count as usize
-                && (!levels.can_partition_by_vnode()
-                    || !wait_enough
-                    || level.vnode_partition_count > 0)
+                && !wait_enough
             {
                 continue;
             }
@@ -229,6 +229,9 @@ impl CompactionPicker for IntraSubLevelPicker {
                 input_levels,
                 target_level: 0,
                 target_sub_level_id: level.sub_level_id,
+                select_input_size: 0,
+                target_input_size: 0,
+                total_file_count: 0,
                 vnode_partition_count,
             });
         }
@@ -296,6 +299,7 @@ impl CompactionPicker for IntraSubLevelPicker {
                     target_level: 0,
                     target_sub_level_id: l0.sub_levels[idx].sub_level_id,
                     vnode_partition_count: levels.vnode_partition_count,
+                    ..Default::default()
                 });
             }
         }
@@ -308,7 +312,7 @@ impl CompactionPicker for IntraSubLevelPicker {
     }
 }
 
-pub fn partition_sub_levels(levels: &Levels) -> Vec<SubLevelPartition> {
+pub fn partition_sub_levels(levels: &Levels) -> Vec<LevelPartition> {
     if levels.member_table_ids.len() != 1 || levels.vnode_partition_count == 0 {
         return vec![];
     }
@@ -319,7 +323,7 @@ pub fn partition_sub_levels(levels: &Levels) -> Vec<SubLevelPartition> {
     }
     let mut partitions = Vec::with_capacity(partition_vnode_count);
     for _ in 0..partition_vnode_count {
-        partitions.push(SubLevelPartition::default());
+        partitions.push(LevelPartition::default());
     }
     for level in &levels.l0.as_ref().unwrap().sub_levels {
         if level.level_type() != LevelType::Nonoverlapping || level.vnode_partition_count == 0 {
@@ -423,7 +427,7 @@ pub fn partition_level(
     table_id: u32,
     partition_vnode_count: usize,
     level: &Level,
-    partitions: &mut Vec<SubLevelPartition>,
+    partitions: &mut Vec<LevelPartition>,
 ) -> bool {
     assert_eq!(partition_vnode_count, partitions.len());
     let mut left_idx = 0;
@@ -451,7 +455,7 @@ pub fn partition_level(
             left_idx += 1;
         }
         if left_idx >= level.table_infos.len() {
-            partition.sub_levels.push(PartitionInfo {
+            partition.sub_levels.push(PartitionLevelInfo {
                 sub_level_id: level.sub_level_id,
                 left_idx: 0,
                 right_idx: 0,
@@ -510,7 +514,7 @@ pub fn partition_level(
             break;
         }
         partition.total_file_size += total_file_size;
-        partition.sub_levels.push(PartitionInfo {
+        partition.sub_levels.push(PartitionLevelInfo {
             sub_level_id: level.sub_level_id,
             left_idx,
             right_idx,
