@@ -125,7 +125,7 @@ impl JemallocMemoryControl {
             {
                 tracing::warn!("Auto Jemalloc dump heap file failed! {:?}", e);
             }
-            unsafe { Box::from_raw(file_path_ptr) };
+            let _ = unsafe { Box::from_raw(file_path_ptr) };
         }
     }
 }

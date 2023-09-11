@@ -19,3 +19,6 @@ criterion = { workspace = true }
 [[bench]]
 name = "sqlparser_bench"
 harness = false
+
+[lints]
+workspace = true

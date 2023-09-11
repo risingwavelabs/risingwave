@@ -512,7 +512,7 @@ impl TestSuite {
         let rows = new_client
             .query(&format!("{} LIMIT 10", query_sql), &[])
             .await?;
-        let expect_ans = vec![
+        let expect_ans = [
             (1, 1, 1),
             (10, 10, 10),
             (100, 100, 100),

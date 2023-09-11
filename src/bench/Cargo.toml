@@ -55,3 +55,6 @@ path = "s3_bench/main.rs"
 [features]
 bpf = ["bcc", "risingwave_storage/bpf"]
 trace = ["opentelemetry", "risingwave_rt", "tracing/release_max_level_trace"]
+
+[lints]
+workspace = true
