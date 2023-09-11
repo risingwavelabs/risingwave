@@ -177,7 +177,7 @@ impl SortOverWindowExecutor {
     ) {
         let mut states =
             WindowStates::new(this.calls.iter().map(create_window_state).try_collect()?);
-        for row in rows.iter() {
+        for row in &*rows {
             for (call, state) in this.calls.iter().zip_eq_fast(states.iter_mut()) {
                 // TODO(rc): batch appending
                 state.append(

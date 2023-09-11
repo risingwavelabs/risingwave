@@ -54,7 +54,6 @@ macro_rules! for_all_undeprecated_params {
             { data_directory, String, None, false },
             { backup_storage_url, String, Some("memory".to_string()), false },
             { backup_storage_directory, String, Some("backup".to_string()), false },
-            { telemetry_enabled, bool, Some(true), true },
             { max_concurrent_creating_streaming_jobs, u32, Some(1_u32), true },
             { pause_on_next_bootstrap, bool, Some(false), true },
             $({ $field, $type, $default, $is_mutable },)*
@@ -369,7 +368,6 @@ mod tests {
             (DATA_DIRECTORY_KEY, "a"),
             (BACKUP_STORAGE_URL_KEY, "a"),
             (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
-            (TELEMETRY_ENABLED_KEY, "false"),
             (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
             (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
         ];

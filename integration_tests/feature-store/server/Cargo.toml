@@ -26,3 +26,6 @@ tonic-build = "0.7.1"
 [[bin]]
 name = "server"
 path = "src/main.rs"
+
+[lints]
+workspace = true

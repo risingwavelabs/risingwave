@@ -90,7 +90,7 @@ where
                         .values_stream()
                         .try_next()
                         .await
-                        .map_err(|err| PsqlError::ExecuteError(err))?
+                        .map_err(PsqlError::ExecuteError)?
                     {
                         rows.into_iter()
                     } else {

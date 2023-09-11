@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(io_error_other)]
 #![feature(lint_reasons)]
 #![feature(trait_alias)]
 #![feature(result_option_inspect)]
