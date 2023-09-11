@@ -13,19 +13,20 @@
 // limitations under the License.
 
 use risingwave_common::array::ListRef;
-use risingwave_common::types::{Scalar, ToOwnedDatum};
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_expr_macro::function;
 
-use crate::Result;
-
-#[function("array_access(anyarray, int32) -> any")]
-fn array_access(list: ListRef<'_>, index: i32) -> DatumRef<'_> {
+#[function(
+    "array_access(anyarray, int32) -> any",
+    type_infer = "|args| Ok(args[0].as_list().clone())"
+)]
+fn array_access(list: ListRef<'_>, index: i32) -> Option<ScalarRefImpl<'_>> {
     // index must be greater than 0 following a one-based numbering convention for arrays
     if index < 1 {
         return None;
     }
     // returns `NULL` if index is out of bounds
-    list.elem_at(index as usize - 1).flatten();
+    list.elem_at(index as usize - 1).flatten()
 }
 
 #[cfg(test)]
@@ -45,10 +46,10 @@ mod tests {
         ]);
         let l1 = ListRef::ValueRef { val: &v1 };
 
-        assert_eq!(array_access::<i32>(l1, 1).unwrap(), Some(1));
-        assert_eq!(array_access::<i32>(l1, -1).unwrap(), None);
-        assert_eq!(array_access::<i32>(l1, 0).unwrap(), None);
-        assert_eq!(array_access::<i32>(l1, 4).unwrap(), None);
+        assert_eq!(array_access(l1, 1), Some(1.into()));
+        assert_eq!(array_access(l1, -1), None);
+        assert_eq!(array_access(l1, 0), None);
+        assert_eq!(array_access(l1, 4), None);
     }
 
     #[test]
@@ -69,18 +70,9 @@ mod tests {
         let l2 = ListRef::ValueRef { val: &v2 };
         let l3 = ListRef::ValueRef { val: &v3 };
 
-        assert_eq!(
-            array_access::<Box<str>>(l1, 1).unwrap(),
-            Some("来自".into())
-        );
-        assert_eq!(
-            array_access::<Box<str>>(l2, 2).unwrap(),
-            Some("荷兰".into())
-        );
-        assert_eq!(
-            array_access::<Box<str>>(l3, 3).unwrap(),
-            Some("的爱".into())
-        );
+        assert_eq!(array_access(l1, 1), Some("来自".into()));
+        assert_eq!(array_access(l2, 2), Some("荷兰".into()));
+        assert_eq!(array_access(l3, 3), Some("的爱".into()));
     }
 
     #[test]
@@ -97,11 +89,14 @@ mod tests {
         ]);
         let l = ListRef::ValueRef { val: &v };
         assert_eq!(
-            array_access::<ListValue>(l, 1).unwrap(),
-            Some(ListValue::new(vec![
-                Some(ScalarImpl::Utf8("foo".into())),
-                Some(ScalarImpl::Utf8("bar".into())),
-            ]))
+            array_access(l, 1),
+            Some(
+                ListRef::from(&ListValue::new(vec![
+                    Some(ScalarImpl::Utf8("foo".into())),
+                    Some(ScalarImpl::Utf8("bar".into())),
+                ]))
+                .into()
+            )
         );
     }
 }

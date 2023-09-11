@@ -73,7 +73,10 @@ use crate::Result;
 /// statement error
 /// select trim_array(array[1,2,3,4,5,null], true);
 /// ```
-#[function("trim_array(anyarray, int32) -> anyarray")]
+#[function(
+    "trim_array(anyarray, int32) -> anyarray",
+    type_infer = "|args| Ok(args[0].clone())"
+)]
 fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
     let values = array.iter();
     let len_to_trim: usize = n.try_into().map_err(|_| ExprError::InvalidParam {

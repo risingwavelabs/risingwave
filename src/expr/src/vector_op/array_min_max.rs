@@ -13,31 +13,13 @@
 // limitations under the License.
 
 use risingwave_common::array::*;
-use risingwave_common::types::{DefaultOrdered, Scalar, ToOwnedDatum};
+use risingwave_common::types::{DefaultOrdered, ScalarRefImpl};
 use risingwave_expr_macro::function;
 
-use crate::Result;
-
-#[function("array_min(int16[]) -> int16")]
-#[function("array_min(int32[]) -> int32")]
-#[function("array_min(int64[]) -> int64")]
-#[function("array_min(float32[]) -> float32")]
-#[function("array_min(float64[]) -> float64")]
-#[function("array_min(decimal[]) -> decimal")]
-#[function("array_min(serial[]) -> serial")]
-#[function("array_min(int256[]) -> int256")]
-#[function("array_min(date[]) -> date")]
-#[function("array_min(time[]) -> time")]
-#[function("array_min(timestamp[]) -> timestamp")]
-#[function("array_min(timestamptz[]) -> timestamptz")]
-#[function("array_min(varchar[]) -> varchar")]
-#[function("array_min(bytea[]) -> bytea")]
-pub fn array_min(list: ListRef<'_>) -> Result<Option<impl Scalar>> {
+#[function("array_min(anyarray) -> any")]
+pub fn array_min(list: ListRef<'_>) -> Option<ScalarRefImpl<'_>> {
     let min_value = list.iter().flatten().map(DefaultOrdered).min();
-    match min_value.map(|v| v.0).to_owned_datum() {
-        Some(s) => Ok(Some(s.try_into()?)),
-        None => Ok(None),
-    }
+    min_value.map(|v| v.0)
 }
 
 #[function("array_max(list) -> *int")]

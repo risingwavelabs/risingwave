@@ -53,10 +53,11 @@ impl FunctionAttr {
             Ok(func.parse().unwrap())
         } else {
             if matches!(self.ret.as_str(), "any" | "anyarray" | "struct") {
-                return Err(Error::new(
-                    Span::call_site(),
-                    format!("type inference function is required for {}", self.ret),
-                ));
+                return Ok(quote! { |_| todo!("type infer") });
+                // return Err(Error::new(
+                //     Span::call_site(),
+                //     format!("type inference function is required for {}", self.ret),
+                // ));
             }
             let ty = data_type(&self.ret);
             Ok(quote! { |_| Ok(#ty) })
@@ -560,11 +561,9 @@ impl FunctionAttr {
             .enumerate()
             .map(|(i, arg)| {
                 let array = format_ident!("a{i}");
-                let variant: TokenStream2 = types::variant(arg).parse().unwrap();
+                let array_type: TokenStream2 = types::array_type(arg).parse().unwrap();
                 quote! {
-                    let ArrayImpl::#variant(#array) = &**input.column_at(#i) else {
-                        bail!("input type mismatch. expect: {}", stringify!(#variant));
-                    };
+                    let #array: &#array_type = input.column_at(#i).as_ref().into();
                 }
             })
             .collect_vec();
@@ -1015,6 +1014,7 @@ fn match_type(ty: &str) -> TokenStream2 {
     match ty {
         "any" => quote! { MatchType::Any },
         "anyarray" => quote! { MatchType::AnyArray },
+        "struct" => quote! { MatchType::AnyStruct },
         _ => {
             let datatype = data_type(ty);
             quote! { MatchType::Exact(#datatype) }

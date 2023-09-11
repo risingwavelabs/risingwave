@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
 use risingwave_expr_macro::aggregate;
 use serde_json::Value;

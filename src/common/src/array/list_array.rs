@@ -606,6 +606,12 @@ impl ToText for ListRef<'_> {
     }
 }
 
+impl<'a> From<&'a ListValue> for ListRef<'a> {
+    fn from(val: &'a ListValue) -> Self {
+        ListRef::ValueRef { val }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use more_asserts::{assert_gt, assert_lt};

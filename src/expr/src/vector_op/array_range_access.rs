@@ -16,22 +16,23 @@ use risingwave_common::array::{ListRef, ListValue};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_expr_macro::function;
 
-use crate::Result;
-
 /// If the case is `array[1,2,3][:2]`, then start will be 0 set by the frontend
 /// If the case is `array[1,2,3][1:]`, then end will be `i32::MAX` set by the frontend
-#[function("array_range_access(anyarray, int32, int32) -> anyarray")]
-pub fn array_range_access(list: ListRef<'_>, start: i32, end: i32) -> Result<Option<ListValue>> {
+#[function(
+    "array_range_access(anyarray, int32, int32) -> anyarray",
+    type_infer = "|args| Ok(args[0].clone())"
+)]
+pub fn array_range_access(list: ListRef<'_>, start: i32, end: i32) -> Option<ListValue> {
     let mut data = vec![];
     let list_all_values = list.iter();
     let start = std::cmp::max(start, 1) as usize;
     let end = std::cmp::min(std::cmp::max(0, end), list_all_values.len() as i32) as usize;
     if start > end {
-        return Ok(Some(ListValue::new(data)));
+        return Some(ListValue::new(data));
     }
 
     for datumref in list_all_values.take(end).skip(start - 1) {
         data.push(datumref.to_owned_datum());
     }
-    Ok(Some(ListValue::new(data)))
+    Some(ListValue::new(data))
 }

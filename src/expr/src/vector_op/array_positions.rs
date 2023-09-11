@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{ListRef, ListValue};
-use risingwave_common::types::{ScalarImpl, ScalarRef};
+use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_expr_macro::function;
 
 use crate::error::ExprError;

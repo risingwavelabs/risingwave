@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{ListRef, ListValue};
-use risingwave_common::types::{ScalarRef, ToOwnedDatum};
+use risingwave_common::types::{ScalarRefImpl, ToOwnedDatum};
 use risingwave_expr_macro::function;
 
 /// Removes all elements equal to the given value from the array.
@@ -66,12 +66,15 @@ use risingwave_expr_macro::function;
 /// statement error
 /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null], array[true]);
 /// ```
-#[function("array_remove(anyarray, any) -> anyarray")]
+#[function(
+    "array_remove(anyarray, any) -> anyarray",
+    type_infer = "|args| Ok(args[0].clone())"
+)]
 fn array_remove(array: Option<ListRef<'_>>, elem: Option<ScalarRefImpl<'_>>) -> Option<ListValue> {
     Some(ListValue::new(
         array?
             .iter()
-            .filter(|x| x != elem)
+            .filter(|x| x != &elem)
             .map(|x| x.to_owned_datum())
             .collect(),
     ))

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::ListValue;
-use risingwave_common::types::{Datum, ScalarRef};
+use risingwave_common::types::{Datum, ScalarRefImpl, ToOwnedDatum};
 use risingwave_expr_macro::aggregate;
 
 #[aggregate("array_agg(any) -> anyarray")]

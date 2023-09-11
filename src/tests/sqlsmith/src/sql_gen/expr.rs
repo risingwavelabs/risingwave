@@ -306,7 +306,7 @@ pub fn print_function_table() -> String {
         .map(|sign| {
             format!(
                 "{:?}({}) -> {:?}",
-                sign.func,
+                sign.name,
                 sign.inputs_type
                     .iter()
                     .map(|arg| format!("{:?}", arg))

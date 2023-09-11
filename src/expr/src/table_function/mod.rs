@@ -18,7 +18,7 @@ use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk};
-use risingwave_common::types::{DataType, DataTypeName, DatumRef};
+use risingwave_common::types::{DataType, DatumRef};
 use risingwave_pb::expr::project_set_select_item::SelectItem;
 use risingwave_pb::expr::table_function::PbType;
 use risingwave_pb::expr::{PbProjectSetSelectItem, PbTableFunction};

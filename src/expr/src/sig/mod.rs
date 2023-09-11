@@ -182,6 +182,16 @@ impl FuncSign {
         }
     }
 
+    /// Returns true if the function is a scalar function.
+    pub const fn is_scalar(&self) -> bool {
+        matches!(self.name, FuncName::Scalar(_))
+    }
+
+    /// Returns true if the function is a aggregate function.
+    pub const fn is_aggregate(&self) -> bool {
+        matches!(self.name, FuncName::Aggregate(_))
+    }
+
     pub fn build_scalar(
         &self,
         return_type: DataType,
@@ -252,6 +262,20 @@ impl FuncName {
     const fn is_table(&self) -> bool {
         matches!(self, Self::Table(_))
     }
+
+    pub fn as_scalar(&self) -> ScalarFunctionType {
+        match self {
+            Self::Scalar(ty) => *ty,
+            _ => panic!("Expected a scalar function"),
+        }
+    }
+
+    pub fn as_aggregate(&self) -> AggregateFunctionType {
+        match self {
+            Self::Aggregate(ty) => *ty,
+            _ => panic!("Expected an aggregate function"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -262,6 +286,8 @@ pub enum MatchType {
     Any,
     /// Any array data type
     AnyArray,
+    /// Any struct type
+    AnyStruct,
 }
 
 impl From<DataType> for MatchType {
@@ -276,6 +302,7 @@ impl std::fmt::Display for MatchType {
             Self::Exact(dt) => write!(f, "{}", dt),
             Self::Any => write!(f, "any"),
             Self::AnyArray => write!(f, "anyarray"),
+            Self::AnyStruct => write!(f, "anystruct"),
         }
     }
 }
@@ -287,6 +314,7 @@ impl MatchType {
             Self::Exact(ty) => ty == dt,
             Self::Any => true,
             Self::AnyArray => dt.is_array(),
+            Self::AnyStruct => dt.is_struct(),
         }
     }
 }

@@ -126,7 +126,7 @@ impl TryFrom<&RwFuncSig> for FuncSig {
             Ok(FuncSig {
                 inputs_type,
                 ret_type,
-                func: value.func,
+                func: value.name,
             })
         } else {
             Err(format!("unsupported func sig: {:?}", value))
@@ -185,7 +185,7 @@ pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<FuncSig>>> = LazyLo
             func.inputs_type
                 .iter()
                 .all(|t| *t != DataTypeName::Timestamptz)
-                && !FUNC_BAN_LIST.contains(&func.func)
+                && !FUNC_BAN_LIST.contains(&func.name)
                 && !func.deprecated // deprecated functions are not accepted by frontend
         })
         .filter_map(|func| func.try_into().ok())
@@ -197,7 +197,7 @@ pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<FuncSig>>> = LazyLo
 // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
 pub(crate) static INVARIANT_FUNC_SET: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
     func_sigs()
-        .map(|sig| sig.func)
+        .map(|sig| sig.name)
         .counts()
         .into_iter()
         .filter(|(_key, count)| *count == 1)
@@ -301,7 +301,7 @@ pub(crate) static BINARY_INEQUALITY_OP_TABLE: LazyLock<
     let mut funcs = HashMap::<(DataType, DataType), Vec<BinaryOperator>>::new();
     func_sigs()
         .filter(|func| {
-            !FUNC_BAN_LIST.contains(&func.func)
+            !FUNC_BAN_LIST.contains(&func.name)
                 && func.ret_type == DataTypeName::Boolean
                 && func.inputs_type.len() == 2
                 && func
@@ -317,7 +317,7 @@ pub(crate) static BINARY_INEQUALITY_OP_TABLE: LazyLock<
                 return None;
             };
             let args = (lhs, rhs);
-            let Some(op) = expr_type_to_inequality_op(func.func) else {
+            let Some(op) = expr_type_to_inequality_op(func.name) else {
                 return None;
             };
             Some((args, op))
