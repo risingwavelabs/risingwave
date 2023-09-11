@@ -27,6 +27,7 @@ use crate::agg::{AggCall, AggKind as AggregateFunctionType, BoxedAggregateFuncti
 use crate::error::Result;
 use crate::expr::BoxedExpression;
 use crate::table_function::BoxedTableFunction;
+use crate::ExprError;
 
 pub mod cast;
 
@@ -57,18 +58,18 @@ impl FuncSigMap {
     /// Deprecated functions are included.
     pub fn get(
         &self,
-        ty: impl Into<FuncName>,
+        name: impl Into<FuncName>,
         args: &[DataType],
         ret: &DataType,
     ) -> Option<&FuncSign> {
-        let v = self.0.get(&ty.into())?;
-        v.iter().find(|d| d.match_type(args, ret))
+        let v = self.0.get(&name.into())?;
+        v.iter().find(|d| d.match_args_ret(args, ret))
     }
 
     /// Returns all function signatures with the same type and number of arguments.
     /// Deprecated functions are excluded.
-    pub fn get_with_arg_nums(&self, ty: impl Into<FuncName>, nargs: usize) -> Vec<&FuncSign> {
-        match self.0.get(&ty.into()) {
+    pub fn get_with_arg_nums(&self, name: impl Into<FuncName>, nargs: usize) -> Vec<&FuncSign> {
+        match self.0.get(&name.into()) {
             Some(v) => v
                 .iter()
                 .filter(|d| d.match_number_of_args(nargs) && !d.deprecated)
@@ -98,10 +99,21 @@ impl FuncSigMap {
     }
 
     /// Returns the return type for the given function and arguments.
-    pub fn get_return_type(&self, ty: impl Into<FuncName>, args: &[DataType]) -> Option<DataType> {
-        let v = self.0.get(&ty.into())?;
-        // v.iter().find(|d| d.inputs_type == args).map(|d| d.ret_type)
-        todo!()
+    pub fn get_return_type(
+        &self,
+        name: impl Into<FuncName>,
+        args: &[DataType],
+    ) -> Result<DataType> {
+        let name = name.into();
+        let v = self
+            .0
+            .get(&name)
+            .ok_or_else(|| ExprError::UnsupportedFunction(name.to_string()))?;
+        let sig = v
+            .iter()
+            .find(|d| d.match_args(args))
+            .ok_or_else(|| ExprError::UnsupportedFunction(name.to_string()))?;
+        (sig.type_infer)(args)
     }
 }
 
@@ -112,13 +124,13 @@ pub struct FuncSign {
     pub name: FuncName,
 
     /// The argument types.
-    pub inputs_type: Vec<MatchType>,
+    pub inputs_type: Vec<SigDataType>,
 
     /// Whether the function is variadic.
     pub variadic: bool,
 
     /// The return type.
-    pub ret_type: MatchType,
+    pub ret_type: SigDataType,
 
     /// A function to build the expression.
     pub build: FuncBuilder,
@@ -142,7 +154,7 @@ impl fmt::Debug for FuncSign {
         write!(
             f,
             "{}({}{}) -> {}{}",
-            self.name.as_str_name(),
+            self.name.as_str_name().to_ascii_lowercase(),
             self.inputs_type.iter().format(", "),
             if self.variadic { " ..." } else { "" },
             if self.name.is_table() { "setof " } else { "" },
@@ -160,10 +172,7 @@ impl fmt::Debug for FuncSign {
 
 impl FuncSign {
     /// Returns true if the argument types match the function signature.
-    fn match_type(&self, args: &[DataType], ret: &DataType) -> bool {
-        if !self.ret_type.matches(ret) {
-            return false;
-        }
+    pub fn match_args(&self, args: &[DataType]) -> bool {
         if !self.match_number_of_args(args.len()) {
             return false;
         }
@@ -171,6 +180,11 @@ impl FuncSign {
             .iter()
             .zip(args.iter())
             .all(|(matcher, arg)| matcher.matches(arg))
+    }
+
+    /// Returns true if the argument types match the function signature.
+    fn match_args_ret(&self, args: &[DataType], ret: &DataType) -> bool {
+        self.match_args(args) && self.ret_type.matches(ret)
     }
 
     /// Returns true if the number of arguments matches the function signature.
@@ -187,11 +201,17 @@ impl FuncSign {
         matches!(self.name, FuncName::Scalar(_))
     }
 
+    /// Returns true if the function is a table function.
+    pub const fn is_table_function(&self) -> bool {
+        matches!(self.name, FuncName::Table(_))
+    }
+
     /// Returns true if the function is a aggregate function.
     pub const fn is_aggregate(&self) -> bool {
         matches!(self.name, FuncName::Aggregate(_))
     }
 
+    /// Builds the scalar function.
     pub fn build_scalar(
         &self,
         return_type: DataType,
@@ -203,6 +223,7 @@ impl FuncSign {
         }
     }
 
+    /// Builds the table function.
     pub fn build_table(
         &self,
         return_type: DataType,
@@ -215,6 +236,7 @@ impl FuncSign {
         }
     }
 
+    /// Builds the aggregate function.
     pub fn build_aggregate(&self, agg: &AggCall) -> Result<BoxedAggregateFunction> {
         match self.build {
             FuncBuilder::Aggregate(f) => f(agg),
@@ -248,6 +270,12 @@ impl From<AggregateFunctionType> for FuncName {
     }
 }
 
+impl fmt::Display for FuncName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str_name().to_ascii_lowercase())
+    }
+}
+
 impl FuncName {
     /// Returns the name of the function in `UPPER_CASE` style.
     pub fn as_str_name(&self) -> &'static str {
@@ -278,25 +306,26 @@ impl FuncName {
     }
 }
 
+/// An extended data type that can be used to declare a function's argument or result type.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum MatchType {
+pub enum SigDataType {
     /// Exact data type
     Exact(DataType),
-    /// Any data type
+    /// Accepts any data type
     Any,
-    /// Any array data type
+    /// Accepts any array data type
     AnyArray,
-    /// Any struct type
+    /// Accepts any struct data type
     AnyStruct,
 }
 
-impl From<DataType> for MatchType {
+impl From<DataType> for SigDataType {
     fn from(dt: DataType) -> Self {
-        MatchType::Exact(dt)
+        SigDataType::Exact(dt)
     }
 }
 
-impl std::fmt::Display for MatchType {
+impl std::fmt::Display for SigDataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Exact(dt) => write!(f, "{}", dt),
@@ -307,7 +336,7 @@ impl std::fmt::Display for MatchType {
     }
 }
 
-impl MatchType {
+impl SigDataType {
     /// Returns true if the data type matches.
     pub fn matches(&self, dt: &DataType) -> bool {
         match self {
@@ -316,6 +345,19 @@ impl MatchType {
             Self::AnyArray => dt.is_array(),
             Self::AnyStruct => dt.is_struct(),
         }
+    }
+
+    /// Returns the exact data type.
+    pub fn as_exact(&self) -> &DataType {
+        match self {
+            Self::Exact(ty) => ty,
+            _ => panic!("Expected an exact type"),
+        }
+    }
+
+    /// Returns true if the data type is exact.
+    pub fn is_exact(&self) -> bool {
+        matches!(self, Self::Exact(_))
     }
 }
 
@@ -363,7 +405,8 @@ mod tests {
     #[test]
     fn test_func_sig_map() {
         // convert FUNC_SIG_MAP to a more convenient map for testing
-        let mut new_map: HashMap<FuncName, HashMap<Vec<MatchType>, Vec<FuncSign>>> = HashMap::new();
+        let mut new_map: HashMap<FuncName, HashMap<Vec<SigDataType>, Vec<FuncSign>>> =
+            HashMap::new();
         for (func, sigs) in &FUNC_SIG_MAP.0 {
             for sig in sigs {
                 // validate the FUNC_SIG_MAP is consistent
@@ -391,7 +434,7 @@ mod tests {
                             "{}({}) -> {}",
                             v[0].name.as_str_name().to_ascii_lowercase(),
                             v[0].inputs_type.iter().format(", "),
-                            v.iter().map(|sig| sig.ret_type).format("/")
+                            v.iter().map(|sig| &sig.ret_type).format("/")
                         ))
                     } else {
                         None

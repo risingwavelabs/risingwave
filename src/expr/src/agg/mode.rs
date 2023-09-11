@@ -24,7 +24,7 @@ use super::{AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFuncti
 use crate::agg::AggCall;
 use crate::Result;
 
-#[build_aggregate("mode(any) -> any")]
+#[build_aggregate("mode(any) -> any", type_infer = "|args| Ok(args[0].clone())")]
 fn build(agg: &AggCall) -> Result<BoxedAggregateFunction> {
     Ok(Box::new(Mode {
         return_type: agg.return_type.clone(),

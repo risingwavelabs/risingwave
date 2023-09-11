@@ -68,8 +68,8 @@ pub use session_timezone::SessionTimezone;
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{
-    agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_some_all,
-    infer_type, least_restrictive, AggFuncSig, CastContext, CastSig, FuncSign,
+    align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_some_all, infer_type,
+    least_restrictive, CastContext, CastSig, FuncSign,
 };
 pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
@@ -252,6 +252,11 @@ impl ExprImpl {
     /// Shorthand to inplace cast expr to `target` type in implicit context.
     pub fn cast_implicit_mut(&mut self, target: DataType) -> Result<(), CastError> {
         FunctionCall::cast_mut(self, target, CastContext::Implicit)
+    }
+
+    /// Shorthand to inplace cast expr to `target` type in explicit context.
+    pub fn cast_explicit_mut(&mut self, target: DataType) -> Result<(), CastError> {
+        FunctionCall::cast_mut(self, target, CastContext::Explicit)
     }
 
     /// Ensure the return type of this expression is an array of some type.

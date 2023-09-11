@@ -22,4 +22,3 @@ pub use cast::{
     CastSig,
 };
 pub use func::{func_sigs, infer_some_all, infer_type, FuncSign};
-pub use risingwave_expr::sig::agg::{agg_func_sigs, AggFuncSig};

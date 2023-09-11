@@ -82,9 +82,9 @@ impl FunctionAttr {
             false => &self.args[..],
         }
         .iter()
-        .map(|ty| match_type(ty))
+        .map(|ty| sig_data_type(ty))
         .collect_vec();
-        let ret = match_type(&self.ret);
+        let ret = sig_data_type(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
@@ -101,7 +101,7 @@ impl FunctionAttr {
             #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                use crate::sig::{_register, FuncSign, MatchType, FuncBuilder};
+                use crate::sig::{_register, FuncSign, SigDataType, FuncBuilder};
 
                 unsafe { _register(FuncSign {
                     name: risingwave_pb::expr::expr_node::Type::#pb_type.into(),
@@ -501,9 +501,9 @@ impl FunctionAttr {
 
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
-            args.push(match_type(ty));
+            args.push(sig_data_type(ty));
         }
-        let ret = match_type(&self.ret);
+        let ret = sig_data_type(&self.ret);
         let state_type = match &self.state {
             Some(ty) if ty != "ref" => data_type(ty),
             _ => data_type(&self.ret),
@@ -531,7 +531,7 @@ impl FunctionAttr {
             #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                use crate::sig::{_register, FuncSign, MatchType, FuncBuilder};
+                use crate::sig::{_register, FuncSign, SigDataType, FuncBuilder};
 
                 unsafe { _register(FuncSign {
                     name: crate::agg::AggKind::#pb_type.into(),
@@ -800,9 +800,9 @@ impl FunctionAttr {
         let name = self.name.clone();
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
-            args.push(match_type(ty));
+            args.push(sig_data_type(ty));
         }
-        let ret = match_type(&self.ret);
+        let ret = sig_data_type(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
@@ -819,7 +819,7 @@ impl FunctionAttr {
             #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                use crate::sig::{_register, FuncSign, MatchType, FuncBuilder};
+                use crate::sig::{_register, FuncSign, SigDataType, FuncBuilder};
 
                 unsafe { _register(FuncSign {
                     name: risingwave_pb::expr::table_function::Type::#pb_type.into(),
@@ -1010,14 +1010,14 @@ impl FunctionAttr {
     }
 }
 
-fn match_type(ty: &str) -> TokenStream2 {
+fn sig_data_type(ty: &str) -> TokenStream2 {
     match ty {
-        "any" => quote! { MatchType::Any },
-        "anyarray" => quote! { MatchType::AnyArray },
-        "struct" => quote! { MatchType::AnyStruct },
+        "any" => quote! { SigDataType::Any },
+        "anyarray" => quote! { SigDataType::AnyArray },
+        "struct" => quote! { SigDataType::AnyStruct },
         _ => {
             let datatype = data_type(ty);
-            quote! { MatchType::Exact(#datatype) }
+            quote! { SigDataType::Exact(#datatype) }
         }
     }
 }

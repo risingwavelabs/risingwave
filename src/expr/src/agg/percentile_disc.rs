@@ -68,7 +68,10 @@ use crate::Result;
 /// statement ok
 /// drop table t;
 /// ```
-#[build_aggregate("percentile_disc(any) -> any")]
+#[build_aggregate(
+    "percentile_disc(any) -> any",
+    type_infer = "|args| Ok(args[0].clone())"
+)]
 fn build(agg: &AggCall) -> Result<BoxedAggregateFunction> {
     let fractions = agg.direct_args[0]
         .literal()

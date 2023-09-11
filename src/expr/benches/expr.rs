@@ -26,8 +26,7 @@ use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::*;
 use risingwave_expr::agg::{build_append_only, AggArgs, AggCall, AggKind};
 use risingwave_expr::expr::*;
-use risingwave_expr::sig::agg::agg_func_sigs;
-use risingwave_expr::sig::func::func_sigs;
+use risingwave_expr::sig::func_sigs;
 use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node::PbType;
 
@@ -227,10 +226,10 @@ fn bench_expr(c: &mut Criterion) {
         InputRefExpression::new(DataType::Jsonb, 26),
         InputRefExpression::new(DataType::Int256, 27),
     ];
-    let input_index_for_type = |ty: DataType| {
+    let input_index_for_type = |ty: &DataType| {
         inputrefs
             .iter()
-            .find(|r| r.return_type() == ty)
+            .find(|r| &r.return_type() == ty)
             .unwrap_or_else(|| panic!("expression not found for {ty:?}"))
             .index()
     };
@@ -265,19 +264,20 @@ fn bench_expr(c: &mut Criterion) {
     c.bench_function("extract(constant)", |bencher| {
         let extract = build_from_pretty(format!(
             "(extract:decimal HOUR:varchar ${}:timestamp)",
-            input_index_for_type(DataType::Timestamp)
+            input_index_for_type(&DataType::Timestamp)
         ));
         bencher
             .to_async(FuturesExecutor)
             .iter(|| extract.eval(&input))
     });
 
-    let sigs = func_sigs();
-    let sigs = sigs.sorted_by_cached_key(|sig| format!("{sig:?}"));
+    let sigs = func_sigs()
+        .filter(|s| s.is_scalar())
+        .sorted_by_cached_key(|sig| format!("{sig:?}"));
     'sig: for sig in sigs {
         if (sig.inputs_type.iter())
-            .chain(&[sig.ret_type])
-            .any(|t| matches!(t, DataTypeName::Struct | DataTypeName::List))
+            .chain([&sig.ret_type])
+            .any(|t| !t.is_exact())
         {
             // TODO: support struct and list
             println!("todo: {sig:?}");
@@ -300,8 +300,8 @@ fn bench_expr(c: &mut Criterion) {
 
         let mut children = vec![];
         for (i, t) in sig.inputs_type.iter().enumerate() {
-            use DataTypeName::*;
-            let idx = match (sig.func, i) {
+            use DataType::*;
+            let idx = match (sig.name.as_scalar(), i) {
                 (PbType::ToTimestamp1, 0) => TIMESTAMP_FORMATTED_STRING,
                 (PbType::ToChar | PbType::ToTimestamp1, 1) => {
                     children.push(string_literal("YYYY/MM/DD HH:MM:SS"));
@@ -315,7 +315,7 @@ fn bench_expr(c: &mut Criterion) {
                     children.push(string_literal("VALUE"));
                     continue;
                 }
-                (PbType::Cast, 0) if *t == DataTypeName::Varchar => match sig.ret_type {
+                (PbType::Cast, 0) if t.as_exact() == &Varchar => match sig.ret_type.as_exact() {
                     Boolean => BOOL_STRING,
                     Int16 | Int32 | Int64 | Float32 | Float64 | Decimal => NUMBER_STRING,
                     Date => DATE_STRING,
@@ -332,7 +332,7 @@ fn bench_expr(c: &mut Criterion) {
                 (PbType::AtTimeZone, 1) => TIMEZONE,
                 (PbType::DateTrunc, 0) => TIME_FIELD,
                 (PbType::DateTrunc, 2) => TIMEZONE,
-                (PbType::Extract, 0) => match sig.inputs_type[1] {
+                (PbType::Extract, 0) => match sig.inputs_type[1].as_exact() {
                     Date => EXTRACT_FIELD_DATE,
                     Time => EXTRACT_FIELD_TIME,
                     Timestamp => EXTRACT_FIELD_TIMESTAMP,
@@ -340,38 +340,46 @@ fn bench_expr(c: &mut Criterion) {
                     Interval => EXTRACT_FIELD_INTERVAL,
                     t => panic!("unexpected type: {t:?}"),
                 },
-                _ => input_index_for_type((*t).into()),
+                _ => input_index_for_type(t.as_exact()),
             };
-            children.push(InputRefExpression::new(DataType::from(*t), idx).boxed());
+            children.push(InputRefExpression::new(t.as_exact().clone(), idx).boxed());
         }
-        let expr = build_func(sig.func, sig.ret_type.into(), children).unwrap();
+        let expr = build_func(
+            sig.name.as_scalar(),
+            sig.ret_type.as_exact().clone(),
+            children,
+        )
+        .unwrap();
         c.bench_function(&format!("{sig:?}"), |bencher| {
             bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
         });
     }
 
-    let sigs = agg_func_sigs();
-    let sigs = sigs.sorted_by_cached_key(|sig| format!("{sig:?}"));
+    let sigs = func_sigs()
+        .filter(|s| s.is_aggregate())
+        .sorted_by_cached_key(|sig| format!("{sig:?}"));
     for sig in sigs {
-        if matches!(sig.func, AggKind::PercentileDisc | AggKind::PercentileCont)
-            || (sig.inputs_type.iter())
-                .chain(&[sig.ret_type])
-                .any(|t| matches!(t, DataTypeName::Struct | DataTypeName::List))
+        if matches!(
+            sig.name.as_aggregate(),
+            AggKind::PercentileDisc | AggKind::PercentileCont
+        ) || (sig.inputs_type.iter())
+            .chain([&sig.ret_type])
+            .any(|t| !t.is_exact())
         {
             println!("todo: {sig:?}");
             continue;
         }
         let agg = match build_append_only(&AggCall {
-            kind: sig.func,
-            args: match sig.inputs_type {
+            kind: sig.name.as_aggregate(),
+            args: match sig.inputs_type.as_slice() {
                 [] => AggArgs::None,
-                [t] => AggArgs::Unary((*t).into(), input_index_for_type((*t).into())),
+                [t] => AggArgs::Unary(t.as_exact().clone(), input_index_for_type(t.as_exact())),
                 _ => {
                     println!("todo: {sig:?}");
                     continue;
                 }
             },
-            return_type: sig.ret_type.into(),
+            return_type: sig.ret_type.as_exact().clone(),
             column_orders: vec![],
             filter: None,
             distinct: false,

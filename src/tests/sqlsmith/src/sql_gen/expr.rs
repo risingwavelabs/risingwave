@@ -16,7 +16,7 @@ use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::{DataType, DataTypeName, StructType};
-use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs};
+use risingwave_frontend::expr::{cast_sigs, func_sigs};
 use risingwave_sqlparser::ast::{Expr, Ident, OrderByExpr, Value};
 
 use crate::sql_gen::types::data_type_to_ast_data_type;
@@ -303,28 +303,24 @@ pub(crate) fn sql_null() -> Expr {
 // to a FUNC_TABLE too.
 pub fn print_function_table() -> String {
     let func_str = func_sigs()
+        .filter(|sign| sign.is_scalar())
         .map(|sign| {
             format!(
-                "{:?}({}) -> {:?}",
+                "{}({}) -> {}",
                 sign.name,
-                sign.inputs_type
-                    .iter()
-                    .map(|arg| format!("{:?}", arg))
-                    .join(", "),
+                sign.inputs_type.iter().format(", "),
                 sign.ret_type,
             )
         })
         .join("\n");
 
-    let agg_func_str = agg_func_sigs()
+    let agg_func_str = func_sigs()
+        .filter(|sign| sign.is_aggregate())
         .map(|sign| {
             format!(
-                "{:?}({}) -> {:?}",
-                sign.func,
-                sign.inputs_type
-                    .iter()
-                    .map(|arg| format!("{:?}", arg))
-                    .join(", "),
+                "{}({}) -> {}",
+                sign.name,
+                sign.inputs_type.iter().format(", "),
                 sign.ret_type,
             )
         })

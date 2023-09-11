@@ -215,15 +215,6 @@ impl FunctionCall {
         match expr_type {
             ExprType::Some | ExprType::All => {
                 let return_type = infer_some_all(func_types, &mut inputs)?;
-
-                if return_type != DataType::Boolean {
-                    return Err(ErrorCode::BindError(format!(
-                        "op SOME/ANY/ALL (array) requires operator to yield boolean, but got {:?}",
-                        return_type
-                    ))
-                    .into());
-                }
-
                 Ok(FunctionCall::new_unchecked(expr_type, inputs, return_type).into())
             }
             ExprType::Not | ExprType::IsNotNull | ExprType::IsNull => Ok(FunctionCall::new(

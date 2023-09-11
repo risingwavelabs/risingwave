@@ -15,9 +15,8 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
-use risingwave_expr::sig::table_function::FUNC_SIG_MAP;
+use risingwave_expr::sig::FUNC_SIG_MAP;
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::{
     TableFunction as TableFunctionPb, UserDefinedTableFunction as UserDefinedTableFunctionPb,
@@ -44,20 +43,10 @@ impl TableFunction {
     /// Create a `TableFunction` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
     pub fn new(func_type: TableFunctionType, args: Vec<ExprImpl>) -> RwResult<Self> {
-        let arg_types = args.iter().map(|c| c.return_type()).collect_vec();
-        let signature = FUNC_SIG_MAP
-            .get(
-                func_type,
-                &args.iter().map(|c| c.return_type().into()).collect_vec(),
-            )
-            .ok_or_else(|| {
-                ErrorCode::BindError(format!(
-                    "table function not found: {:?}({})",
-                    func_type,
-                    arg_types.iter().map(|t| format!("{:?}", t)).join(", "),
-                ))
-            })?;
-        let return_type = (signature.type_infer)(&arg_types)?;
+        let return_type = FUNC_SIG_MAP.get_return_type(
+            func_type,
+            &args.iter().map(|c| c.return_type()).collect_vec(),
+        )?;
         Ok(TableFunction {
             args,
             return_type,
