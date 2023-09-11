@@ -25,8 +25,8 @@ docker buildx build -f docker/Dockerfile \
   --progress plain \
   --builder=container \
   --load \
-  --cache-to type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache \
-  --cache-from type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache \
+  --cache-to "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
+  --cache-from "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
   .
 
 
