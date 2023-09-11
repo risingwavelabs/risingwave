@@ -38,25 +38,27 @@ public class JniDbzSourceHandler {
 
     public static void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)
             throws com.google.protobuf.InvalidProtocolBufferException {
+        try (CdcJniChannel channel = new CdcJniChannel(channelPtr)) {
+            var request =
+                    ConnectorServiceProto.GetEventStreamRequest.parseFrom(
+                            getEventStreamRequestBytes);
 
-        var request =
-                ConnectorServiceProto.GetEventStreamRequest.parseFrom(getEventStreamRequestBytes);
-
-        // For jni.rs
-        java.lang.Thread.currentThread()
-                .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
-        // userProps extracted from grpc request, underlying implementation is UnmodifiableMap
-        Map<String, String> mutableUserProps = new HashMap<>(request.getPropertiesMap());
-        mutableUserProps.put("source.id", Long.toString(request.getSourceId()));
-        var config =
-                new DbzConnectorConfig(
-                        SourceTypeE.valueOf(request.getSourceType()),
-                        request.getSourceId(),
-                        request.getStartOffset(),
-                        mutableUserProps,
-                        request.getSnapshotDone());
-        JniDbzSourceHandler handler = new JniDbzSourceHandler(config);
-        handler.start(channelPtr);
+            // For jni.rs
+            java.lang.Thread.currentThread()
+                    .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
+            // userProps extracted from request, underlying implementation is UnmodifiableMap
+            Map<String, String> mutableUserProps = new HashMap<>(request.getPropertiesMap());
+            mutableUserProps.put("source.id", Long.toString(request.getSourceId()));
+            var config =
+                    new DbzConnectorConfig(
+                            SourceTypeE.valueOf(request.getSourceType()),
+                            request.getSourceId(),
+                            request.getStartOffset(),
+                            mutableUserProps,
+                            request.getSnapshotDone());
+            JniDbzSourceHandler handler = new JniDbzSourceHandler(config);
+            handler.start(channel.getPointer());
+        }
     }
 
     public void start(long channelPtr) {
@@ -65,7 +67,7 @@ public class JniDbzSourceHandler {
             return;
         }
 
-        try (CdcJniChannel channel = new CdcJniChannel(channelPtr)) {
+        try {
             // Start the engine
             runner.start();
             LOG.info("Start consuming events of table {}", config.getSourceId());
@@ -84,12 +86,10 @@ public class JniDbzSourceHandler {
                             "Engine#{}: emit one chunk {} events to network ",
                             config.getSourceId(),
                             resp.getEventsCount());
-                    success =
-                            Binding.sendCdcSourceMsgToChannel(
-                                    channel.getPointer(), resp.toByteArray());
+                    success = Binding.sendCdcSourceMsgToChannel(channelPtr, resp.toByteArray());
                 } else {
                     // If resp is null means just check whether channel is closed.
-                    success = Binding.sendCdcSourceMsgToChannel(channel.getPointer(), null);
+                    success = Binding.sendCdcSourceMsgToChannel(channelPtr, null);
                 }
                 if (!success) {
                     LOG.info(

@@ -50,6 +50,8 @@ pub struct CdcSplitReader<T: CdcSourceTypeTrait> {
     source_ctx: SourceContextRef,
 }
 
+const DEFAULT_CHANNEL_SIZE: usize = 16;
+
 #[async_trait]
 impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T>
 where
@@ -123,7 +125,7 @@ where
             properties.insert("table.name".into(), table_name);
         }
 
-        let (tx, mut rx) = mpsc::channel(1024);
+        let (tx, mut rx) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
         let tx: Box<GetEventStreamJniSender> = Box::new(tx);
 
         LazyLock::force(&JVM).as_ref()?;
