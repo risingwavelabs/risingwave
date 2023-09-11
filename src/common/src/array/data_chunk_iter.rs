@@ -141,7 +141,7 @@ impl<'a> std::fmt::Debug for RowRef<'a> {
 
 impl<'a> RowRef<'a> {
     pub fn new(chunk: &'a DataChunk, idx: usize) -> Self {
-        debug_assert!(idx < chunk.capacity());
+        assert!(idx < chunk.capacity());
         Self {
             columns: chunk.columns(),
             idx,
@@ -149,6 +149,9 @@ impl<'a> RowRef<'a> {
     }
 
     pub fn with_columns(columns: &'a [ArrayRef], idx: usize) -> Self {
+        if columns.len() > 0 {
+            assert!(idx < columns[0].len());
+        }
         Self { columns, idx }
     }
 
