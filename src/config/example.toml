@@ -7,6 +7,7 @@ metrics_level = "Info"
 telemetry_enabled = true
 
 [server.auto_dump_heap_profile]
+enabled = true
 dir = ""
 threshold = 0.8999999761581421
 
