@@ -6,3 +6,6 @@ vacuum_interval_sec = 10
 [system]
 backup_storage_url = "minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001"
 backup_storage_directory = "backup"
+
+[server]
+metrics_level = "Disabled"
