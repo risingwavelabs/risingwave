@@ -11,16 +11,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Check free space before maximizing
-        run: df -h
-      - name: Maximize build space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf "/usr/local/share/boost"
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-      - name: Check free space after maximizing
-        run: df -h
+      - name: Cleanup Disk
+        uses: curoky/cleanup-disk-action@v2.0
+        with:
+          retain: 'rust'
       - uses: actions/checkout@v3
       - name: Setup Rust toolchain
         run: |
