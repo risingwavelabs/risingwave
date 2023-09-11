@@ -1623,7 +1623,8 @@ pub(crate) mod tests {
                     .unwrap()
                     .sub_levels
                     .iter()
-                    .filter(|level| level.level_type() == LevelType::Nonoverlapping)
+                    .filter(|level| level.level_type() == LevelType::Nonoverlapping
+                        && level.vnode_partition_count > 0)
                     .count()
                     <= self
                         .group_config
@@ -1928,7 +1929,7 @@ pub(crate) mod tests {
         fn generate(&mut self, kv_count: usize) -> Vec<TableKey<Vec<u8>>> {
             let mut data = Vec::with_capacity(VirtualNode::COUNT / 16 * kv_count);
             for vnode_idx in 0..PARTITION_COUNT {
-                let vnode = vnode_idx * 64;
+                let vnode = vnode_idx * PARTITION_SIZE;
                 let mut last_pk = self.last_pk;
                 for _ in 0..kv_count {
                     let k = if self.rng.next_u32() % 10 == 1

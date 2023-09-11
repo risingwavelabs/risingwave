@@ -212,14 +212,15 @@ impl CompactionPicker for PartitionIntraSubLevelPicker {
             }
 
             if input_levels.len() < self.config.level0_sub_level_compact_level_count as usize
-                && !wait_enough
+                && (!wait_enough || level.vnode_partition_count > 0)
             {
                 continue;
             }
+
             input_levels.reverse();
 
             let vnode_partition_count =
-                if compaction_bytes >= self.config.sub_level_max_compaction_bytes {
+                if compaction_bytes >= self.config.sub_level_max_compaction_bytes || wait_enough {
                     levels.vnode_partition_count
                 } else {
                     0
