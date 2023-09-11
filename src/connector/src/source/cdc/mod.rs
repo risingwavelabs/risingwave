@@ -19,14 +19,13 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 
 pub use enumerator::*;
-use paste::paste;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
 pub use source::*;
 pub use split::*;
 
-use crate::impl_cdc_source_type;
-use crate::source::{ConnectorProperties, SourceProperties, SplitImpl};
+use crate::source::{SourceProperties, SplitImpl, TryFromHashmap};
+use crate::{for_all_classified_sources, impl_cdc_source_type};
 
 pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
 
@@ -39,7 +38,7 @@ pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
     fn source_type() -> CdcSourceType;
 }
 
-impl_cdc_source_type!({ Mysql, "mysql" }, { Postgres, "postgres" }, { Citus, "citus" });
+for_all_classified_sources!(impl_cdc_source_type);
 
 #[derive(Clone, Debug, Default)]
 pub struct CdcProperties<T: CdcSourceTypeTrait> {
@@ -52,6 +51,16 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
     pub _phantom: PhantomData<T>,
 }
 
+impl<T: CdcSourceTypeTrait> TryFromHashmap for CdcProperties<T> {
+    fn try_from_hashmap(props: HashMap<String, String>) -> anyhow::Result<Self> {
+        Ok(CdcProperties {
+            props,
+            table_schema: Default::default(),
+            _phantom: PhantomData,
+        })
+    }
+}
+
 impl<T: CdcSourceTypeTrait> SourceProperties for CdcProperties<T>
 where
     DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>,
@@ -61,7 +70,12 @@ where
     type SplitEnumerator = DebeziumSplitEnumerator<T>;
     type SplitReader = CdcSplitReader<T>;
 
+    const IS_CDC_SOURCE: bool = true;
     const SOURCE_NAME: &'static str = T::CDC_CONNECTOR_NAME;
+
+    fn set_schema(&mut self, table_schema: PbTableSchema) {
+        self.table_schema = table_schema;
+    }
 }
 
 impl<T: CdcSourceTypeTrait> CdcProperties<T> {

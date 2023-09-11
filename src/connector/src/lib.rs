@@ -49,6 +49,8 @@ pub mod source;
 
 pub mod common;
 
+pub use paste::paste;
+
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
     pub connector_client: Option<ConnectorClient>,
