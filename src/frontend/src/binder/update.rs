@@ -118,7 +118,7 @@ impl Binder {
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
-        let cols_refed_by_generated = get_col_referenced_by_generated_pk(table_catalog)?;
+        let cols_refed_by_generated_pk = get_col_referenced_by_generated_pk(table_catalog)?;
 
         let table = self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
@@ -181,7 +181,7 @@ impl Binder {
                         )
                         .into());
                     }
-                    if cols_refed_by_generated.contains(id_index) {
+                    if cols_refed_by_generated_pk.contains(id_index) {
                         return Err(ErrorCode::BindError(
                             "update modifying the column referenced by generated columns that are part of the primary key is not allowed".to_owned(),
                         )
