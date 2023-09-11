@@ -27,7 +27,7 @@ profile:
       #   bucket: test-bucket
 
       # If you want to create CDC source table, uncomment the following line
-      - use: connector-node
+      # - use: connector-node
 
       # if you want to enable etcd backend, uncomment the following lines.
       # - use: etcd
