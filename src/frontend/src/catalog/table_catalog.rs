@@ -239,13 +239,13 @@ impl TableCatalog {
         self
     }
 
-    pub fn with_output_column_ids(mut self, output_column_ids: &[i32]) -> Self {
+    pub fn with_output_column_ids(mut self, output_column_ids: &[ColumnId]) -> Self {
         let output_indices = output_column_ids
             .iter()
             .map(|&x| {
                 self.columns()
                     .iter()
-                    .position(|i| i.column_desc.column_id.get_id() == x)
+                    .position(|i| i.column_desc.column_id == x)
                     .unwrap()
             })
             .collect_vec();

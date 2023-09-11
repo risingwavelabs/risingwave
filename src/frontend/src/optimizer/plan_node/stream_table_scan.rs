@@ -213,9 +213,18 @@ impl StreamTableScan {
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.chain_type {
             // For backfill, we additionally need the primary key columns.
-            ChainType::Backfill | ChainType::ArrangementBackfill => {
-                self.logical.output_and_pk_column_ids()
-            }
+            ChainType::Backfill => self.logical.output_and_pk_column_ids(),
+            // For arrangement backfill, we need all columns.
+            // This is for replication.
+            // Only inside the arrangement backfill executor we will
+            // filter out the columns that are not in the output.
+            ChainType::ArrangementBackfill => self
+                .logical
+                .table_desc
+                .columns
+                .iter()
+                .map(|c| c.column_id)
+                .collect_vec(),
             ChainType::Chain | ChainType::Rearrange | ChainType::UpstreamOnly => {
                 self.logical.output_column_ids()
             }
@@ -255,21 +264,39 @@ impl StreamTableScan {
         // For arrangement backfill we need to maintain 2 sets of output_indices.
         // 1. output_indices for the updates.
         // 2. output_indices for the records from the arrangement table.
+        // FIXME(kwannoel): Actually we should just project in arrangement backfill.
+        // Especially since the output indices can be the same.
         let upstream_table_catalog = self
             .get_upstream_state_table()
             .unwrap()
-            .with_output_column_ids(&upstream_column_ids);
-        let output_indices = self
-            .logical
-            .output_column_ids()
-            .iter()
-            .map(|i| {
-                upstream_column_ids
-                    .iter()
-                    .position(|&x| x == i.get_id())
-                    .unwrap() as u32
-            })
-            .collect_vec();
+            .with_output_column_ids(&self.logical.output_column_ids());
+        let output_indices = match self.chain_type {
+            ChainType::ArrangementBackfill => self
+                .logical
+                .output_column_ids()
+                .iter()
+                .map(|i| {
+                    self.logical
+                        .table_desc
+                        .columns
+                        .iter()
+                        .map(|c| c.column_id)
+                        .position(|c| &c == i)
+                        .unwrap() as u32
+                })
+                .collect_vec(),
+            _ => self
+                .logical
+                .output_column_ids()
+                .iter()
+                .map(|i| {
+                    upstream_column_ids
+                        .iter()
+                        .position(|&x| x == i.get_id())
+                        .unwrap() as u32
+                })
+                .collect_vec(),
+        };
         println!("upstream_column_ids: {:?}", upstream_column_ids);
         println!("output_column_ids {:?}", self.logical.output_column_ids());
         println!("output_indices {:?}", output_indices);
@@ -287,6 +314,7 @@ impl StreamTableScan {
         PbStreamNode {
             fields: self.schema().to_prost(),
             input: vec![
+                // Upstream updates
                 // The merge node body will be filled by the `ActorBuilder` on the meta service.
                 PbStreamNode {
                     node_body: Some(PbNodeBody::Merge(Default::default())),
@@ -295,6 +323,7 @@ impl StreamTableScan {
                     stream_key: vec![], // not used
                     ..Default::default()
                 },
+                // Snapshot read
                 PbStreamNode {
                     node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
                     operator_id: self.batch_plan_id.0 as u64,
