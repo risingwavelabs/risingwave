@@ -670,8 +670,10 @@ fn gen_table_plan_inner(
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
+
+    println!("source catalog {:?}", source_catalog);
     let source_node: PlanRef = LogicalSource::new(
-        source_catalog,
+        source_catalog.clone(),
         columns.clone(),
         row_id_index,
         false,
