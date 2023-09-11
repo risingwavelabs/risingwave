@@ -64,7 +64,10 @@ impl<K: Ord, V> WindowBuffer<K, V> {
                         } else {
                             // FIXME(rc): Clippy rule `clippy::nonminimal_bool` is misreporting that
                             // the following can be simplified.
-                            // assert!(self.curr_idx >= self.left_idx);
+                            #[allow(clippy::nonminimal_bool)]
+                            {
+                                assert!(self.curr_idx >= self.left_idx);
+                            }
                             self.curr_idx - self.left_idx >= start_off.unsigned_abs()
                         }
                     } else {
@@ -84,9 +87,12 @@ impl<K: Ord, V> WindowBuffer<K, V> {
                             true // pure preceding frame, always following-saturated
                         } else {
                             // FIXME(rc): Ditto.
-                            // assert!(self.right_excl_idx > 0);
-                            // assert!(self.right_excl_idx > self.curr_idx);
-                            // assert!(self.right_excl_idx <= self.buffer.len());
+                            #[allow(clippy::nonminimal_bool)]
+                            {
+                                assert!(self.right_excl_idx > 0);
+                                assert!(self.right_excl_idx > self.curr_idx);
+                                assert!(self.right_excl_idx <= self.buffer.len());
+                            }
                             self.right_excl_idx - 1 - self.curr_idx >= end_off as usize
                         }
                     } else {
