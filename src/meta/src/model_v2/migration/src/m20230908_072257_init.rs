@@ -1,51 +1,1137 @@
-use sea_orm_migration::prelude::*;
+use sea_orm_migration::prelude::{Index as MigrationIndex, Table as MigrationTable, *};
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-const INIT_SQL: &str = r#"
-
-"#;
-
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
-        todo!();
+        // 1. check if the table exists.
+        assert!(!manager.has_table(Worker::Table.to_string()).await?);
+        assert!(!manager.has_table(WorkerProperty::Table.to_string()).await?);
+        assert!(!manager.has_table(User::Table.to_string()).await?);
+        assert!(!manager.has_table(UserPrivilege::Table.to_string()).await?);
+        assert!(!manager.has_table(Database::Table.to_string()).await?);
+        assert!(!manager.has_table(Schema::Table.to_string()).await?);
+        assert!(!manager.has_table(Fragment::Table.to_string()).await?);
+        assert!(!manager.has_table(Actor::Table.to_string()).await?);
+        assert!(!manager.has_table(Table::Table.to_string()).await?);
+        assert!(!manager.has_table(Source::Table.to_string()).await?);
+        assert!(!manager.has_table(Sink::Table.to_string()).await?);
+        assert!(!manager.has_table(Connection::Table.to_string()).await?);
+        assert!(!manager.has_table(View::Table.to_string()).await?);
+        assert!(!manager.has_table(Index::Table.to_string()).await?);
+        assert!(!manager.has_table(Function::Table.to_string()).await?);
+        assert!(!manager.has_table(Object::Table.to_string()).await?);
+        assert!(
+            !manager
+                .has_table(ObjectDependency::Table.to_string())
+                .await?
+        );
 
+        // 2. create tables.
         manager
             .create_table(
-                Table::create()
-                    .table(Post::Table)
-                    .if_not_exists()
+                MigrationTable::create()
+                    .table(Worker::Table)
                     .col(
-                        ColumnDef::new(Post::Id)
+                        ColumnDef::new(Worker::WorkerId)
                             .integer()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(Post::Title).string().not_null())
-                    .col(ColumnDef::new(Post::Text).string().not_null())
+                    .col(ColumnDef::new(Worker::WorkerType).string().not_null())
+                    .col(ColumnDef::new(Worker::Host).string().not_null())
+                    .col(ColumnDef::new(Worker::Port).integer().not_null())
+                    .col(ColumnDef::new(Worker::Status).string().not_null())
                     .to_owned(),
             )
-            .await
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(WorkerProperty::Table)
+                    .col(
+                        ColumnDef::new(WorkerProperty::WorkerId)
+                            .integer()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(WorkerProperty::ParallelUnitIds)
+                            .array(ColumnType::Integer)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(WorkerProperty::IsStreaming)
+                            .boolean()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(WorkerProperty::IsServing)
+                            .boolean()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(WorkerProperty::IsUnschedulable)
+                            .boolean()
+                            .not_null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(User::Table)
+                    .col(ColumnDef::new(User::UserId).integer().primary_key())
+                    .col(ColumnDef::new(User::Name).string().not_null())
+                    .col(ColumnDef::new(User::IsSuper).boolean().not_null())
+                    .col(ColumnDef::new(User::CanCreateDb).boolean().not_null())
+                    .col(ColumnDef::new(User::CanCreateUser).boolean().not_null())
+                    .col(ColumnDef::new(User::CanLogin).boolean().not_null())
+                    .col(ColumnDef::new(User::AuthType).string())
+                    .col(ColumnDef::new(User::AuthValue).string())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(UserPrivilege::Table)
+                    .col(
+                        ColumnDef::new(UserPrivilege::Id)
+                            .integer()
+                            .primary_key()
+                            .auto_increment(),
+                    )
+                    .col(ColumnDef::new(UserPrivilege::UserId).integer().not_null())
+                    .col(ColumnDef::new(UserPrivilege::Oid).integer().not_null())
+                    .col(
+                        ColumnDef::new(UserPrivilege::GrantedBy)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(UserPrivilege::Actions)
+                            .array(ColumnType::String(None))
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(UserPrivilege::WithGrantOption)
+                            .boolean()
+                            .not_null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(Database::Table)
+                    .col(
+                        ColumnDef::new(Database::DatabaseId)
+                            .integer()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(Database::Name)
+                            .string()
+                            .unique_key()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(Database::OwnerId).integer().not_null())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(Schema::Table)
+                    .col(
+                        ColumnDef::new(Schema::SchemaId)
+                            .integer()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(Schema::Name).string().not_null())
+                    .col(ColumnDef::new(Schema::DatabaseId).integer().not_null())
+                    .col(ColumnDef::new(Schema::OwnerId).integer().not_null())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(Fragment::Table)
+                    .col(ColumnDef::new(Fragment::FragmentId).integer().primary_key())
+                    .col(ColumnDef::new(Fragment::TableId).integer().not_null())
+                    .col(
+                        ColumnDef::new(Fragment::FragmentTypeMask)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Fragment::DistributionType)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(Fragment::StreamNode).json().not_null())
+                    .col(ColumnDef::new(Fragment::VnodeMapping).json())
+                    .col(ColumnDef::new(Fragment::StateTableIds).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Fragment::UpstreamFragmentId).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Fragment::DispatcherType).string())
+                    .col(ColumnDef::new(Fragment::DistKeyIndices).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Fragment::OutputIndices).array(ColumnType::Integer))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(Actor::Table)
+                    .col(ColumnDef::new(Actor::ActorId).integer().primary_key())
+                    .col(ColumnDef::new(Actor::FragmentId).integer().not_null())
+                    .col(ColumnDef::new(Actor::Status).string())
+                    .col(ColumnDef::new(Actor::Splits).json())
+                    .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
+                    .col(ColumnDef::new(Actor::UpstreamActorIds).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Actor::Dispatchers).json())
+                    .col(ColumnDef::new(Actor::VnodeBitmap).string())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(Table::Table)
+                    .col(ColumnDef::new(Table::TableId).integer().primary_key())
+                    .col(ColumnDef::new(Table::Name).string().not_null())
+                    .col(ColumnDef::new(Table::SchemaId).integer().not_null())
+                    .col(ColumnDef::new(Table::DatabaseId).integer().not_null())
+                    .col(ColumnDef::new(Table::OwnerId).integer().not_null())
+                    .col(ColumnDef::new(Table::OptionalAssociatedSourceId).integer())
+                    .col(ColumnDef::new(Table::TableType).string())
+                    .col(ColumnDef::new(Table::Columns).json())
+                    .col(ColumnDef::new(Table::Pk).json())
+                    .col(ColumnDef::new(Table::DistributionKey).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Table::AppendOnly).boolean())
+                    .col(ColumnDef::new(Table::Properties).json())
+                    .col(ColumnDef::new(Table::FragmentId).integer())
+                    .col(ColumnDef::new(Table::VnodeColIndex).integer())
+                    .col(ColumnDef::new(Table::ValueIndices).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Table::Definition).string())
+                    .col(ColumnDef::new(Table::HandlePkConflictBehavior).integer())
+                    .col(ColumnDef::new(Table::ReadPrefixLenHint).integer())
+                    .col(ColumnDef::new(Table::WatermarkIndices).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Table::DistKeyInPk).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Table::DmlFragmentId).integer())
+                    .col(ColumnDef::new(Table::Cardinality).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Table::InitializedAtEpoch).integer())
+                    .col(ColumnDef::new(Table::CreatedAtEpoch).integer())
+                    .col(ColumnDef::new(Table::CleanedByWatermark).boolean())
+                    .col(ColumnDef::new(Table::Version).array(ColumnType::Integer))
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(Source::Table)
+                    .col(ColumnDef::new(Source::SourceId).integer().primary_key())
+                    .col(ColumnDef::new(Source::Name).string().not_null())
+                    .col(ColumnDef::new(Source::SchemaId).integer().not_null())
+                    .col(ColumnDef::new(Source::DatabaseId).integer().not_null())
+                    .col(ColumnDef::new(Source::OwnerId).integer().not_null())
+                    .col(ColumnDef::new(Source::RowIdIndex).string())
+                    .col(ColumnDef::new(Source::Columns).json())
+                    .col(ColumnDef::new(Source::PkColumnIds).json())
+                    .col(ColumnDef::new(Source::Properties).json())
+                    .col(ColumnDef::new(Source::Definition).string())
+                    .col(ColumnDef::new(Source::SourceInfo).json())
+                    .col(ColumnDef::new(Source::WatermarkDescs).json())
+                    .col(ColumnDef::new(Source::OptionalAssociatedTableId).integer())
+                    .col(ColumnDef::new(Source::ConnectionId).integer())
+                    .col(ColumnDef::new(Source::InitializedAtEpoch).integer())
+                    .col(ColumnDef::new(Source::CreatedAtEpoch).integer())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(Sink::Table)
+                    .col(ColumnDef::new(Sink::SinkId).integer().primary_key())
+                    .col(ColumnDef::new(Sink::Name).string().not_null())
+                    .col(ColumnDef::new(Sink::SchemaId).integer().not_null())
+                    .col(ColumnDef::new(Sink::DatabaseId).integer().not_null())
+                    .col(ColumnDef::new(Sink::OwnerId).integer().not_null())
+                    .col(ColumnDef::new(Sink::Columns).json())
+                    .col(ColumnDef::new(Sink::PkColumnIds).json())
+                    .col(ColumnDef::new(Sink::DistributionKey).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Sink::DownstreamPk).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Sink::SinkType).string())
+                    .col(ColumnDef::new(Sink::Properties).json())
+                    .col(ColumnDef::new(Sink::Definition).string())
+                    .col(ColumnDef::new(Sink::ConnectionId).integer())
+                    .col(ColumnDef::new(Sink::InitializedAtEpoch).integer())
+                    .col(ColumnDef::new(Sink::CreatedAtEpoch).integer())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(Connection::Table)
+                    .col(
+                        ColumnDef::new(Connection::ConnectionId)
+                            .integer()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(Connection::Name).string().not_null())
+                    .col(ColumnDef::new(Connection::SchemaId).integer().not_null())
+                    .col(ColumnDef::new(Connection::DatabaseId).integer().not_null())
+                    .col(ColumnDef::new(Connection::OwnerId).integer().not_null())
+                    .col(ColumnDef::new(Connection::Info).json())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(View::Table)
+                    .col(ColumnDef::new(View::ViewId).integer().primary_key())
+                    .col(ColumnDef::new(View::Name).string().not_null())
+                    .col(ColumnDef::new(View::SchemaId).integer().not_null())
+                    .col(ColumnDef::new(View::DatabaseId).integer().not_null())
+                    .col(ColumnDef::new(View::OwnerId).integer().not_null())
+                    .col(ColumnDef::new(View::Properties).json())
+                    .col(ColumnDef::new(View::Sql).string())
+                    .col(ColumnDef::new(View::Columns).json())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(Index::Table)
+                    .col(ColumnDef::new(Index::IndexId).integer().primary_key())
+                    .col(ColumnDef::new(Index::Name).string().not_null())
+                    .col(ColumnDef::new(Index::SchemaId).integer().not_null())
+                    .col(ColumnDef::new(Index::DatabaseId).integer().not_null())
+                    .col(ColumnDef::new(Index::OwnerId).integer().not_null())
+                    .col(ColumnDef::new(Index::IndexTableId).integer().not_null())
+                    .col(ColumnDef::new(Index::PrimaryTableId).integer().not_null())
+                    .col(ColumnDef::new(Index::IndexItems).json())
+                    .col(ColumnDef::new(Index::OriginalColumns).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Index::InitializedAtEpoch).integer())
+                    .col(ColumnDef::new(Index::CreatedAtEpoch).integer())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(Function::Table)
+                    .col(ColumnDef::new(Function::FunctionId).integer().primary_key())
+                    .col(ColumnDef::new(Function::Name).string().not_null())
+                    .col(ColumnDef::new(Function::SchemaId).integer().not_null())
+                    .col(ColumnDef::new(Function::DatabaseId).integer().not_null())
+                    .col(ColumnDef::new(Function::OwnerId).integer().not_null())
+                    .col(ColumnDef::new(Function::ArgTypes).json())
+                    .col(ColumnDef::new(Function::ReturnType).string())
+                    .col(ColumnDef::new(Function::Language).string())
+                    .col(ColumnDef::new(Function::Link).string())
+                    .col(ColumnDef::new(Function::Identifier).string())
+                    .col(ColumnDef::new(Function::Kind).json())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(Object::Table)
+                    .col(ColumnDef::new(Object::Oid).integer().primary_key())
+                    .col(ColumnDef::new(Object::ObjType).string().not_null())
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(ObjectDependency::Table)
+                    .col(ColumnDef::new(ObjectDependency::Id).integer().primary_key())
+                    .col(ColumnDef::new(ObjectDependency::Oid).integer().not_null())
+                    .col(
+                        ColumnDef::new(ObjectDependency::UsedBy)
+                            .integer()
+                            .not_null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        // 3. create indexes.
+        manager
+            .create_index(
+                MigrationIndex::create()
+                    .table(Worker::Table)
+                    .unique()
+                    .col(Worker::Host)
+                    .col(Worker::Port)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_index(
+                MigrationIndex::create()
+                    .table(Schema::Table)
+                    .unique()
+                    .col(Schema::DatabaseId)
+                    .col(Schema::Name)
+                    .to_owned(),
+            )
+            .await?;
+
+        // 4. create foreign keys.
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_worker_property_worker_id")
+                    .from(WorkerProperty::Table, WorkerProperty::WorkerId)
+                    .to(Worker::Table, Worker::WorkerId)
+                    .on_delete(ForeignKeyAction::Cascade)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_user_privilege_user_id")
+                    .from(UserPrivilege::Table, UserPrivilege::UserId)
+                    .to(User::Table, User::UserId)
+                    .on_delete(ForeignKeyAction::Cascade)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_user_privilege_granted_by")
+                    .from(UserPrivilege::Table, UserPrivilege::GrantedBy)
+                    .to(User::Table, User::UserId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_user_privilege_oid")
+                    .from(UserPrivilege::Table, UserPrivilege::Oid)
+                    .to(Object::Table, Object::Oid)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_database_owner_id")
+                    .from(Database::Table, Database::OwnerId)
+                    .to(User::Table, User::UserId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_schema_database_id")
+                    .from(Schema::Table, Schema::DatabaseId)
+                    .to(Database::Table, Database::DatabaseId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_schema_owner_id")
+                    .from(Schema::Table, Schema::OwnerId)
+                    .to(User::Table, User::UserId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_fragment_table_id")
+                    .from(Fragment::Table, Fragment::TableId)
+                    .to(Table::Table, Table::TableId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_actor_fragment_id")
+                    .from(Actor::Table, Actor::FragmentId)
+                    .to(Fragment::Table, Fragment::FragmentId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_table_schema_id")
+                    .from(Table::Table, Table::SchemaId)
+                    .to(Schema::Table, Schema::SchemaId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_table_database_id")
+                    .from(Table::Table, Table::DatabaseId)
+                    .to(Database::Table, Database::DatabaseId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_table_owner_id")
+                    .from(Table::Table, Table::OwnerId)
+                    .to(User::Table, User::UserId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_table_fragment_id")
+                    .from(Table::Table, Table::FragmentId)
+                    .to(Fragment::Table, Fragment::FragmentId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_table_dml_fragment_id")
+                    .from(Table::Table, Table::DmlFragmentId)
+                    .to(Fragment::Table, Fragment::FragmentId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_table_optional_associated_source_id")
+                    .from(Table::Table, Table::OptionalAssociatedSourceId)
+                    .to(Source::Table, Source::SourceId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_source_schema_id")
+                    .from(Source::Table, Source::SchemaId)
+                    .to(Schema::Table, Schema::SchemaId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_source_database_id")
+                    .from(Source::Table, Source::DatabaseId)
+                    .to(Database::Table, Database::DatabaseId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_source_owner_id")
+                    .from(Source::Table, Source::OwnerId)
+                    .to(User::Table, User::UserId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_source_connection_id")
+                    .from(Source::Table, Source::ConnectionId)
+                    .to(Connection::Table, Connection::ConnectionId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_source_optional_associated_table_id")
+                    .from(Source::Table, Source::OptionalAssociatedTableId)
+                    .to(Table::Table, Table::TableId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_sink_schema_id")
+                    .from(Sink::Table, Sink::SchemaId)
+                    .to(Schema::Table, Schema::SchemaId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_sink_database_id")
+                    .from(Sink::Table, Sink::DatabaseId)
+                    .to(Database::Table, Database::DatabaseId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_sink_owner_id")
+                    .from(Sink::Table, Sink::OwnerId)
+                    .to(User::Table, User::UserId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_sink_connection_id")
+                    .from(Sink::Table, Sink::ConnectionId)
+                    .to(Connection::Table, Connection::ConnectionId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_connection_schema_id")
+                    .from(Connection::Table, Connection::SchemaId)
+                    .to(Schema::Table, Schema::SchemaId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_connection_database_id")
+                    .from(Connection::Table, Connection::DatabaseId)
+                    .to(Database::Table, Database::DatabaseId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_connection_owner_id")
+                    .from(Connection::Table, Connection::OwnerId)
+                    .to(User::Table, User::UserId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_view_schema_id")
+                    .from(View::Table, View::SchemaId)
+                    .to(Schema::Table, Schema::SchemaId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_view_database_id")
+                    .from(View::Table, View::DatabaseId)
+                    .to(Database::Table, Database::DatabaseId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_view_owner_id")
+                    .from(View::Table, View::OwnerId)
+                    .to(User::Table, User::UserId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_index_schema_id")
+                    .from(Index::Table, Index::SchemaId)
+                    .to(Schema::Table, Schema::SchemaId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_index_database_id")
+                    .from(Index::Table, Index::DatabaseId)
+                    .to(Database::Table, Database::DatabaseId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_index_owner_id")
+                    .from(Index::Table, Index::OwnerId)
+                    .to(User::Table, User::UserId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_index_index_table_id")
+                    .from(Index::Table, Index::IndexTableId)
+                    .to(Table::Table, Table::TableId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_index_primary_table_id")
+                    .from(Index::Table, Index::PrimaryTableId)
+                    .to(Table::Table, Table::TableId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_function_schema_id")
+                    .from(Function::Table, Function::SchemaId)
+                    .to(Schema::Table, Schema::SchemaId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_function_database_id")
+                    .from(Function::Table, Function::DatabaseId)
+                    .to(Database::Table, Database::DatabaseId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_function_owner_id")
+                    .from(Function::Table, Function::OwnerId)
+                    .to(User::Table, User::UserId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_object_oid_table")
+                    .from(Object::Table, Object::Oid)
+                    .to(Table::Table, Table::TableId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_object_oid_source")
+                    .from(Object::Table, Object::Oid)
+                    .to(Source::Table, Source::SourceId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_object_oid_sink")
+                    .from(Object::Table, Object::Oid)
+                    .to(Sink::Table, Sink::SinkId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_object_oid_index")
+                    .from(Object::Table, Object::Oid)
+                    .to(Index::Table, Index::IndexId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_object_oid_view")
+                    .from(Object::Table, Object::Oid)
+                    .to(View::Table, View::ViewId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_object_oid_connection")
+                    .from(Object::Table, Object::Oid)
+                    .to(Connection::Table, Connection::ConnectionId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_object_oid_function")
+                    .from(Object::Table, Object::Oid)
+                    .to(Function::Table, Function::FunctionId)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_object_dependency_oid")
+                    .from(ObjectDependency::Table, ObjectDependency::Oid)
+                    .to(Object::Table, Object::Oid)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_object_dependency_used_by")
+                    .from(ObjectDependency::Table, ObjectDependency::UsedBy)
+                    .to(Object::Table, Object::Oid)
+                    .to_owned(),
+            )
+            .await?;
+
+        // 4. initialize data.
+        let insert_sys_users = Query::insert()
+            .into_table(User::Table)
+            .columns([
+                User::UserId,
+                User::Name,
+                User::IsSuper,
+                User::CanCreateUser,
+                User::CanCreateDb,
+                User::CanLogin,
+            ])
+            .values_panic([
+                1.into(),
+                "root".into(),
+                true.into(),
+                true.into(),
+                true.into(),
+                true.into(),
+            ])
+            .values_panic([
+                2.into(),
+                "postgres".into(),
+                true.into(),
+                true.into(),
+                true.into(),
+                true.into(),
+            ])
+            .to_owned();
+        let insert_sys_database = Query::insert()
+            .into_table(Database::Table)
+            .columns([Database::Name, Database::OwnerId])
+            .values_panic(["dev".into(), 1.into()])
+            .to_owned();
+        manager.exec_stmt(insert_sys_users).await?;
+        manager.exec_stmt(insert_sys_database).await?;
+
+        Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Replace the sample below with your own migration scripts
-        todo!();
+        macro_rules! drop_tables {
+            ($manager:expr, $( $table:ident ),+) => {
+                $(
+                    $manager
+                        .drop_table(
+                            MigrationTable::drop()
+                                .table($table::Table)
+                                .if_exists()
+                                .cascade()
+                                .to_owned(),
+                        )
+                        .await?;
+                )+
+            };
+        }
 
-        manager
-            .drop_table(Table::drop().table(Post::Table).to_owned())
-            .await
+        // drop tables cascade.
+        drop_tables!(
+            manager,
+            Worker,
+            WorkerProperty,
+            User,
+            UserPrivilege,
+            Database,
+            Schema,
+            Fragment,
+            Actor,
+            Table,
+            Source,
+            Sink,
+            Connection,
+            View,
+            Index,
+            Function,
+            Object,
+            ObjectDependency
+        );
+        Ok(())
     }
 }
 
 #[derive(DeriveIden)]
-enum Post {
+enum Worker {
+    Table,
+    WorkerId,
+    WorkerType,
+    Host,
+    Port,
+    Status,
+}
+
+#[derive(DeriveIden)]
+enum WorkerProperty {
+    Table,
+    WorkerId,
+    ParallelUnitIds,
+    IsStreaming,
+    IsServing,
+    IsUnschedulable,
+}
+
+#[derive(DeriveIden)]
+enum User {
+    Table,
+    UserId,
+    Name,
+    IsSuper,
+    CanCreateDb,
+    CanCreateUser,
+    CanLogin,
+    AuthType,
+    AuthValue,
+}
+
+#[derive(DeriveIden)]
+enum UserPrivilege {
     Table,
     Id,
-    Title,
-    Text,
+    UserId,
+    Oid,
+    GrantedBy,
+    Actions,
+    WithGrantOption,
+}
+
+#[derive(DeriveIden)]
+enum Database {
+    Table,
+    DatabaseId,
+    Name,
+    OwnerId,
+}
+
+#[derive(DeriveIden)]
+enum Schema {
+    Table,
+    SchemaId,
+    Name,
+    DatabaseId,
+    OwnerId,
+}
+
+#[derive(DeriveIden)]
+enum Fragment {
+    Table,
+    FragmentId,
+    TableId,
+    FragmentTypeMask,
+    DistributionType,
+    StreamNode,
+    VnodeMapping,
+    StateTableIds,
+    UpstreamFragmentId,
+    DispatcherType,
+    DistKeyIndices,
+    OutputIndices,
+}
+
+#[derive(DeriveIden)]
+enum Actor {
+    Table,
+    ActorId,
+    FragmentId,
+    Status,
+    Splits,
+    ParallelUnitId,
+    UpstreamActorIds,
+    Dispatchers,
+    VnodeBitmap,
+}
+
+#[derive(DeriveIden)]
+#[allow(clippy::enum_variant_names)]
+enum Table {
+    Table,
+    TableId,
+    Name,
+    SchemaId,
+    DatabaseId,
+    OwnerId,
+    OptionalAssociatedSourceId,
+    TableType,
+    Columns,
+    Pk,
+    DistributionKey,
+    AppendOnly,
+    Properties,
+    FragmentId,
+    VnodeColIndex,
+    ValueIndices,
+    Definition,
+    HandlePkConflictBehavior,
+    ReadPrefixLenHint,
+    WatermarkIndices,
+    DistKeyInPk,
+    DmlFragmentId,
+    Cardinality,
+    InitializedAtEpoch,
+    CreatedAtEpoch,
+    CleanedByWatermark,
+    Version,
+}
+
+#[derive(DeriveIden)]
+enum Source {
+    Table,
+    SourceId,
+    Name,
+    SchemaId,
+    DatabaseId,
+    OwnerId,
+    RowIdIndex,
+    Columns,
+    PkColumnIds,
+    Properties,
+    Definition,
+    SourceInfo,
+    WatermarkDescs,
+    OptionalAssociatedTableId,
+    ConnectionId,
+    InitializedAtEpoch,
+    CreatedAtEpoch,
+}
+
+#[derive(DeriveIden)]
+enum Sink {
+    Table,
+    SinkId,
+    Name,
+    SchemaId,
+    DatabaseId,
+    OwnerId,
+    Columns,
+    PkColumnIds,
+    DistributionKey,
+    DownstreamPk,
+    SinkType,
+    Properties,
+    Definition,
+    ConnectionId,
+    InitializedAtEpoch,
+    CreatedAtEpoch,
+}
+
+#[derive(DeriveIden)]
+enum Connection {
+    Table,
+    ConnectionId,
+    Name,
+    SchemaId,
+    DatabaseId,
+    OwnerId,
+    Info,
+}
+
+#[derive(DeriveIden)]
+enum View {
+    Table,
+    ViewId,
+    Name,
+    SchemaId,
+    DatabaseId,
+    OwnerId,
+    Properties,
+    Sql,
+    Columns,
+}
+
+#[derive(DeriveIden)]
+enum Index {
+    Table,
+    IndexId,
+    Name,
+    SchemaId,
+    DatabaseId,
+    OwnerId,
+    IndexTableId,
+    PrimaryTableId,
+    IndexItems,
+    OriginalColumns,
+    InitializedAtEpoch,
+    CreatedAtEpoch,
+}
+
+#[derive(DeriveIden)]
+enum Function {
+    Table,
+    FunctionId,
+    Name,
+    SchemaId,
+    DatabaseId,
+    OwnerId,
+    ArgTypes,
+    ReturnType,
+    Language,
+    Link,
+    Identifier,
+    Kind,
+}
+
+#[derive(DeriveIden)]
+enum Object {
+    Table,
+    Oid,
+    ObjType,
+}
+
+#[derive(DeriveIden)]
+enum ObjectDependency {
+    Table,
+    Id,
+    Oid,
+    UsedBy,
 }

@@ -15,12 +15,7 @@
 use std::iter;
 
 use anyhow::anyhow;
-use prometheus::core::{Atomic, AtomicI64};
-use risingwave_common::catalog::{
-    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
-    DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
-};
-use risingwave_pb::catalog::PbDatabase;
+use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::{
     ActiveModelBehavior, ActiveModelTrait, ActiveValue, ColumnTrait, Database, DatabaseConnection,
@@ -58,64 +53,13 @@ impl From<sea_orm::DbErr> for MetaError {
 
 pub struct MetadataManager {
     env: MetaSrvEnv,
-    conn: DatabaseConnection,
+    db: DatabaseConnection,
 }
 
 impl MetadataManager {
-    pub async fn new(env: MetaSrvEnv, conn: DatabaseConnection) -> MetaResult<Self> {
-        //FIXME: for test only, to remove.
-        // let dbs: Vec<model_v2::database::Model> = prelude::Database::find().all(&conn).await.unwrap();
-        // dbs.into_iter().for_each(|db| {
-        //     println!("db: {:?}", db);
-        // });
-        let mgr = Self { env, conn };
-        mgr.init_user().await?;
-        mgr.init_database().await?;
-        Ok(mgr)
-    }
-
-    // FIXME: should be done in init.sql scripts.
-    async fn init_user(&self) -> MetaResult<()> {
-        for (id, name) in [
-            (DEFAULT_SUPER_USER_ID, DEFAULT_SUPER_USER),
-            (DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_FOR_PG),
-        ] {
-            if prelude::User::find_by_id(id as i32)
-                .one(&self.conn)
-                .await?
-                .is_some()
-            {
-                continue;
-            }
-            let user = model_v2::user::ActiveModel {
-                user_id: ActiveValue::Set(id as _),
-                name: ActiveValue::Set(name.into()),
-                is_super: ActiveValue::Set(Some(true)),
-                can_create_db: ActiveValue::Set(Some(true)),
-                can_create_user: ActiveValue::Set(Some(true)),
-                can_login: ActiveValue::Set(Some(true)),
-                ..Default::default()
-            };
-            user.insert(&self.conn).await?;
-        }
-        Ok(())
-    }
-
-    // FIXME: should be done in init.sql scripts.
-    async fn init_database(&self) -> MetaResult<()> {
-        if prelude::Database::find()
-            .filter(model_v2::database::Column::Name.eq(DEFAULT_DATABASE_NAME))
-            .one(&self.conn)
-            .await?
-            .is_some()
-        {
-            return Ok(());
-        }
-        let mut db = model_v2::database::ActiveModel::new();
-        db.name = ActiveValue::Set(DEFAULT_DATABASE_NAME.into());
-        db.owner_id = ActiveValue::Set(DEFAULT_SUPER_USER_ID as _);
-        self.create_database(db).await?;
-        Ok(())
+    pub async fn new(env: MetaSrvEnv, url: &str) -> MetaResult<Self> {
+        let db = Database::connect(url).await?;
+        Ok(Self { env, db })
     }
 }
 
@@ -139,7 +83,7 @@ impl MetadataManager {
         &self,
         db: model_v2::database::ActiveModel,
     ) -> MetaResult<NotificationVersion> {
-        let txn = self.conn.begin().await?;
+        let txn = self.db.begin().await?;
         let db = db.insert(&txn).await?;
         let mut schemas = vec![];
         for schema_name in iter::once(DEFAULT_SCHEMA_NAME).chain(SYSTEM_SCHEMAS) {
@@ -165,18 +109,15 @@ impl MetadataManager {
 
     // todo: return all streaming jobs.
     pub async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<()> {
-        let tables = prelude::Table::find()
+        let _tables = prelude::Table::find()
             .filter(model_v2::table::Column::DatabaseId.eq(database_id as i32))
-            .all(&self.conn)
+            .all(&self.db)
             .await?;
         // 1. unregister source.
         // 2. fragments + actors, streaming manager drop streaming job.
         // 3. connection to drop.
 
-        // let fragments = prelude::Fragment::
-        //
-
-        let txn = self.conn.begin().await?;
+        let txn = self.db.begin().await?;
         let db: model_v2::database::ActiveModel = prelude::Database::find_by_id(database_id as i32)
             .one(&txn)
             .await?
@@ -224,18 +165,18 @@ impl MetadataManager {
 
 #[cfg(test)]
 mod tests {
-    use sea_orm::{DbBackend, MockDatabase};
     use super::*;
 
     #[tokio::test]
+    #[ignore]
     async fn test_create_database() {
-        let conn = Database::connect("postgres://postgres:@localhost:5432/postgres")
-            .await
-            .unwrap();
         // let conn = MockDatabase::new(DbBackend::Postgres).into_connection();
-        let mgr = MetadataManager::new(MetaSrvEnv::for_test().await, conn)
-            .await
-            .unwrap();
+        let mgr = MetadataManager::new(
+            MetaSrvEnv::for_test().await,
+            "postgres://postgres:@localhost:5432/postgres",
+        )
+        .await
+        .unwrap();
         let db = model_v2::database::ActiveModel {
             name: ActiveValue::Set("test".into()),
             owner_id: ActiveValue::Set(1),
@@ -244,7 +185,7 @@ mod tests {
         mgr.create_database(db).await.unwrap();
         let db = prelude::Database::find()
             .filter(model_v2::database::Column::Name.eq("test"))
-            .one(&mgr.conn)
+            .one(&mgr.db)
             .await
             .unwrap()
             .unwrap();
