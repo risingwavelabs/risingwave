@@ -327,7 +327,6 @@ where
                                             chunk,
                                             &self.output_indices,
                                         ));
-                                        println!("yielding Chunk from snapshot read: {:#?}", chunk);
                                         yield chunk;
                                     }
                                 }
@@ -480,7 +479,7 @@ where
                     // (there's no epoch before the first epoch).
                     // TODO: if we reach here, maybe some vnodes do not have their state finished.
                     // We should update them to finished state.
-                    let finished_placeholder_state = construct_initial_finished_state(pk_indices.len());
+                    let finished_placeholder_state = construct_initial_finished_state(state_len);
                     for vnode in upstream_table.vnodes().iter_vnodes() {
                         let backfill_progress = backfill_state.get_progress(&vnode)?;
                         let finished_state = match backfill_progress {
