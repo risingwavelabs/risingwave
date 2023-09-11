@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_expr::agg::AggKind;
 use risingwave_expr::sig::cast::{cast_sigs, CastContext, CastSig as RwCastSig};
-use risingwave_expr::sig::{func_sigs, FuncSign};
+use risingwave_expr::sig::{aggregate_functions, scalar_functions, FuncSign};
 use risingwave_frontend::expr::ExprType;
 use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType, StructField};
 
@@ -120,13 +120,11 @@ static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
 pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSign>>> =
     LazyLock::new(|| {
         let mut funcs = HashMap::<DataType, Vec<&'static FuncSign>>::new();
-        func_sigs()
+        scalar_functions()
             .filter(|func| {
-                func.is_scalar()
-                    && func
-                        .inputs_type
-                        .iter()
-                        .all(|t| t.is_exact() && t.as_exact() != &DataType::Timestamptz)
+                func.inputs_type
+                    .iter()
+                    .all(|t| t.is_exact() && t.as_exact() != &DataType::Timestamptz)
                     && !FUNC_BAN_LIST.contains(&func.name.as_scalar())
                     && !func.deprecated // deprecated functions are not accepted by frontend
             })
@@ -142,8 +140,7 @@ pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSign>>
 /// Set of invariant functions
 // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
 pub(crate) static INVARIANT_FUNC_SET: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
-    func_sigs()
-        .filter(|sig| sig.is_scalar())
+    scalar_functions()
         .map(|sig| sig.name.as_scalar())
         .counts()
         .into_iter()
@@ -157,10 +154,9 @@ pub(crate) static INVARIANT_FUNC_SET: LazyLock<HashSet<ExprType>> = LazyLock::ne
 pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSign>>> =
     LazyLock::new(|| {
         let mut funcs = HashMap::<DataType, Vec<&'static FuncSign>>::new();
-        func_sigs()
+        aggregate_functions()
             .filter(|func| {
-                func.is_aggregate()
-                    && func.inputs_type
+                func.inputs_type
                     .iter()
                     .all(|t| t != &DataType::Timestamptz.into())
                     // Ignored functions
@@ -245,10 +241,9 @@ pub(crate) static BINARY_INEQUALITY_OP_TABLE: LazyLock<
     HashMap<(DataType, DataType), Vec<BinaryOperator>>,
 > = LazyLock::new(|| {
     let mut funcs = HashMap::<(DataType, DataType), Vec<BinaryOperator>>::new();
-    func_sigs()
+    scalar_functions()
         .filter(|func| {
-            func.is_scalar()
-                && !FUNC_BAN_LIST.contains(&func.name.as_scalar())
+            !FUNC_BAN_LIST.contains(&func.name.as_scalar())
                 && func.ret_type == DataType::Boolean.into()
                 && func.inputs_type.len() == 2
                 && func

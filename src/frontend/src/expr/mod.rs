@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::once;
-
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use futures::FutureExt;
@@ -68,7 +66,7 @@ pub use session_timezone::SessionTimezone;
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{
-    align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_some_all, infer_type,
+    align_types, all_functions, cast_map_array, cast_ok, cast_sigs, infer_some_all, infer_type,
     least_restrictive, CastContext, CastSig, FuncSign,
 };
 pub use user_defined_function::UserDefinedFunction;
@@ -202,7 +200,7 @@ impl ExprImpl {
     /// # Panics
     /// Panics if `input_ref >= input_col_num`.
     pub fn collect_input_refs(&self, input_col_num: usize) -> FixedBitSet {
-        collect_input_refs(input_col_num, once(self))
+        collect_input_refs(input_col_num, [self])
     }
 
     /// Check if the expression has no side effects and output is deterministic

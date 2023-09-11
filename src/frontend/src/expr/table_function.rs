@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_expr::sig::FUNC_SIG_MAP;
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::{
     TableFunction as TableFunctionPb, UserDefinedTableFunction as UserDefinedTableFunctionPb,
@@ -43,7 +43,7 @@ impl TableFunction {
     /// Create a `TableFunction` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
     pub fn new(func_type: TableFunctionType, args: Vec<ExprImpl>) -> RwResult<Self> {
-        let return_type = FUNC_SIG_MAP.get_return_type(
+        let return_type = FUNCTION_REGISTRY.get_return_type(
             func_type,
             &args.iter().map(|c| c.return_type()).collect_vec(),
         )?;

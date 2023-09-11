@@ -135,7 +135,7 @@ pub fn build(
     children: Vec<BoxedExpression>,
 ) -> Result<BoxedTableFunction> {
     let args = children.iter().map(|t| t.return_type()).collect_vec();
-    let desc = crate::sig::FUNC_SIG_MAP
+    let desc = crate::sig::FUNCTION_REGISTRY
         .get(func, &args, &return_type)
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(

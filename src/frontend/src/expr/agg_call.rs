@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_expr::agg::AggKind;
-use risingwave_expr::sig::FUNC_SIG_MAP;
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 
 use super::{Expr, ExprImpl, Literal, OrderBy};
 use crate::utils::Condition;
@@ -88,7 +88,7 @@ impl AggCall {
             // Ordered-Set Aggregation
             (AggKind::Grouping, _) => Int32,
             // other functions are handled by signature map
-            _ => FUNC_SIG_MAP.get_return_type(agg_kind, &args)?,
+            _ => FUNCTION_REGISTRY.get_return_type(agg_kind, &args)?,
         })
     }
 

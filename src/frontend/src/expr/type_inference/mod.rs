@@ -21,4 +21,4 @@ pub use cast::{
     align_types, cast_map_array, cast_ok, cast_ok_base, cast_sigs, least_restrictive, CastContext,
     CastSig,
 };
-pub use func::{func_sigs, infer_some_all, infer_type, FuncSign};
+pub use func::{all_functions, infer_some_all, infer_type, FuncSign};

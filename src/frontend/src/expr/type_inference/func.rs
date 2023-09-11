@@ -39,7 +39,7 @@ pub fn infer_type(func_type: ExprType, inputs: &mut [ExprImpl]) -> Result<DataTy
             false => Some(e.return_type()),
         })
         .collect_vec();
-    let sig = infer_type_name(&FUNC_SIG_MAP, func_type, &actuals)?;
+    let sig = infer_type_name(&FUNCTION_REGISTRY, func_type, &actuals)?;
 
     // add implicit casts to inputs
     for (expr, t) in inputs.iter_mut().zip_eq_fast(&sig.inputs_type) {
@@ -80,7 +80,7 @@ pub fn infer_some_all(
         (!inputs[0].is_untyped()).then_some(inputs[0].return_type()),
         element_type.clone(),
     ];
-    let sig = infer_type_name(&FUNC_SIG_MAP, final_type, &actuals)?;
+    let sig = infer_type_name(&FUNCTION_REGISTRY, final_type, &actuals)?;
     if sig.ret_type != DataType::Boolean.into() {
         return Err(ErrorCode::BindError(format!(
             "op SOME/ANY/ALL (array) requires operator to yield boolean, but got {}",
@@ -273,7 +273,7 @@ fn infer_struct_cast_target_type(
         (NestedType::Infer(l), NestedType::Infer(r)) => {
             // Both sides are *unknown*, using the sig_map to infer the return type.
             let actuals = vec![None, None];
-            let sig = infer_type_name(&FUNC_SIG_MAP, func_type, &actuals)?;
+            let sig = infer_type_name(&FUNCTION_REGISTRY, func_type, &actuals)?;
             Ok((
                 sig.ret_type != l.into(),
                 sig.ret_type != r.into(),
@@ -562,7 +562,7 @@ fn infer_type_for_special(
 /// 5. Attempt to narrow down candidates by assuming all arguments are same type. This covers Rule
 ///    4f in `PostgreSQL`. See [`narrow_same_type`] for details.
 fn infer_type_name<'a>(
-    sig_map: &'a FuncSigMap,
+    sig_map: &'a FunctionRegistry,
     func_type: ExprType,
     inputs: &[Option<DataType>],
 ) -> Result<&'a FuncSign> {
@@ -1120,7 +1120,7 @@ mod tests {
             ),
         ];
         for (desc, candidates, inputs, expected) in testcases {
-            let mut sig_map = FuncSigMap::default();
+            let mut sig_map = FunctionRegistry::default();
             for formals in candidates {
                 sig_map.insert(FuncSign {
                     // func_name does not affect the overload resolution logic

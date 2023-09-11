@@ -31,27 +31,40 @@ use crate::ExprError;
 
 pub mod cast;
 
-pub static FUNC_SIG_MAP: LazyLock<FuncSigMap> = LazyLock::new(|| unsafe {
-    let mut map = FuncSigMap::default();
-    tracing::info!("{} function signatures loaded.", FUNC_SIG_MAP_INIT.len());
-    for desc in FUNC_SIG_MAP_INIT.drain(..) {
-        map.insert(desc);
+/// The global registry of all function signatures.
+pub static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> = LazyLock::new(|| unsafe {
+    // SAFETY: this function is called after all `#[ctor]` functions are called.
+    let mut map = FunctionRegistry::default();
+    tracing::info!("found {} functions", FUNCTION_REGISTRY_INIT.len());
+    for sig in FUNCTION_REGISTRY_INIT.drain(..) {
+        map.insert(sig);
     }
     map
 });
 
-/// The table of function signatures.
-pub fn func_sigs() -> impl Iterator<Item = &'static FuncSign> {
-    FUNC_SIG_MAP.0.values().flatten()
+/// Returns an iterator of all function signatures.
+pub fn all_functions() -> impl Iterator<Item = &'static FuncSign> {
+    FUNCTION_REGISTRY.0.values().flatten()
 }
 
-#[derive(Default, Clone, Debug)]
-pub struct FuncSigMap(HashMap<FuncName, Vec<FuncSign>>);
+/// Returns an iterator of all scalar functions.
+pub fn scalar_functions() -> impl Iterator<Item = &'static FuncSign> {
+    all_functions().filter(|d| d.is_scalar())
+}
 
-impl FuncSigMap {
+/// Returns an iterator of all aggregate functions.
+pub fn aggregate_functions() -> impl Iterator<Item = &'static FuncSign> {
+    all_functions().filter(|d| d.is_aggregate())
+}
+
+/// A set of function signatures.
+#[derive(Default, Clone, Debug)]
+pub struct FunctionRegistry(HashMap<FuncName, Vec<FuncSign>>);
+
+impl FunctionRegistry {
     /// Inserts a function signature.
-    pub fn insert(&mut self, desc: FuncSign) {
-        self.0.entry(desc.name).or_default().push(desc)
+    pub fn insert(&mut self, sig: FuncSign) {
+        self.0.entry(sig.name).or_default().push(sig)
     }
 
     /// Returns a function signature with the same type, argument types and return type.
@@ -391,8 +404,8 @@ pub enum FuncBuilder {
 /// It is designed to be used by `#[function]` macro.
 /// Users SHOULD NOT call this function.
 #[doc(hidden)]
-pub unsafe fn _register(desc: FuncSign) {
-    FUNC_SIG_MAP_INIT.push(desc)
+pub unsafe fn _register(sig: FuncSign) {
+    FUNCTION_REGISTRY_INIT.push(sig)
 }
 
 /// The global registry of function signatures on initialization.
@@ -400,7 +413,7 @@ pub unsafe fn _register(desc: FuncSign) {
 /// `#[function]` macro will generate a `#[ctor]` function to register the signature into this
 /// vector. The calls are guaranteed to be sequential. The vector will be drained and moved into
 /// `FUNC_SIG_MAP` on the first access of `FUNC_SIG_MAP`.
-static mut FUNC_SIG_MAP_INIT: Vec<FuncSign> = Vec::new();
+static mut FUNCTION_REGISTRY_INIT: Vec<FuncSign> = Vec::new();
 
 #[cfg(test)]
 mod tests {
@@ -415,7 +428,7 @@ mod tests {
         // convert FUNC_SIG_MAP to a more convenient map for testing
         let mut new_map: HashMap<FuncName, HashMap<Vec<SigDataType>, Vec<FuncSign>>> =
             HashMap::new();
-        for (func, sigs) in &FUNC_SIG_MAP.0 {
+        for (func, sigs) in &FUNCTION_REGISTRY.0 {
             for sig in sigs {
                 // validate the FUNC_SIG_MAP is consistent
                 assert_eq!(func, &sig.name);
