@@ -106,8 +106,9 @@ test_replication_with_column_pruning() {
 }
 
 main() {
-  # echo "--- Basic test"
-  # test_basic
+  set -euo pipefail
+  echo "--- Basic test"
+  test_basic
   echo "--- Replication with Column pruning"
   test_replication_with_column_pruning
   echo "Backfill tests complete"
