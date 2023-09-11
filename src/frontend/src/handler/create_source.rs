@@ -1107,7 +1107,13 @@ pub async fn handle_create_source(
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
 
-    bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
+    bind_sql_column_constraints(
+        &session,
+        name.clone(),
+        &mut columns,
+        stmt.columns,
+        &pk_column_ids,
+    )?;
 
     check_source_schema(&with_properties, row_id_index, &columns)?;
 
