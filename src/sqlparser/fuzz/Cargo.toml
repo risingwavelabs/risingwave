@@ -20,3 +20,6 @@ members = ["."]
 [[bin]]
 name = "fuzz_parse_sql"
 path = "fuzz_targets/fuzz_parse_sql.rs"
+
+[lints]
+workspace = true

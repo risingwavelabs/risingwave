@@ -23,6 +23,8 @@ anyhow = { version = "1", features = ["backtrace"] }
 aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
 aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
 aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
+base64 = { version = "0.21", features = ["alloc"] }
+bitflags = { version = "2", default-features = false, features = ["std"] }
 byteorder = { version = "1", features = ["i128"] }
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", features = ["alloc", "serde"] }
@@ -60,11 +62,8 @@ lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
 madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "bb8f063", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
-memchr = { version = "2" }
-miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 mio = { version = "0.8", features = ["net", "os-ext"] }
 multimap = { version = "0.8" }
-nix = { version = "0.26" }
 nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
@@ -100,6 +99,8 @@ tokio = { version = "1", features = ["full", "stats", "tracing"] }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6", features = ["with-chrono-0_4"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
+toml_datetime = { version = "0.6", default-features = false, features = ["serde"] }
+toml_edit = { version = "0.19", features = ["serde"] }
 tonic = { version = "0.9", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }
@@ -118,6 +119,8 @@ auto_enums = { version = "0.8", features = ["futures03"] }
 aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
 aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
 aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
+base64 = { version = "0.21", features = ["alloc"] }
+bitflags = { version = "2", default-features = false, features = ["std"] }
 byteorder = { version = "1", features = ["i128"] }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
@@ -156,11 +159,8 @@ lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
 madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "bb8f063", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
-memchr = { version = "2" }
-miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
 mio = { version = "0.8", features = ["net", "os-ext"] }
 multimap = { version = "0.8" }
-nix = { version = "0.26" }
 nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
@@ -200,6 +200,8 @@ tokio = { version = "1", features = ["full", "stats", "tracing"] }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6", features = ["with-chrono-0_4"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
+toml_datetime = { version = "0.6", default-features = false, features = ["serde"] }
+toml_edit = { version = "0.19", features = ["serde"] }
 tonic = { version = "0.9", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
 tracing = { version = "0.1", features = ["log"] }

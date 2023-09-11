@@ -46,7 +46,11 @@ workspace-hack = { path = "../workspace-hack" }
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { git = "https://github.com/yuhao-su/jemallocator.git", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"], rev = "a0911601bb7bb263ca55c7ea161ef308fdc623f8" }
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
+    "profiling",
+    "stats",
+    "unprefixed_malloc_on_supported_platforms",
+], rev = "b7f9f3" }
 
 [[bin]]
 name = "frontend"
@@ -67,3 +71,6 @@ path = "src/bin/compactor.rs"
 [[bin]]
 name = "risectl"
 path = "src/bin/ctl.rs"
+
+[lints]
+workspace = true

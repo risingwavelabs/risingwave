@@ -33,7 +33,6 @@ use crate::backup_restore::metrics::BackupManagerMetrics;
 use crate::hummock::{HummockManagerRef, HummockVersionSafePoint};
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub enum BackupJobResult {
@@ -59,14 +58,14 @@ impl BackupJobHandle {
     }
 }
 
-pub type BackupManagerRef<S> = Arc<BackupManager<S>>;
+pub type BackupManagerRef = Arc<BackupManager>;
 /// (url, dir)
 type StoreConfig = (String, String);
 
 /// `BackupManager` manages lifecycle of all existent backups and the running backup job.
-pub struct BackupManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
-    hummock_manager: HummockManagerRef<S>,
+pub struct BackupManager {
+    env: MetaSrvEnv,
+    hummock_manager: HummockManagerRef,
     backup_store: ArcSwap<(BoxedMetaSnapshotStorage, StoreConfig)>,
     /// Tracks the running backup job. Concurrent jobs is not supported.
     running_backup_job: tokio::sync::Mutex<Option<BackupJobHandle>>,
@@ -74,10 +73,10 @@ pub struct BackupManager<S: MetaStore> {
     meta_metrics: Arc<MetaMetrics>,
 }
 
-impl<S: MetaStore> BackupManager<S> {
+impl BackupManager {
     pub async fn new(
-        env: MetaSrvEnv<S>,
-        hummock_manager: HummockManagerRef<S>,
+        env: MetaSrvEnv,
+        hummock_manager: HummockManagerRef,
         metrics: Arc<MetaMetrics>,
         store_url: &str,
         store_dir: &str,
@@ -139,8 +138,8 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     fn with_store(
-        env: MetaSrvEnv<S>,
-        hummock_manager: HummockManagerRef<S>,
+        env: MetaSrvEnv,
+        hummock_manager: HummockManagerRef,
         meta_metrics: Arc<MetaMetrics>,
         backup_store: (BoxedMetaSnapshotStorage, StoreConfig),
     ) -> Self {
@@ -167,7 +166,7 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     #[cfg(test)]
-    pub fn for_test(env: MetaSrvEnv<S>, hummock_manager: HummockManagerRef<S>) -> Self {
+    pub fn for_test(env: MetaSrvEnv, hummock_manager: HummockManagerRef) -> Self {
         Self::with_store(
             env,
             hummock_manager,
@@ -326,12 +325,12 @@ impl<S: MetaStore> BackupManager<S> {
 }
 
 /// `BackupWorker` creates a database snapshot.
-struct BackupWorker<S: MetaStore> {
-    backup_manager: BackupManagerRef<S>,
+struct BackupWorker {
+    backup_manager: BackupManagerRef,
 }
 
-impl<S: MetaStore> BackupWorker<S> {
-    fn new(backup_manager: BackupManagerRef<S>) -> Self {
+impl BackupWorker {
+    fn new(backup_manager: BackupManagerRef) -> Self {
         Self { backup_manager }
     }
 

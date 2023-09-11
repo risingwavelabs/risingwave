@@ -25,6 +25,9 @@ use tracing_subscriber::Layer;
 
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
 
+mod relabeled_metric;
+pub use relabeled_metric::*;
+
 #[derive(Debug)]
 pub struct TrAdderAtomic(TrAdder<i64>);
 

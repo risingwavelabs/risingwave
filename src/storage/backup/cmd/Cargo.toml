@@ -33,3 +33,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 [[bin]]
 name = "backup-restore"
 path = "src/bin/backup_restore.rs"
+
+[lints]
+workspace = true

@@ -22,7 +22,6 @@ use risingwave_pb::hummock::{CompactStatus as PbCompactStatus, CompactTaskAssign
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::manager::read_lock;
 use crate::hummock::HummockManager;
-use crate::storage::MetaStore;
 
 #[derive(Default)]
 pub struct Compaction {
@@ -34,10 +33,7 @@ pub struct Compaction {
     pub deterministic_mode: bool,
 }
 
-impl<S> HummockManager<S>
-where
-    S: MetaStore,
-{
+impl HummockManager {
     #[named]
     pub async fn get_assigned_compact_task_num(&self) -> u64 {
         read_lock!(self, compaction)

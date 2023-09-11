@@ -26,7 +26,7 @@ dyn-clone = "1.0.13"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-foyer = { git = "https://github.com/mrcroxx/foyer", rev = "99b21df" }
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "2b8907c" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
@@ -53,7 +53,6 @@ scopeguard = "1"
 sled = "0.34.7"
 spin = "0.9"
 sync-point = { path = "../utils/sync-point" }
-sysinfo = { version = "0.29", default-features = false }
 tempfile = "3"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
@@ -70,13 +69,13 @@ tokio-retry = "0.3"
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 xorf = "0.8.1"
-xxhash-rust = { version = "0.8.6", features = ["xxh32", "xxh64"] }
+xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.12", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.15", default-features = false }
 libc = "0.2"
-nix = { version = "0.26", features = ["fs", "mman"] }
+nix = { version = "0.27", features = ["fs", "mman"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
@@ -136,3 +135,6 @@ harness = false
 [[bench]]
 name = "bench_row"
 harness = false
+
+[lints]
+workspace = true

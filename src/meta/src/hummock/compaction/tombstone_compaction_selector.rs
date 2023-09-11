@@ -52,10 +52,7 @@ impl LevelSelector for TombstoneCompactionSelector {
             group.compaction_config.tombstone_reclaim_ratio as u64,
             group.compaction_config.tombstone_reclaim_ratio as u64 / 2,
         );
-        let state = self
-            .state
-            .entry(group.group_id)
-            .or_insert_with(TombstoneReclaimPickerState::default);
+        let state = self.state.entry(group.group_id).or_default();
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
         compaction_input.add_pending_task(task_id, level_handlers);
 

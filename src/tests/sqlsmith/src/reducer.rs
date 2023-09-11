@@ -13,8 +13,8 @@
 // limitations under the License.
 
 //! Provides E2E Test runner functionality.
-
 use std::collections::HashSet;
+use std::fmt::Write;
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -86,8 +86,10 @@ fn shrink(sql: &str) -> Result<String> {
 
     let sql = reduced_statements
         .iter()
-        .map(|s| format!("{s};\n"))
-        .collect::<String>();
+        .fold(String::new(), |mut output, s| {
+            let _ = writeln!(output, "{s};");
+            output
+        });
 
     Ok(sql)
 }

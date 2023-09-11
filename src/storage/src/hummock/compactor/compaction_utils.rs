@@ -161,7 +161,7 @@ pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompact
 pub async fn generate_splits(
     sstable_infos: &Vec<SstableInfo>,
     compaction_size: u64,
-    context: Arc<CompactorContext>,
+    context: CompactorContext,
 ) -> HummockResult<Vec<KeyRange_vec>> {
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     if compaction_size > parallel_compact_size {
@@ -231,7 +231,7 @@ pub async fn generate_splits(
     Ok(vec![])
 }
 
-pub fn estimate_task_output_capacity(context: Arc<CompactorContext>, task: &CompactTask) -> usize {
+pub fn estimate_task_output_capacity(context: CompactorContext, task: &CompactTask) -> usize {
     let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
     let total_input_uncompressed_file_size = task
         .input_ssts

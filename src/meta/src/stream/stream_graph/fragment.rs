@@ -37,7 +37,6 @@ use risingwave_pb::stream_plan::{
 
 use crate::manager::{IdGeneratorManagerRef, StreamingJob};
 use crate::model::FragmentId;
-use crate::storage::MetaStore;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
 use crate::MetaResult;
@@ -263,9 +262,9 @@ pub struct StreamFragmentGraph {
 impl StreamFragmentGraph {
     /// Create a new [`StreamFragmentGraph`] from the given [`StreamFragmentGraphProto`], with all
     /// global IDs correctly filled.
-    pub async fn new<S: MetaStore>(
+    pub async fn new(
         proto: StreamFragmentGraphProto,
-        id_gen: IdGeneratorManagerRef<S>,
+        id_gen: IdGeneratorManagerRef,
         job: &StreamingJob,
     ) -> MetaResult<Self> {
         let fragment_id_gen =
