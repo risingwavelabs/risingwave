@@ -11,10 +11,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Cleanup Disk
-        uses: curoky/cleanup-disk-action@v2.0
-        with:
-          retain: 'rust'
+      -  name: Maximize build space
+         uses: easimon/maximize-build-space@master
+         with:
+           remove-dotnet: 'true'
+           remove-android: 'true'
+           remove-haskell: 'true'
+           remove-codeql: 'true'
+           remove-docker-images: 'true'
       - uses: actions/checkout@v3
       - name: Setup Rust toolchain
         run: |
