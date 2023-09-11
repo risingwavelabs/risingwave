@@ -115,6 +115,16 @@ services:
       - ..:/risingwave
 
   release-env:
+    # build binaries on a earlier Linux distribution (therefore with earlier version GLIBC)
+    # See https://github.com/risingwavelabs/risingwave/issues/4556 for more details
+    # 
+    # GLIBC versions on some systems:
+    # Amazon Linux 2: 2.26 (EOL 2025-06-30)
+    # AL2023: 2.34
+    # Ubuntu 18.04: 2.27 (Already EOL 2023-05-31)
+    # Ubuntu 20.04: 2.31
+    # 
+    # manylinux2014: CentOS 7 (EOL 2024-06-30), GLIBC 2.17
     image: quay.io/pypa/manylinux2014_x86_64
     working_dir: /mnt
     volumes:
