@@ -282,8 +282,8 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         pin_mut!(aligned_stream);
 
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
-        self.right_table.init_epoch(barrier.epoch).await?;
-        self.left_table.init_epoch(barrier.epoch).await?;
+        self.right_table.init_epoch(barrier.epoch);
+        self.left_table.init_epoch(barrier.epoch);
 
         let recovered_row = self.recover_rhs().await?;
         let recovered_value = recovered_row.as_ref().map(|r| r[0].clone());

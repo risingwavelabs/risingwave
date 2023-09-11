@@ -15,13 +15,11 @@
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
-use std::time::Duration;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::mpsc;
@@ -43,7 +41,7 @@ use crate::hummock::utils::{
     do_update_sanity_check, filter_with_delete_range, wait_for_epoch, ENABLE_SANITY_CHECK,
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
-use crate::hummock::{HummockError, MemoryLimiter, SstableIterator};
+use crate::hummock::{MemoryLimiter, SstableIterator};
 use crate::mem_table::{merge_stream, KeyOp, MemTable};
 use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
 use crate::storage_value::StorageValue;

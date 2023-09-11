@@ -23,7 +23,6 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use thiserror::Error;
 

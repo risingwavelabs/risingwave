@@ -77,7 +77,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
         // Consume the first barrier message and initialize state table.
         let barrier = expect_first_barrier(&mut input).await?;
-        self.state_table.init_epoch(barrier.epoch).await?;
+        self.state_table.init_epoch(barrier.epoch);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);

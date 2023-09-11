@@ -19,7 +19,6 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::{for_await, try_stream};
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{

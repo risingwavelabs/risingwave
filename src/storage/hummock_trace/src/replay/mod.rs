@@ -23,7 +23,6 @@ use futures::Stream;
 use futures_async_stream::try_stream;
 #[cfg(test)]
 use mockall::{automock, mock};
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 pub use runner::*;

@@ -122,7 +122,9 @@ impl<S: StateStore> ManagedTopNState<S> {
             .state_table
             .iter_row_with_pk_prefix(
                 &group_key,
-                PrefetchOptions::new_with_exhaust_iter(cache_size_limit == usize::MAX),
+                PrefetchOptions {
+                    exhaust_iter: cache_size_limit == usize::MAX,
+                },
             )
             .await?;
         pin_mut!(state_table_iter);
@@ -168,7 +170,9 @@ impl<S: StateStore> ManagedTopNState<S> {
             .state_table
             .iter_row_with_pk_prefix(
                 &group_key,
-                PrefetchOptions::new_with_exhaust_iter(topn_cache.limit == usize::MAX),
+                PrefetchOptions {
+                    exhaust_iter: topn_cache.limit == usize::MAX,
+                },
             )
             .await?;
         pin_mut!(state_table_iter);
@@ -277,7 +281,7 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(1)).await.unwrap();
+            tb.init_epoch(EpochPair::new_test_epoch(1));
             tb
         };
 
@@ -357,7 +361,7 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(1)).await.unwrap();
+            tb.init_epoch(EpochPair::new_test_epoch(1));
             tb
         };
 
@@ -404,7 +408,7 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(1)).await.unwrap();
+            tb.init_epoch(EpochPair::new_test_epoch(1));
             tb
         };
 

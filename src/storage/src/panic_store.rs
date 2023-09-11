@@ -18,7 +18,6 @@ use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use futures::Stream;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;

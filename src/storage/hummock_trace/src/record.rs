@@ -19,7 +19,6 @@ use bincode::error::{DecodeError, EncodeError};
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use prost::Message;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::meta::SubscribeResponse;
 
 use crate::{
