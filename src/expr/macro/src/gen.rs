@@ -50,18 +50,40 @@ impl FunctionAttr {
     /// Generate the type infer function.
     fn generate_type_infer_fn(&self) -> Result<TokenStream2> {
         if let Some(func) = &self.type_infer {
-            Ok(func.parse().unwrap())
-        } else {
-            if matches!(self.ret.as_str(), "any" | "anyarray" | "struct") {
-                return Ok(quote! { |_| todo!("type infer") });
-                // return Err(Error::new(
-                //     Span::call_site(),
-                //     format!("type inference function is required for {}", self.ret),
-                // ));
+            if func == "panic" {
+                return Ok(quote! { |_| panic!("type inference function is not implemented") });
             }
+            // use the user defined type inference function
+            return Ok(func.parse().unwrap());
+        } else if self.ret == "any" {
+            // TODO: if there are multiple "any", they should be the same type
+            if let Some(i) = self.args.iter().position(|t| t == "any") {
+                // infer as the type of "any" argument
+                return Ok(quote! { |args| Ok(args[#i].clone()) });
+            }
+            if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
+                // infer as the element type of "anyarray" argument
+                return Ok(quote! { |args| Ok(args[#i].as_list().clone()) });
+            }
+        } else if self.ret == "anyarray" {
+            if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
+                // infer as the type of "anyarray" argument
+                return Ok(quote! { |args| Ok(args[#i].clone()) });
+            }
+        } else if self.ret == "struct" {
+            if let Some(i) = self.args.iter().position(|t| t == "struct") {
+                // infer as the type of "struct" argument
+                return Ok(quote! { |args| Ok(args[#i].clone()) });
+            }
+        } else {
+            // the return type is fixed
             let ty = data_type(&self.ret);
-            Ok(quote! { |_| Ok(#ty) })
+            return Ok(quote! { |_| Ok(#ty) });
         }
+        Err(Error::new(
+            Span::call_site(),
+            "type inference function is required",
+        ))
     }
 
     /// Generate a descriptor of the scalar or table function.

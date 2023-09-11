@@ -66,10 +66,7 @@ use risingwave_expr_macro::function;
 /// statement error
 /// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null], array[true]);
 /// ```
-#[function(
-    "array_remove(anyarray, any) -> anyarray",
-    type_infer = "|args| Ok(args[0].clone())"
-)]
+#[function("array_remove(anyarray, any) -> anyarray")]
 fn array_remove(array: Option<ListRef<'_>>, elem: Option<ScalarRefImpl<'_>>) -> Option<ListValue> {
     Some(ListValue::new(
         array?

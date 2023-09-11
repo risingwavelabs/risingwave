@@ -18,10 +18,7 @@ use risingwave_expr_macro::function;
 
 /// If the case is `array[1,2,3][:2]`, then start will be 0 set by the frontend
 /// If the case is `array[1,2,3][1:]`, then end will be `i32::MAX` set by the frontend
-#[function(
-    "array_range_access(anyarray, int32, int32) -> anyarray",
-    type_infer = "|args| Ok(args[0].clone())"
-)]
+#[function("array_range_access(anyarray, int32, int32) -> anyarray")]
 pub fn array_range_access(list: ListRef<'_>, start: i32, end: i32) -> Option<ListValue> {
     let mut data = vec![];
     let list_all_values = list.iter();

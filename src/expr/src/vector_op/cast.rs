@@ -314,7 +314,7 @@ fn unnest(input: &str) -> Result<Vec<&str>> {
     Ok(items)
 }
 
-#[function("cast(varchar) -> anyarray")]
+#[function("cast(varchar) -> anyarray", type_infer = "panic")]
 fn str_to_list(input: &str, ctx: &Context) -> Result<ListValue> {
     let cast = build_func(
         PbType::Cast,
@@ -334,7 +334,7 @@ fn str_to_list(input: &str, ctx: &Context) -> Result<ListValue> {
 }
 
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
-#[function("cast(anyarray) -> anyarray")]
+#[function("cast(anyarray) -> anyarray", type_infer = "panic")]
 fn list_cast(input: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
     let cast = build_func(
         PbType::Cast,
@@ -355,7 +355,7 @@ fn list_cast(input: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
 }
 
 /// Cast struct of `source_elem_type` to `target_elem_type` by casting each element.
-#[function("cast(struct) -> struct")]
+#[function("cast(struct) -> struct", type_infer = "panic")]
 fn struct_cast(input: StructRef<'_>, ctx: &Context) -> Result<StructValue> {
     let fields = (input.iter_fields_ref())
         .zip_eq_fast(ctx.arg_types[0].as_struct().types())

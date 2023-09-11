@@ -54,10 +54,7 @@ use risingwave_expr_macro::function;
 /// statement error
 /// select array_replace(array[array[array[0, 1], array[2, 3]], array[array[4, 5], array[6, 7]]], array[4, 5], array[8, 9]);
 /// ```
-#[function(
-    "array_replace(anyarray, any, any) -> anyarray",
-    type_infer = "|args| Ok(args[0].clone())"
-)]
+#[function("array_replace(anyarray, any, any) -> anyarray")]
 fn array_replace(
     array: Option<ListRef<'_>>,
     elem_from: Option<ScalarRefImpl<'_>>,

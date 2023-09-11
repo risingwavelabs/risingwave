@@ -16,10 +16,7 @@ use risingwave_common::array::ListRef;
 use risingwave_common::types::ScalarRefImpl;
 use risingwave_expr_macro::function;
 
-#[function(
-    "array_access(anyarray, int32) -> any",
-    type_infer = "|args| Ok(args[0].as_list().clone())"
-)]
+#[function("array_access(anyarray, int32) -> any")]
 fn array_access(list: ListRef<'_>, index: i32) -> Option<ScalarRefImpl<'_>> {
     // index must be greater than 0 following a one-based numbering convention for arrays
     if index < 1 {

@@ -17,12 +17,12 @@ use risingwave_common::row::Row;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_expr_macro::function;
 
-#[function("array(...) -> anyarray")]
+#[function("array(...) -> anyarray", type_infer = "panic")]
 fn array(row: impl Row) -> ListValue {
     ListValue::new(row.iter().map(|d| d.to_owned_datum()).collect())
 }
 
-#[function("row(...) -> struct")]
+#[function("row(...) -> struct", type_infer = "panic")]
 fn row_(row: impl Row) -> StructValue {
     StructValue::new(row.iter().map(|d| d.to_owned_datum()).collect())
 }
