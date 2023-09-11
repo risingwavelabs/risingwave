@@ -46,7 +46,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 
 # TODO: build dashboard, instead of downloading
 RUN curl -LO https://github.com/risingwavelabs/risingwave/archive/refs/heads/dashboard-artifact.zip
-RUN unzip dashboard-artifact.zip && mkdir /risingwave && mv risingwave-dashboard-artifact /risingwave/ui && rm dashboard-artifact.zip
+RUN unzip dashboard-artifact.zip && mv risingwave-dashboard-artifact /risingwave/ui && rm dashboard-artifact.zip
 
 
 # Build application
