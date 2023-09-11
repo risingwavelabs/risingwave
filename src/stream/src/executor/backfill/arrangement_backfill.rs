@@ -124,7 +124,8 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
-        self.state_table.init_epoch(first_barrier.epoch).await?;
+        let first_epoch = first_barrier.epoch;
+        self.state_table.init_epoch(first_barrier.epoch);
 
         let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
 

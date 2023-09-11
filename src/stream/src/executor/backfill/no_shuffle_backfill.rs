@@ -137,7 +137,7 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
         if let Some(state_table) = self.state_table.as_mut() {
-            state_table.init_epoch(first_barrier.epoch).await?;
+            state_table.init_epoch(first_barrier.epoch);
         }
 
         let is_finished = if let Some(state_table) = self.state_table.as_mut() {

@@ -23,8 +23,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    LocalStateStore, LocalStateStoreTestExt, NewLocalOptions, PrefetchOptions, ReadOptions,
-    WriteOptions,
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
 };
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
