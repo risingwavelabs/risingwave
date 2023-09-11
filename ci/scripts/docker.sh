@@ -24,7 +24,7 @@ docker buildx build -f docker/Dockerfile \
   --progress plain \
   --builder=container \
   --load \
-  --cache-to "type=s3,region=us-east-2,bucket=ci-docker-cache-bucket,name=risingwave-build-cache-${arch},mode=max" \
+  --cache-to "type=s3,region=us-east-2,bucket=ci-docker-cache-bucket,name=risingwave-build-cache-${arch}" \
   --cache-from "type=s3,region=us-east-2,bucket=ci-docker-cache-bucket,name=risingwave-build-cache-${arch}" \
   .
 
