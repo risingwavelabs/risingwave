@@ -21,7 +21,6 @@ use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
-
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
 };
