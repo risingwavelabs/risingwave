@@ -125,7 +125,7 @@ services:
     # Ubuntu 20.04: 2.31
     # 
     # manylinux2014: CentOS 7 (EOL 2024-06-30), GLIBC 2.17
-    image: quay.io/pypa/manylinux2014_x86_64
+    image: public.ecr.aws/amazonlinux/amazonlinux:2
     working_dir: /mnt
     volumes:
       - ..:/mnt
