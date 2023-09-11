@@ -100,7 +100,7 @@ pub fn infer_some_all(
     if !matches!(&element_type, Some(e) if sig.inputs_type[1].matches(e)) {
         let SigDataType::Exact(t) = &sig.inputs_type[1] else {
             return Err(ErrorCode::BindError(
-                "array of array/struct on left are not supported yet".into(),
+                "array/struct on left are not supported yet".into(),
             )
             .into());
         };
@@ -756,9 +756,9 @@ fn narrow_category<'a>(
                 //   candidate.
                 let Ok(selected) = &category else { continue };
                 // least_restrictive or mark temporary conflict err
-                if implicit_ok(formal.as_exact(), selected, true) {
+                if formal.is_exact() && implicit_ok(formal.as_exact(), selected, true) {
                     // noop
-                } else if implicit_ok(selected.as_exact(), formal, false) {
+                } else if selected.is_exact() && implicit_ok(selected.as_exact(), formal, false) {
                     category = Ok(formal);
                 } else {
                     category = Err(());
@@ -785,6 +785,7 @@ fn narrow_category<'a>(
                     };
                     formal == *selected
                         || !is_preferred(selected)
+                            && formal.is_exact()
                             && implicit_ok(formal.as_exact(), selected, false)
                 })
         })
