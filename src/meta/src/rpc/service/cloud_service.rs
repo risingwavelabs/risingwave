@@ -116,7 +116,9 @@ impl CloudService for CloudServiceImpl {
                     }
                     _ => (),
                 };
-                if let Err(e) = insert_privatelink_broker_rewrite_map(&service, &mut source_cfg) {
+                if let Err(e) =
+                    insert_privatelink_broker_rewrite_map(&mut source_cfg, Some(&service), None)
+                {
                     return Ok(new_rwc_validate_fail_response(
                         ErrorType::PrivatelinkResolveErr,
                         e.to_string(),
