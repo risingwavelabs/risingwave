@@ -15,11 +15,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-mo
 ENV PATH /root/.cargo/bin/:$PATH
 ENV CARGO_INCREMENTAL=0
 
-
-# TODO: build dashboard, instead of downloading
-RUN curl -LO https://github.com/risingwavelabs/risingwave/archive/refs/heads/dashboard-artifact.zip
-RUN unzip dashboard-artifact.zip && mkdir /risingwave && mv risingwave-dashboard-artifact /risingwave/ui && rm dashboard-artifact.zip
-
 COPY rust-toolchain rust-toolchain
 
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
@@ -47,6 +42,12 @@ COPY --from=rust-planner /risingwave/recipe.json recipe.json
 
 # Build dependencies - this can be cached if the dependencies don't change
 RUN cargo chef cook --release --recipe-path recipe.json
+
+
+# TODO: build dashboard, instead of downloading
+RUN curl -LO https://github.com/risingwavelabs/risingwave/archive/refs/heads/dashboard-artifact.zip
+RUN unzip dashboard-artifact.zip && mkdir /risingwave && mv risingwave-dashboard-artifact /risingwave/ui && rm dashboard-artifact.zip
+
 
 # Build application
 ARG GIT_SHA
