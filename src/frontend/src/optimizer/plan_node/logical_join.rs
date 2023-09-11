@@ -226,7 +226,7 @@ impl LogicalJoin {
             Condition {
                 conjunctions: others
                     .conjunctions
-                    .drain_filter(|expr| expr.count_nows() == 0)
+                    .extract_if(|expr| expr.count_nows() == 0)
                     .collect(),
             }
         } else {
@@ -655,8 +655,8 @@ impl ExprRewritable for LogicalJoin {
 ///    then we proceed. Else abort.
 /// 2. Then, we collect `InputRef`s in the conjunction.
 /// 3. If they are all columns in the given side of join eq condition, then we proceed. Else abort.
-/// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with
-///    the equivalent in the other side.
+/// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with the equivalent in
+///    the other side.
 ///
 /// # Arguments
 ///

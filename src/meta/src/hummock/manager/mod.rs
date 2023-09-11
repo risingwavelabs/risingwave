@@ -1950,7 +1950,7 @@ impl HummockManager {
     }
 
     #[named]
-    pub async fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+    pub fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         use futures::{FutureExt, StreamExt};
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -2469,7 +2469,7 @@ impl HummockManager {
         }
     }
 
-    pub async fn compaction_event_loop(
+    pub fn compaction_event_loop(
         hummock_manager: Arc<Self>,
         mut compactor_streams_change_rx: UnboundedReceiver<(
             u32,

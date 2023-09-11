@@ -128,7 +128,7 @@ pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
     fragment_graph
 }
 
-#[expect(dead_code)]
+#[cfg(any())]
 fn is_stateful_executor(stream_node: &StreamNode) -> bool {
     matches!(
         stream_node.get_node_body().unwrap(),
@@ -144,7 +144,7 @@ fn is_stateful_executor(stream_node: &StreamNode) -> bool {
 /// Currently, it will split the fragment with multiple stateful operators (those have high I/O
 /// throughput) into multiple fragments, which may help improve the I/O concurrency.
 /// Known as "no-shuffle exchange" or "1v1 exchange".
-#[expect(dead_code)]
+#[cfg(any())]
 fn rewrite_stream_node(
     state: &mut BuildFragmentGraphState,
     stream_node: StreamNode,
@@ -211,7 +211,7 @@ fn generate_fragment_graph(
 }
 
 /// Use the given `stream_node` to create a fragment and add it to graph.
-pub(self) fn build_and_add_fragment(
+fn build_and_add_fragment(
     state: &mut BuildFragmentGraphState,
     stream_node: StreamNode,
 ) -> Result<Rc<StreamFragment>> {

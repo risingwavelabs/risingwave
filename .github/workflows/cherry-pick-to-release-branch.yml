@@ -3,7 +3,7 @@ on:
   pull_request:
     branches:
       - main
-    types: ["closed"]
+    types: ["closed", "labeled"]
 
 jobs:
   release_pull_request_1_1:

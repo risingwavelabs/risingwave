@@ -171,7 +171,7 @@ impl DistinctAggRule {
         // shift the indices of filter first to make later rewrite more convenient.
         let mut shift_with_offset =
             ColIndexMapping::with_shift_offset(input_schema_len, input_schema_len as isize);
-        for agg_call in agg_calls.iter_mut() {
+        for agg_call in &mut *agg_calls {
             agg_call.filter = mem::replace(&mut agg_call.filter, Condition::true_cond())
                 .rewrite_expr(&mut shift_with_offset);
         }
@@ -180,7 +180,7 @@ impl DistinctAggRule {
         let expand_schema_len = expand.schema().len();
         let mut input_indices = CollectInputRef::with_capacity(expand_schema_len);
         input_indices.extend(group_keys.indices());
-        for agg_call in agg_calls.iter() {
+        for agg_call in &*agg_calls {
             input_indices.extend(agg_call.input_indices());
             agg_call.filter.visit_expr(&mut input_indices);
         }

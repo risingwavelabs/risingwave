@@ -77,7 +77,7 @@ impl std::fmt::Debug for StorageError {
 
         write!(f, "{}", self)?;
         writeln!(f)?;
-        if let Some(backtrace) = (&self as &dyn Error).request_ref::<Backtrace>() {
+        if let Some(backtrace) = std::error::request_ref::<Backtrace>(&self as &dyn Error) {
             // Since we forward all backtraces from source, `self.backtrace()` is the backtrace of
             // inner error.
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
