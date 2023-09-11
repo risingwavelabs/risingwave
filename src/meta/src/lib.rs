@@ -42,6 +42,7 @@ mod error;
 pub mod hummock;
 pub mod manager;
 pub mod model;
+pub mod model_v2;
 mod rpc;
 pub(crate) mod serving;
 pub mod storage;
