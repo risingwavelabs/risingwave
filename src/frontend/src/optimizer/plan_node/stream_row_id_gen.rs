@@ -37,6 +37,14 @@ impl StreamRowIdGen {
             input.distribution().clone()
         };
 
+        Self::new_with_dist(input, row_id_index, distribution)
+    }
+
+    pub fn new_with_dist(
+        input: PlanRef,
+        row_id_index: usize,
+        distribution: Distribution,
+    ) -> StreamRowIdGen {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),

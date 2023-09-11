@@ -121,7 +121,7 @@ impl VirtualNode {
         {
             return serial_array
                 .iter()
-                .map(|serial| extract_vnode_id_from_row_id(serial.unwrap().as_row_id()))
+                .map(|serial| extract_vnode_id_from_row_id(serial.unwrap_or_default().as_row_id()))
                 .collect();
         }
 

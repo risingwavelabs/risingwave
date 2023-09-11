@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::ops::DerefMut;
 
 pub mod plan_node;
+
 pub use plan_node::{Explain, PlanRef};
 
 pub mod property;
@@ -23,16 +24,21 @@ pub mod property;
 mod delta_join_solver;
 mod heuristic_optimizer;
 mod plan_rewriter;
+
 pub use plan_rewriter::PlanRewriter;
+
 mod plan_visitor;
+
 pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
+
 mod logical_optimization;
 mod optimizer_context;
 mod plan_expr_rewriter;
 mod plan_expr_visitor;
 mod rule;
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use logical_optimization::*;
@@ -59,11 +65,15 @@ use self::plan_visitor::{has_batch_exchange, CardinalityVisitor};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
+use crate::optimizer::plan_node::generic::Union;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
-    BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
+    BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
+    ToStream,
 };
 use crate::optimizer::plan_visitor::TemporalJoinValidator;
 use crate::optimizer::property::Distribution;
+use crate::optimizer::property::Distribution::HashShard;
 use crate::utils::ColIndexMappingRewriteExt;
 use crate::WithOptions;
 
@@ -346,6 +356,8 @@ impl PlanRoot {
 
     /// Generate create index or create materialize view plan.
     fn gen_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
+        println!("self is {:#?}", self);
+
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
@@ -431,43 +443,11 @@ impl PlanRoot {
         append_only: bool,
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
+        with_external_source: bool,
     ) -> Result<StreamMaterialize> {
-        let mut stream_plan = self.gen_optimized_stream_plan(false)?;
+        let stream_plan = self.gen_optimized_stream_plan(false)?;
 
-        // Add DML node.
-        stream_plan = StreamDml::new(
-            stream_plan,
-            append_only,
-            columns
-                .iter()
-                .filter(|&c| (!c.is_generated()))
-                .map(|c| c.column_desc.clone())
-                .collect(),
-        )
-        .into();
-
-        // Add generated columns.
-        let exprs = LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
-        if let Some(exprs) = exprs {
-            let logical_project = generic::Project::new(exprs, stream_plan);
-            // The project node merges a chunk if it has an ungenerated row id as stream key.
-            stream_plan = StreamProject::new(logical_project).into();
-        }
-
-        // Add WatermarkFilter node.
-        if !watermark_descs.is_empty() {
-            stream_plan = StreamWatermarkFilter::new(stream_plan, watermark_descs).into();
-        }
-
-        // Add RowIDGen node if needed.
-        if let Some(row_id_index) = row_id_index {
-            stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
-        }
-
-        let conflict_behavior = match append_only {
-            true => ConflictBehavior::NoCheck,
-            false => ConflictBehavior::Overwrite,
-        };
+        assert!(!pk_column_ids.is_empty() || row_id_index.is_some());
 
         let pk_column_indices = {
             let mut id_to_idx = HashMap::new();
@@ -481,6 +461,129 @@ impl PlanRoot {
                 .collect_vec()
         };
 
+        fn inject_project_if_needed(columns: &[ColumnCatalog], node: PlanRef) -> Result<PlanRef> {
+            let exprs = LogicalSource::derive_output_exprs_from_generated_columns(columns)?;
+            if let Some(exprs) = exprs {
+                let logical_project = generic::Project::new(exprs, node);
+                return Ok(StreamProject::new(logical_project).into());
+            }
+            Ok(node)
+        }
+
+        #[derive(PartialEq, Debug)]
+        enum PrimaryKeyKind {
+            UserDefinedPrimaryKey,
+            RowIdAsPrimaryKey,
+            AppendOnly,
+        }
+
+        let kind = if append_only {
+            assert!(row_id_index.is_some());
+            PrimaryKeyKind::AppendOnly
+        } else if let Some(row_id_index) = row_id_index {
+            assert_eq!(
+                pk_column_indices.iter().exactly_one().copied().unwrap(),
+                row_id_index
+            );
+            PrimaryKeyKind::RowIdAsPrimaryKey
+        } else {
+            PrimaryKeyKind::UserDefinedPrimaryKey
+        };
+
+        let column_descs = columns
+            .iter()
+            .filter_map(|c| (!c.is_generated()).then(|| c.column_desc.clone()))
+            .collect();
+
+        let mut stream_plan = if with_external_source {
+            let mut external_source_node = stream_plan;
+            external_source_node = inject_project_if_needed(&columns, external_source_node)?;
+            external_source_node = match kind {
+                PrimaryKeyKind::UserDefinedPrimaryKey => {
+                    RequiredDist::hash_shard(&pk_column_indices)
+                        .enforce_if_not_satisfies(external_source_node, &Order::any())?
+                }
+                PrimaryKeyKind::RowIdAsPrimaryKey => {
+                    StreamExchange::new_no_shuffle(external_source_node).into()
+                }
+                PrimaryKeyKind::AppendOnly => {
+                    StreamExchange::new_no_shuffle(external_source_node).into()
+                }
+            };
+
+            let dummy_source_node =
+                LogicalSource::new(None, columns.clone(), row_id_index, false, true, context)
+                    .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
+
+            let mut dml_node: PlanRef =
+                StreamDml::new(dummy_source_node, append_only, column_descs).into();
+
+            // Add generated columns.
+            dml_node = inject_project_if_needed(&columns, dml_node)?;
+
+            dml_node = match kind {
+                PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::RowIdAsPrimaryKey => {
+                    RequiredDist::hash_shard(&pk_column_indices)
+                        .enforce_if_not_satisfies(dml_node, &Order::any())?
+                }
+                PrimaryKeyKind::AppendOnly => StreamExchange::new_no_shuffle(dml_node).into(),
+            };
+
+            StreamUnion::new(Union {
+                all: true,
+                inputs: vec![external_source_node, dml_node],
+                source_col: None,
+            })
+            .into()
+        } else {
+            let mut dml_node = StreamDml::new(stream_plan, append_only, column_descs).into();
+
+            // Add generated columns.
+            dml_node = inject_project_if_needed(&columns, dml_node)?;
+
+            dml_node = match kind {
+                PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::RowIdAsPrimaryKey => {
+                    RequiredDist::hash_shard(&pk_column_indices)
+                        .enforce_if_not_satisfies(dml_node, &Order::any())?
+                }
+                PrimaryKeyKind::AppendOnly => StreamExchange::new_no_shuffle(dml_node).into(),
+            };
+
+            StreamUnion::new(Union {
+                all: true,
+                inputs: vec![dml_node],
+                source_col: None,
+            })
+            .into()
+        };
+
+        // Add WatermarkFilter node.
+        if !watermark_descs.is_empty() {
+            stream_plan = StreamWatermarkFilter::new(stream_plan, watermark_descs).into();
+        }
+
+        // Add RowIDGen node if needed.
+        if let Some(row_id_index) = row_id_index {
+            match kind {
+                PrimaryKeyKind::UserDefinedPrimaryKey => {
+                    unreachable!()
+                }
+                PrimaryKeyKind::RowIdAsPrimaryKey | PrimaryKeyKind::AppendOnly => {
+                    stream_plan = StreamRowIdGen::new_with_dist(
+                        stream_plan,
+                        row_id_index,
+                        HashShard(vec![row_id_index]),
+                    )
+                    .into();
+                }
+            }
+        }
+
+        let conflict_behavior = match append_only {
+            true => ConflictBehavior::NoCheck,
+            false => ConflictBehavior::Overwrite,
+        };
+
         let table_required_dist = {
             let mut bitset = FixedBitSet::with_capacity(columns.len());
             for idx in &pk_column_indices {
@@ -489,7 +592,7 @@ impl PlanRoot {
             RequiredDist::ShardByKey(bitset)
         };
 
-        let stream_plan = inline_session_timezone_in_exprs(context, stream_plan)?;
+        // let stream_plan = inline_session_timezone_in_exprs(context, stream_plan)?;
 
         StreamMaterialize::create_for_table(
             stream_plan,
@@ -702,7 +805,7 @@ mod tests {
         let subplan = root.into_subplan();
         assert_eq!(
             subplan.schema(),
-            &Schema::new(vec![Field::with_name(DataType::Int32, "v1"),])
+            &Schema::new(vec![Field::with_name(DataType::Int32, "v1")])
         );
     }
 }
