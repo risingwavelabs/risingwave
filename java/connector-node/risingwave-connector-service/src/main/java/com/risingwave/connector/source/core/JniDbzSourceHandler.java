@@ -17,7 +17,6 @@ package com.risingwave.connector.source.core;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.java.binding.Binding;
-import com.risingwave.java.binding.CdcJniChannel;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto;
 import java.util.HashMap;
@@ -38,27 +37,24 @@ public class JniDbzSourceHandler {
 
     public static void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)
             throws com.google.protobuf.InvalidProtocolBufferException {
-        try (CdcJniChannel channel = new CdcJniChannel(channelPtr)) {
-            var request =
-                    ConnectorServiceProto.GetEventStreamRequest.parseFrom(
-                            getEventStreamRequestBytes);
+        var request =
+                ConnectorServiceProto.GetEventStreamRequest.parseFrom(getEventStreamRequestBytes);
 
-            // For jni.rs
-            java.lang.Thread.currentThread()
-                    .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
-            // userProps extracted from request, underlying implementation is UnmodifiableMap
-            Map<String, String> mutableUserProps = new HashMap<>(request.getPropertiesMap());
-            mutableUserProps.put("source.id", Long.toString(request.getSourceId()));
-            var config =
-                    new DbzConnectorConfig(
-                            SourceTypeE.valueOf(request.getSourceType()),
-                            request.getSourceId(),
-                            request.getStartOffset(),
-                            mutableUserProps,
-                            request.getSnapshotDone());
-            JniDbzSourceHandler handler = new JniDbzSourceHandler(config);
-            handler.start(channel.getPointer());
-        }
+        // For jni.rs
+        java.lang.Thread.currentThread()
+                .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
+        // userProps extracted from request, underlying implementation is UnmodifiableMap
+        Map<String, String> mutableUserProps = new HashMap<>(request.getPropertiesMap());
+        mutableUserProps.put("source.id", Long.toString(request.getSourceId()));
+        var config =
+                new DbzConnectorConfig(
+                        SourceTypeE.valueOf(request.getSourceType()),
+                        request.getSourceId(),
+                        request.getStartOffset(),
+                        mutableUserProps,
+                        request.getSnapshotDone());
+        JniDbzSourceHandler handler = new JniDbzSourceHandler(config);
+        handler.start(channelPtr);
     }
 
     public void start(long channelPtr) {

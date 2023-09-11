@@ -151,18 +151,25 @@ where
 
             let channel_ptr = Box::into_raw(tx) as i64;
 
-            let _ = env
-                .call_static_method(
-                    "com/risingwave/connector/source/core/JniDbzSourceHandler",
-                    "runJniDbzSourceThread",
-                    "([BJ)V",
-                    &[
-                        JValue::Object(&get_event_stream_request_bytes),
-                        JValue::from(channel_ptr),
-                    ],
-                )
-                .inspect_err(|e| tracing::error!("jni call error: {:?}", e))
-                .unwrap();
+            let result = env.call_static_method(
+                "com/risingwave/connector/source/core/JniDbzSourceHandler",
+                "runJniDbzSourceThread",
+                "([BJ)V",
+                &[
+                    JValue::Object(&get_event_stream_request_bytes),
+                    JValue::from(channel_ptr),
+                ],
+            );
+
+            unsafe { drop(Box::from_raw(channel_ptr as *mut GetEventStreamJniSender)) };
+            match result {
+                Ok(_) => {
+                    tracing::info!("end of jni call runJniDbzSourceThread");
+                }
+                Err(e) => {
+                    tracing::error!("jni call error: {:?}", e);
+                }
+            }
         });
 
         while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {
@@ -170,5 +177,7 @@ where
             let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
             yield msgs;
         }
+
+        Err(anyhow!("all senders are dropped"))?;
     }
 }

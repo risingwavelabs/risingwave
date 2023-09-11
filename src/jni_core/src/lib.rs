@@ -864,14 +864,6 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsg
     })
 }
 
-#[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_cdcJniChannelClose<'a>(
-    _env: EnvParam<'a>,
-    pointer: Pointer<'a, GetEventStreamJniSender>,
-) {
-    pointer.drop()
-}
-
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::{DataType, Timestamptz};
