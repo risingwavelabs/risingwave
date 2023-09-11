@@ -144,6 +144,7 @@ pub struct SinkParam {
     pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
     pub sink_from_name: String,
+    pub sink_into_name: Option<String>,
 }
 
 impl SinkParam {
@@ -175,6 +176,7 @@ impl SinkParam {
             format_desc,
             db_name: pb_param.db_name,
             sink_from_name: pb_param.sink_from_name,
+            sink_into_name: pb_param.sink_into_name,
         }
     }
 
@@ -190,6 +192,7 @@ impl SinkParam {
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
+            sink_into_name: self.sink_into_name.clone(),
         }
     }
 
@@ -215,6 +218,7 @@ impl From<SinkCatalog> for SinkParam {
             format_desc: sink_catalog.format_desc,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
+            sink_into_name: sink_catalog.sink_into_name,
         }
     }
 }

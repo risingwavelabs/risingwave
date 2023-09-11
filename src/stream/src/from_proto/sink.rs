@@ -47,6 +47,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let sink_id = sink_desc.get_id().into();
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
+        let sink_into_name = sink_desc.get_sink_into_name().cloned().ok();
         let properties = sink_desc.get_properties().clone();
         let downstream_pk = sink_desc
             .downstream_pk
@@ -101,6 +102,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             format_desc,
             db_name,
             sink_from_name,
+            sink_into_name,
         };
 
         let sink_id_str = format!("{}", sink_id.sink_id);

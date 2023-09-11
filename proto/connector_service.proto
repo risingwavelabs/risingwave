@@ -27,6 +27,7 @@ message SinkParam {
   string db_name = 5;
   string sink_from_name = 6;
   catalog.SinkFormatDesc format_desc = 7;
+  optional string sink_into_name = 8;
 }
 
 enum SinkPayloadFormat {

@@ -64,6 +64,8 @@ pub struct SinkDesc {
     /// Name of the "table" field for Debezium. If the sink is from table or mv,
     /// it is the name of table/mv. Otherwise, it is the name of the sink.
     pub sink_from_name: String,
+
+    pub sink_into_name: Option<String>,
 }
 
 impl SinkDesc {
@@ -95,6 +97,7 @@ impl SinkDesc {
             initialized_at_epoch: None,
             db_name: self.db_name,
             sink_from_name: self.sink_from_name,
+            sink_into_name: self.sink_into_name,
         }
     }
 
@@ -116,6 +119,7 @@ impl SinkDesc {
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
+            sink_into_name: self.sink_into_name.clone(),
         }
     }
 }

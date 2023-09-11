@@ -93,6 +93,8 @@ pub fn gen_sink_plan(
         }
     };
 
+    let sink_into_table_name = stmt.into_table_name.map(|name| name.real_value());
+
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
@@ -158,6 +160,7 @@ pub fn gen_sink_plan(
         db_name.to_owned(),
         sink_from_table_name,
         format_desc,
+        sink_into_table_name,
     )?;
     let sink_desc = sink_plan.sink_desc().clone();
     let sink_plan: PlanRef = sink_plan.into();

@@ -144,6 +144,7 @@ message Sink {
   string sink_from_name = 18;
   StreamJobStatus stream_job_status = 19;
   SinkFormatDesc format_desc = 20;
+  optional string sink_into_name = 21;
 }
 
 message Connection {
