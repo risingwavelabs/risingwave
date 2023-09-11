@@ -18,11 +18,12 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
+use futures::channel::oneshot::Canceled;
 use futures::future::try_join_all;
 use futures::FutureExt;
 use futures_async_stream::for_await;
 use rdkafka::error::{KafkaError, KafkaResult};
-use rdkafka::message::ToBytes;
+use rdkafka::message::{OwnedMessage, ToBytes};
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
@@ -50,6 +51,9 @@ use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
 };
+
+type FutureResult =
+    std::result::Result<std::result::Result<(i32, i64), (KafkaError, OwnedMessage)>, Canceled>;
 
 pub const KAFKA_SINK: &str = "kafka";
 
@@ -406,15 +410,6 @@ impl KafkaSinkWriter {
         K: ToBytes + ?Sized,
         P: ToBytes + ?Sized,
     {
-        // First take the ownership of the exist buffer
-        let mut future_buffer = std::mem::take(&mut self.future_delivery_buffer);
-
-        // Sanity check
-        debug_assert!(
-            self.future_delivery_buffer.is_empty(),
-            "future delivery buffer must be empty"
-        );
-
         let mut success_flag = false;
 
         let mut ret = Ok(());
@@ -424,15 +419,16 @@ impl KafkaSinkWriter {
                 Ok(delivery_future) => {
                     // First check if the current length is
                     // greater than the preset limit
-                    while future_buffer.len() >= KAFKA_WRITER_MAX_QUEUE_SIZE {
-                        if let Some(delivery_future) = future_buffer.pop_front() {
-                            Self::await_once(delivery_future).await?;
-                        } else {
-                            panic!("Expect the future not to be None");
-                        };
+                    while self.future_delivery_buffer.len() >= KAFKA_WRITER_MAX_QUEUE_SIZE {
+                        Self::map_future_result(
+                            self.future_delivery_buffer
+                                .pop_front()
+                                .expect("Expect the future not to be None")
+                                .await,
+                        )?;
                     }
 
-                    future_buffer.push_back(delivery_future);
+                    self.future_delivery_buffer.push_back(delivery_future);
                     success_flag = true;
                     break;
                 }
@@ -460,15 +456,6 @@ impl KafkaSinkWriter {
             ret = Err(KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull));
         }
 
-        // Reset the buffer
-        std::mem::swap(&mut future_buffer, &mut self.future_delivery_buffer);
-
-        // Sanity check
-        debug_assert!(
-            future_buffer.is_empty(),
-            "future delivery buffer must be empty"
-        );
-
         ret
     }
 
@@ -493,10 +480,21 @@ impl KafkaSinkWriter {
         Ok(())
     }
 
-    async fn await_once(delivery_future: DeliveryFuture) -> KafkaResult<()> {
-        match delivery_future.await {
+    fn map_future_result(delivery_future_result: FutureResult) -> KafkaResult<()> {
+        match delivery_future_result {
+            // Successfully sent the record
+            // Will return the partition and offset of the message (i32, i64)
+            // Note that `Vec<()>` won't cause memory allocation
             Ok(Ok(_)) => Ok(()),
+            // If the message failed to be delivered. (i.e., flush)
+            // The error & the copy of the original message will be returned
+            // i.e., (KafkaError, OwnedMessage)
+            // We will just stop the loop, and return the error
+            // The sink executor will back to the latest checkpoint
             Ok(Err((k_err, _msg))) => Err(k_err),
+            // This represents the producer is dropped
+            // before the delivery status is received
+            // Return `KafkaError::Canceled`
             Err(_) => Err(KafkaError::Canceled),
         }
     }
@@ -507,21 +505,9 @@ impl KafkaSinkWriter {
                 .drain(..)
                 .map(|delivery_future| {
                     delivery_future.map(|delivery_future_result| {
-                        match delivery_future_result {
-                            // Successfully sent the record
-                            // Will return the partition and offset of the message (i32, i64)
-                            // Note that `Vec<()>` won't cause memory allocation
-                            Ok(Ok(_)) => Ok(()),
-                            // If the message failed to be delivered. (i.e., flush)
-                            // The error & the copy of the original message will be returned
-                            // i.e., (KafkaError, OwnedMessage)
-                            // We will just stop the loop, and return the error
-                            // The sink executor will back to the latest checkpoint
-                            Ok(Err((k_err, _msg))) => Err(SinkError::Kafka(k_err)),
-                            // This represents the producer is dropped
-                            // before the delivery status is received
-                            // Return `KafkaError::Canceled`
-                            Err(_) => Err(SinkError::Kafka(KafkaError::Canceled)),
+                        match Self::map_future_result(delivery_future_result) {
+                            Ok(_) => Ok(()),
+                            Err(err) => Err(SinkError::Kafka(err)),
                         }
                     })
                 }),
