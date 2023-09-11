@@ -15,9 +15,14 @@ echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
 
 # Build RisingWave docker image ${BUILDKITE_COMMIT}-${arch}
 echo "--- docker build and tag"
+docker buildx create \
+  --name container \
+  --driver=docker-container
+
 docker buildx build -f docker/Dockerfile \
   --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" \
   --target risingwave \
+  --builder=container \
   --cache-to type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache \
   --cache-from type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache \
   .
