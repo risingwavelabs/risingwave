@@ -70,6 +70,9 @@ impl TierCompactionPicker {
                     input_levels: vec![input_level],
                     target_level: 0,
                     target_sub_level_id: level.sub_level_id,
+                    select_input_size: level.total_file_size,
+                    target_input_size: 0,
+                    total_file_count: level.total_file_size,
                     vnode_partition_count: 0,
                 });
             }
@@ -148,6 +151,9 @@ impl TierCompactionPicker {
                 input_levels: select_level_inputs,
                 target_level: 0,
                 target_sub_level_id: level.sub_level_id,
+                select_input_size: compaction_bytes,
+                target_input_size: 0,
+                total_file_count: compact_file_count,
                 vnode_partition_count,
             });
         }

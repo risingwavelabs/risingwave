@@ -31,14 +31,11 @@ use super::picker::{
     TtlReclaimCompactionPicker,
 };
 use super::{
-    create_compaction_task, LevelCompactionPicker, ManualCompactionOption, ManualCompactionPicker,
+    create_compaction_task, PartitionLevelCompactionPicker, ManualCompactionOption, ManualCompactionPicker,
     TierCompactionPicker,
 };
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::picker::{
-    partition_level, partition_sub_levels, CompactionPicker, IntraSubLevelPicker,
-    LocalPickerStatistic, MinOverlappingPicker, PartitionMinOverlappingPicker, SubLevelPartition,
-};
+use crate::hummock::compaction::picker::{partition_level, partition_sub_levels, CompactionPicker, IntraSubLevelPicker, LocalPickerStatistic, MinOverlappingPicker, PartitionMinOverlappingPicker, SubLevelPartition, LevelCompactionPicker};
 use crate::hummock::compaction::{create_overlap_strategy, CompactionTask, LocalSelectorStatistic};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
@@ -67,7 +64,8 @@ pub trait LevelSelector: Sync + Send {
 #[derive(Debug, Default, Clone)]
 pub enum PickerType {
     L0Tier,
-    L0ToBaseLevel(Vec<SubLevelPartition>),
+    PartitionBaseLevel(Vec<SubLevelPartition>),
+    L0ToBase,
     L0SubLevel(Vec<SubLevelPartition>),
     #[default]
     BottomLevelCompaction,
@@ -121,11 +119,12 @@ impl DynamicLevelSelectorCore {
     ) -> Box<dyn CompactionPicker> {
         match picker_type {
             PickerType::L0Tier => Box::new(TierCompactionPicker::new(self.config.clone())),
-            PickerType::L0ToBaseLevel(parts) => Box::new(LevelCompactionPicker::new(
+            PickerType::PartitionBaseLevel(parts) => Box::new(PartitionLevelCompactionPicker::new(
                 target_level,
                 self.config.clone(),
                 parts,
             )),
+            PickerType::L0ToBase => Box::new(LevelCompactionPicker::new(target_level, self.config.clone())),
             PickerType::BottomLevelCompaction => {
                 assert_eq!(select_level + 1, target_level);
                 Box::new(MinOverlappingPicker::new(
@@ -331,12 +330,21 @@ impl DynamicLevelSelectorCore {
             }
 
             if non_overlapping_size_score > SCORE_BASE {
-                ctx.score_levels.push(PickerInfo {
-                    score: non_overlapping_size_score,
-                    select_level: 0,
-                    target_level: ctx.base_level,
-                    picker_type: PickerType::L0ToBaseLevel(ctx.target_partitions.clone()),
-                });
+                if levels.can_partition_by_vnode() {
+                    ctx.score_levels.push(PickerInfo {
+                        score: non_overlapping_size_score,
+                        select_level: 0,
+                        target_level: ctx.base_level,
+                        picker_type: PickerType::PartitionBaseLevel(ctx.target_partitions.clone()),
+                    });
+                } else {
+                    ctx.score_levels.push(PickerInfo {
+                        score: non_overlapping_size_score,
+                        select_level: 0,
+                        target_level: ctx.base_level,
+                        picker_type: PickerType::L0ToBase,
+                    });
+                }
             }
         }
 

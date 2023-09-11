@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod partition_level_compaction_picker;
 mod base_level_compaction_picker;
 mod intral_sub_level_picker;
 mod manual_compaction_picker;
@@ -21,6 +22,7 @@ mod tier_compaction_picker;
 mod trivial_move_compaction_picker;
 mod ttl_reclaim_compaction_picker;
 
+pub use partition_level_compaction_picker::PartitionLevelCompactionPicker;
 pub use base_level_compaction_picker::LevelCompactionPicker;
 pub use intral_sub_level_picker::*;
 pub use manual_compaction_picker::ManualCompactionPicker;
@@ -46,6 +48,9 @@ pub struct CompactionInput {
     pub input_levels: Vec<InputLevel>,
     pub target_level: usize,
     pub target_sub_level_id: u64,
+    pub select_input_size: u64,
+    pub target_input_size: u64,
+    pub total_file_count: u64,
     pub vnode_partition_count: u32,
 }
 

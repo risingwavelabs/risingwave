@@ -25,7 +25,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use picker::{LevelCompactionPicker, ManualCompactionPicker, TierCompactionPicker};
+use picker::{PartitionLevelCompactionPicker, ManualCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::{
     can_concat, CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
 };
