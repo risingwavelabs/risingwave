@@ -637,7 +637,7 @@ fn is_preferred(t: &SigDataType) -> bool {
 /// accept an actual argument. So we introduced `eq_ok` to control this behavior.
 fn implicit_ok(source: &DataType, target: &SigDataType, eq_ok: bool) -> bool {
     eq_ok && target.matches(source)
-        || cast_ok_base(source, target.as_exact(), CastContext::Implicit)
+        || target.is_exact() && cast_ok_base(source, target.as_exact(), CastContext::Implicit)
 }
 
 /// Find the top `candidates` that match `inputs` on most non-null positions. This covers Rule 2,

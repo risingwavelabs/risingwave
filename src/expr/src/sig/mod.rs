@@ -156,7 +156,15 @@ impl fmt::Debug for FuncSign {
             "{}({}{}) -> {}{}",
             self.name.as_str_name().to_ascii_lowercase(),
             self.inputs_type.iter().format(", "),
-            if self.variadic { " ..." } else { "" },
+            if self.variadic {
+                if self.inputs_type.is_empty() {
+                    "..."
+                } else {
+                    ", ..."
+                }
+            } else {
+                ""
+            },
             if self.name.is_table() { "setof " } else { "" },
             self.ret_type,
         )?;
@@ -351,7 +359,7 @@ impl SigDataType {
     pub fn as_exact(&self) -> &DataType {
         match self {
             Self::Exact(ty) => ty,
-            _ => panic!("Expected an exact type"),
+            t => panic!("expected data type, but got: {t}"),
         }
     }
 
@@ -448,24 +456,22 @@ mod tests {
         // handle them specially without relying on FuncSigMap.
         let expected = expect_test::expect![[r#"
             [
-                "to_timestamp1(varchar, varchar) -> timestamp/timestamptz",
-                "cast(boolean) -> int32/varchar",
-                "cast(int16) -> int256/decimal/float64/float32/int64/int32/varchar",
-                "cast(int32) -> int256/int16/decimal/float64/float32/int64/boolean/varchar",
-                "cast(int64) -> int256/int32/int16/decimal/float64/float32/varchar",
-                "cast(float32) -> decimal/int64/int32/int16/float64/varchar",
-                "cast(float64) -> decimal/float32/int64/int32/int16/varchar",
-                "cast(decimal) -> float64/float32/int64/int32/int16/varchar",
+                "cast(anyarray) -> varchar/anyarray",
+                "cast(bigint) -> rw_int256/integer/smallint/numeric/double precision/real/varchar",
+                "cast(boolean) -> integer/varchar",
                 "cast(date) -> timestamp/varchar",
-                "cast(varchar) -> date/time/timestamp/jsonb/interval/int256/float32/float64/decimal/int16/int32/int64/varchar/boolean/bytea/list",
+                "cast(double precision) -> numeric/real/bigint/integer/smallint/varchar",
+                "cast(integer) -> rw_int256/smallint/numeric/double precision/real/bigint/boolean/varchar",
+                "cast(interval) -> time/varchar",
+                "cast(jsonb) -> boolean/double precision/real/numeric/bigint/integer/smallint/varchar",
+                "cast(numeric) -> double precision/real/bigint/integer/smallint/varchar",
+                "cast(real) -> numeric/bigint/integer/smallint/double precision/varchar",
+                "cast(rw_int256) -> double precision/varchar",
+                "cast(smallint) -> rw_int256/numeric/double precision/real/bigint/integer/varchar",
                 "cast(time) -> interval/varchar",
                 "cast(timestamp) -> date/time/varchar",
-                "cast(interval) -> time/varchar",
-                "cast(list) -> varchar/list",
-                "cast(jsonb) -> boolean/float64/float32/decimal/int64/int32/int16/varchar",
-                "cast(int256) -> float64/varchar",
-                "array_access(list, int32) -> boolean/int16/int32/int64/int256/float32/float64/decimal/serial/date/time/timestamp/timestamptz/interval/varchar/bytea/jsonb/list/struct",
-                "array_min(list) -> bytea/varchar/timestamptz/timestamp/time/date/int256/serial/decimal/float32/float64/int16/int32/int64",
+                "cast(varchar) -> date/time/timestamp/jsonb/interval/rw_int256/real/double precision/numeric/smallint/integer/bigint/varchar/boolean/bytea/anyarray",
+                "sum(bigint) -> numeric/bigint",
             ]
         "#]];
         expected.assert_debug_eq(&duplicated);

@@ -124,10 +124,10 @@ pub enum DataType {
     #[display("varchar")]
     #[from_str(regex = "(?i)^varchar$")]
     Varchar,
-    #[display("time without time zone")]
+    #[display("time")]
     #[from_str(regex = "(?i)^time$|^time without time zone$")]
     Time,
-    #[display("timestamp without time zone")]
+    #[display("timestamp")]
     #[from_str(regex = "(?i)^timestamp$|^timestamp without time zone$")]
     Timestamp,
     #[display("timestamp with time zone")]
