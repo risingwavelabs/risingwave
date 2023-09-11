@@ -30,26 +30,87 @@ flush() {
   run_sql "FLUSH;"
 }
 
-run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_base_table.sql
-run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_seed.sql
+test_basic() {
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_base_table.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_seed.sql
 
-# Provide snapshot
-for i in $(seq 1 12)
-do
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_recurse.sql
-  flush
-done
+  # Provide snapshot
+  for i in $(seq 1 12)
+  do
+    run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_recurse.sql
+    flush
+  done
 
-run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql &
 
-# Provide upstream updates
-for i in $(seq 1 5)
-do
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_recurse.sql &
-done
+  # Provide upstream updates
+  for i in $(seq 1 5)
+  do
+    run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_recurse.sql &
+  done
 
-wait
+  wait
 
-run_sql_file "$PARENT_PATH"/sql/backfill/basic/select.sql </dev/null
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/select.sql </dev/null
 
-echo "Backfill tests complete"
+}
+
+test_basic() {
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_base_table.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_seed.sql
+
+  # Provide snapshot
+  for i in $(seq 1 12)
+  do
+    run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_recurse.sql
+    flush
+  done
+
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql &
+
+  # Provide upstream updates
+  for i in $(seq 1 5)
+  do
+    run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_recurse.sql &
+  done
+
+  wait
+
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/select.sql </dev/null
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/drop.sql
+
+}
+
+test_replication_with_column_pruning() {
+   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_base_table.sql
+   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert_seed.sql
+
+   # Provide snapshot
+   for i in $(seq 1 20)
+   do
+     run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert_recurse.sql
+   done
+
+   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_mv.sql &
+
+   # Provide upstream updates
+   for i in $(seq 1 5)
+   do
+     run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert_recurse.sql &
+   done
+
+   wait
+
+   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/select.sql </dev/null
+   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/drop.sql
+}
+
+main() {
+  # echo "--- Basic test"
+  # test_basic
+  echo "--- Replication with Column pruning"
+  test_replication_with_column_pruning
+  echo "Backfill tests complete"
+}
+
+main
