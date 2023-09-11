@@ -40,8 +40,7 @@ impl FsConnectorSource {
         parser_config: SpecificParserConfig,
     ) -> Result<Self> {
         // Store the connector node address to properties for later use.
-        let mut source_props: HashMap<String, String> =
-            HashMap::from_iter(properties.clone().into_iter());
+        let mut source_props: HashMap<String, String> = HashMap::from_iter(properties.clone());
         connector_node_addr
             .map(|addr| source_props.insert("connector_node_addr".to_string(), addr));
         let config =

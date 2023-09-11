@@ -49,3 +49,6 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std",
 [target.'cfg(not(madsim))'.dependencies]
 opentelemetry = { version = "0.20", default-features = false, features = ["rt-tokio"] }
 workspace-hack = { path = "../../workspace-hack" }
+
+[lints]
+workspace = true

@@ -74,9 +74,7 @@ impl Rule for ApplyTopNTransposeRule {
                 .column_orders
                 .iter_mut()
                 .for_each(|ord| ord.column_index += apply_left_len);
-            let new_group_key = (0..apply_left_len)
-                .chain(group_key.into_iter())
-                .collect_vec();
+            let new_group_key = (0..apply_left_len).chain(group_key).collect_vec();
             LogicalTopN::new(new_apply, limit, offset, with_ties, order, new_group_key)
         };
 

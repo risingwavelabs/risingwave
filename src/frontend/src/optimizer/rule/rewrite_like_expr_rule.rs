@@ -238,9 +238,9 @@ mod tests {
             ("test_name", (Some(4), None, "test_name")),
             ("test_name_2", (Some(4), None, "test_name_2")),
             ("test%name", (None, Some(4), "test%name")),
-            (r#"test\_name"#, (None, None, "test_name")),
-            (r#"test\_name_2"#, (Some(9), None, "test_name_2")),
-            (r#"test\\_name_2"#, (Some(5), None, r#"test\_name_2"#)),
+            (r"test\_name", (None, None, "test_name")),
+            (r"test\_name_2", (Some(9), None, "test_name_2")),
+            (r"test\\_name_2", (Some(5), None, r"test\_name_2")),
         ];
 
         for (pattern, (c, s, ub)) in testcases {

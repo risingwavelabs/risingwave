@@ -185,10 +185,16 @@ impl Binder {
             }
         };
 
-        let ast::FunctionArgExpr::Expr(ast::Expr::LambdaFunction { args: lambda_args, body: lambda_body }) = lambda.get_expr() else {
+        let ast::FunctionArgExpr::Expr(ast::Expr::LambdaFunction {
+            args: lambda_args,
+            body: lambda_body,
+        }) = lambda.get_expr()
+        else {
             return Err(ErrorCode::BindError(
-                "The `lambda` argument for `array_transform` should be a lambda function".to_string()
-            ).into());
+                "The `lambda` argument for `array_transform` should be a lambda function"
+                    .to_string(),
+            )
+            .into());
         };
 
         let [lambda_arg] = <[Ident; 1]>::try_from(lambda_args).map_err(|args| -> RwError {
