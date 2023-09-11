@@ -58,7 +58,9 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 .iter()
                 .map(|i| upstream_schema_fields[*i as usize].clone())
                 .collect_vec();
-            Schema { fields: output_schema_fields }
+            Schema {
+                fields: output_schema_fields,
+            }
         } else {
             snapshot.schema().clone()
         };
