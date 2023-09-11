@@ -5,44 +5,44 @@ auto-retry: &auto-retry
       limit: 3
 
 steps:
-  - label: "docker-build-push: amd64"
-    command: "ci/scripts/docker.sh"
-    key: "build-amd64"
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-            DOCKER_TOKEN: docker-token
-            GITHUB_TOKEN: github-token
-    retry: *auto-retry
+  # - label: "docker-build-push: amd64"
+  #   command: "ci/scripts/docker.sh"
+  #   key: "build-amd64"
+  #   plugins:
+  #     - seek-oss/aws-sm#v2.3.1:
+  #         env:
+  #           GHCR_USERNAME: ghcr-username
+  #           GHCR_TOKEN: ghcr-token
+  #           DOCKER_TOKEN: docker-token
+  #           GITHUB_TOKEN: github-token
+  #   retry: *auto-retry
 
-  - label: "docker-build-push: aarch64"
-    command: "ci/scripts/docker.sh"
-    key: "build-aarch64"
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-            DOCKER_TOKEN: docker-token
-            GITHUB_TOKEN: github-token
-    agents:
-      queue: "linux-arm64"
-    retry: *auto-retry
+  # - label: "docker-build-push: aarch64"
+  #   command: "ci/scripts/docker.sh"
+  #   key: "build-aarch64"
+  #   plugins:
+  #     - seek-oss/aws-sm#v2.3.1:
+  #         env:
+  #           GHCR_USERNAME: ghcr-username
+  #           GHCR_TOKEN: ghcr-token
+  #           DOCKER_TOKEN: docker-token
+  #           GITHUB_TOKEN: github-token
+  #   agents:
+  #     queue: "linux-arm64"
+  #   retry: *auto-retry
 
-  - label: "multi-arch-image-create-push"
-    command: "ci/scripts/multi-arch-docker.sh"
-    depends_on:
-      - "build-amd64"
-      - "build-aarch64"
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
-            DOCKER_TOKEN: docker-token
-    retry: *auto-retry
+  # - label: "multi-arch-image-create-push"
+  #   command: "ci/scripts/multi-arch-docker.sh"
+  #   depends_on:
+  #     - "build-amd64"
+  #     - "build-aarch64"
+  #   plugins:
+  #     - seek-oss/aws-sm#v2.3.1:
+  #         env:
+  #           GHCR_USERNAME: ghcr-username
+  #           GHCR_TOKEN: ghcr-token
+  #           DOCKER_TOKEN: docker-token
+  #   retry: *auto-retry
 
   - label: "pre build binary"
     command: "ci/scripts/release.sh"

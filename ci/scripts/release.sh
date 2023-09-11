@@ -4,6 +4,9 @@
 set -euo pipefail
 
 REPO_ROOT=${PWD}
+BUILDKITE_SOURCE=""
+BINARY_NAME=xxtest
+BUILDKITE_TAG=""
 
 echo "--- Check env"
 if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
