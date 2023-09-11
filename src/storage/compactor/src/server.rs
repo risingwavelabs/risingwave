@@ -313,9 +313,17 @@ pub async fn shared_compactor_serve(
     listen_addr: SocketAddr,
     opts: CompactorOpts,
 ) -> (JoinHandle<()>, Sender<()>) {
+    let config = load_config(&opts.config_path, &opts);
+    info!("Starting shared compactor node",);
+    info!("> config: {:?}", config);
+    info!(
+        "> debug assertions: {}",
+        if cfg!(debug_assertions) { "on" } else { "off" }
+    );
+    info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+
     let endpoint: &'static str = Box::leak(opts.proxy_rpc_endpoint.clone().into_boxed_str());
     let endpoint = Endpoint::from_static(endpoint);
-    // let channel = Channel::from_static(endpoint).connect().await.unwrap();
     let channel = endpoint
         .http2_keep_alive_interval(Duration::from_secs(ENDPOINT_KEEP_ALIVE_INTERVAL_SEC))
         .keep_alive_timeout(Duration::from_secs(ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
@@ -329,25 +337,8 @@ pub async fn shared_compactor_serve(
     let system_params_response = system_params_client
         .get_system_params(GetSystemParamsRequest {})
         .await
-        .expect("Fail to get system params, the compactor pod  cannot be started.");
-
+        .expect("Fail to get system params, the compactor pod cannot be started.");
     let system_params = system_params_response.into_inner().params.unwrap();
-    let config = load_config(&opts.config_path, &opts);
-    info!("Starting Serverless compactor node",);
-    info!("> config: {:?}", config);
-    info!(
-        "> debug assertions: {}",
-        if cfg!(debug_assertions) { "on" } else { "off" }
-    );
-    info!("> version: {} ({})", RW_VERSION, GIT_SHA);
-    let config = load_config(&opts.config_path, &opts);
-    info!("Starting compactor node",);
-    info!("> config: {:?}", config);
-    info!(
-        "> debug assertions: {}",
-        if cfg!(debug_assertions) { "on" } else { "off" }
-    );
-    info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Boot compactor
     let object_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());

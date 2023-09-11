@@ -90,8 +90,8 @@ pub struct CompactorOpts {
     #[override_opts(path = storage.object_store_read_timeout_ms)]
     pub object_store_read_timeout_ms: Option<u64>,
 
-    #[clap(long, env = "RW_IS_SHARED_COMPACTOR", default_value = "false")]
-    pub is_shared_compactor: bool,
+    #[clap(long, env = "RW_COMPACTOR_MODE", default_value = "dedicated_compactor")]
+    pub compactor_mode: String,
 
     #[clap(long, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
     pub proxy_rpc_endpoint: String,
@@ -103,24 +103,19 @@ use std::pin::Pin;
 pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
+    match opts.compactor_mode.as_str() {
+        "shared_compactor" => Box::pin(async move {
+            tracing::info!("Shared compactor pod options: {:?}", opts);
+            tracing::info!("meta address: {}", opts.meta_address.clone());
 
-    match opts.is_shared_compactor {
-        true => {
-            Box::pin(async move {
-                tracing::info!("Shared compactor pod options: {:?}", opts);
-                tracing::info!("meta address: {}", opts.meta_address.clone());
+            let listen_addr = opts.listen_addr.parse().unwrap();
+            tracing::info!("Server Listening at {}", listen_addr);
 
-                let listen_addr = opts.listen_addr.parse().unwrap();
-                tracing::info!("Server Listening at {}", listen_addr);
+            let (join_handle, _shutdown_sender) = shared_compactor_serve(listen_addr, opts).await;
 
-                let (join_handle, _shutdown_sender) =
-                    shared_compactor_serve(listen_addr, opts).await;
-
-                join_handle.await.unwrap();
-                // observer_join_handle.abort();
-            })
-        }
-        false => Box::pin(async move {
+            join_handle.await.unwrap();
+        }),
+        "dedicated_compactor" => Box::pin(async move {
             tracing::info!("Compactor node options: {:?}", opts);
             tracing::info!("meta address: {}", opts.meta_address.clone());
 
@@ -143,5 +138,11 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             join_handle.await.unwrap();
             observer_join_handle.abort();
         }),
+        _ => {
+            panic!(
+                "Compactor mode {} is configured incorrectly",
+                opts.compactor_mode
+            );
+        }
     }
 }

@@ -326,9 +326,7 @@ pub fn start_compactor(
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let stream_retry_interval = Duration::from_secs(30);
-    let task_progress: Arc<
-        parking_lot::lock_api::Mutex<parking_lot::RawMutex, HashMap<u64, Arc<TaskProgress>>>,
-    > = compactor_context.task_progress_manager.clone();
+    let task_progress = compactor_context.task_progress_manager.clone();
     let periodic_event_update_interval = Duration::from_millis(1000);
     let cpu_core_num = compactor_context.compaction_executor.worker_num() as u32;
     let running_task_count = compactor_context.running_task_count.clone();
