@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
 #![expect(
     refining_impl_trait,
     reason = "Some of the Row::iter() implementations returns ExactSizeIterator. Is this reasonable?"
