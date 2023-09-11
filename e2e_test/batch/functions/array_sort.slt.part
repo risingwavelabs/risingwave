@@ -31,7 +31,7 @@ select array_sort(array['114514🤔️1919810', '113514🥵1919810', '112514😅
 query I
 select array_sort(array[3, 2, NULL, 1, NULL]);
 ----
-{1,2,3}
+{1,2,3,NULL,NULL}
 
 query error invalid digit found in string
 select array_sort(array[3, 2, 1, 'a']);
