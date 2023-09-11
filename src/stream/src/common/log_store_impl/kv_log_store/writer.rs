@@ -133,7 +133,6 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         Ok(())
     }
 
-    #[expect(clippy::unused_async)]
     async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
         self.serde.update_vnode_bitmap(new_vnodes.clone());
         self.tx.update_vnode(self.state_store.epoch(), new_vnodes);

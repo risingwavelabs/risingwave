@@ -95,7 +95,6 @@ impl LogStoreFactory for BoundedInMemLogStoreFactory {
     type Reader = BoundedInMemLogStoreReader;
     type Writer = BoundedInMemLogStoreWriter;
 
-    #[expect(clippy::unused_async)]
     async fn build(self) -> (Self::Reader, Self::Writer) {
         let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
         let (item_tx, item_rx) = channel(self.bound);
@@ -164,7 +163,6 @@ impl LogReader for BoundedInMemLogStoreReader {
         }
     }
 
-    #[expect(clippy::unused_async)]
     async fn truncate(&mut self) -> LogStoreResult<()> {
         let sealed_epoch = match self.epoch_progress {
             Consuming(_) => unreachable!("should be awaiting truncate"),
@@ -184,7 +182,6 @@ impl LogReader for BoundedInMemLogStoreReader {
 }
 
 impl LogWriter for BoundedInMemLogStoreWriter {
-    #[expect(clippy::unused_async)]
     async fn init(&mut self, epoch: EpochPair) -> LogStoreResult<()> {
         let init_epoch_tx = self.init_epoch_tx.take().expect("cannot be init for twice");
         init_epoch_tx

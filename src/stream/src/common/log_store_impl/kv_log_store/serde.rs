@@ -756,7 +756,7 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         let row_data = ops
             .into_iter()
-            .zip_eq(rows.into_iter())
+            .zip_eq(rows)
             .map(|(op, row)| {
                 let (_, key, value) = serde.serialize_data_row(epoch, *seq_id, op, row);
                 *seq_id += 1;

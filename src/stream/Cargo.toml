@@ -95,3 +95,6 @@ harness = false
 [[bench]]
 name = "bench_state_table"
 harness = false
+
+[lints]
+workspace = true

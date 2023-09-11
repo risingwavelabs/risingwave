@@ -329,7 +329,7 @@ impl ClusterManager {
         ))
     }
 
-    pub async fn start_heartbeat_checker(
+    pub fn start_heartbeat_checker(
         cluster_manager: ClusterManagerRef,
         check_interval: Duration,
     ) -> (JoinHandle<()>, Sender<()>) {
@@ -666,7 +666,7 @@ impl ClusterManagerCore {
         let mut streaming_worker_node = self.list_streaming_worker_node(Some(State::Running));
 
         let unschedulable_worker_node = streaming_worker_node
-            .drain_filter(|worker| {
+            .extract_if(|worker| {
                 worker
                     .property
                     .as_ref()
@@ -949,7 +949,7 @@ mod tests {
         );
 
         let (join_handle, shutdown_sender) =
-            ClusterManager::start_heartbeat_checker(cluster_manager.clone(), check_interval).await;
+            ClusterManager::start_heartbeat_checker(cluster_manager.clone(), check_interval);
         tokio::time::sleep(ttl * 2 + check_interval).await;
 
         // One live node left.

@@ -359,11 +359,9 @@ pub struct ServerConfig {
     #[serde(default = "default::server::connection_pool_size")]
     pub connection_pool_size: u16,
 
-    #[serde(default = "default::server::metrics_level")]
     /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
-    pub metrics_level: u32,
+    #[serde(default = "default::server::metrics_level")]
+    pub metrics_level: MetricLevel,
 
     #[serde(default = "default::server::telemetry_enabled")]
     pub telemetry_enabled: bool,
@@ -372,7 +370,7 @@ pub struct ServerConfig {
     pub unrecognized: Unrecognized<Self>,
 
     /// Enable heap profile dump when memory usage is high.
-    #[serde(default = "default::server::auto_dump_heap_profile")]
+    #[serde(default)]
     pub auto_dump_heap_profile: AutoDumpHeapProfileConfig,
 }
 
@@ -419,9 +417,6 @@ pub struct StreamingConfig {
     /// Max unique user stream errors per actor
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
-
-    #[serde(default = "default::streaming::streaming_metric_level")]
-    pub streaming_metric_level: MetricLevel,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -568,10 +563,6 @@ pub struct StorageConfig {
     pub compact_iter_recreate_timeout_ms: u64,
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
-
-    #[serde(default = "default::storage::storage_metric_level")]
-    pub storage_metric_level: MetricLevel,
-
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -667,16 +658,17 @@ impl AsyncStackTraceOption {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct AutoDumpHeapProfileConfig {
+    /// Enable to auto dump heap profile when memory usage is high
+    #[serde(default = "default::auto_dump_heap_profile::enabled")]
+    pub enabled: bool,
+
+    /// The directory to dump heap profile. If empty, the prefix in `MALLOC_CONF` will be used
     #[serde(default = "default::auto_dump_heap_profile::dir")]
     pub dir: String,
+
+    /// The proportion (number between 0 and 1) of memory usage to trigger heap profile dump
     #[serde(default = "default::auto_dump_heap_profile::threshold")]
     pub threshold: f32,
-}
-
-impl AutoDumpHeapProfileConfig {
-    pub fn enabled(&self) -> bool {
-        !self.dir.is_empty()
-    }
 }
 
 serde_with::with_prefix!(streaming_prefix "stream_");
@@ -745,8 +737,9 @@ pub struct BatchDeveloperConfig {
     pub chunk_size: usize,
 }
 
-/// The section `[system]` in `risingwave.toml`. This section is only for testing purpose and should
-/// not be documented.
+/// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
+/// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
+/// documented.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct SystemConfig {
     /// The interval of periodic barrier.
@@ -787,9 +780,6 @@ pub struct SystemConfig {
     #[serde(default = "default::system::backup_storage_directory")]
     pub backup_storage_directory: Option<String>,
 
-    #[serde(default = "default::system::telemetry_enabled")]
-    pub telemetry_enabled: Option<bool>,
-
     /// Max number of concurrent creating streaming jobs.
     #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
     pub max_concurrent_creating_streaming_jobs: Option<u32>,
@@ -800,6 +790,7 @@ pub struct SystemConfig {
 }
 
 impl SystemConfig {
+    #![allow(deprecated)]
     pub fn into_init_system_params(self) -> SystemParams {
         SystemParams {
             barrier_interval_ms: self.barrier_interval_ms,
@@ -812,9 +803,9 @@ impl SystemConfig {
             data_directory: self.data_directory,
             backup_storage_url: self.backup_storage_url,
             backup_storage_directory: self.backup_storage_directory,
-            telemetry_enabled: self.telemetry_enabled,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
             pause_on_next_bootstrap: self.pause_on_next_bootstrap,
+            telemetry_enabled: None, // deprecated
         }
     }
 }
@@ -917,7 +908,7 @@ pub mod default {
     }
 
     pub mod server {
-        use crate::config::AutoDumpHeapProfileConfig;
+        use crate::config::MetricLevel;
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
@@ -927,22 +918,16 @@ pub mod default {
             16
         }
 
-        pub fn metrics_level() -> u32 {
-            0
+        pub fn metrics_level() -> MetricLevel {
+            MetricLevel::Info
         }
 
         pub fn telemetry_enabled() -> bool {
             true
         }
-
-        pub fn auto_dump_heap_profile() -> AutoDumpHeapProfileConfig {
-            Default::default()
-        }
     }
 
     pub mod storage {
-        use crate::config::MetricLevel;
-
         pub fn share_buffers_sync_parallelism() -> u32 {
             1
         }
@@ -1047,14 +1032,10 @@ pub mod default {
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
-
-        pub fn storage_metric_level() -> MetricLevel {
-            MetricLevel::Info
-        }
     }
 
     pub mod streaming {
-        use crate::config::{AsyncStackTraceOption, MetricLevel};
+        use crate::config::AsyncStackTraceOption;
 
         pub fn in_flight_barrier_nums() -> usize {
             // quick fix
@@ -1068,10 +1049,6 @@ pub mod default {
 
         pub fn unique_user_stream_errors() -> usize {
             10
-        }
-
-        pub fn streaming_metric_level() -> MetricLevel {
-            MetricLevel::Info
         }
     }
 
@@ -1149,6 +1126,10 @@ pub mod default {
     }
 
     pub mod auto_dump_heap_profile {
+        pub fn enabled() -> bool {
+            true
+        }
+
         pub fn dir() -> String {
             "".to_string()
         }

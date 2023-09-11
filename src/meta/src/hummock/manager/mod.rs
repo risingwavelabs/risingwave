@@ -1950,7 +1950,7 @@ impl HummockManager {
     }
 
     #[named]
-    pub async fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+    pub fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         use futures::{FutureExt, StreamExt};
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -2469,7 +2469,7 @@ impl HummockManager {
         }
     }
 
-    pub async fn compaction_event_loop(
+    pub fn compaction_event_loop(
         hummock_manager: Arc<Self>,
         mut compactor_streams_change_rx: UnboundedReceiver<(
             u32,
@@ -2772,34 +2772,47 @@ fn gen_version_delta<'a>(
         .or_default()
         .group_deltas;
     let mut gc_object_ids = vec![];
+    let mut removed_table_ids_map: BTreeMap<u32, Vec<u64>> = BTreeMap::default();
+
     for level in &compact_task.input_ssts {
+        let level_idx = level.level_idx;
+        let mut removed_table_ids = level
+            .table_infos
+            .iter()
+            .map(|sst| {
+                let object_id = sst.get_object_id();
+                let sst_id = sst.get_sst_id();
+                if !trivial_move
+                    && drop_sst(
+                        branched_ssts,
+                        compact_task.compaction_group_id,
+                        object_id,
+                        sst_id,
+                    )
+                {
+                    gc_object_ids.push(object_id);
+                }
+                sst_id
+            })
+            .collect_vec();
+
+        removed_table_ids_map
+            .entry(level_idx)
+            .or_default()
+            .append(&mut removed_table_ids);
+    }
+
+    for (level_idx, removed_table_ids) in removed_table_ids_map {
         let group_delta = GroupDelta {
             delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                level_idx: level.level_idx,
-                removed_table_ids: level
-                    .table_infos
-                    .iter()
-                    .map(|sst| {
-                        let object_id = sst.get_object_id();
-                        let sst_id = sst.get_sst_id();
-                        if !trivial_move
-                            && drop_sst(
-                                branched_ssts,
-                                compact_task.compaction_group_id,
-                                object_id,
-                                sst_id,
-                            )
-                        {
-                            gc_object_ids.push(object_id);
-                        }
-                        sst_id
-                    })
-                    .collect_vec(),
+                level_idx,
+                removed_table_ids,
                 ..Default::default()
             })),
         };
         group_deltas.push(group_delta);
     }
+
     let group_delta = GroupDelta {
         delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
             level_idx: compact_task.target_level,
