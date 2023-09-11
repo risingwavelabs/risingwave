@@ -36,18 +36,14 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 pub use vacuum::*;
 
-use crate::storage::MetaStore;
 use crate::MetaOpts;
 
 /// Start hummock's asynchronous tasks.
-pub fn start_hummock_workers<S>(
-    hummock_manager: HummockManagerRef<S>,
-    vacuum_manager: VacuumManagerRef<S>,
+pub fn start_hummock_workers(
+    hummock_manager: HummockManagerRef,
+    vacuum_manager: VacuumManagerRef,
     meta_opts: &MetaOpts,
-) -> Vec<(JoinHandle<()>, Sender<()>)>
-where
-    S: MetaStore,
-{
+) -> Vec<(JoinHandle<()>, Sender<()>)> {
     // These critical tasks are put in their own timer loop deliberately, to avoid long-running ones
     // from blocking others.
     let workers = vec![
@@ -69,13 +65,10 @@ where
 }
 
 /// Starts a task to periodically vacuum stale metadata.
-pub fn start_vacuum_metadata_loop<S>(
-    vacuum: VacuumManagerRef<S>,
+pub fn start_vacuum_metadata_loop(
+    vacuum: VacuumManagerRef,
     interval: Duration,
-) -> (JoinHandle<()>, Sender<()>)
-where
-    S: MetaStore,
-{
+) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         let mut min_trigger_interval = tokio::time::interval(interval);
@@ -99,13 +92,10 @@ where
 }
 
 /// Starts a task to periodically vacuum stale objects.
-pub fn start_vacuum_object_loop<S>(
-    vacuum: VacuumManagerRef<S>,
+pub fn start_vacuum_object_loop(
+    vacuum: VacuumManagerRef,
     interval: Duration,
-) -> (JoinHandle<()>, Sender<()>)
-where
-    S: MetaStore,
-{
+) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         let mut min_trigger_interval = tokio::time::interval(interval);
@@ -128,8 +118,8 @@ where
     (join_handle, shutdown_tx)
 }
 
-pub fn start_checkpoint_loop<S: MetaStore>(
-    hummock_manager: HummockManagerRef<S>,
+pub fn start_checkpoint_loop(
+    hummock_manager: HummockManagerRef,
     interval: Duration,
     min_delta_log_num: u64,
 ) -> (JoinHandle<()>, Sender<()>) {

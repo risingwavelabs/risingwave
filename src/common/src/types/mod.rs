@@ -375,6 +375,18 @@ impl DataType {
         }
     }
 
+    /// Returns the inner type of a list type.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the type is not a list type.
+    pub fn as_list(&self) -> &DataType {
+        match self {
+            DataType::List(t) => t,
+            _ => panic!("expect list type"),
+        }
+    }
+
     /// WARNING: Currently this should only be used in `WatermarkFilterExecutor`. Please be careful
     /// if you want to use this.
     pub fn min_value(&self) -> ScalarImpl {

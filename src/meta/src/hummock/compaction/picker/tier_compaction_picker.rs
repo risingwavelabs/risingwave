@@ -19,17 +19,35 @@ use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
-use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
-use crate::hummock::compaction::picker::min_overlap_compaction_picker::MAX_LEVEL_COUNT;
+use super::{
+    CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
+    ValidationRuleType,
+};
+use crate::hummock::compaction::picker::MAX_COMPACT_LEVEL_COUNT;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
     config: Arc<CompactionConfig>,
+    compaction_task_validator: Arc<CompactionTaskValidator>,
 }
 
 impl TierCompactionPicker {
+    #[cfg(test)]
     pub fn new(config: Arc<CompactionConfig>) -> TierCompactionPicker {
-        TierCompactionPicker { config }
+        TierCompactionPicker {
+            compaction_task_validator: Arc::new(CompactionTaskValidator::new(config.clone())),
+            config,
+        }
+    }
+
+    pub fn new_with_validator(
+        config: Arc<CompactionConfig>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
+    ) -> TierCompactionPicker {
+        TierCompactionPicker {
+            config,
+            compaction_task_validator,
+        }
     }
 
     fn pick_overlapping_level(
@@ -67,13 +85,16 @@ impl TierCompactionPicker {
 
             if can_concat(&input_level.table_infos) && vnode_partition_count == 0 {
                 return Some(CompactionInput {
+                    select_input_size: input_level
+                        .table_infos
+                        .iter()
+                        .map(|sst| sst.file_size)
+                        .sum(),
+                    total_file_count: input_level.table_infos.len() as u64,
                     input_levels: vec![input_level],
                     target_level: 0,
                     target_sub_level_id: level.sub_level_id,
-                    select_input_size: level.total_file_size,
-                    target_input_size: 0,
-                    total_file_count: level.total_file_size,
-                    vnode_partition_count: 0,
+                    ..Default::default()
                 });
             }
 
@@ -92,29 +113,15 @@ impl TierCompactionPicker {
             // Limit sstable file count to avoid using too much memory.
             let overlapping_max_compact_file_numer = std::cmp::min(
                 self.config.level0_max_compact_file_number,
-                MAX_LEVEL_COUNT as u64,
+                MAX_COMPACT_LEVEL_COUNT as u64,
             );
-            let mut waiting_enough_files = {
-                if compaction_bytes > max_compaction_bytes {
-                    false
-                } else {
-                    compact_file_count <= overlapping_max_compact_file_numer
-                }
-            };
 
             for other in &l0.sub_levels[idx + 1..] {
                 if compaction_bytes > max_compaction_bytes {
-                    waiting_enough_files = false;
                     break;
                 }
 
                 if compact_file_count > overlapping_max_compact_file_numer {
-                    waiting_enough_files = false;
-                    break;
-                }
-
-                if other.level_type() != LevelType::Overlapping {
-                    waiting_enough_files = false;
                     break;
                 }
 
@@ -131,23 +138,12 @@ impl TierCompactionPicker {
                 });
             }
 
-            // If waiting_enough_files is not satisfied, we will raise the priority of the number of
-            // levels to ensure that we can merge as many sub_levels as possible
-            let tier_sub_level_compact_level_count =
-                self.config.level0_overlapping_sub_level_compact_level_count as usize;
-            if select_level_inputs.len() < tier_sub_level_compact_level_count
-                && waiting_enough_files
-            {
-                stats.skip_by_count_limit += 1;
-                continue;
-            }
-
             select_level_inputs.reverse();
             if compaction_bytes < self.config.sub_level_max_compaction_bytes {
                 vnode_partition_count = 0;
             }
 
-            return Some(CompactionInput {
+            let result = CompactionInput {
                 input_levels: select_level_inputs,
                 target_level: 0,
                 target_sub_level_id: level.sub_level_id,
@@ -155,7 +151,17 @@ impl TierCompactionPicker {
                 target_input_size: 0,
                 total_file_count: compact_file_count,
                 vnode_partition_count,
-            });
+            };
+
+            if !self.compaction_task_validator.valid_compact_task(
+                &result,
+                ValidationRuleType::Tier,
+                stats,
+            ) {
+                continue;
+            }
+
+            return Some(result);
         }
         None
     }

@@ -23,7 +23,9 @@ use risingwave_storage::table::Distribution;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{BackfillExecutor, ChainExecutor, RearrangedChainExecutor};
+use crate::executor::{
+    BackfillExecutor, ChainExecutor, FlowControlExecutor, RearrangedChainExecutor,
+};
 
 pub struct ChainExecutorBuilder;
 
@@ -172,6 +174,10 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             }
             ChainType::ChainUnspecified => unreachable!(),
         };
-        Ok(executor)
+        if let Ok(rate_limit) = node.get_rate_limit() {
+            Ok(FlowControlExecutor::new(executor, *rate_limit).boxed())
+        } else {
+            Ok(executor)
+        }
     }
 }

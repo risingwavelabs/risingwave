@@ -27,8 +27,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{compact_task, CompactionConfig, LevelType};
 
 use super::picker::{
-    SpaceReclaimCompactionPicker, SpaceReclaimPickerState, TtlPickerState,
-    TtlReclaimCompactionPicker,
+    CompactionTaskValidator, IntraCompactionPicker, SpaceReclaimCompactionPicker,
+    SpaceReclaimPickerState, TtlPickerState, TtlReclaimCompactionPicker,
 };
 use super::{
     create_compaction_task, PartitionLevelCompactionPicker, ManualCompactionOption, ManualCompactionPicker,
@@ -42,6 +42,23 @@ use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
 
 pub const SCORE_BASE: u64 = 100;
+
+#[derive(Debug, Default, Clone)]
+pub enum PickerType {
+    Tier,
+    Intra,
+    ToBase,
+    #[default]
+    BottomLevel,
+}
+
+#[derive(Default, Debug)]
+pub struct PickerInfo {
+    score: u64,
+    select_level: usize,
+    target_level: usize,
+    picker_type: PickerType,
+}
 
 pub trait LevelSelector: Sync + Send {
     fn pick_compaction(
@@ -116,6 +133,7 @@ impl DynamicLevelSelectorCore {
         target_level: usize,
         picker_type: PickerType,
         overlap_strategy: Arc<dyn OverlapStrategy>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
     ) -> Box<dyn CompactionPicker> {
         match picker_type {
             PickerType::L0Tier => Box::new(TierCompactionPicker::new(self.config.clone())),
@@ -153,7 +171,7 @@ impl DynamicLevelSelectorCore {
     // TODO: calculate this scores in apply compact result.
     /// `calculate_level_base_size` calculate base level and the base size of LSM tree build for
     /// current dataset. In other words,  `level_max_bytes` is our compaction goal which shall
-    /// reach. This algorithm refers to the implementation in  `</>https://github.com/facebook/rocksdb/blob/v7.2.2/db/version_set.cc#L3706</>`
+    /// reach. This algorithm refers to the implementation in  [`https://github.com/facebook/rocksdb/blob/v7.2.2/db/version_set.cc#L3706`]
     pub fn calculate_level_base_size(&self, levels: &Levels) -> SelectContext {
         let mut first_non_empty_level = 0;
         let mut max_level_size = 0;
@@ -365,6 +383,7 @@ impl DynamicLevelSelectorCore {
             if total_size == 0 {
                 continue;
             }
+
             let mut score = total_size * SCORE_BASE / ctx.level_max_bytes[level_idx];
             if level.level_idx as usize == ctx.base_level
                 && level.vnode_partition_count != 0
@@ -412,7 +431,7 @@ impl DynamicLevelSelectorCore {
     /// `compact_pending_bytes_needed` calculates the number of compact bytes needed to balance the
     /// LSM Tree from the current state of each level in the LSM Tree in combination with
     /// `compaction_config`
-    /// This algorithm refers to the implementation in  `</>https://github.com/facebook/rocksdb/blob/main/db/version_set.cc#L3141</>`
+    /// This algorithm refers to the implementation in  [`https://github.com/facebook/rocksdb/blob/main/db/version_set.cc#L3141`]
     pub fn compact_pending_bytes_needed(&self, levels: &Levels) -> u64 {
         let ctx = self.calculate_level_base_size(levels);
         self.compact_pending_bytes_needed_with_ctx(levels, &ctx)
@@ -509,7 +528,9 @@ impl LevelSelector for DynamicLevelSelector {
                 info.target_level,
                 info.picker_type.clone(),
                 overlap_strategy.clone(),
+                compaction_task_validator.clone(),
             );
+
             let mut stats = LocalPickerStatistic::default();
             if let Some(mut ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
                 ret.add_pending_task(task_id, level_handlers);
@@ -621,16 +642,14 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
             group.compaction_config.max_space_reclaim_bytes,
             levels.member_table_ids.iter().cloned().collect(),
         );
+
         let mut base_level = 1;
         while base_level < levels.levels.len()
             && levels.get_level(base_level).table_infos.is_empty()
         {
             base_level += 1;
         }
-        let state = self
-            .state
-            .entry(group.group_id)
-            .or_insert_with(SpaceReclaimPickerState::default);
+        let state = self.state.entry(group.group_id).or_default();
 
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
         compaction_input.add_pending_task(task_id, level_handlers);
@@ -678,10 +697,7 @@ impl LevelSelector for TtlCompactionSelector {
             group.compaction_config.max_space_reclaim_bytes,
             table_id_to_options,
         );
-        let state = self
-            .state
-            .entry(group.group_id)
-            .or_insert_with(TtlPickerState::default);
+        let state = self.state.entry(group.group_id).or_default();
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
         compaction_input.add_pending_task(task_id, level_handlers);
 
@@ -782,6 +798,7 @@ pub mod tests {
             file_size: (right - left + 1) as u64,
             table_ids: vec![table_prefix as u32],
             uncompressed_file_size: (right - left + 1) as u64,
+            total_key_count: (right - left + 1) as u64,
             ..Default::default()
         }
     }

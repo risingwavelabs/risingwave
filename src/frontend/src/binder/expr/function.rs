@@ -31,15 +31,15 @@ use risingwave_expr::function::window::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameExclusion,
+    self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
     WindowFrameUnits, WindowSpec,
 };
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, Now, OrderBy, Subquery, SubqueryKind,
-    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
+    AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
+    Subquery, SubqueryKind, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -101,6 +101,11 @@ impl Binder {
             return Ok(ExprImpl::literal_varchar("".to_string()));
         }
 
+        if function_name == "array_transform" {
+            // For type inference, we need to bind the array type first.
+            return self.bind_array_transform(f);
+        }
+
         let inputs = f
             .args
             .into_iter()
@@ -152,6 +157,81 @@ impl Binder {
         }
 
         self.bind_builtin_scalar_function(function_name.as_str(), inputs)
+    }
+
+    fn bind_array_transform(&mut self, f: Function) -> Result<ExprImpl> {
+        let [array, lambda] = <[FunctionArg; 2]>::try_from(f.args).map_err(|args| -> RwError {
+            ErrorCode::BindError(format!(
+                "`array_transform` expect two inputs `array` and `lambda`, but {} were given",
+                args.len()
+            ))
+            .into()
+        })?;
+
+        let bound_array = self.bind_function_arg(array)?;
+        let [bound_array] = <[ExprImpl; 1]>::try_from(bound_array).map_err(|bound_array| -> RwError {
+            ErrorCode::BindError(format!("The `array` argument for `array_transform` should be bound to one argument, but {} were got", bound_array.len()))
+                .into()
+        })?;
+
+        let inner_ty = match bound_array.return_type() {
+            DataType::List(ty) => *ty,
+            real_type => {
+                return Err(ErrorCode::BindError(format!(
+                "The `array` argument for `array_transform` should be an array, but {} were got",
+                real_type
+            ))
+                .into())
+            }
+        };
+
+        let ast::FunctionArgExpr::Expr(ast::Expr::LambdaFunction {
+            args: lambda_args,
+            body: lambda_body,
+        }) = lambda.get_expr()
+        else {
+            return Err(ErrorCode::BindError(
+                "The `lambda` argument for `array_transform` should be a lambda function"
+                    .to_string(),
+            )
+            .into());
+        };
+
+        let [lambda_arg] = <[Ident; 1]>::try_from(lambda_args).map_err(|args| -> RwError {
+            ErrorCode::BindError(format!(
+                "The `lambda` argument for `array_transform` should be a lambda function with one argument, but {} were given",
+                args.len()
+            ))
+            .into()
+        })?;
+
+        let bound_lambda = self.bind_unary_lambda_function(inner_ty, lambda_arg, *lambda_body)?;
+
+        let lambda_ret_type = bound_lambda.return_type();
+        let transform_ret_type = DataType::List(Box::new(lambda_ret_type));
+
+        Ok(ExprImpl::FunctionCallWithLambda(Box::new(
+            FunctionCallWithLambda::new_unchecked(
+                ExprType::ArrayTransform,
+                vec![bound_array],
+                bound_lambda,
+                transform_ret_type,
+            ),
+        )))
+    }
+
+    fn bind_unary_lambda_function(
+        &mut self,
+        input_ty: DataType,
+        arg: Ident,
+        body: ast::Expr,
+    ) -> Result<ExprImpl> {
+        let lambda_args = HashMap::from([(arg.real_value(), (0usize, input_ty))]);
+        let orig_lambda_args = self.context.lambda_args.replace(lambda_args);
+        let body = self.bind_expr_inner(body)?;
+        self.context.lambda_args = orig_lambda_args;
+
+        Ok(body)
     }
 
     pub(super) fn bind_agg(&mut self, f: Function, kind: AggKind) -> Result<ExprImpl> {
@@ -588,7 +668,12 @@ impl Binder {
                     "boolne",
                     rewrite(ExprType::NotEqual, Binder::rewrite_two_bool_inputs),
                 ),
-                ("coalesce", raw_call(ExprType::Coalesce)),
+                ("coalesce", rewrite(ExprType::Coalesce, |inputs| {
+                    if inputs.iter().any(ExprImpl::has_table_function) {
+                        return Err(ErrorCode::BindError("table functions are not allowed in COALESCE".into()).into());
+                    }
+                    Ok(inputs)
+                })),
                 (
                     "nullif",
                     rewrite(ExprType::Case, Binder::rewrite_nullif_to_case_when),
@@ -680,6 +765,8 @@ impl Binder {
                 ("octet_length", raw_call(ExprType::OctetLength)),
                 ("bit_length", raw_call(ExprType::BitLength)),
                 ("regexp_match", raw_call(ExprType::RegexpMatch)),
+                ("regexp_replace", raw_call(ExprType::RegexpReplace)),
+                ("regexp_count", raw_call(ExprType::RegexpCount)),
                 ("chr", raw_call(ExprType::Chr)),
                 ("starts_with", raw_call(ExprType::StartsWith)),
                 ("initcap", raw_call(ExprType::Initcap)),
@@ -707,10 +794,12 @@ impl Binder {
                 ("array_prepend", raw_call(ExprType::ArrayPrepend)),
                 ("array_to_string", raw_call(ExprType::ArrayToString)),
                 ("array_distinct", raw_call(ExprType::ArrayDistinct)),
+                ("array_min", raw_call(ExprType::ArrayMin)),
                 ("array_length", raw_call(ExprType::ArrayLength)),
                 ("cardinality", raw_call(ExprType::Cardinality)),
                 ("array_remove", raw_call(ExprType::ArrayRemove)),
                 ("array_replace", raw_call(ExprType::ArrayReplace)),
+                ("array_max", raw_call(ExprType::ArrayMax)),
                 ("array_position", raw_call(ExprType::ArrayPosition)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
@@ -1288,18 +1377,19 @@ impl Binder {
     fn ensure_table_function_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values | Clause::GeneratedColumn => {
+                Clause::JoinOn
+                | Clause::Where
+                | Clause::Having
+                | Clause::Filter
+                | Clause::Values
+                | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "table functions are not allowed in {}",
                         clause
                     ))
                     .into());
                 }
-                Clause::JoinOn
-                | Clause::GroupBy
-                | Clause::Having
-                | Clause::Filter
-                | Clause::From => {}
+                Clause::GroupBy | Clause::From => {}
             }
         }
         Ok(())

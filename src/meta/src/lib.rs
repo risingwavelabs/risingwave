@@ -16,23 +16,21 @@
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(type_alias_impl_trait)]
-#![feature(drain_filter)]
+#![feature(extract_if)]
 #![feature(custom_test_frameworks)]
 #![feature(lint_reasons)]
 #![feature(map_try_insert)]
-#![feature(hash_drain_filter)]
-#![feature(btree_drain_filter)]
+#![feature(hash_extract_if)]
+#![feature(btree_extract_if)]
 #![feature(result_option_inspect)]
 #![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
 #![feature(assert_matches)]
 #![feature(try_blocks)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(is_sorted)]
-#![feature(string_leak)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(type_name_of_val)]
 
@@ -246,6 +244,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
+
         let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
             backend,
@@ -285,6 +284,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_ttl_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_ttl_reclaim_compaction_interval_sec,
+                periodic_tombstone_reclaim_compaction_interval_sec: config
+                    .meta
+                    .periodic_tombstone_reclaim_compaction_interval_sec,
                 periodic_split_compact_group_interval_sec: config
                     .meta
                     .periodic_split_compact_group_interval_sec,

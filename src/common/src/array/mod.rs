@@ -709,7 +709,7 @@ mod test_util {
     use super::Array;
     use crate::util::iter_util::ZipEqFast;
 
-    pub fn hash_finish<H: Hasher>(hashers: &mut [H]) -> Vec<u64> {
+    pub fn hash_finish<H: Hasher>(hashers: &[H]) -> Vec<u64> {
         return hashers
             .iter()
             .map(|hasher| hasher.finish())
@@ -733,8 +733,8 @@ mod test_util {
         itertools::cons_tuples(
             expects
                 .iter()
-                .zip_eq_fast(hash_finish(&mut states_scalar[..]))
-                .zip_eq_fast(hash_finish(&mut states_vec[..])),
+                .zip_eq_fast(hash_finish(&states_scalar[..]))
+                .zip_eq_fast(hash_finish(&states_vec[..])),
         )
         .all(|(a, b, c)| *a == b && b == c);
     }

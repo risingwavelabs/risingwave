@@ -309,10 +309,10 @@ impl ReplayWorker {
                         .unwrap();
                 }
             }
-            Operation::LocalStorageInit(epoch) => {
+            Operation::LocalStorageInit(options) => {
                 assert_ne!(storage_type, StorageType::Global);
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();
-                local_storage.init(epoch);
+                local_storage.init(options).await.unwrap();
             }
             Operation::TryWaitEpoch(epoch) => {
                 assert_eq!(storage_type, StorageType::Global);

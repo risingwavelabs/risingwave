@@ -43,9 +43,12 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs"
 ] }
 tracing = "0.1"
-tracing-opentelemetry = "0.20"
+tracing-opentelemetry = "0.21"
 tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std", "time", "local-time", "json"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 opentelemetry = { version = "0.20", default-features = false, features = ["rt-tokio"] }
 workspace-hack = { path = "../../workspace-hack" }
+
+[lints]
+workspace = true

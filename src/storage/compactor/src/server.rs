@@ -19,9 +19,9 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, AsyncStackTraceOption,
+    extract_storage_memory_config, load_config, AsyncStackTraceOption, MetricLevel,
 };
-use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -30,19 +30,22 @@ use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_object_store::object::parse_remote_object_store_with_config;
+use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
+use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::filter_key_extractor::{FilterKeyExtractorManager, RemoteTableAccessor};
+use risingwave_storage::filter_key_extractor::{
+    FilterKeyExtractorManager, RemoteTableAccessor, RpcFilterKeyExtractorManager,
+};
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
     HummockMemoryCollector, MemoryLimiter, SstableObjectIdManager, SstableStore,
 };
 use risingwave_storage::monitor::{
-    monitor_cache, CompactorMetrics, HummockMetrics, ObjectStoreMetrics,
+    monitor_cache, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS,
 };
 use risingwave_storage::opts::StorageOpts;
 use tokio::sync::oneshot::Sender;
@@ -86,11 +89,9 @@ pub async fn compactor_serve(
     meta_client.activate(&advertise_addr).await.unwrap();
 
     // Boot compactor
-    let registry = prometheus::Registry::new();
-    monitor_process(&registry).unwrap();
-    let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
-    let object_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
-    let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
+    let object_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
+    let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
+    let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
 
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
         meta_client.clone(),
@@ -133,13 +134,12 @@ pub async fn compactor_serve(
         assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes * 2);
     }
 
-    let mut object_store = parse_remote_object_store_with_config(
+    let mut object_store = parse_remote_object_store(
         state_store_url
             .strip_prefix("hummock+")
             .expect("object store must be hummock for compactor server"),
         object_metrics,
         "Hummock",
-        Some(Arc::new(config.storage.clone())),
     )
     .await;
     object_store.set_opts(
@@ -156,9 +156,7 @@ pub async fn compactor_serve(
         meta_cache_capacity_bytes,
     ));
 
-    let telemetry_enabled = system_params_reader.telemetry_enabled();
-
-    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::new(Box::new(
+    let filter_key_extractor_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
         RemoteTableAccessor::new(meta_client.clone()),
     )));
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
@@ -180,7 +178,7 @@ pub async fn compactor_serve(
         storage_memory_config,
     ));
 
-    monitor_cache(memory_collector, &registry).unwrap();
+    monitor_cache(memory_collector);
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
@@ -194,45 +192,44 @@ pub async fn compactor_serve(
     };
     let await_tree_reg =
         await_tree_config.map(|c| Arc::new(RwLock::new(await_tree::Registry::new(c))));
-    let compactor_context = Arc::new(CompactorContext {
+    let compactor_context = CompactorContext {
         storage_opts,
-        hummock_meta_client: hummock_meta_client.clone(),
         sstable_store: sstable_store.clone(),
         compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(
             opts.compaction_worker_threads_number,
         )),
-        filter_key_extractor_manager: filter_key_extractor_manager.clone(),
+        filter_key_extractor_manager: FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            filter_key_extractor_manager.clone(),
+        ),
         memory_limiter,
-        sstable_object_id_manager: sstable_object_id_manager.clone(),
+
         task_progress_manager: Default::default(),
         await_tree_reg: await_tree_reg.clone(),
         running_task_count: Arc::new(AtomicU32::new(0)),
-    });
+    };
     let mut sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-            vec![sstable_object_id_manager],
+            vec![sstable_object_id_manager.clone()],
         ),
-        risingwave_storage::hummock::compactor::Compactor::start_compactor(
+        risingwave_storage::hummock::compactor::start_compactor(
             compactor_context.clone(),
+            hummock_meta_client.clone(),
+            sstable_object_id_manager.clone(),
         ),
     ];
 
     let telemetry_manager = TelemetryManager::new(
-        system_params_manager.watch_params(),
         Arc::new(meta_client.clone()),
         Arc::new(CompactorTelemetryCreator::new()),
     );
     // if the toml config file or env variable disables telemetry, do not watch system params change
     // because if any of configs disable telemetry, we should never start it
     if config.server.telemetry_enabled && telemetry_env_enabled() {
-        if telemetry_enabled {
-            telemetry_manager.start_telemetry_reporting().await;
-        }
-        sub_tasks.push(telemetry_manager.watch_params_change());
+        sub_tasks.push(telemetry_manager.start().await);
     } else {
         tracing::info!("Telemetry didn't start due to config");
     }
@@ -244,32 +241,36 @@ pub async fn compactor_serve(
         tonic::transport::Server::builder()
             .add_service(CompactorServiceServer::new(compactor_srv))
             .add_service(MonitorServiceServer::new(monitor_srv))
-            .serve_with_shutdown(listen_addr, async move {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {},
-                    _ = &mut shutdown_recv => {
-                        for (join_handle, shutdown_sender) in sub_tasks {
-                            if let Err(err) = shutdown_sender.send(()) {
-                                tracing::warn!("Failed to send shutdown: {:?}", err);
-                                continue;
+            .monitored_serve_with_shutdown(
+                listen_addr,
+                "grpc-compactor-node-service",
+                TcpConfig {
+                    tcp_nodelay: true,
+                    keepalive_duration: None,
+                },
+                async move {
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {},
+                        _ = &mut shutdown_recv => {
+                            for (join_handle, shutdown_sender) in sub_tasks {
+                                if let Err(err) = shutdown_sender.send(()) {
+                                    tracing::warn!("Failed to send shutdown: {:?}", err);
+                                    continue;
+                                }
+                                if let Err(err) = join_handle.await {
+                                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                                }
                             }
-                            if let Err(err) = join_handle.await {
-                                tracing::warn!("Failed to join shutdown: {:?}", err);
-                            }
-                        }
-                    },
-                }
-            })
+                        },
+                    }
+                },
+            )
             .await
-            .unwrap();
     });
 
     // Boot metrics service.
-    if config.server.metrics_level > 0 {
-        MetricsManager::boot_metrics_service(
-            opts.prometheus_listener_addr.clone(),
-            registry.clone(),
-        );
+    if config.server.metrics_level > MetricLevel::Disabled {
+        MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 
     (join_handle, observer_join_handle, shutdown_send)

@@ -199,6 +199,8 @@ impl TtlReclaimCompactionPicker {
         });
 
         Some(CompactionInput {
+            select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+            total_file_count: select_input_ssts.len() as _,
             input_levels: vec![
                 InputLevel {
                     level_idx: reclaimed_level.level_idx,
@@ -212,8 +214,8 @@ impl TtlReclaimCompactionPicker {
                 },
             ],
             target_level: reclaimed_level.level_idx as usize,
-            target_sub_level_id: 0,
             vnode_partition_count: reclaimed_level.vnode_partition_count,
+            ..Default::default()
         })
     }
 }
@@ -630,7 +632,7 @@ mod test {
                 },
             );
 
-            let expect_task_file_count = vec![3, 2, 1];
+            let expect_task_file_count = [3, 2, 1];
             let expect_task_sst_id_range = vec![vec![2, 3, 4], vec![6, 7], vec![10]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
                 // // pick ttl reclaim
@@ -712,7 +714,7 @@ mod test {
                 },
             );
 
-            let expect_task_file_count = vec![3, 3];
+            let expect_task_file_count = [3, 3];
             let expect_task_sst_id_range = vec![vec![2, 3, 4], vec![5, 6, 7]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
                 if index == expect_task_file_count.len() - 1 {

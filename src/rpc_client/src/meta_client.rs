@@ -55,6 +55,7 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_c
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
 use risingwave_pb::hummock::*;
 use risingwave_pb::meta::add_worker_node_request::Property;
+use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
@@ -417,6 +418,15 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    // only adding columns is supported
+    pub async fn alter_source_column(&self, source: PbSource) -> Result<CatalogVersion> {
+        let request = AlterSourceRequest {
+            source: Some(source),
+        };
+        let resp = self.inner.alter_source(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn replace_table(
         &self,
         table: PbTable,
@@ -684,10 +694,10 @@ impl MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
-    pub async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()> {
-        let request = CancelCreatingJobsRequest { infos };
-        let _ = self.inner.cancel_creating_jobs(request).await?;
-        Ok(())
+    pub async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>> {
+        let request = CancelCreatingJobsRequest { jobs: Some(jobs) };
+        let resp = self.inner.cancel_creating_jobs(request).await?;
+        Ok(resp.canceled_jobs)
     }
 
     pub async fn list_table_fragments(
@@ -725,16 +735,16 @@ impl MetaClient {
         Ok(resp.states)
     }
 
-    pub async fn pause(&self) -> Result<()> {
+    pub async fn pause(&self) -> Result<PauseResponse> {
         let request = PauseRequest {};
-        let _resp = self.inner.pause(request).await?;
-        Ok(())
+        let resp = self.inner.pause(request).await?;
+        Ok(resp)
     }
 
-    pub async fn resume(&self) -> Result<()> {
+    pub async fn resume(&self) -> Result<ResumeResponse> {
         let request = ResumeRequest {};
-        let _resp = self.inner.resume(request).await?;
-        Ok(())
+        let resp = self.inner.resume(request).await?;
+        Ok(resp)
     }
 
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
@@ -1297,7 +1307,7 @@ impl GrpcMetaClientCore {
 
 /// Client to meta server. Cloning the instance is lightweight.
 ///
-/// It is a wrapper of tonic client. See [`rpc_client_method_impl`].
+/// It is a wrapper of tonic client. See [`crate::rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
     member_monitor_event_sender: mpsc::Sender<Sender<Result<()>>>,
@@ -1359,7 +1369,7 @@ impl MetaMemberManagement {
             Either::Right(member_group) => {
                 let mut fetched_members = None;
 
-                for (addr, client) in member_group.members.iter_mut() {
+                for (addr, client) in &mut member_group.members {
                     let client: Result<MetaMemberClient> = try {
                         match client {
                             Some(cached_client) => cached_client.to_owned(),
@@ -1448,7 +1458,7 @@ impl GrpcMetaClient {
     // Max retry times for connecting to meta server.
     const INIT_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
-    async fn start_meta_member_monitor(
+    fn start_meta_member_monitor(
         &self,
         init_leader_addr: String,
         members: Either<MetaMemberClient, MetaMemberGroup>,
@@ -1549,9 +1559,7 @@ impl GrpcMetaClient {
             }
         };
 
-        client
-            .start_meta_member_monitor(addr, members, force_refresh_receiver, config)
-            .await?;
+        client.start_meta_member_monitor(addr, members, force_refresh_receiver, config)?;
 
         client.force_refresh_leader().await?;
 
@@ -1637,6 +1645,8 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
+            ,{ stream_client, pause, PauseRequest, PauseResponse }
+            ,{ stream_client, resume, ResumeRequest, ResumeResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
@@ -1662,6 +1672,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, drop_function, DropFunctionRequest, DropFunctionResponse }
             ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
+            ,{ ddl_client, alter_source, AlterSourceRequest, AlterSourceResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
@@ -1701,8 +1712,6 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
-            ,{ scale_client, pause, PauseRequest, PauseResponse }
-            ,{ scale_client, resume, ResumeRequest, ResumeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
             ,{ scale_client, get_reschedule_plan, GetReschedulePlanRequest, GetReschedulePlanResponse }

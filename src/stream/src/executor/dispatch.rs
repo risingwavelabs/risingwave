@@ -183,7 +183,15 @@ impl DispatchExecutorInner {
                     self.add_dispatchers(new_dispatchers)?;
                 }
             }
-            Mutation::Update { dispatchers, .. } => {
+            Mutation::Update {
+                dispatchers,
+                actor_new_dispatchers: actor_dispatchers,
+                ..
+            } => {
+                if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
+                    self.add_dispatchers(new_dispatchers)?;
+                }
+
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
                         self.pre_update_dispatcher(update)?;
@@ -211,10 +219,20 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-            Mutation::Update { dispatchers, .. } => {
+            Mutation::Update {
+                dispatchers,
+                dropped_actors,
+                ..
+            } => {
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
                         self.post_update_dispatcher(update)?;
+                    }
+                }
+
+                if !dropped_actors.contains(&self.actor_id) {
+                    for dispatcher in &mut self.dispatchers {
+                        dispatcher.remove_outputs(dropped_actors);
                     }
                 }
             }
@@ -510,12 +528,12 @@ impl Dispatcher for RoundRobinDataDispatcher {
     }
 
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs.extend(outputs.into_iter());
+        self.outputs.extend(outputs);
     }
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|output| actor_ids.contains(&output.actor_id()))
+            .extract_if(|output| actor_ids.contains(&output.actor_id()))
             .count();
         self.cur = self.cur.min(self.outputs.len() - 1);
     }
@@ -571,7 +589,7 @@ impl Dispatcher for HashDataDispatcher {
     define_dispatcher_associated_types!();
 
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs.extend(outputs.into_iter());
+        self.outputs.extend(outputs);
     }
 
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_> {
@@ -606,7 +624,7 @@ impl Dispatcher for HashDataDispatcher {
             // get hash value of every line by its key
             let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys);
 
-            tracing::trace!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty_string(), self.keys, vnodes);
+            tracing::trace!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty(), self.keys, vnodes);
 
             let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
                 .take(num_outputs)
@@ -678,7 +696,7 @@ impl Dispatcher for HashDataDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|output| actor_ids.contains(&output.actor_id()))
+            .extract_if(|output| actor_ids.contains(&output.actor_id()))
             .count();
     }
 
@@ -761,7 +779,7 @@ impl Dispatcher for BroadcastDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|actor_id, _| actor_ids.contains(actor_id))
+            .extract_if(|actor_id, _| actor_ids.contains(actor_id))
             .count();
     }
 
@@ -820,7 +838,7 @@ impl Dispatcher for SimpleDispatcher {
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_> {
         async move {
             // Only barrier is allowed to be dispatched to multiple outputs during migration.
-            for output in self.output.iter_mut() {
+            for output in &mut self.output {
                 output.send(Message::Barrier(barrier.clone())).await?;
             }
             Ok(())
@@ -1083,6 +1101,7 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
+            actor_new_dispatchers: Default::default(),
         });
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1134,6 +1153,7 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
+            actor_new_dispatchers: Default::default(),
         });
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1202,7 +1222,7 @@ mod tests {
             let hash_builder = Crc32FastBuilder;
             let mut hasher = hash_builder.build_hasher();
             let one_row = (0..dimension).map(|_| start.next().unwrap()).collect_vec();
-            for key_idx in key_indices.iter() {
+            for key_idx in key_indices {
                 let val = one_row[*key_idx];
                 let bytes = val.to_le_bytes();
                 hasher.update(&bytes);

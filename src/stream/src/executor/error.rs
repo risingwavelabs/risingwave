@@ -124,7 +124,9 @@ impl std::fmt::Debug for StreamExecutorError {
 
         write!(f, "{}", self.inner.kind)?;
         writeln!(f)?;
-        if let Some(backtrace) = (&self.inner.kind as &dyn Error).request_ref::<Backtrace>() {
+        if let Some(backtrace) =
+            std::error::request_ref::<Backtrace>(&self.inner.kind as &dyn Error)
+        {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(
@@ -216,6 +218,12 @@ impl From<PbFieldNotFound> for StreamExecutorError {
             "Failed to decode prost: field not found `{}`",
             err.0
         ))
+    }
+}
+
+impl From<String> for StreamExecutorError {
+    fn from(s: String) -> Self {
+        ErrorKind::Internal(anyhow::anyhow!(s)).into()
     }
 }
 

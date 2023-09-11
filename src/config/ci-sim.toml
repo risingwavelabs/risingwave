@@ -1,8 +1,8 @@
 [server]
 telemetry_enabled = false
+metrics_level = "Disabled"
 
 [system]
-telemetry_enabled = false
 max_concurrent_creating_streaming_jobs = 0
 
 [meta]

@@ -461,6 +461,17 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::List(Box::new(DataType::Varchar))))
         }
+        ExprType::RegexpReplace => {
+            // regexp_replace(source, pattern, replacement [, start [, N ]] [, flags ])
+            // TODO: Preprocessing?
+            ensure_arity!("regexp_replace", 3 <= | inputs | <= 6);
+            Ok(Some(DataType::Varchar))
+        }
+        ExprType::RegexpCount => {
+            // TODO: Preprocessing?
+            ensure_arity!("regexp_count", 2 <= | inputs | <= 4);
+            Ok(Some(DataType::Int32))
+        }
         ExprType::ArrayCat => {
             ensure_arity!("array_cat", | inputs | == 2);
             let left_type = (!inputs[0].is_untyped()).then(|| inputs[0].return_type());
@@ -584,6 +595,12 @@ fn infer_type_for_special(
 
             Ok(Some(inputs[0].return_type()))
         }
+        ExprType::ArrayMin => {
+            ensure_arity!("array_min", | inputs | == 1);
+            inputs[0].ensure_array_type()?;
+
+            Ok(Some(inputs[0].return_type().as_list().clone()))
+        }
         ExprType::ArrayDims => {
             ensure_arity!("array_dims", | inputs | == 1);
             inputs[0].ensure_array_type()?;
@@ -595,6 +612,12 @@ fn infer_type_for_special(
                 .into());
             }
             Ok(Some(DataType::Varchar))
+        }
+        ExprType::ArrayMax => {
+            ensure_arity!("array_max", | inputs | == 1);
+            inputs[0].ensure_array_type()?;
+
+            Ok(Some(inputs[0].return_type().as_list().clone()))
         }
         ExprType::StringToArray => {
             ensure_arity!("string_to_array", 2 <= | inputs | <= 3);

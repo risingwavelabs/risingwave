@@ -20,6 +20,7 @@
 #![feature(result_option_inspect)]
 #![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(lazy_cell)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
@@ -31,8 +32,11 @@ pub mod rpc;
 pub mod server;
 pub mod telemetry;
 
+use std::future::Future;
+use std::pin::Pin;
+
 use clap::{Parser, ValueEnum};
-use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
+use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 use serde::{Deserialize, Serialize};
@@ -99,7 +103,7 @@ pub struct ComputeNodeOpts {
     /// >0 = enable metrics
     #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
-    pub metrics_level: Option<u32>,
+    pub metrics_level: Option<MetricLevel>,
 
     /// Path to data file cache data directory.
     /// Left empty to disable file cache.
@@ -185,16 +189,10 @@ fn validate_opts(opts: &ComputeNodeOpts) {
     }
 }
 
-use std::future::Future;
-use std::pin::Pin;
-
 use crate::server::compute_node_serve;
 
 /// Start compute node
-pub fn start(
-    opts: ComputeNodeOpts,
-    registry: prometheus::Registry,
-) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
@@ -216,7 +214,7 @@ pub fn start(
         tracing::info!("advertise addr is {}", advertise_addr);
 
         let (join_handle_vec, _shutdown_send) =
-            compute_node_serve(listen_addr, advertise_addr, opts, registry).await;
+            compute_node_serve(listen_addr, advertise_addr, opts).await;
 
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();

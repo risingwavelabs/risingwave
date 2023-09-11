@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -23,35 +24,28 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
-use crate::barrier::BarrierScheduler;
+use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv};
-use crate::storage::MetaStore;
 use crate::stream::GlobalStreamManagerRef;
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
 #[derive(Clone)]
-pub struct StreamServiceImpl<S>
-where
-    S: MetaStore,
-{
-    env: MetaSrvEnv<S>,
-    barrier_scheduler: BarrierScheduler<S>,
-    stream_manager: GlobalStreamManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
+pub struct StreamServiceImpl {
+    env: MetaSrvEnv,
+    barrier_scheduler: BarrierScheduler,
+    stream_manager: GlobalStreamManagerRef,
+    catalog_manager: CatalogManagerRef,
+    fragment_manager: FragmentManagerRef,
 }
 
-impl<S> StreamServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl StreamServiceImpl {
     pub fn new(
-        env: MetaSrvEnv<S>,
-        barrier_scheduler: BarrierScheduler<S>,
-        stream_manager: GlobalStreamManagerRef<S>,
-        catalog_manager: CatalogManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        env: MetaSrvEnv,
+        barrier_scheduler: BarrierScheduler,
+        stream_manager: GlobalStreamManagerRef,
+        catalog_manager: CatalogManagerRef,
+        fragment_manager: FragmentManagerRef,
     ) -> Self {
         StreamServiceImpl {
             env,
@@ -64,10 +58,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> StreamManagerService for StreamServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl StreamManagerService for StreamServiceImpl {
     #[cfg_attr(coverage, no_coverage)]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         self.env.idle_manager().record_activity();
@@ -80,21 +71,55 @@ where
         }))
     }
 
+    #[cfg_attr(coverage, no_coverage)]
+    async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
+        let i = self
+            .barrier_scheduler
+            .run_command(Command::pause(PausedReason::Manual))
+            .await?;
+        Ok(Response::new(PauseResponse {
+            prev: i.prev_paused_reason.map(Into::into),
+            curr: i.curr_paused_reason.map(Into::into),
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
+        let i = self
+            .barrier_scheduler
+            .run_command(Command::resume(PausedReason::Manual))
+            .await?;
+        Ok(Response::new(ResumeResponse {
+            prev: i.prev_paused_reason.map(Into::into),
+            curr: i.curr_paused_reason.map(Into::into),
+        }))
+    }
+
     async fn cancel_creating_jobs(
         &self,
         request: Request<CancelCreatingJobsRequest>,
     ) -> TonicResponse<CancelCreatingJobsResponse> {
         let req = request.into_inner();
-        let table_ids = self
-            .catalog_manager
-            .find_creating_streaming_job_ids(req.infos)
-            .await;
-        if !table_ids.is_empty() {
-            self.stream_manager
-                .cancel_streaming_jobs(table_ids.into_iter().map(TableId::from).collect_vec())
-                .await;
-        }
-        Ok(Response::new(CancelCreatingJobsResponse { status: None }))
+        let table_ids = match req.jobs.unwrap() {
+            Jobs::Infos(infos) => {
+                self.catalog_manager
+                    .find_creating_streaming_job_ids(infos.infos)
+                    .await
+            }
+            Jobs::Ids(jobs) => jobs.job_ids,
+        };
+
+        let canceled_jobs = self
+            .stream_manager
+            .cancel_streaming_jobs(table_ids.into_iter().map(TableId::from).collect_vec())
+            .await
+            .into_iter()
+            .map(|id| id.table_id)
+            .collect_vec();
+        Ok(Response::new(CancelCreatingJobsResponse {
+            status: None,
+            canceled_jobs,
+        }))
     }
 
     #[cfg_attr(coverage, no_coverage)]

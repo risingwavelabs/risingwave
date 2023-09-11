@@ -458,7 +458,7 @@ fn main() -> Result<()> {
                 err.root_cause().to_string().trim(),
             );
             println!(
-                "* Use `{}` to enable new compoenents, if they are missing.",
+                "* Use `{}` to enable new components, if they are missing.",
                 style("./risedev configure").blue().bold(),
             );
             println!(

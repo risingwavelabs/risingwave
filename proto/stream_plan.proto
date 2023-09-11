@@ -12,10 +12,11 @@ import "source.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
+message Dispatchers {
+  repeated Dispatcher dispatchers = 1;
+}
+
 message AddMutation {
-  message Dispatchers {
-    repeated Dispatcher dispatchers = 1;
-  }
   // New dispatchers for each actor.
   map<uint32, Dispatchers> actor_dispatchers = 1;
   // All actors to be added (to the main connected component of the graph) in this update.
@@ -23,6 +24,9 @@ message AddMutation {
   // We may embed a source change split mutation here.
   // TODO: we may allow multiple mutations in a single barrier.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
+  // We may embed a pause mutation here.
+  // TODO: we may allow multiple mutations in a single barrier.
+  bool pause = 4;
 }
 
 message StopMutation {
@@ -65,6 +69,9 @@ message UpdateMutation {
   repeated uint32 dropped_actors = 4;
   // Source updates.
   map<uint32, source.ConnectorSplits> actor_splits = 5;
+  // When modifying the Materialized View, we need to recreate the Dispatcher from the old upstream to the new TableFragment.
+  // Consistent with the semantics in AddMutation.
+  map<uint32, Dispatchers> actor_new_dispatchers = 6;
 }
 
 message SourceChangeSplitMutation {
@@ -167,6 +174,10 @@ message SinkDesc {
   map<string, string> properties = 8;
   catalog.SinkType sink_type = 9;
   repeated plan_common.ColumnCatalog column_catalogs = 10;
+  string db_name = 11;
+  // If the sink is from table or mv, this is name of the table/mv. Otherwise
+  // it is the name of the sink itself.
+  string sink_from_name = 12;
 }
 
 enum SinkLogStoreType {
@@ -445,6 +456,9 @@ message ChainNode {
 
   // The upstream materialized view info used by backfill.
   plan_common.StorageTableDesc table_desc = 7;
+
+  // The rate limit for the chain node.
+  optional uint32 rate_limit = 8;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -526,6 +540,12 @@ message ExpandNode {
 
 message ProjectSetNode {
   repeated expr.ProjectSetSelectItem select_list = 1;
+  // this two field is expressing a list of usize pair, which means when project receives a
+  // watermark with `watermark_input_cols[i]` column index, it should derive a new watermark
+  // with `watermark_output_cols[i]`th expression
+  repeated uint32 watermark_input_cols = 2;
+  repeated uint32 watermark_expr_indices = 3;
+  repeated uint32 nondecreasing_exprs = 4;
 }
 
 // Sorts inputs and outputs ordered data based on watermark.
@@ -577,12 +597,20 @@ message EowcOverWindowNode {
   catalog.Table state_table = 4;
 }
 
-// Note this is not exactly the same as EowcOverWindowNode in terms of future extension, so better to split as 2 different nodes.
+enum OverWindowCachePolicy {
+  OVER_WINDOW_CACHE_POLICY_UNSPECIFIED = 0;
+  OVER_WINDOW_CACHE_POLICY_FULL = 1;
+  OVER_WINDOW_CACHE_POLICY_RECENT = 2;
+  OVER_WINDOW_CACHE_POLICY_RECENT_FIRST_N = 3;
+  OVER_WINDOW_CACHE_POLICY_RECENT_LAST_N = 4;
+}
+
 message OverWindowNode {
   repeated expr.WindowFunction calls = 1;
   repeated uint32 partition_by = 2;
   repeated common.ColumnOrder order_by = 3;
   catalog.Table state_table = 4;
+  OverWindowCachePolicy cache_policy = 5;
 }
 
 message StreamNode {

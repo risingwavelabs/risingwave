@@ -15,26 +15,37 @@
 mod partition_level_compaction_picker;
 mod base_level_compaction_picker;
 mod intral_sub_level_picker;
+mod intra_compaction_picker;
 mod manual_compaction_picker;
 mod min_overlap_compaction_picker;
 mod space_reclaim_compaction_picker;
 mod tier_compaction_picker;
+mod tombstone_reclaim_compaction_picker;
 mod trivial_move_compaction_picker;
 mod ttl_reclaim_compaction_picker;
 
 pub use partition_level_compaction_picker::PartitionLevelCompactionPicker;
-pub use base_level_compaction_picker::LevelCompactionPicker;
 pub use intral_sub_level_picker::*;
+mod compaction_task_validator;
+
+pub use base_level_compaction_picker::LevelCompactionPicker;
+pub use compaction_task_validator::{CompactionTaskValidator, ValidationRuleType};
+pub use intra_compaction_picker::IntraCompactionPicker;
 pub use manual_compaction_picker::ManualCompactionPicker;
 pub use min_overlap_compaction_picker::{MinOverlappingPicker, PartitionMinOverlappingPicker};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::InputLevel;
 pub use space_reclaim_compaction_picker::{SpaceReclaimCompactionPicker, SpaceReclaimPickerState};
 pub use tier_compaction_picker::TierCompactionPicker;
+pub use tombstone_reclaim_compaction_picker::{
+    TombstoneReclaimCompactionPicker, TombstoneReclaimPickerState,
+};
 pub use trivial_move_compaction_picker::TrivialMovePicker;
 pub use ttl_reclaim_compaction_picker::{TtlPickerState, TtlReclaimCompactionPicker};
 
 use crate::hummock::level_handler::LevelHandler;
+
+pub const MAX_COMPACT_LEVEL_COUNT: usize = 42;
 
 #[derive(Default)]
 pub struct LocalPickerStatistic {
@@ -44,6 +55,8 @@ pub struct LocalPickerStatistic {
     pub skip_by_overlapping: u64,
     pub use_vnode_partition: bool,
 }
+
+#[derive(Default)]
 pub struct CompactionInput {
     pub input_levels: Vec<InputLevel>,
     pub target_level: usize,

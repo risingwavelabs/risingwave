@@ -17,14 +17,16 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_batch::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchTaskMetrics};
+use risingwave_batch::monitor::{
+    GLOBAL_BATCH_EXECUTOR_METRICS, GLOBAL_BATCH_MANAGER_METRICS, GLOBAL_BATCH_TASK_METRICS,
+};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
-    load_config, AsyncStackTraceOption, StorageMemoryConfig, MAX_CONNECTION_WINDOW_SIZE,
-    STREAM_WINDOW_SIZE,
+    load_config, AsyncStackTraceOption, MetricLevel, StorageMemoryConfig,
+    MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
-use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -34,7 +36,7 @@ use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
-use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::connector_service::SinkPayloadFormat;
@@ -46,16 +48,18 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ConnectorClient, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
-use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
+use risingwave_storage::hummock::compactor::{
+    start_compactor, CompactionExecutor, CompactorContext,
+};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
 use risingwave_storage::monitor::{
-    monitor_cache, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
-    MonitoredStorageMetrics, ObjectStoreMetrics,
+    global_hummock_state_store_metrics, global_storage_metrics, monitor_cache,
+    GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, GLOBAL_OBJECT_STORE_METRICS,
 };
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
-use risingwave_stream::executor::monitor::StreamingMetrics;
+use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -67,7 +71,7 @@ use crate::memory_management::{
 };
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
-use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
+use crate::rpc::service::exchange_metrics::GLOBAL_EXCHANGE_SERVICE_METRICS;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::health_service::HealthServiceImpl;
 use crate::rpc::service::monitor_service::{
@@ -82,7 +86,6 @@ pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
     opts: ComputeNodeOpts,
-    registry: prometheus::Registry,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, &opts);
@@ -164,22 +167,21 @@ pub async fn compute_node_serve(
 
     let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
-
-    monitor_process(&registry).unwrap();
-    let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
-    let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
-    let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
-    let batch_task_metrics = Arc::new(BatchTaskMetrics::new(registry.clone()));
-    let batch_executor_metrics = Arc::new(BatchExecutorMetrics::new(registry.clone()));
-    let batch_manager_metrics = BatchManagerMetrics::new(registry.clone());
-    let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
+    let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
+    let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
+    let streaming_metrics = Arc::new(global_streaming_metrics(config.server.metrics_level));
+    let batch_task_metrics = Arc::new(GLOBAL_BATCH_TASK_METRICS.clone());
+    let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
+    let batch_manager_metrics = GLOBAL_BATCH_MANAGER_METRICS.clone();
+    let exchange_srv_metrics = Arc::new(GLOBAL_EXCHANGE_SERVICE_METRICS.clone());
 
     // Initialize state store.
-    let state_store_metrics = Arc::new(HummockStateStoreMetrics::new(registry.clone()));
-    let object_store_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
-    let storage_metrics = Arc::new(MonitoredStorageMetrics::new(registry.clone()));
-    let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
-
+    let state_store_metrics = Arc::new(global_hummock_state_store_metrics(
+        config.server.metrics_level,
+    ));
+    let object_store_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
+    let storage_metrics = Arc::new(global_storage_metrics(config.server.metrics_level));
+    let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
         meta_client.clone(),
         hummock_metrics.clone(),
@@ -214,22 +216,25 @@ pub async fn compute_node_serve(
             let memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
-            let compactor_context = Arc::new(CompactorContext {
+            let compactor_context = CompactorContext {
                 storage_opts,
-                hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
                 memory_limiter,
-                sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
+
                 task_progress_manager: Default::default(),
                 await_tree_reg: None,
                 running_task_count: Arc::new(AtomicU32::new(0)),
-            });
+            };
 
-            let (handle, shutdown_sender) = Compactor::start_compactor(compactor_context);
+            let (handle, shutdown_sender) = start_compactor(
+                compactor_context,
+                hummock_meta_client.clone(),
+                storage.sstable_object_id_manager().clone(),
+            );
             sub_tasks.push((handle, shutdown_sender));
         }
         let flush_limiter = storage.get_memory_limiter();
@@ -238,7 +243,7 @@ pub async fn compute_node_serve(
             flush_limiter,
             storage_memory_config,
         ));
-        monitor_cache(memory_collector, &registry).unwrap();
+        monitor_cache(memory_collector);
         let backup_reader = storage.backup_reader();
         let system_params_mgr = system_params_manager.clone();
         tokio::spawn(async move {
@@ -296,8 +301,6 @@ pub async fn compute_node_serve(
     // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead
     // of lru manager.
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
-
-    let telemetry_enabled = system_params.telemetry_enabled();
 
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
@@ -374,7 +377,6 @@ pub async fn compute_node_serve(
     let health_srv = HealthServiceImpl::new();
 
     let telemetry_manager = TelemetryManager::new(
-        system_params_manager.watch_params(),
         Arc::new(meta_client.clone()),
         Arc::new(ComputeTelemetryCreator::new()),
     );
@@ -382,12 +384,7 @@ pub async fn compute_node_serve(
     // if the toml config file or env variable disables telemetry, do not watch system params change
     // because if any of configs disable telemetry, we should never start it
     if config.server.telemetry_enabled && telemetry_env_enabled() {
-        // if all configs are true, start reporting
-        if telemetry_enabled {
-            telemetry_manager.start_telemetry_reporting().await;
-        }
-        // if config and env are true, starting watching
-        sub_tasks.push(telemetry_manager.watch_params_change());
+        sub_tasks.push(telemetry_manager.start().await);
     } else {
         tracing::info!("Telemetry didn't start due to config");
     }
@@ -397,7 +394,6 @@ pub async fn compute_node_serve(
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .tcp_nodelay(true)
             .layer(TracingExtractLayer::new())
             // XXX: unlimit the max message size to allow arbitrary large SQL input.
             .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
@@ -419,33 +415,37 @@ pub async fn compute_node_serve(
             .add_service(MonitorServiceServer::new(monitor_srv))
             .add_service(ConfigServiceServer::new(config_srv))
             .add_service(HealthServer::new(health_srv))
-            .serve_with_shutdown(listen_addr, async move {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {},
-                    _ = &mut shutdown_recv => {
-                        for (join_handle, shutdown_sender) in sub_tasks {
-                            if let Err(err) = shutdown_sender.send(()) {
-                                tracing::warn!("Failed to send shutdown: {:?}", err);
-                                continue;
+            .monitored_serve_with_shutdown(
+                listen_addr,
+                "grpc-compute-node-service",
+                TcpConfig {
+                    tcp_nodelay: true,
+                    keepalive_duration: None,
+                },
+                async move {
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {},
+                        _ = &mut shutdown_recv => {
+                            for (join_handle, shutdown_sender) in sub_tasks {
+                                if let Err(err) = shutdown_sender.send(()) {
+                                    tracing::warn!("Failed to send shutdown: {:?}", err);
+                                    continue;
+                                }
+                                if let Err(err) = join_handle.await {
+                                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                                }
                             }
-                            if let Err(err) = join_handle.await {
-                                tracing::warn!("Failed to join shutdown: {:?}", err);
-                            }
-                        }
-                    },
-                }
-            })
-            .await
-            .unwrap();
+                        },
+                    }
+                },
+            )
+            .await;
     });
     join_handle_vec.push(join_handle);
 
     // Boot metrics service.
-    if config.server.metrics_level > 0 {
-        MetricsManager::boot_metrics_service(
-            opts.prometheus_listener_addr.clone(),
-            registry.clone(),
-        );
+    if config.server.metrics_level > MetricLevel::Disabled {
+        MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 
     // All set, let the meta service know we're ready.

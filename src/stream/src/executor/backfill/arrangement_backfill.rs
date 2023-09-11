@@ -34,8 +34,8 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::utils::{
     compute_bounds, construct_initial_finished_state, get_progress_per_vnode, iter_chunks,
-    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state_per_vnode,
-    update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
+    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, owned_row_iter,
+    persist_state_per_vnode, update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -44,7 +44,7 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-/// Similar to [`BackfillExecutor`].
+/// Similar to [`super::no_shuffle_backfill::BackfillExecutor`].
 /// Main differences:
 /// - [`ArrangementBackfillExecutor`] can reside on a different CN, so it can be scaled
 ///   independently.
@@ -130,7 +130,7 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
-        self.state_table.init_epoch(first_barrier.epoch);
+        self.state_table.init_epoch(first_barrier.epoch).await?;
 
         let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
 
@@ -162,7 +162,6 @@ where
                 let snapshot = Self::snapshot_read_per_vnode(
                     &upstream_table,
                     backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
-                    self.chunk_size,
                     &mut builders,
                 );
                 pin_mut!(snapshot);
@@ -244,7 +243,6 @@ where
                     let right_snapshot = pin!(Self::snapshot_read_per_vnode(
                         &upstream_table,
                         backfill_state.clone(), // FIXME: temporary workaround, how to avoid it?
-                        self.chunk_size,
                         &mut builders,
                     )
                     .map(Either::Right),);
@@ -348,19 +346,27 @@ where
                 // NOTE(kwannoel): `zip_eq_debug` does not work here,
                 // we encounter "higher-ranked lifetime error".
                 for (vnode, chunk) in vnodes.iter_vnodes().zip_eq(builders.iter_mut().map(|b| {
-                    let chunk = b.build_data_chunk();
-                    let ops = vec![Op::Insert; chunk.capacity()];
-                    StreamChunk::from_parts(ops, chunk)
+                    b.consume_all().map(|chunk| {
+                        let ops = vec![Op::Insert; chunk.capacity()];
+                        StreamChunk::from_parts(ops, chunk)
+                    })
                 })) {
-                    // Raise the current position.
-                    // As snapshot read streams are ordered by pk, so we can
-                    // just use the last row to update `current_pos`.
-                    update_pos_by_vnode(vnode, &chunk, &pk_in_output_indices, &mut backfill_state);
+                    if let Some(chunk) = chunk {
+                        // Raise the current position.
+                        // As snapshot read streams are ordered by pk, so we can
+                        // just use the last row to update `current_pos`.
+                        update_pos_by_vnode(
+                            vnode,
+                            &chunk,
+                            &pk_in_output_indices,
+                            &mut backfill_state,
+                        );
 
-                    let chunk_cardinality = chunk.cardinality() as u64;
-                    cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                    total_snapshot_processed_rows += chunk_cardinality;
-                    yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+                        let chunk_cardinality = chunk.cardinality() as u64;
+                        cur_barrier_snapshot_processed_rows += chunk_cardinality;
+                        total_snapshot_processed_rows += chunk_cardinality;
+                        yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+                    }
                 }
 
                 // consume upstream buffer chunk
@@ -422,7 +428,7 @@ where
                     barrier.epoch,
                     &mut self.state_table,
                     false,
-                    &mut backfill_state,
+                    &backfill_state,
                     &mut committed_progress,
                     &mut temporary_state,
                 )
@@ -462,7 +468,7 @@ where
                         barrier.epoch,
                         &mut self.state_table,
                         false,
-                        &mut backfill_state,
+                        &backfill_state,
                         &mut committed_progress,
                         &mut temporary_state,
                     ).await?;
@@ -496,10 +502,6 @@ where
     /// 3. Change it into a chunk iterator with `iter_chunks`.
     /// This means it should fetch a row from each iterator to form a chunk.
     ///
-    /// NOTE(kwannoel): We interleave at chunk per vnode level rather than rows.
-    /// This is so that we can compute `current_pos` once per chunk, since they correspond to 1
-    /// vnode.
-    ///
     /// We will return chunks based on the `BackfillProgressPerVnode`.
     /// 1. Completed(vnode): Current iterator is complete, in that case we need to handle it
     ///    in arrangement backfill. We should not buffer updates for this vnode,
@@ -507,11 +509,21 @@ where
     /// 2. InProgress(CHUNK): Current iterator is not complete, in that case we
     ///    need to buffer updates for this vnode.
     /// 3. Finished: All iterators finished.
+    ///
+    /// NOTE(kwannoel): We interleave at chunk per vnode level rather than rows.
+    /// This is so that we can compute `current_pos` once per chunk, since they correspond to 1
+    /// vnode.
+    ///
+    /// NOTE(kwannoel):
+    /// The rows from upstream snapshot read will be buffered inside the `builder`.
+    /// If snapshot is dropped before its rows are consumed,
+    /// remaining data in `builder` must be flushed manually.
+    /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be
+    /// present, Then when we flush we contain duplicate rows.
     #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
     async fn snapshot_read_per_vnode<'a>(
         upstream_table: &'a ReplicatedStateTable<S>,
         backfill_state: BackfillState,
-        chunk_size: usize,
         builders: &'a mut [DataChunkBuilder],
     ) {
         let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
@@ -536,13 +548,13 @@ where
             let range_bounds = range_bounds.unwrap();
 
             let vnode_row_iter = upstream_table
-                .iter_with_pk_range(&range_bounds, vnode, Default::default())
+                .iter_row_with_pk_range(&range_bounds, vnode, Default::default())
                 .await?;
 
             // TODO: Is there some way to avoid double-pin here?
-            let vnode_row_iter = Box::pin(vnode_row_iter);
+            let vnode_row_iter = Box::pin(owned_row_iter(vnode_row_iter));
 
-            let vnode_chunk_iter = iter_chunks(vnode_row_iter, chunk_size, builder)
+            let vnode_chunk_iter = iter_chunks(vnode_row_iter, builder)
                 .map_ok(move |chunk_opt| chunk_opt.map(|chunk| (vnode, chunk)));
             // TODO: Is there some way to avoid double-pin
             streams.push(Box::pin(vnode_chunk_iter));

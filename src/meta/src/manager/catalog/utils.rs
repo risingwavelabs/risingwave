@@ -274,6 +274,7 @@ impl QueryRewriter<'_> {
             | Expr::IsNotFalse(expr)
             | Expr::IsUnknown(expr)
             | Expr::IsNotUnknown(expr)
+            | Expr::IsJson { expr, .. }
             | Expr::InList { expr, .. }
             | Expr::SomeOp(expr)
             | Expr::AllOp(expr)
@@ -336,6 +337,8 @@ impl QueryRewriter<'_> {
                     self.visit_expr(expr);
                 }
             }
+
+            Expr::LambdaFunction { body, args: _ } => self.visit_expr(body),
 
             // No need to visit.
             Expr::Identifier(_)

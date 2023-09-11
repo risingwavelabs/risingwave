@@ -18,11 +18,10 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevels
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, LevelType, SstableInfo};
 
-use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
+use super::{CompactionInput, CompactionPicker, LocalPickerStatistic, MAX_COMPACT_LEVEL_COUNT};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::SubLevelPartition;
 use crate::hummock::level_handler::LevelHandler;
-pub const MAX_LEVEL_COUNT: usize = 42;
 
 pub struct MinOverlappingPicker {
     level: usize,
@@ -130,6 +129,9 @@ impl CompactionPicker for MinOverlappingPicker {
             return None;
         }
         Some(CompactionInput {
+            select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+            target_input_size: target_input_ssts.iter().map(|sst| sst.file_size).sum(),
+            total_file_count: (select_input_ssts.len() + target_input_ssts.len()) as u64,
             input_levels: vec![
                 InputLevel {
                     level_idx: self.level as u32,
@@ -143,8 +145,8 @@ impl CompactionPicker for MinOverlappingPicker {
                 },
             ],
             target_level: self.target_level,
-            target_sub_level_id: 0,
             vnode_partition_count: levels.vnode_partition_count,
+            ..Default::default()
         })
     }
 }
