@@ -24,8 +24,8 @@ docker buildx build -f docker/Dockerfile \
   --progress plain \
   --builder=container \
   --load \
-  --cache-to "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch},mode=max" \
-  --cache-from "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
+  --cache-to "type=s3,region=us-east-2,bucket=ci-docker-cache-bucket,name=risingwave-build-cache-${arch},mode=max" \
+  --cache-from "type=s3,region=us-east-2,bucket=ci-docker-cache-bucket,name=risingwave-build-cache-${arch}" \
   .
 
 echo "--- check the image can start correctly"
