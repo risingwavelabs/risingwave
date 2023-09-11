@@ -15,8 +15,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-mo
 ENV PATH /root/.cargo/bin/:$PATH
 ENV CARGO_INCREMENTAL=0
 
-ARG GIT_SHA
-ENV GIT_SHA=$GIT_SHA
 
 # TODO: build dashboard, instead of downloading
 RUN curl -LO https://github.com/risingwavelabs/risingwave/archive/refs/heads/dashboard-artifact.zip
@@ -51,6 +49,9 @@ COPY --from=rust-planner /risingwave/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
 # Build application
+ARG GIT_SHA
+ENV GIT_SHA=$GIT_SHA
+
 COPY ./ /risingwave
 RUN cargo fetch
 RUN cargo build -p risingwave_cmd_all --release --features "rw-static-link"
