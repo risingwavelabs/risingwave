@@ -44,3 +44,6 @@ disable-publish = true
 [[bin]]
 name = "sqlparser"
 path = "src/bin/sqlparser.rs"
+
+[lints]
+workspace = true

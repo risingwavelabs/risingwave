@@ -374,8 +374,8 @@ impl LocalQueryExecution {
                 }
 
                 Ok(PlanNodePb {
-                    /// Since all the rest plan is embedded into the exchange node,
-                    /// there is no children any more.
+                    // Since all the rest plan is embedded into the exchange node,
+                    // there is no children any more.
                     children: vec![],
                     identity,
                     node_body: Some(node_body),

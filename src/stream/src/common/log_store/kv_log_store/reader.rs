@@ -195,7 +195,6 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         })
     }
 
-    #[expect(clippy::unused_async)]
     async fn truncate(&mut self) -> LogStoreResult<()> {
         self.rx.truncate();
         Ok(())

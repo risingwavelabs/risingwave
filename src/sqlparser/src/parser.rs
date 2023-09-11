@@ -3150,7 +3150,11 @@ impl Parser {
     pub fn parse_literal_string(&mut self) -> Result<String, ParserError> {
         let token = self.next_token();
         match token.token {
-            Token::Word(Word { value, keyword, .. }) if keyword == Keyword::NoKeyword => Ok(value),
+            Token::Word(Word {
+                value,
+                keyword: Keyword::NoKeyword,
+                ..
+            }) => Ok(value),
             Token::SingleQuotedString(s) => Ok(s),
             unexpected => self.expected("literal string", unexpected.with_location(token.location)),
         }
@@ -3160,7 +3164,11 @@ impl Parser {
     pub fn parse_map_key(&mut self) -> Result<Expr, ParserError> {
         let token = self.next_token();
         match token.token {
-            Token::Word(Word { value, keyword, .. }) if keyword == Keyword::NoKeyword => {
+            Token::Word(Word {
+                value,
+                keyword: Keyword::NoKeyword,
+                ..
+            }) => {
                 if self.peek_token() == Token::LParen {
                     return self.parse_function(ObjectName(vec![Ident::new_unchecked(value)]));
                 }

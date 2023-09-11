@@ -65,11 +65,11 @@ impl<S> TracedStateStore<S> {
         }
     }
 
-    async fn traced_iter<'a, 's, St: StateStoreIterItemStream + 's>(
+    async fn traced_iter<'a, St: StateStoreIterItemStream>(
         &'a self,
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
         span: MayTraceSpan,
-    ) -> StorageResult<TracedStateStoreIterStream<'s, St>> {
+    ) -> StorageResult<TracedStateStoreIterStream<St>> {
         let res = iter_stream_future.await;
         if res.is_ok() {
             span.may_send_result(OperationResult::Iter(TraceResult::Ok(())));
@@ -104,8 +104,7 @@ impl<S> TracedStateStore<S> {
     }
 }
 
-type TracedStateStoreIterStream<'s, S: StateStoreIterItemStream + 's> =
-    impl StateStoreIterItemStream + 's;
+type TracedStateStoreIterStream<S: StateStoreIterItemStream> = impl StateStoreIterItemStream;
 
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     type IterStream<'a> = impl StateStoreIterItemStream + 'a;
@@ -349,7 +348,7 @@ impl<S: StateStoreIterItemStream> TracedStateStoreIter<S> {
         }
     }
 
-    fn into_stream(self) -> impl StateStoreIterItemStream {
+    fn into_stream(self) -> TracedStateStoreIterStream<S> {
         Self::into_stream_inner(self)
     }
 }

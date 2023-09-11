@@ -508,7 +508,8 @@ message SystemParams {
   optional string data_directory = 7;
   optional string backup_storage_url = 8;
   optional string backup_storage_directory = 9;
-  optional bool telemetry_enabled = 10;
+  // Deprecated. Use config file instead.
+  optional bool telemetry_enabled = 10 [deprecated = true];
   optional uint32 parallel_compact_size_mb = 11;
   optional uint32 max_concurrent_creating_streaming_jobs = 12;
   optional bool pause_on_next_bootstrap = 13;

@@ -387,7 +387,7 @@ pub fn start_compactor(
                 let event: Option<Result<SubscribeCompactionEventResponse, _>> = tokio::select! {
                     _ = periodic_event_interval.tick() => {
                         let mut progress_list = Vec::new();
-                        for (&task_id, progress) in task_progress.lock().iter() {
+                        for (&task_id, progress) in &*task_progress.lock() {
                             progress_list.push(CompactTaskProgress {
                                 task_id,
                                 num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),

@@ -18,6 +18,13 @@ use opendal::Operator;
 
 use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
+
+/// The fixed number of bytes that is buffered before they are uploaded as a part, will be used in
+/// streaing upload.
+///
+/// Reference: <https://cloud.google.com/storage/docs/streaming-uploads>
+const GCS_PART_SIZE: usize = 16 * 1024 * 1024;
+
 impl OpendalObjectStore {
     /// create opendal gcs engine.
     pub fn new_gcs_engine(bucket: String, root: String) -> ObjectResult<Self> {
@@ -27,6 +34,8 @@ impl OpendalObjectStore {
         builder.bucket(&bucket);
 
         builder.root(&root);
+
+        builder.write_fixed_size(GCS_PART_SIZE);
 
         // if credential env is set, use it. Otherwise, ADC will be used.
         let cred = std::env::var("GOOGLE_APPLICATION_CREDENTIALS");

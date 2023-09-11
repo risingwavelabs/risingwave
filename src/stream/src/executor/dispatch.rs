@@ -528,12 +528,12 @@ impl Dispatcher for RoundRobinDataDispatcher {
     }
 
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs.extend(outputs.into_iter());
+        self.outputs.extend(outputs);
     }
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|output| actor_ids.contains(&output.actor_id()))
+            .extract_if(|output| actor_ids.contains(&output.actor_id()))
             .count();
         self.cur = self.cur.min(self.outputs.len() - 1);
     }
@@ -589,7 +589,7 @@ impl Dispatcher for HashDataDispatcher {
     define_dispatcher_associated_types!();
 
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs.extend(outputs.into_iter());
+        self.outputs.extend(outputs);
     }
 
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_> {
@@ -696,7 +696,7 @@ impl Dispatcher for HashDataDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|output| actor_ids.contains(&output.actor_id()))
+            .extract_if(|output| actor_ids.contains(&output.actor_id()))
             .count();
     }
 
@@ -779,7 +779,7 @@ impl Dispatcher for BroadcastDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|actor_id, _| actor_ids.contains(actor_id))
+            .extract_if(|actor_id, _| actor_ids.contains(actor_id))
             .count();
     }
 
@@ -838,7 +838,7 @@ impl Dispatcher for SimpleDispatcher {
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_> {
         async move {
             // Only barrier is allowed to be dispatched to multiple outputs during migration.
-            for output in self.output.iter_mut() {
+            for output in &mut self.output {
                 output.send(Message::Barrier(barrier.clone())).await?;
             }
             Ok(())
@@ -1222,7 +1222,7 @@ mod tests {
             let hash_builder = Crc32FastBuilder;
             let mut hasher = hash_builder.build_hasher();
             let one_row = (0..dimension).map(|_| start.next().unwrap()).collect_vec();
-            for key_idx in key_indices.iter() {
+            for key_idx in key_indices {
                 let val = one_row[*key_idx];
                 let bytes = val.to_le_bytes();
                 hasher.update(&bytes);
