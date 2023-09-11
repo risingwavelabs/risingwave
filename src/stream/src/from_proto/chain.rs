@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::BasicSerde;
@@ -51,7 +51,18 @@ impl ExecutorBuilder for ChainExecutorBuilder {
 
         // The batch query executor scans on a mapped adhoc mview table, thus we should directly use
         // its schema.
-        let schema = snapshot.schema().clone();
+        let schema = if node.chain_type() == ChainType::ArrangementBackfill {
+            let upstream_schema_fields = &snapshot.schema().fields;
+            let output_schema_fields = node
+                .get_output_indices()
+                .iter()
+                .map(|i| upstream_schema_fields[*i as usize].clone())
+                .collect_vec();
+            Schema { fields: output_schema_fields }
+        } else {
+            snapshot.schema().clone()
+        };
+        println!("schema: {:#?}", schema);
 
         let output_indices = node
             .output_indices

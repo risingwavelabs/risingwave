@@ -146,7 +146,8 @@ where
         // We can do it later when testing recovery + scaling mechanism.
         let mut committed_progress = HashMap::new();
 
-        let output_data_types = upstream_table.get_output_data_types();
+        // let output_data_types = upstream_table.get_output_data_types();
+        let output_data_types = upstream_table.get_data_types().to_vec();
         let mut builders = upstream_table
             .vnodes()
             .iter_vnodes()
@@ -322,10 +323,12 @@ where
                                         let chunk_cardinality = chunk.cardinality() as u64;
                                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                         total_snapshot_processed_rows += chunk_cardinality;
-                                        yield Message::Chunk(mapping_chunk(
+                                        let chunk = Message::Chunk(mapping_chunk(
                                             chunk,
                                             &self.output_indices,
                                         ));
+                                        println!("yielding Chunk from snapshot read: {:#?}", chunk);
+                                        yield chunk;
                                     }
                                 }
                             }

@@ -162,7 +162,7 @@ pub(crate) fn mark_chunk_ref_by_vnode(
             // If in progress, we need to check row <= current_pos.
             BackfillProgressPerVnode::InProgress(current_pos) => {
                 let lhs = row.project(pk_in_output_indices);
-                let rhs = current_pos.project(pk_in_output_indices);
+                let rhs = current_pos;
                 let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
                 match order {
                     Ordering::Less | Ordering::Equal => true,
