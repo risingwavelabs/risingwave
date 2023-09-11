@@ -21,7 +21,6 @@ docker buildx create \
 
 docker buildx build -f docker/Dockerfile \
   --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" \
-  --target risingwave \
   --progress plain \
   --builder=container \
   --load \
