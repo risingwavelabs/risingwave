@@ -391,7 +391,6 @@ where
                         ));
                     }
 
-                    println!("Replicate");
                     // Replicate
                     upstream_table.write_chunk(chunk);
                 }
@@ -479,11 +478,11 @@ where
                     // (there's no epoch before the first epoch).
                     // TODO: if we reach here, maybe some vnodes do not have their state finished.
                     // We should update them to finished state.
-                    let finished_placeholder_state = construct_initial_finished_state(state_len);
+                    let finished_placeholder_position = construct_initial_finished_state(pk_indices.len());
                     for vnode in upstream_table.vnodes().iter_vnodes() {
                         let backfill_progress = backfill_state.get_progress(&vnode)?;
                         let finished_state = match backfill_progress {
-                            BackfillProgressPerVnode::NotStarted => finished_placeholder_state.clone(),
+                            BackfillProgressPerVnode::NotStarted => finished_placeholder_position.clone(),
                             BackfillProgressPerVnode::InProgress(p) | BackfillProgressPerVnode::Completed(p) =>
                               p.clone(),
                         };
