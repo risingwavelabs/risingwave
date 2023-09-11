@@ -42,9 +42,9 @@ risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 risingwave_sqlsmith = { workspace = true }
 serde = "1.0.188"
-serde_derive = "1.0.183"
+serde_derive = "1.0.188"
 serde_json = "1.0.105"
-sqllogictest = "0.15.2"
+sqllogictest = "0.15.3"
 tempfile = "3"
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
     "profiling",
