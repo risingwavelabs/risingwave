@@ -15,3 +15,7 @@
 mod parser;
 pub use parser::*;
 mod schema_resolver;
+
+#[rustfmt::skip]
+#[cfg(test)]
+mod recursive;

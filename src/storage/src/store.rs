@@ -25,7 +25,8 @@ use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
-    TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions, TracedWriteOptions,
+    TracedInitOptions, TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions,
+    TracedWriteOptions,
 };
 
 use crate::error::{StorageError, StorageResult};
@@ -249,7 +250,7 @@ pub trait LocalStateStore: StaticSendSync {
     /// In some cases like replicated state table, state table may not be empty initially,
     /// as such we need to wait for `epoch.prev` checkpoint to complete,
     /// hence this interface is made async.
-    fn init(&mut self, epoch: EpochPair) -> impl Future<Output = StorageResult<()>> + Send + '_;
+    fn init(&mut self, epoch: InitOptions) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
@@ -287,11 +288,6 @@ pub struct PrefetchOptions {
     /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
     /// exhausted, i.e., will iterate until end.
     pub exhaust_iter: bool,
-
-    /// If None -> read from state table's current epoch.
-    /// If Some(epoch) -> read from this epoch instead.
-    /// Used to read previously checkpointed data.
-    pub read_epoch: Option<u64>,
 }
 
 impl PrefetchOptions {
@@ -300,17 +296,7 @@ impl PrefetchOptions {
     }
 
     pub fn new_with_exhaust_iter(exhaust_iter: bool) -> Self {
-        Self {
-            exhaust_iter,
-            ..Default::default()
-        }
-    }
-
-    pub fn new_with_epoch(epoch_option: Option<u64>) -> Self {
-        Self {
-            read_epoch: epoch_option,
-            ..Default::default()
-        }
+        Self { exhaust_iter }
     }
 }
 
@@ -318,7 +304,6 @@ impl From<TracedPrefetchOptions> for PrefetchOptions {
     fn from(value: TracedPrefetchOptions) -> Self {
         Self {
             exhaust_iter: value.exhaust_iter,
-            read_epoch: None,
         }
     }
 }
@@ -474,6 +459,39 @@ impl NewLocalOptions {
                 retention_seconds: None,
             },
             is_replicated: false,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct InitOptions {
+    pub epoch: EpochPair,
+}
+
+impl InitOptions {
+    pub fn new_with_epoch(epoch: EpochPair) -> Self {
+        Self { epoch }
+    }
+}
+
+impl From<EpochPair> for InitOptions {
+    fn from(value: EpochPair) -> Self {
+        Self { epoch: value }
+    }
+}
+
+impl From<InitOptions> for TracedInitOptions {
+    fn from(value: InitOptions) -> Self {
+        TracedInitOptions {
+            epoch: value.epoch.into(),
+        }
+    }
+}
+
+impl From<TracedInitOptions> for InitOptions {
+    fn from(value: TracedInitOptions) -> Self {
+        InitOptions {
+            epoch: value.epoch.into(),
         }
     }
 }

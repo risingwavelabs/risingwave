@@ -35,7 +35,7 @@ use tokio::task_local;
 use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{
     ConcurrentIdGenerator, Operation, OperationResult, Record, RecordId, RecordIdGenerator,
-    TracedNewLocalOptions, TracedReadOptions, TracedSubResp, UniqueIdGenerator,
+    TracedInitOptions, TracedNewLocalOptions, TracedReadOptions, TracedSubResp, UniqueIdGenerator,
 };
 
 // Global collector instance used for trace collection
@@ -325,10 +325,10 @@ impl TraceSpan {
     }
 
     pub fn new_local_storage_init_span(
-        epoch: EpochPair,
+        options: TracedInitOptions,
         storage_type: StorageType,
     ) -> MayTraceSpan {
-        Self::new_global_op(Operation::LocalStorageInit(epoch), storage_type)
+        Self::new_global_op(Operation::LocalStorageInit(options), storage_type)
     }
 
     pub fn send(&self, op: Operation) {

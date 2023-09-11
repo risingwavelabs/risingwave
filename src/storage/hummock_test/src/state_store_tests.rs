@@ -37,6 +37,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 
 use crate::get_notification_client_for_test;
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
 
 #[tokio::test]

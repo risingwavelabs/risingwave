@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
 
@@ -29,6 +28,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 use risingwave_storage::StateStore;
 
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::{prepare_hummock_test_env, TestIngestBatch};
 
 #[tokio::test]

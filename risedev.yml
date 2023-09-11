@@ -815,7 +815,7 @@ profile:
       - use: compactor
 
   ci-backfill:
-    config-path: "src/config/backfill.toml"
+    config-path: "src/config/ci-backfill.toml"
     steps:
       - use: minio
       - use: etcd
@@ -1166,7 +1166,6 @@ template:
     namenode: 127.0.0.1:9000
 
     bucket: risingwave-test
-
 
   # aws-s3 is a placeholder service to provide configurations
   aws-s3:

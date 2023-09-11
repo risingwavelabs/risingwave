@@ -430,7 +430,7 @@ async fn test_row_seq_scan() -> Result<()> {
         Field::unnamed(DataType::Int32),
         Field::unnamed(DataType::Int64),
     ]);
-    let _column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let _column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
 
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), schema[0].data_type.clone()),

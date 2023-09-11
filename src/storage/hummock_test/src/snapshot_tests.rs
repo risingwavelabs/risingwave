@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -28,6 +27,7 @@ use risingwave_storage::store::{
     WriteOptions,
 };
 
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
 
 macro_rules! assert_count_range_scan {

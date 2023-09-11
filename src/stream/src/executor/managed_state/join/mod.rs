@@ -131,7 +131,7 @@ impl EstimateSize for HashValueWrapper {
 }
 
 impl HashValueWrapper {
-    const MESSAGE: &str = "the state should always be `Some`";
+    const MESSAGE: &'static str = "the state should always be `Some`";
 
     /// Take the value out of the wrapper. Panic if the value is `None`.
     pub fn take(&mut self) -> HashValueType {

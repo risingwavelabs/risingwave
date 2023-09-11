@@ -181,7 +181,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
     }
 
     async fn ensure_key_in_cache(
-        this: &mut ExecutorInner<S>,
+        this: &ExecutorInner<S>,
         cache: &mut PartitionCache,
         partition_key: impl Row,
         encoded_partition_key: &MemcmpEncoded,

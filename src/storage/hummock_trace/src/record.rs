@@ -23,7 +23,8 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::meta::SubscribeResponse;
 
 use crate::{
-    LocalStorageId, StorageType, TracedHummockReadEpoch, TracedNewLocalOptions, TracedReadOptions,
+    LocalStorageId, StorageType, TracedHummockReadEpoch, TracedInitOptions, TracedNewLocalOptions,
+    TracedReadOptions,
 };
 
 pub type RecordId = u64;
@@ -164,7 +165,7 @@ pub enum Operation {
     DropLocalStorage,
 
     /// Init of a local storage
-    LocalStorageInit(EpochPair),
+    LocalStorageInit(TracedInitOptions),
 
     /// Try wait epoch
     TryWaitEpoch(TracedHummockReadEpoch),

@@ -108,7 +108,7 @@ fn build_lookup_for_delta_join(
 
 fn build_delta_join_inner(
     state: &mut BuildFragmentGraphState,
-    current_fragment: &mut StreamFragment,
+    current_fragment: &StreamFragment,
     arrange_0_frag: Rc<StreamFragment>,
     arrange_1_frag: Rc<StreamFragment>,
     node: &StreamNode,
@@ -315,7 +315,7 @@ fn build_delta_join_inner(
 
 pub(crate) fn build_delta_join_without_arrange(
     state: &mut BuildFragmentGraphState,
-    current_fragment: &mut StreamFragment,
+    current_fragment: &StreamFragment,
     mut node: StreamNode,
 ) -> Result<StreamNode> {
     match &node.node_body {

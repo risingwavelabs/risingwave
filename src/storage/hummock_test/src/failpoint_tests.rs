@@ -34,6 +34,7 @@ use risingwave_storage::store::{
 use risingwave_storage::StateStore;
 
 use crate::get_notification_client_for_test;
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::TestIngestBatch;
 
 #[tokio::test]

@@ -40,7 +40,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::utils::{
     cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
-    do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
+    do_update_sanity_check, filter_with_delete_range, wait_for_epoch, ENABLE_SANITY_CHECK,
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{HummockError, MemoryLimiter, SstableIterator};
@@ -119,46 +119,8 @@ impl LocalHummockStorage {
             .await
     }
 
-    pub async fn wait_for_epoch(&self, epoch: u64) -> StorageResult<()> {
-        // TODO(kwannoel): Refactor this copy-paste code.
-        // TODO(kwannoel): Also we should take in read options, because only initial snapshot read
-        // will require this.
-        let wait_epoch = epoch;
-        let mut receiver = self.version_update_notifier_tx.subscribe();
-        let max_committed_epoch = *receiver.borrow_and_update();
-        if max_committed_epoch >= wait_epoch {
-            return Ok(());
-        }
-        loop {
-            match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
-                Err(elapsed) => {
-                    // The reason that we need to retry here is batch scan in
-                    // chain/rearrange_chain is waiting for an
-                    // uncommitted epoch carried by the CreateMV barrier, which
-                    // can take unbounded time to become committed and propagate
-                    // to the CN. We should consider removing the retry as well as wait_epoch
-                    // for chain/rearrange_chain if we enforce
-                    // chain/rearrange_chain to be scheduled on the same
-                    // CN with the same distribution as the upstream MV.
-                    // See #3845 for more details.
-                    tracing::warn!(
-                        "wait_epoch {:?} timeout when waiting for version update elapsed {:?}s",
-                        wait_epoch,
-                        elapsed
-                    );
-                    continue;
-                }
-                Ok(Err(_)) => {
-                    return Err(HummockError::wait_epoch("tx dropped").into());
-                }
-                Ok(Ok(_)) => {
-                    let max_committed_epoch = *receiver.borrow();
-                    if max_committed_epoch >= wait_epoch {
-                        return Ok(());
-                    }
-                }
-            }
-        }
+    pub async fn wait_for_epoch(&self, wait_epoch: u64) -> StorageResult<()> {
+        wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
     }
 
     pub async fn iter_inner(
@@ -369,7 +331,8 @@ impl LocalStateStore for LocalHummockStorage {
         self.mem_table.is_dirty()
     }
 
-    async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
+    async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+        let epoch = options.epoch;
         if self.is_replicated {
             self.wait_for_epoch(epoch.prev).await?;
         }

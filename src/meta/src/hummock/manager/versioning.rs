@@ -39,7 +39,6 @@ use crate::hummock::manager::{read_lock, write_lock};
 use crate::hummock::metrics_utils::{trigger_safepoint_stat, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
-use crate::storage::MetaStore;
 
 /// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
 /// It's used by meta node itself to temporarily pin versions.
@@ -161,10 +160,7 @@ impl Versioning {
     }
 }
 
-impl<S> HummockManager<S>
-where
-    S: MetaStore,
-{
+impl HummockManager {
     #[named]
     pub async fn list_pinned_version(&self) -> Vec<HummockPinnedVersion> {
         read_lock!(self, versioning)

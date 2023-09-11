@@ -32,7 +32,10 @@ pub(crate) use worker::*;
 use crate::error::Result;
 #[cfg(test)]
 use crate::TraceError;
-use crate::{LocalStorageId, Record, TracedBytes, TracedNewLocalOptions, TracedReadOptions};
+use crate::{
+    LocalStorageId, Record, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
+    TracedReadOptions,
+};
 
 pub type ReplayItem = (TracedBytes, TracedBytes);
 pub trait ReplayItemStream = Stream<Item = ReplayItem> + Send;
@@ -57,7 +60,7 @@ pub(crate) enum WorkerId {
 
 #[async_trait::async_trait]
 pub trait LocalReplay: LocalReplayRead + ReplayWrite + Send + Sync {
-    async fn init(&mut self, epoch: EpochPair) -> Result<()>;
+    async fn init(&mut self, options: TracedInitOptions) -> Result<()>;
     fn seal_current_epoch(&mut self, next_epoch: u64);
     fn is_dirty(&self) -> bool;
     fn epoch(&self) -> u64;
@@ -182,7 +185,7 @@ mock! {
     }
     #[async_trait::async_trait]
     impl LocalReplay for LocalReplayInterface{
-        async fn init(&mut self, epoch: EpochPair) -> Result<()>;
+        async fn init(&mut self, options: TracedInitOptions) -> Result<()>;
         fn seal_current_epoch(&mut self, next_epoch: u64);
         fn is_dirty(&self) -> bool;
         fn epoch(&self) -> u64;

@@ -28,6 +28,12 @@ use crate::utils::ColIndexMappingRewriteExt;
 pub struct StreamProjectSet {
     pub base: PlanBase,
     logical: generic::ProjectSet<PlanRef>,
+    /// All the watermark derivations, (input_column_idx, expr_idx). And the
+    /// derivation expression is the project_set's expression itself.
+    watermark_derivations: Vec<(usize, usize)>,
+    /// Nondecreasing expression indices. `ProjectSet` can produce watermarks for these
+    /// expressions.
+    nondecreasing_exprs: Vec<usize>,
 }
 
 impl StreamProjectSet {
@@ -37,15 +43,26 @@ impl StreamProjectSet {
             .i2o_col_mapping()
             .rewrite_provided_distribution(input.distribution());
 
+        let mut watermark_derivations = vec![];
+        let mut nondecreasing_exprs = vec![];
         let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
         for (expr_idx, expr) in logical.select_list.iter().enumerate() {
-            if let WatermarkDerivation::Watermark(input_idx) = try_derive_watermark(expr) {
-                if input.watermark_columns().contains(input_idx) {
-                    // The first column of ProjectSet is `projected_row_id`.
+            match try_derive_watermark(expr) {
+                WatermarkDerivation::Watermark(input_idx) => {
+                    if input.watermark_columns().contains(input_idx) {
+                        watermark_derivations.push((input_idx, expr_idx));
+                        watermark_columns.insert(expr_idx + 1);
+                    }
+                }
+                WatermarkDerivation::Nondecreasing => {
+                    nondecreasing_exprs.push(expr_idx);
                     watermark_columns.insert(expr_idx + 1);
                 }
+                WatermarkDerivation::Constant => {
+                    // XXX(rc): we can produce one watermark on each recovery for this case.
+                }
+                WatermarkDerivation::None => {}
             }
-            // XXX(rc): do we need to handle `WatermarkDerivation::Nondecreasing` here?
         }
 
         // ProjectSet executor won't change the append-only behavior of the stream, so it depends on
@@ -57,7 +74,12 @@ impl StreamProjectSet {
             input.emit_on_window_close(),
             watermark_columns,
         );
-        StreamProjectSet { base, logical }
+        StreamProjectSet {
+            base,
+            logical,
+            watermark_derivations,
+            nondecreasing_exprs,
+        }
     }
 }
 impl_distill_by_unit!(StreamProjectSet, logical, "StreamProjectSet");
@@ -77,6 +99,11 @@ impl PlanTreeNodeUnary for StreamProjectSet {
 
 impl StreamNode for StreamProjectSet {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        let (watermark_input_cols, watermark_expr_indices) = self
+            .watermark_derivations
+            .iter()
+            .map(|(i, o)| (*i as u32, *o as u32))
+            .unzip();
         PbNodeBody::ProjectSet(ProjectSetNode {
             select_list: self
                 .logical
@@ -84,6 +111,9 @@ impl StreamNode for StreamProjectSet {
                 .iter()
                 .map(|select_item| select_item.to_project_set_select_item_proto())
                 .collect_vec(),
+            watermark_input_cols,
+            watermark_expr_indices,
+            nondecreasing_exprs: self.nondecreasing_exprs.iter().map(|i| *i as _).collect(),
         })
     }
 }

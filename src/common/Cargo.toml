@@ -96,11 +96,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 toml = "0.7"
 tonic = { workspace = true }
 tracing = "0.1"
-tracing-opentelemetry = "0.20"
+tracing-opentelemetry = "0.21"
 tracing-subscriber = "0.3.17"
 twox-hash = "1"
 url = "2"
-uuid = "1.4.1"
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
@@ -152,3 +152,6 @@ harness = false
 [[bin]]
 name = "example-config"
 path = "src/bin/default_config.rs"
+
+[lints]
+workspace = true

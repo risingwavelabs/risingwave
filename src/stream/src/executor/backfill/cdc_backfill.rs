@@ -494,7 +494,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 .set(key.into(), JsonbVal::from(Value::Bool(true)))
                 .await?;
 
-            if let Some(SplitImpl::MySqlCdc(split)) = cdc_split.as_mut()
+            if let Some(SplitImpl::MysqlCdc(split)) = cdc_split.as_mut()
                 && let Some(s) = split.mysql_split.as_mut() {
                 let start_offset =
                     last_binlog_offset.as_ref().map(|cdc_offset| {

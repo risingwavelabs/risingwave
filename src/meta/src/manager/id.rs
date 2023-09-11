@@ -21,7 +21,7 @@ use tokio::sync::RwLock;
 
 use crate::manager::cluster::META_NODE_ID;
 use crate::model::MetadataModelResult;
-use crate::storage::{MetaStore, MetaStoreError, DEFAULT_COLUMN_FAMILY};
+use crate::storage::{MetaStore, MetaStoreError, MetaStoreRef, DEFAULT_COLUMN_FAMILY};
 
 pub const ID_PREALLOCATE_INTERVAL: u64 = 1000;
 
@@ -41,18 +41,15 @@ pub trait IdGenerator: Sync + Send + 'static {
 }
 
 /// [`StoredIdGenerator`] implements id generator using metastore.
-pub struct StoredIdGenerator<S> {
-    meta_store: Arc<S>,
+pub struct StoredIdGenerator {
+    meta_store: MetaStoreRef,
     category_gen_key: String,
     current_id: AtomicU64,
     next_allocate_id: RwLock<Id>,
 }
 
-impl<S> StoredIdGenerator<S>
-where
-    S: MetaStore,
-{
-    pub async fn new(meta_store: Arc<S>, category: &str, start: Option<Id>) -> Self {
+impl StoredIdGenerator {
+    pub async fn new(meta_store: MetaStoreRef, category: &str, start: Option<Id>) -> Self {
         let category_gen_key = format!("{}_id_next_generator", category);
         let res = meta_store
             .get_cf(DEFAULT_COLUMN_FAMILY, category_gen_key.as_bytes())
@@ -85,10 +82,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> IdGenerator for StoredIdGenerator<S>
-where
-    S: MetaStore,
-{
+impl IdGenerator for StoredIdGenerator {
     async fn generate_interval(&self, interval: u64) -> MetadataModelResult<Id> {
         let id = self.current_id.fetch_add(interval, Ordering::Relaxed);
         let next_allocate_id = { *self.next_allocate_id.read().await };
@@ -144,34 +138,31 @@ pub mod IdCategory {
     pub const Connection: IdCategoryType = 17;
 }
 
-pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;
+pub type IdGeneratorManagerRef = Arc<IdGeneratorManager>;
 
 /// [`IdGeneratorManager`] manages id generators in all categories,
 /// which defined as [`IdCategory`] in [`meta.proto`].
-pub struct IdGeneratorManager<S> {
+pub struct IdGeneratorManager {
     #[cfg(test)]
-    test: Arc<StoredIdGenerator<S>>,
-    database: Arc<StoredIdGenerator<S>>,
-    schema: Arc<StoredIdGenerator<S>>,
-    table: Arc<StoredIdGenerator<S>>,
-    function: Arc<StoredIdGenerator<S>>,
-    worker: Arc<StoredIdGenerator<S>>,
-    fragment: Arc<StoredIdGenerator<S>>,
-    actor: Arc<StoredIdGenerator<S>>,
-    user: Arc<StoredIdGenerator<S>>,
-    backup: Arc<StoredIdGenerator<S>>,
-    hummock_ss_table_id: Arc<StoredIdGenerator<S>>,
-    hummock_compaction_task: Arc<StoredIdGenerator<S>>,
-    parallel_unit: Arc<StoredIdGenerator<S>>,
-    compaction_group: Arc<StoredIdGenerator<S>>,
-    connection: Arc<StoredIdGenerator<S>>,
+    test: Arc<StoredIdGenerator>,
+    database: Arc<StoredIdGenerator>,
+    schema: Arc<StoredIdGenerator>,
+    table: Arc<StoredIdGenerator>,
+    function: Arc<StoredIdGenerator>,
+    worker: Arc<StoredIdGenerator>,
+    fragment: Arc<StoredIdGenerator>,
+    actor: Arc<StoredIdGenerator>,
+    user: Arc<StoredIdGenerator>,
+    backup: Arc<StoredIdGenerator>,
+    hummock_ss_table_id: Arc<StoredIdGenerator>,
+    hummock_compaction_task: Arc<StoredIdGenerator>,
+    parallel_unit: Arc<StoredIdGenerator>,
+    compaction_group: Arc<StoredIdGenerator>,
+    connection: Arc<StoredIdGenerator>,
 }
 
-impl<S> IdGeneratorManager<S>
-where
-    S: MetaStore,
-{
-    pub async fn new(meta_store: Arc<S>) -> Self {
+impl IdGeneratorManager {
+    pub async fn new(meta_store: MetaStoreRef) -> Self {
         Self {
             #[cfg(test)]
             test: Arc::new(StoredIdGenerator::new(meta_store.clone(), "test", None).await),
@@ -227,7 +218,7 @@ where
         }
     }
 
-    const fn get<const C: IdCategoryType>(&self) -> &Arc<StoredIdGenerator<S>> {
+    const fn get<const C: IdCategoryType>(&self) -> &Arc<StoredIdGenerator> {
         match C {
             #[cfg(test)]
             IdCategory::Test => &self.test,
@@ -266,16 +257,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use futures::future;
 
     use super::*;
-    use crate::storage::MemStore;
+    use crate::storage::{MemStore, MetaStoreBoxExt};
 
     #[tokio::test]
     async fn test_id_generator() -> MetadataModelResult<()> {
-        let meta_store = Arc::new(MemStore::default());
+        let meta_store = MemStore::default().into_ref();
         let id_generator = StoredIdGenerator::new(meta_store.clone(), "default", None).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let id_generator = &id_generator;
@@ -335,7 +324,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_id_generator_manager() -> MetadataModelResult<()> {
-        let meta_store = Arc::new(MemStore::default());
+        let meta_store = MemStore::default().into_ref();
         let manager = IdGeneratorManager::new(meta_store.clone()).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let manager = &manager;

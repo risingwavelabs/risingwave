@@ -46,3 +46,8 @@ query I
 select count(*) from person_rw;
 ----
 3
+
+query I
+select count(*) from tt3_rw;
+----
+2

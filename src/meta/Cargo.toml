@@ -90,3 +90,6 @@ tempfile = "3"
 [features]
 test = []
 failpoints = ["fail/failpoints"]
+
+[lints]
+workspace = true

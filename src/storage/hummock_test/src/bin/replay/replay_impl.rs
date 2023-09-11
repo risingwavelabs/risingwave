@@ -24,11 +24,10 @@ use risingwave_common_service::observer_manager::{Channel, NotificationClient};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, LocalReplayRead, ReplayItem, ReplayRead, ReplayStateStore,
-    ReplayWrite, Result, TraceError, TracedBytes, TracedNewLocalOptions, TracedReadOptions,
-    TracedSubResp,
+    ReplayWrite, Result, TraceError, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
+    TracedReadOptions, TracedSubResp,
 };
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
-use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
@@ -89,11 +88,11 @@ impl LocalReplayIter {
 
 pub(crate) struct GlobalReplayImpl {
     store: HummockStorage,
-    notifier: NotificationManagerRef<MemStore>,
+    notifier: NotificationManagerRef,
 }
 
 impl GlobalReplayImpl {
-    pub(crate) fn new(store: HummockStorage, notifier: NotificationManagerRef<MemStore>) -> Self {
+    pub(crate) fn new(store: HummockStorage, notifier: NotificationManagerRef) -> Self {
         Self { store, notifier }
     }
 }
@@ -201,9 +200,11 @@ pub(crate) struct LocalReplayImpl(LocalHummockStorage);
 
 #[async_trait::async_trait]
 impl LocalReplay for LocalReplayImpl {
-    async fn init(&mut self, epoch: EpochPair) -> Result<()> {
-        self.0.init(epoch).await.unwrap(); // FIXME(kwannoel): coerce error
-        Ok(())
+    async fn init(&mut self, options: TracedInitOptions) -> Result<()> {
+        self.0
+            .init(options.into())
+            .await
+            .map_err(|_| TraceError::Other("init failed"))
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -289,16 +290,16 @@ impl ReplayWrite for LocalReplayImpl {
     }
 }
 
-pub struct ReplayNotificationClient<S: MetaStore> {
+pub struct ReplayNotificationClient {
     addr: HostAddr,
-    notification_manager: NotificationManagerRef<S>,
+    notification_manager: NotificationManagerRef,
     first_resp: Box<TracedSubResp>,
 }
 
-impl<S: MetaStore> ReplayNotificationClient<S> {
+impl ReplayNotificationClient {
     pub fn new(
         addr: HostAddr,
-        notification_manager: NotificationManagerRef<S>,
+        notification_manager: NotificationManagerRef,
         first_resp: Box<TracedSubResp>,
     ) -> Self {
         Self {
@@ -310,7 +311,7 @@ impl<S: MetaStore> ReplayNotificationClient<S> {
 }
 
 #[async_trait::async_trait]
-impl<S: MetaStore> NotificationClient for ReplayNotificationClient<S> {
+impl NotificationClient for ReplayNotificationClient {
     type Channel = ReplayChannel<SubscribeResponse>;
 
     async fn subscribe(&self, subscribe_type: SubscribeType) -> RwResult<Self::Channel> {
@@ -333,10 +334,10 @@ impl<S: MetaStore> NotificationClient for ReplayNotificationClient<S> {
 }
 
 pub fn get_replay_notification_client(
-    env: MetaSrvEnv<MemStore>,
+    env: MetaSrvEnv,
     worker_node: WorkerNode,
     first_resp: Box<TracedSubResp>,
-) -> ReplayNotificationClient<MemStore> {
+) -> ReplayNotificationClient {
     ReplayNotificationClient::new(
         worker_node.get_host().unwrap().into(),
         env.notification_manager_ref(),

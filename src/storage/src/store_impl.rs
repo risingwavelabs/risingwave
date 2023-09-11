@@ -29,8 +29,8 @@ use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError, HummockStorage, MemoryLimiter,
-    SstableObjectIdManagerRef, SstableStore,
+    set_foyer_metrics_registry, FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError,
+    HummockStorage, MemoryLimiter, SstableObjectIdManagerRef, SstableStore,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -448,10 +448,10 @@ pub mod verify {
             self.actual.flush(delete_ranges).await
         }
 
-        async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
-            self.actual.init(epoch).await?;
+        async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+            self.actual.init(options.clone()).await?;
             if let Some(expected) = &mut self.expected {
-                expected.init(epoch).await?;
+                expected.init(options).await?;
             }
             Ok(())
         }
@@ -543,12 +543,15 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
+        set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
+
         let data_file_cache = if opts.data_file_cache_dir.is_empty() {
             FileCache::none()
         } else {
             const MB: usize = 1024 * 1024;
 
             let foyer_store_config = FoyerStoreConfig {
+                name: "data".to_string(),
                 dir: PathBuf::from(opts.data_file_cache_dir.clone()),
                 capacity: opts.data_file_cache_capacity_mb * MB,
                 file_capacity: opts.data_file_cache_file_capacity_mb * MB,
@@ -564,9 +567,7 @@ impl StateStoreImpl {
                 reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
                 event_listener: vec![],
-                prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.clone()),
-                prometheus_namespace: Some("data".to_string()),
-                enable_filter: !opts.data_file_cache_refill_levels.is_empty(),
+                enable_filter: !opts.cache_refill_data_refill_levels.is_empty(),
             };
             let config = FoyerRuntimeConfig {
                 foyer_store_config,
@@ -583,6 +584,7 @@ impl StateStoreImpl {
             const MB: usize = 1024 * 1024;
 
             let foyer_store_config = FoyerStoreConfig {
+                name: "meta".to_string(),
                 dir: PathBuf::from(opts.meta_file_cache_dir.clone()),
                 capacity: opts.meta_file_cache_capacity_mb * MB,
                 file_capacity: opts.meta_file_cache_file_capacity_mb * MB,
@@ -598,8 +600,6 @@ impl StateStoreImpl {
                 reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
                 event_listener: vec![],
-                prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.clone()),
-                prometheus_namespace: Some("meta".to_string()),
                 enable_filter: false,
             };
             let config = FoyerRuntimeConfig {
@@ -824,7 +824,7 @@ pub mod boxed_state_store {
 
         fn is_dirty(&self) -> bool;
 
-        async fn init(&mut self, epoch: EpochPair) -> StorageResult<()>;
+        async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
         fn seal_current_epoch(&mut self, next_epoch: u64);
     }
@@ -879,8 +879,8 @@ pub mod boxed_state_store {
             self.is_dirty()
         }
 
-        async fn init(&mut self, epoch: EpochPair) -> StorageResult<()> {
-            self.init(epoch).await
+        async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+            self.init(options).await
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -947,9 +947,9 @@ pub mod boxed_state_store {
 
         fn init(
             &mut self,
-            epoch: EpochPair,
+            options: InitOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
-            self.deref_mut().init(epoch)
+            self.deref_mut().init(options)
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {

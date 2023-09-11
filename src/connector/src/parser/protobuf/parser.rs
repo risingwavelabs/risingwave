@@ -25,11 +25,12 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, F32, F64};
 use risingwave_pb::plan_common::ColumnDesc;
-use url::Url;
 
 use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
-use crate::parser::schema_registry::{extract_schema_id, get_subject_by_strategy, Client};
+use crate::parser::schema_registry::{
+    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
+};
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::AccessImpl;
 use crate::parser::{AccessBuilder, EncodingProperties};
@@ -80,8 +81,7 @@ impl ProtobufParserConfig {
         let protobuf_config = try_match_expand!(encoding_properties, EncodingProperties::Protobuf)?;
         let location = &protobuf_config.row_schema_location;
         let message_name = &protobuf_config.message_name;
-        let url = Url::parse(location)
-            .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
+        let url = handle_sr_list(location.as_str())?;
 
         let schema_bytes = if protobuf_config.use_schema_registry {
             let (schema_key, schema_value) = get_subject_by_strategy(
@@ -99,6 +99,7 @@ impl ProtobufParserConfig {
             let client = Client::new(url, &protobuf_config.client_config)?;
             compile_file_descriptor_from_schema_registry(schema_value.as_str(), &client).await?
         } else {
+            let url = url.get(0).unwrap();
             match url.scheme() {
                 // TODO(Tao): support local file only when it's compiled in debug mode.
                 "file" => {
@@ -115,12 +116,12 @@ impl ProtobufParserConfig {
                 }
                 "s3" => {
                     load_file_descriptor_from_s3(
-                        &url,
+                        url,
                         protobuf_config.aws_auth_props.as_ref().unwrap(),
                     )
                     .await
                 }
-                "https" | "http" => load_file_descriptor_from_http(&url).await,
+                "https" | "http" => load_file_descriptor_from_http(url).await,
                 scheme => Err(RwError::from(ProtocolError(format!(
                     "path scheme {} is not supported",
                     scheme
@@ -299,11 +300,12 @@ fn protobuf_type_mapping(
         Kind::Bool => DataType::Boolean,
         Kind::Double => DataType::Float64,
         Kind::Float => DataType::Float32,
-        Kind::Int32 | Kind::Sint32 | Kind::Sfixed32 | Kind::Fixed32 => DataType::Int32,
-        Kind::Int64 | Kind::Sint64 | Kind::Sfixed64 | Kind::Fixed64 | Kind::Uint32 => {
+        Kind::Int32 | Kind::Sint32 | Kind::Sfixed32 => DataType::Int32,
+        // Fixed32 represents [0, 2^32 - 1]. It's equal to u32.
+        Kind::Int64 | Kind::Sint64 | Kind::Sfixed64 | Kind::Uint32 | Kind::Fixed32 => {
             DataType::Int64
         }
-        Kind::Uint64 => DataType::Decimal,
+        Kind::Uint64 | Kind::Fixed64 => DataType::Decimal,
         Kind::String => DataType::Varchar,
         Kind::Message(m) => {
             let fields = m
@@ -316,6 +318,12 @@ fn protobuf_type_mapping(
         Kind::Enum(_) => DataType::Varchar,
         Kind::Bytes => DataType::Bytea,
     };
+    if field_descriptor.is_map() {
+        return Err(RwError::from(ProtocolError(format!(
+            "map type is unsupported (field: '{}')",
+            field_descriptor.full_name()
+        ))));
+    }
     if field_descriptor.cardinality() == Cardinality::Repeated {
         t = DataType::List(Box::new(t))
     }
@@ -341,15 +349,18 @@ pub(crate) fn resolve_pb_header(payload: &[u8]) -> Result<&[u8]> {
 
 #[cfg(test)]
 mod test {
-
     use std::collections::HashMap;
     use std::path::PathBuf;
 
-    use bytes::Bytes;
+    use prost::Message;
+    use risingwave_common::types::{DataType, StructType};
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::PbTypeName;
 
     use super::*;
+    use crate::parser::protobuf::recursive::all_types::{EnumType, ExampleOneof, NestedMessage};
+    use crate::parser::protobuf::recursive::AllTypes;
+    use crate::parser::unified::Access;
     use crate::parser::SpecificParserConfig;
     use crate::source::{SourceEncode, SourceFormat, SourceStruct};
 
@@ -497,8 +508,7 @@ mod test {
         assert!(columns.is_err());
     }
 
-    #[tokio::test]
-    async fn test_all_types() {
+    async fn create_recursive_pb_parser_config() -> ProtobufParserConfig {
         let location = schema_dir() + "/proto_recursive/recursive.pb";
         let message_name = "recursive.AllTypes";
 
@@ -514,19 +524,209 @@ mod test {
             &HashMap::new(),
         )
         .unwrap();
-        let conf = ProtobufParserConfig::new(parser_config.encoding_config)
-            .await
-            .unwrap();
-        // Ensure that the parser can recognize the schema.
-        conf.map_to_columns().unwrap();
 
-        let field_desc = conf
-            .message_descriptor
-            .get_field_by_name("bytes_field")
-            .unwrap();
-        let d = from_protobuf_value(&field_desc, &Value::Bytes(Bytes::from(vec![1, 2, 3])))
+        ProtobufParserConfig::new(parser_config.encoding_config)
+            .await
             .unwrap()
-            .unwrap();
-        assert_eq!(d, ScalarImpl::Bytea(vec![1, 2, 3].into_boxed_slice()));
+    }
+
+    #[tokio::test]
+    async fn test_all_types_create_source() {
+        let conf = create_recursive_pb_parser_config().await;
+
+        // Ensure that the parser can recognize the schema.
+        let columns = conf
+            .map_to_columns()
+            .unwrap()
+            .into_iter()
+            .map(|c| DataType::from(&c.column_type.unwrap()))
+            .collect_vec();
+        assert_eq!(
+            columns,
+            vec![
+                DataType::Float64, // double_field
+                DataType::Float32, // float_field
+                DataType::Int32,   // int32_field
+                DataType::Int64,   // int64_field
+                DataType::Int64,   // uint32_field
+                DataType::Decimal, // uint64_field
+                DataType::Int32,   // sint32_field
+                DataType::Int64,   // sint64_field
+                DataType::Int64,   // fixed32_field
+                DataType::Decimal, // fixed64_field
+                DataType::Int32,   // sfixed32_field
+                DataType::Int64,   // sfixed64_field
+                DataType::Boolean, // bool_field
+                DataType::Varchar, // string_field
+                DataType::Bytea,   // bytes_field
+                DataType::Varchar, // enum_field
+                DataType::Struct(StructType::new(vec![
+                    ("id", DataType::Int32),
+                    ("name", DataType::Varchar)
+                ])), // nested_message_field
+                DataType::List(DataType::Int32.into()), // repeated_int_field
+                DataType::Varchar, // oneof_string
+                DataType::Int32,   // oneof_int32
+                DataType::Varchar, // oneof_enum
+                DataType::Struct(StructType::new(vec![
+                    ("seconds", DataType::Int64),
+                    ("nanos", DataType::Int32)
+                ])), // timestamp_field
+                DataType::Struct(StructType::new(vec![
+                    ("seconds", DataType::Int64),
+                    ("nanos", DataType::Int32)
+                ])), // duration_field
+                DataType::Struct(StructType::new(vec![
+                    ("type_url", DataType::Varchar),
+                    ("value", DataType::Bytea),
+                ])), // any_field
+                DataType::Struct(StructType::new(vec![("value", DataType::Int32)])), /* int32_value_field */
+                DataType::Struct(StructType::new(vec![("value", DataType::Varchar)])), /* string_value_field */
+            ]
+        )
+    }
+
+    #[tokio::test]
+    async fn test_all_types_data_parsing() {
+        let m = create_all_types_message();
+        let mut payload = Vec::new();
+        m.encode(&mut payload).unwrap();
+
+        let conf = create_recursive_pb_parser_config().await;
+        let mut access_builder = ProtobufAccessBuilder::new(conf).unwrap();
+        let access = access_builder.generate_accessor(payload).await.unwrap();
+        if let AccessImpl::Protobuf(a) = access {
+            assert_all_types_eq(&a, &m);
+        } else {
+            panic!("unexpected")
+        }
+    }
+
+    fn assert_all_types_eq(a: &ProtobufAccess, m: &AllTypes) {
+        type S = ScalarImpl;
+
+        pb_eq(a, "double_field", S::Float64(m.double_field.into()));
+        pb_eq(a, "float_field", S::Float32(m.float_field.into()));
+        pb_eq(a, "int32_field", S::Int32(m.int32_field));
+        pb_eq(a, "int64_field", S::Int64(m.int64_field));
+        pb_eq(a, "uint32_field", S::Int64(m.uint32_field.into()));
+        pb_eq(a, "uint64_field", S::Decimal(m.uint64_field.into()));
+        pb_eq(a, "sint32_field", S::Int32(m.sint32_field));
+        pb_eq(a, "sint64_field", S::Int64(m.sint64_field));
+        pb_eq(a, "fixed32_field", S::Int64(m.fixed32_field.into()));
+        pb_eq(a, "fixed64_field", S::Decimal(m.fixed64_field.into()));
+        pb_eq(a, "sfixed32_field", S::Int32(m.sfixed32_field));
+        pb_eq(a, "sfixed64_field", S::Int64(m.sfixed64_field));
+        pb_eq(a, "bool_field", S::Bool(m.bool_field));
+        pb_eq(a, "string_field", S::Utf8(m.string_field.as_str().into()));
+        pb_eq(a, "bytes_field", S::Bytea(m.bytes_field.clone().into()));
+        pb_eq(a, "enum_field", S::Utf8("OPTION1".into()));
+        pb_eq(
+            a,
+            "nested_message_field",
+            S::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Int32(100)),
+                Some(ScalarImpl::Utf8("Nested".into())),
+            ])),
+        );
+        pb_eq(
+            a,
+            "repeated_int_field",
+            S::List(ListValue::new(
+                m.repeated_int_field
+                    .iter()
+                    .map(|&x| Some(x.into()))
+                    .collect(),
+            )),
+        );
+        pb_eq(
+            a,
+            "timestamp_field",
+            S::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Int64(1630927032)),
+                Some(ScalarImpl::Int32(500000000)),
+            ])),
+        );
+        pb_eq(
+            a,
+            "duration_field",
+            S::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Int64(60)),
+                Some(ScalarImpl::Int32(500000000)),
+            ])),
+        );
+        pb_eq(
+            a,
+            "any_field",
+            S::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Utf8(
+                    m.any_field.as_ref().unwrap().type_url.as_str().into(),
+                )),
+                Some(ScalarImpl::Bytea(
+                    m.any_field.as_ref().unwrap().value.clone().into(),
+                )),
+            ])),
+        );
+        pb_eq(
+            a,
+            "int32_value_field",
+            S::Struct(StructValue::new(vec![Some(ScalarImpl::Int32(42))])),
+        );
+        pb_eq(
+            a,
+            "string_value_field",
+            S::Struct(StructValue::new(vec![Some(ScalarImpl::Utf8(
+                m.string_value_field.as_ref().unwrap().as_str().into(),
+            ))])),
+        );
+        pb_eq(a, "oneof_string", S::Utf8("".into()));
+        pb_eq(a, "oneof_int32", S::Int32(123));
+        pb_eq(a, "oneof_enum", S::Utf8("DEFAULT".into()));
+    }
+
+    fn pb_eq(a: &ProtobufAccess, field_name: &str, value: ScalarImpl) {
+        let d = a.access(&[field_name], None).unwrap().unwrap();
+        assert_eq!(d, value, "field: {} value: {:?}", field_name, d);
+    }
+
+    fn create_all_types_message() -> AllTypes {
+        AllTypes {
+            double_field: 1.2345,
+            float_field: 1.2345,
+            int32_field: 42,
+            int64_field: 1234567890,
+            uint32_field: 98765,
+            uint64_field: 9876543210,
+            sint32_field: -12345,
+            sint64_field: -987654321,
+            fixed32_field: 1234,
+            fixed64_field: 5678,
+            sfixed32_field: -56789,
+            sfixed64_field: -123456,
+            bool_field: true,
+            string_field: "Hello, Prost!".to_string(),
+            bytes_field: b"byte data".to_vec(),
+            enum_field: EnumType::Option1 as i32,
+            nested_message_field: Some(NestedMessage {
+                id: 100,
+                name: "Nested".to_string(),
+            }),
+            repeated_int_field: vec![1, 2, 3, 4, 5],
+            timestamp_field: Some(::prost_types::Timestamp {
+                seconds: 1630927032,
+                nanos: 500000000,
+            }),
+            duration_field: Some(::prost_types::Duration {
+                seconds: 60,
+                nanos: 500000000,
+            }),
+            any_field: Some(::prost_types::Any {
+                type_url: "type.googleapis.com/my_custom_type".to_string(),
+                value: b"My custom data".to_vec(),
+            }),
+            int32_value_field: Some(42),
+            string_value_field: Some("Hello, Wrapper!".to_string()),
+            example_oneof: Some(ExampleOneof::OneofInt32(123)),
+        }
     }
 }
