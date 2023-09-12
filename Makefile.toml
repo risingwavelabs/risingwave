@@ -284,7 +284,10 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 [tasks.codesign-binaries]
 private = true
 category = "RiseDev - Build"
-description = "Codesign all binaries to support coredump" # https://developer.apple.com/forums/thread/694233?answerId=695943022#695943022
+description = "Codesign all binaries to support coredump"
+# If core dump is enabled by RiseDev and we're on an Apple Silicon platform,
+# codesign the binary before running.
+# https://developer.apple.com/forums/thread/694233?answerId=695943022#695943022
 condition = { env_set = [
   "ENABLE_COREDUMP",
 ], env = { "SYSTEM" = "darwin-arm64" } }
