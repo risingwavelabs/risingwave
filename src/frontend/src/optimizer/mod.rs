@@ -492,7 +492,8 @@ impl PlanRoot {
 
         let column_descs = columns
             .iter()
-            .filter_map(|c| (!c.is_generated()).then(|| c.column_desc.clone()))
+            .filter(|&c| (!c.is_generated()))
+            .map(|c| c.column_desc.clone())
             .collect();
 
         let mut stream_plan = if with_external_source {
