@@ -141,6 +141,10 @@ chmod +x ./scripts/source/prepare_data_after_alter.sh
 ./scripts/source/prepare_data_after_alter.sh 2
 sqllogictest -p 4566 -d dev './e2e_test/source/basic/alter/kafka_after_new_data.slt'
 
+echo "--- e2e, kafka alter source again"
+./scripts/source/prepare_data_after_alter.sh 3
+sqllogictest -p 4566 -d dev './e2e_test/source/basic/alter/kafka_after_new_data_2.slt'
+
 echo "--- Run CH-benCHmark"
 ./risedev slt -p 4566 -d dev './e2e_test/ch_benchmark/batch/ch_benchmark.slt'
 ./risedev slt -p 4566 -d dev './e2e_test/ch_benchmark/streaming/*.slt'
