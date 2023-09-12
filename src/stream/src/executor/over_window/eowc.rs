@@ -235,7 +235,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
 
         // Ignore ready windows (all ready windows were outputted before).
         while partition.states.are_ready() {
-            partition.states.just_slide();
+            partition.states.just_slide()?;
             partition.curr_row_buffer.pop_front();
         }
 

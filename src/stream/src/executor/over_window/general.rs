@@ -534,7 +534,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             // Slide to the first affected key. We can safely compare to `Some(first_curr_key)` here
             // because it must exist in the states, by the definition of affected range.
             while states.curr_key() != Some(first_curr_key.as_normal_expect()) {
-                states.just_slide();
+                states.just_slide()?;
             }
             let mut curr_key_cursor = part_with_delta.find(first_curr_key).unwrap();
             assert_eq!(

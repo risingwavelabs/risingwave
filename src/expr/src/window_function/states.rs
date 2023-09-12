@@ -51,50 +51,40 @@ impl WindowStates {
     /// Slide all windows forward and collect the output and evict hints.
     pub fn slide(&mut self) -> Result<(Vec<Datum>, StateEvictHint)> {
         debug_assert!(self.are_aligned());
-        let output = self
-            .0
-            .iter()
-            .map(|state| state.curr_output())
-            .try_collect()?;
-        let evit_hint = self
-            .0
-            .iter_mut()
-            .map(|state| state.slide_forward())
-            .reduce(StateEvictHint::merge)
-            .expect("# of evict hints = # of window states");
-        Ok((output, evit_hint))
-    }
-
-    /// Slide all windows forward and collect the evict hints, ignoring the output.
-    pub fn slide_no_output(&mut self) -> StateEvictHint {
-        debug_assert!(self.are_aligned());
-        self.0
-            .iter_mut()
-            .map(|state| state.slide_forward())
-            .reduce(StateEvictHint::merge)
-            .expect("# of evict hints = # of window states")
+        let mut output = Vec::with_capacity(self.0.len());
+        let mut evict_hint: Option<StateEvictHint> = None;
+        for state in &mut self.0 {
+            let (x_output, x_evict) = state.slide()?;
+            output.push(x_output);
+            evict_hint = match evict_hint {
+                Some(evict_hint) => Some(evict_hint.merge(x_evict)),
+                None => Some(x_evict),
+            };
+        }
+        Ok((
+            output,
+            evict_hint.expect("# of evict hints = # of window states"),
+        ))
     }
 
     /// Slide all windows forward and collect the output, ignoring the evict hints.
     pub fn slide_no_evict_hint(&mut self) -> Result<Vec<Datum>> {
         debug_assert!(self.are_aligned());
-        let output_res = self
-            .0
-            .iter_mut()
-            .map(|state| state.curr_output())
-            .try_collect();
-        self.0
-            .iter_mut()
-            .for_each(|state| _ = state.slide_forward());
-        output_res
+        let mut output = Vec::with_capacity(self.0.len());
+        for state in &mut self.0 {
+            let (x_output, _) = state.slide()?;
+            output.push(x_output);
+        }
+        Ok(output)
     }
 
     /// Slide all windows forward, ignoring the output and evict hints.
-    pub fn just_slide(&mut self) {
+    pub fn just_slide(&mut self) -> Result<()> {
         debug_assert!(self.are_aligned());
-        self.0
-            .iter_mut()
-            .for_each(|state| _ = state.slide_forward());
+        for state in &mut self.0 {
+            state.slide_no_output()?;
+        }
+        Ok(())
     }
 }
 

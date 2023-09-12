@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 
 use futures::FutureExt;
-use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -24,12 +24,16 @@ use smallvec::SmallVec;
 
 use super::buffer::WindowBuffer;
 use super::{StateEvictHint, StateKey, StatePos, WindowState};
-use crate::agg::{build_append_only, AggArgs, AggCall, BoxedAggregateFunction};
-use crate::function::window::{WindowFuncCall, WindowFuncKind};
+use crate::agg::{
+    AggArgs, AggCall, AggregateFunction, AggregateState as AggImplState, BoxedAggregateFunction,
+};
+use crate::function::window::{FrameExclusion, WindowFuncCall, WindowFuncKind};
+use crate::sig::agg::AGG_FUNC_SIG_MAP;
 use crate::Result;
 
 pub struct AggregateState {
-    agg_call: AggCall,
+    agg_func: BoxedAggregateFunction,
+    agg_impl: AggImpl,
     arg_data_types: Vec<DataType>,
     buffer: WindowBuffer<StateKey, SmallVec<[Datum; 2]>>,
     buffer_heap_size: KvSize,
@@ -58,41 +62,34 @@ impl AggregateState {
             distinct: false,
             direct_args: vec![],
         };
+        let agg_func_sig = AGG_FUNC_SIG_MAP
+            .get(
+                agg_kind,
+                &arg_data_types.iter().map(Into::into).collect::<Vec<_>>(),
+                (&call.return_type).into(),
+                false, // means prefer retractable version
+            )
+            .expect("the agg func must exist");
+        let agg_func = (agg_func_sig.build)(&agg_call)?;
+        let agg_impl = if false /* TODO() */
+            && !agg_func_sig.append_only
+            && call.frame.exclusion == FrameExclusion::NoOthers
+        {
+            let init_state = agg_func.create_state();
+            AggImpl::Incremental(init_state)
+        } else {
+            AggImpl::Full
+        };
         Ok(Self {
-            agg_call,
+            agg_func,
+            agg_impl,
             arg_data_types,
             buffer: WindowBuffer::new(call.frame.clone()),
             buffer_heap_size: KvSize::new(),
         })
     }
-}
 
-impl WindowState for AggregateState {
-    fn append(&mut self, key: StateKey, args: SmallVec<[Datum; 2]>) {
-        args.iter().for_each(|arg| {
-            self.buffer_heap_size.add_val(arg);
-        });
-        self.buffer_heap_size.add_val(&key);
-        self.buffer.append(key, args);
-    }
-
-    fn curr_window(&self) -> StatePos<'_> {
-        let window = self.buffer.curr_window();
-        StatePos {
-            key: window.key,
-            is_ready: window.following_saturated,
-        }
-    }
-
-    fn curr_output(&self) -> Result<Datum> {
-        let wrapper = AggregatorWrapper {
-            agg: build_append_only(&self.agg_call)?,
-            arg_data_types: &self.arg_data_types,
-        };
-        wrapper.aggregate(self.buffer.curr_window_values().map(SmallVec::as_slice))
-    }
-
-    fn slide_forward(&mut self) -> StateEvictHint {
+    fn slide_inner(&mut self) -> StateEvictHint {
         let removed_keys: BTreeSet<_> = self
             .buffer
             .slide()
@@ -117,6 +114,64 @@ impl WindowState for AggregateState {
     }
 }
 
+impl WindowState for AggregateState {
+    fn append(&mut self, key: StateKey, args: SmallVec<[Datum; 2]>) {
+        args.iter().for_each(|arg| {
+            self.buffer_heap_size.add_val(arg);
+        });
+        self.buffer_heap_size.add_val(&key);
+        self.buffer.append(key, args);
+    }
+
+    fn curr_window(&self) -> StatePos<'_> {
+        let window = self.buffer.curr_window();
+        StatePos {
+            key: window.key,
+            is_ready: window.following_saturated,
+        }
+    }
+
+    fn slide(&mut self) -> Result<(Datum, StateEvictHint)> {
+        let wrapper = AggregatorWrapper {
+            agg_func: self.agg_func.as_ref(),
+            arg_data_types: &self.arg_data_types,
+        };
+        let output = match self.agg_impl {
+            AggImpl::Full => {
+                wrapper.aggregate(self.buffer.curr_window_values().map(SmallVec::as_slice))
+            }
+            AggImpl::Incremental(ref mut state) => wrapper.update(
+                state,
+                self.buffer
+                    .curr_window_values_delta()
+                    .map(|(op, args)| (op, args.as_slice())),
+            ),
+        }?;
+        let evict_hint = self.slide_inner();
+        Ok((output, evict_hint))
+    }
+
+    fn slide_no_output(&mut self) -> Result<StateEvictHint> {
+        match self.agg_impl {
+            AggImpl::Full => {}
+            AggImpl::Incremental(ref mut state) => {
+                // for incremental agg, we need to update the state even if the caller doesn't need the output
+                let wrapper = AggregatorWrapper {
+                    agg_func: self.agg_func.as_ref(),
+                    arg_data_types: &self.arg_data_types,
+                };
+                wrapper.update(
+                    state,
+                    self.buffer
+                        .curr_window_values_delta()
+                        .map(|(op, args)| (op, args.as_slice())),
+                )?;
+            }
+        };
+        Ok(self.slide_inner())
+    }
+}
+
 impl EstimateSize for AggregateState {
     fn estimated_heap_size(&self) -> usize {
         // estimate `VecDeque` of `StreamWindowBuffer` internal size
@@ -125,23 +180,40 @@ impl EstimateSize for AggregateState {
     }
 }
 
+enum AggImpl {
+    Incremental(AggImplState),
+    Full,
+}
+
 struct AggregatorWrapper<'a> {
-    agg: BoxedAggregateFunction,
+    agg_func: &'a dyn AggregateFunction,
     arg_data_types: &'a [DataType],
 }
 
 impl AggregatorWrapper<'_> {
-    fn aggregate<'a>(&'a self, values: impl Iterator<Item = &'a [Datum]>) -> Result<Datum> {
-        // TODO(rc): switch to a better general version of aggregator implementation
+    fn aggregate<'a>(&'a self, values: impl IntoIterator<Item = &'a [Datum]>) -> Result<Datum> {
+        let mut state = self.agg_func.create_state();
+        self.update(
+            &mut state,
+            values.into_iter().map(|args| (Op::Insert, args)),
+        )
+    }
 
+    fn update<'a>(
+        &'a self,
+        state: &mut AggImplState,
+        delta: impl IntoIterator<Item = (Op, &'a [Datum])>,
+    ) -> Result<Datum> {
         let mut args_builders = self
             .arg_data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(0 /* bad! */))
             .collect::<Vec<_>>();
-        let mut n_values = 0;
-        for value in values {
-            n_values += 1;
+        let mut ops = Vec::new();
+        let mut n_rows = 0;
+        for (op, value) in delta {
+            n_rows += 1;
+            ops.push(op);
             for (builder, datum) in args_builders.iter_mut().zip_eq_fast(value.iter()) {
                 builder.append(datum);
             }
@@ -151,15 +223,14 @@ impl AggregatorWrapper<'_> {
             .into_iter()
             .map(|builder| builder.finish().into())
             .collect::<Vec<_>>();
-        let chunk = StreamChunk::from(DataChunk::new(columns, n_values));
+        let chunk = StreamChunk::from_parts(ops, DataChunk::new(columns, n_rows));
 
-        let mut state = self.agg.create_state();
-        self.agg
-            .update(&mut state, &chunk)
+        self.agg_func
+            .update(state, &chunk)
             .now_or_never()
             .expect("we don't support UDAF currently, so the function should return immediately")?;
-        self.agg
-            .get_result(&state)
+        self.agg_func
+            .get_result(state)
             .now_or_never()
             .expect("we don't support UDAF currently, so the function should return immediately")
     }
