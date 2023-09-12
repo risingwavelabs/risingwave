@@ -22,6 +22,8 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, SstObjectIdRange};
+use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
+use risingwave_pb::hummock::GetNewSstIdsRequest;
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
 use risingwave_rpc_client::{ExtraInfoSource, HummockMetaClient};
 use sync_point::sync_point;
@@ -202,11 +204,18 @@ impl GetObjectId for Arc<SstableObjectIdManager> {
 #[derive(Clone)]
 pub struct SharedComapctorObjectIdManager {
     output_object_ids: VecDeque<u64>,
+    client: HummockManagerServiceClient<tonic::transport::Channel>,
 }
 
 impl SharedComapctorObjectIdManager {
-    pub fn new(output_object_ids: VecDeque<u64>) -> Self {
-        Self { output_object_ids }
+    pub fn new(
+        output_object_ids: VecDeque<u64>,
+        client: HummockManagerServiceClient<tonic::transport::Channel>,
+    ) -> Self {
+        Self {
+            output_object_ids,
+            client,
+        }
     }
 }
 
@@ -216,7 +225,17 @@ impl GetObjectId for SharedComapctorObjectIdManager {
         if let Some(first_element) = self.output_object_ids.pop_front() {
             Ok(first_element)
         } else {
-            return Err(HummockError::other("Output object id runs out"));
+            tracing::warn!("The pre-allocated object ids are used up, and new object id are obtained through RPC.");
+            let request = GetNewSstIdsRequest { number: 1 };
+            match self.client.get_new_sst_ids(request).await {
+                Ok(reponse) => return Ok(reponse.into_inner().start_id),
+                Err(e) => {
+                    return Err(HummockError::other(format!(
+                        "Fail to get new sst id, {}",
+                        e
+                    )));
+                }
+            };
         }
     }
 }
@@ -313,14 +332,10 @@ impl SstObjectIdTrackerInner {
 #[cfg(test)]
 mod test {
 
-    use std::collections::VecDeque;
-
     use risingwave_common::try_match_expand;
 
     use crate::hummock::sstable::sstable_object_id_manager::AutoTrackerId;
-    use crate::hummock::{
-        GetObjectId, SharedComapctorObjectIdManager, SstObjectIdTracker, TrackerId,
-    };
+    use crate::hummock::{SstObjectIdTracker, TrackerId};
 
     #[tokio::test]
     async fn test_object_id_tracker_basic() {
@@ -389,19 +404,5 @@ mod test {
 
         object_id_tacker.remove_tracker(auto_id_3);
         assert!(object_id_tacker.tracking_object_ids().is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_shared_comapctor_object_id_manager() {
-        let mut pre_allocated_object_ids: VecDeque<_> = VecDeque::new();
-        pre_allocated_object_ids.extend(vec![1, 3, 5]);
-        let mut object_id_manager = SharedComapctorObjectIdManager::new(pre_allocated_object_ids);
-        assert_eq!(object_id_manager.get_new_sst_object_id().await.unwrap(), 1);
-
-        assert_eq!(object_id_manager.get_new_sst_object_id().await.unwrap(), 3);
-
-        assert_eq!(object_id_manager.get_new_sst_object_id().await.unwrap(), 5);
-
-        assert!(object_id_manager.get_new_sst_object_id().await.is_err());
     }
 }

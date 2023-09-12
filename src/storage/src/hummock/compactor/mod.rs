@@ -624,6 +624,7 @@ pub fn start_shared_compactor(
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let periodic_event_update_interval = Duration::from_millis(1000);
     let report_task_client = client.clone();
+    let get_object_id_client = client.clone();
     let mut report_heartbeat_client = client;
     let join_handle = tokio::spawn(async move {
         let shutdown_map = CompactionShutdownMap::default();
@@ -666,6 +667,7 @@ pub fn start_shared_compactor(
                     let context = context.clone();
                     let shutdown = shutdown_map.clone();
                     let mut report_task_client = report_task_client.clone();
+                    let get_new_object_id_client = get_object_id_client.clone();
                     executor.spawn(async move {
                         let DispatchCompactionTaskRequest {
                             tables,
@@ -686,7 +688,7 @@ pub fn start_shared_compactor(
                         let mut output_object_ids_deque: VecDeque<_> = VecDeque::new();
                         output_object_ids_deque.extend(output_object_ids);
                         let shared_compactor_object_id_manager =
-                            SharedComapctorObjectIdManager::new(output_object_ids_deque);
+                            SharedComapctorObjectIdManager::new(output_object_ids_deque, get_new_object_id_client);
                             match dispatch_task.unwrap() {
                                 dispatch_compaction_task_request::Task::CompactTask(compact_task) => {
                                     context.running_task_count.fetch_add(1, Ordering::SeqCst);
