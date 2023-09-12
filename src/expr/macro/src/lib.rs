@@ -41,6 +41,7 @@ mod utils;
 ///     - [Optimization](#optimization)
 ///     - [Functions Returning Strings](#functions-returning-strings)
 ///     - [Preprocessing Constant Arguments](#preprocessing-constant-arguments)
+///     - [Context](#context)
 /// - [Table Function](#table-function)
 /// - [Registration and Invocation](#registration-and-invocation)
 /// - [Appendix: Type Matrix](#appendix-type-matrix)
@@ -196,6 +197,8 @@ mod utils;
 /// matrix]) and do not contain any Option or Result, the `#[function]` macro will automatically
 /// generate SIMD vectorized execution code.
 ///
+/// Therefore, try to avoid returning `Option` and `Result` whenever possible.
+///
 /// ## Functions Returning Strings
 ///
 /// For functions that return varchar types, you can also use the writer style function signature to
@@ -203,7 +206,7 @@ mod utils;
 ///
 /// ```ignore
 /// #[function("trim(varchar) -> varchar")]
-/// pub fn trim(s: &str, writer: &mut dyn Write) {
+/// fn trim(s: &str, writer: &mut impl Write) {
 ///     writer.write_str(s.trim()).unwrap();
 /// }
 /// ```
@@ -212,9 +215,23 @@ mod utils;
 ///
 /// ```ignore
 /// #[function("trim(varchar) -> varchar")]
-/// pub fn trim(s: &str, writer: &mut dyn Write) -> Result<()> {
+/// fn trim(s: &str, writer: &mut impl Write) -> Result<()> {
 ///     writer.write_str(s.trim()).unwrap();
 ///     Ok(())
+/// }
+/// ```
+///
+/// If null values may be returned, then the return value should be `Option<()>`:
+///
+/// ```ignore
+/// #[function("trim(varchar) -> varchar")]
+/// fn trim(s: &str, writer: &mut impl Write) -> Option<()> {
+///     if s.is_empty() {
+///         None
+///     } else {
+///         writer.write_str(s.trim()).unwrap();
+///         Some(())
+///     }
 /// }
 /// ```
 ///
@@ -237,12 +254,28 @@ mod utils;
 ///
 /// The `prebuild` argument can be specified, and its value is a Rust expression used to construct a
 /// new variable from the input arguments of the function. Here `$1`, `$2` represent the second and
-/// third arguments of the function (indexed from 0), and their types are `Datum`. In the Rust
+/// third arguments of the function (indexed from 0), and their types are `&str`. In the Rust
 /// function signature, these positions of parameters will be omitted, replaced by an extra new
 /// variable at the end.
 ///
-/// TODO: This macro will support both variable and constant inputs, and automatically optimize the
-/// preprocessing of constants. Currently, it only supports constant inputs.
+/// This macro generates two versions of the function. If all the input parameters that `prebuild`
+/// depends on are constants, it will precompute them during the build function. Otherwise, it will
+/// compute them for each input row during evaluation. This way, we support both constant and variable
+/// inputs while optimizing performance for constant inputs.
+///
+/// ## Context
+///
+/// If a function needs to obtain type information at runtime, you can add an `&Context` parameter to
+/// the function signature. For example:
+///
+/// ```ignore
+/// #[function("foo(int32) -> int64")]
+/// fn foo(a: i32, ctx: &Context) -> i64 {
+///    assert_eq!(ctx.arg_types[0], DataType::Int32);
+///    assert_eq!(ctx.return_type, DataType::Int64);
+///    // ...
+/// }
+/// ```
 ///
 /// # Table Function
 ///
