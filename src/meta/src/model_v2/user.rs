@@ -8,11 +8,12 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub user_id: i32,
     pub name: String,
-    pub is_super: Option<bool>,
-    pub can_create_db: Option<bool>,
-    pub can_create_user: Option<bool>,
-    pub can_login: Option<bool>,
+    pub is_super: bool,
+    pub can_create_db: bool,
+    pub can_create_user: bool,
+    pub can_login: bool,
     pub auth_type: Option<String>,
+    pub auth_value: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

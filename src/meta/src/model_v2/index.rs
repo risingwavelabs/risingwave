@@ -13,7 +13,6 @@ pub struct Model {
     pub owner_id: i32,
     pub index_table_id: i32,
     pub primary_table_id: i32,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub index_items: Option<Json>,
     pub original_columns: Option<Vec<i32>>,
     pub initialized_at_epoch: Option<i32>,

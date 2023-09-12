@@ -10,8 +10,8 @@ pub struct Model {
     pub user_id: i32,
     pub oid: i32,
     pub granted_by: i32,
-    pub actions: Option<Vec<String>>,
-    pub with_grant_option: Option<bool>,
+    pub actions: Vec<String>,
+    pub with_grant_option: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

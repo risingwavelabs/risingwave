@@ -13,13 +13,10 @@ pub struct Model {
     pub owner_id: i32,
     pub optional_associated_source_id: Option<i32>,
     pub table_type: Option<String>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub columns: Option<Json>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub pk: Option<Json>,
     pub distribution_key: Option<Vec<i32>>,
     pub append_only: Option<bool>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub properties: Option<Json>,
     pub fragment_id: Option<i32>,
     pub vnode_col_index: Option<i32>,

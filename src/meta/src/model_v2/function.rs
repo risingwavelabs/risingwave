@@ -11,13 +11,11 @@ pub struct Model {
     pub schema_id: i32,
     pub database_id: i32,
     pub owner_id: i32,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub arg_types: Option<Json>,
     pub return_type: Option<String>,
     pub language: Option<String>,
     pub link: Option<String>,
     pub identifier: Option<String>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub kind: Option<Json>,
 }
 

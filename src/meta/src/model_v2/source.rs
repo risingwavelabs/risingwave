@@ -12,16 +12,11 @@ pub struct Model {
     pub database_id: i32,
     pub owner_id: i32,
     pub row_id_index: Option<String>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub columns: Option<Json>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub pk_column_ids: Option<Json>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub properties: Option<Json>,
     pub definition: Option<String>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub source_info: Option<Json>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub watermark_descs: Option<Json>,
     pub optional_associated_table_id: Option<i32>,
     pub connection_id: Option<i32>,

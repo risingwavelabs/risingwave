@@ -9,11 +9,9 @@ pub struct Model {
     pub actor_id: i32,
     pub fragment_id: i32,
     pub status: Option<String>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub splits: Option<Json>,
     pub parallel_unit_id: i32,
     pub upstream_actor_ids: Option<Vec<i32>>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
     pub dispatchers: Option<Json>,
     pub vnode_bitmap: Option<String>,
 }

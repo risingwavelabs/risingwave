@@ -8,11 +8,9 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub fragment_id: i32,
     pub table_id: i32,
-    pub fragment_type_mask: Option<i32>,
-    pub distribution_type: Option<String>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub stream_node: Option<Json>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub fragment_type_mask: i32,
+    pub distribution_type: String,
+    pub stream_node: Json,
     pub vnode_mapping: Option<Json>,
     pub state_table_ids: Option<Vec<i32>>,
     pub upstream_fragment_id: Option<Vec<i32>>,

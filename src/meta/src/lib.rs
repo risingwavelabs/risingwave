@@ -36,6 +36,7 @@
 
 pub mod backup_restore;
 mod barrier;
+pub mod controller;
 #[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
 mod error;
@@ -48,6 +49,7 @@ pub(crate) mod serving;
 pub mod storage;
 mod stream;
 pub(crate) mod telemetry;
+
 use std::time::Duration;
 
 use clap::Parser;
