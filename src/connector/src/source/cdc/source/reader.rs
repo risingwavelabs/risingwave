@@ -126,7 +126,6 @@ where
         }
 
         let (tx, mut rx) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
-        let tx: Box<GetEventStreamJniSender> = Box::new(tx);
 
         LazyLock::force(&JVM).as_ref()?;
 
@@ -148,20 +147,16 @@ where
             let get_event_stream_request_bytes = env
                 .byte_array_from_slice(&Message::encode_to_vec(&get_event_stream_request))
                 .unwrap();
-
-            let channel_ptr = Box::into_raw(tx) as i64;
-
             let result = env.call_static_method(
                 "com/risingwave/connector/source/core/JniDbzSourceHandler",
                 "runJniDbzSourceThread",
                 "([BJ)V",
                 &[
                     JValue::Object(&get_event_stream_request_bytes),
-                    JValue::from(channel_ptr),
+                    JValue::from(&tx as *const GetEventStreamJniSender as i64),
                 ],
             );
 
-            unsafe { drop(Box::from_raw(channel_ptr as *mut GetEventStreamJniSender)) };
             match result {
                 Ok(_) => {
                     tracing::info!("end of jni call runJniDbzSourceThread");
