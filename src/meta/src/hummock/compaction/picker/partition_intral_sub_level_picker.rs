@@ -130,16 +130,12 @@ impl PartitionIntraSubLevelPicker {
         }
         None
     }
-}
 
-impl CompactionPicker for PartitionIntraSubLevelPicker {
-    fn pick_compaction(
-        &mut self,
+    fn pick_whole_level(
+        &self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
-        stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        assert!(levels.can_partition_by_vnode());
         let l0 = levels.l0.as_ref().unwrap();
         let max_sub_level_id = self
             .partitions
@@ -162,7 +158,7 @@ impl CompactionPicker for PartitionIntraSubLevelPicker {
             }
 
             if levels.vnode_partition_count == 0
-                && level.total_file_size > self.config.sub_level_max_compaction_bytes / 2
+                && level.total_file_size > self.config.sub_level_max_compaction_bytes
             {
                 continue;
             }
@@ -236,9 +232,17 @@ impl CompactionPicker for PartitionIntraSubLevelPicker {
                 vnode_partition_count,
             });
         }
+        None
+    }
 
+    fn pick_partition(
+        &mut self,
+        levels: &Levels,
+        level_handlers: &[LevelHandler],
+        stats: &mut LocalPickerStatistic,
+    ) -> Option<CompactionInput> {
         let mut skip_pending_compact = false;
-
+        let l0 = levels.l0.as_ref().unwrap();
         for part in &self.partitions {
             for (idx, info) in part.sub_levels.iter().enumerate() {
                 if info.total_file_size > self.config.sub_level_max_compaction_bytes / 2 {
@@ -309,6 +313,26 @@ impl CompactionPicker for PartitionIntraSubLevelPicker {
         } else {
             stats.skip_by_count_limit += 1;
         }
+        None
+    }
+}
+
+impl CompactionPicker for PartitionIntraSubLevelPicker {
+    fn pick_compaction(
+        &mut self,
+        levels: &Levels,
+        level_handlers: &[LevelHandler],
+        stats: &mut LocalPickerStatistic,
+    ) -> Option<CompactionInput> {
+        assert!(levels.can_partition_by_vnode());
+        if let Some(input) = self.pick_whole_level(levels, level_handlers) {
+            return Some(input);
+        }
+
+        if let Some(input) = self.pick_partition(levels, level_handlers, stats) {
+            return Some(input);
+        }
+
         self.pick_l0_trivial_move_file(levels.l0.as_ref().unwrap(), level_handlers, stats)
     }
 }

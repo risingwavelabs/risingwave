@@ -397,7 +397,6 @@ impl DynamicLevelSelectorCore {
                     max_size * SCORE_BASE * (level.vnode_partition_count as u64)
                         / ctx.level_max_bytes[level_idx],
                 );
-                // Reduce the level num of l0 non-overlapping sub_level
                 ctx.score_levels.push(PickerInfo {
                     score,
                     select_level: level_idx,
@@ -405,7 +404,6 @@ impl DynamicLevelSelectorCore {
                     picker_type: PickerType::BaseLevelCompaction(ctx.target_partitions.clone()),
                 });
             } else {
-                // Reduce the level num of l0 non-overlapping sub_level
                 ctx.score_levels.push(PickerInfo {
                     score,
                     select_level: level_idx,

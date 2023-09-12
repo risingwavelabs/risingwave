@@ -185,6 +185,7 @@ impl CompactStatus {
                 &task.input_ssts[0].table_infos,
             )
         {
+            // If this level can not be partitioned, we must compact it at least once.
             return false;
         }
         if task.input_ssts.len() == 1 {
