@@ -414,7 +414,7 @@ impl DdlService for DdlServiceImpl {
         if let Some(source) = &mut source {
             // Generate source id.
             let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: Use source category
-            bind_table_source(source, source_id, &mut mview, table_id, &mut fragment_graph);
+            fill_table_source(source, source_id, &mut mview, table_id, &mut fragment_graph);
         }
 
         let mut stream_job = StreamingJob::Table(source, mview);
@@ -516,7 +516,7 @@ impl DdlService for DdlServiceImpl {
         {
             let source = source.as_mut().unwrap();
             let table_id = table.id;
-            bind_table_source(source, source_id, &mut table, table_id, &mut fragment_graph);
+            fill_table_source(source, source_id, &mut table, table_id, &mut fragment_graph);
         }
         let table_col_index_mapping =
             ColIndexMapping::from_protobuf(&req.table_col_index_mapping.unwrap());
@@ -748,7 +748,7 @@ impl DdlServiceImpl {
     }
 }
 
-fn bind_table_source(
+fn fill_table_source(
     source: &mut PbSource,
     source_id: u32,
     table: &mut PbTable,

@@ -257,7 +257,7 @@ pub async fn handle_alter_table_column(
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }
 
-pub fn schema_has_schema_registry(schema: &SourceSchemaV2) -> bool {
+fn schema_has_schema_registry(schema: &SourceSchemaV2) -> bool {
     match schema.row_encode {
         Encode::Avro | Encode::Protobuf => true,
         Encode::Json => {

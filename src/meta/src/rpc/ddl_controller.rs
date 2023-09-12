@@ -957,12 +957,8 @@ impl DdlController {
     }
 
     async fn cancel_replace_table(&self, stream_job: &StreamingJob) -> MetaResult<()> {
-        let StreamingJob::Table(source, table) = stream_job else {
-            unreachable!("unexpected job: {stream_job:?}")
-        };
-
         self.catalog_manager
-            .cancel_replace_table_procedure(source, table)
+            .cancel_replace_table_procedure(stream_job)
             .await
     }
 

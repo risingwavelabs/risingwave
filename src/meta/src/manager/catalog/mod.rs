@@ -2147,9 +2147,11 @@ impl CatalogManager {
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
     pub async fn cancel_replace_table_procedure(
         &self,
-        source: &Option<Source>,
-        table: &Table,
+        stream_job: &StreamingJob,
     ) -> MetaResult<()> {
+        let StreamingJob::Table(source, table) = stream_job else {
+            unreachable!("unexpected job: {stream_job:?}")
+        };
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
