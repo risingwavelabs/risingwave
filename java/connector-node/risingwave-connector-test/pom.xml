@@ -176,7 +176,7 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-cassandra</artifactId>
             <scope>test</scope>
         </dependency>
