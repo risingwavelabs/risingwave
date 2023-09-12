@@ -386,7 +386,7 @@ impl CommandContext {
 
             Command::RescheduleFragment { reschedules, .. } => {
                 let mut dispatcher_update = HashMap::new();
-                for (_fragment_id, reschedule) in reschedules.iter() {
+                for reschedule in reschedules.values() {
                     for &(upstream_fragment_id, dispatcher_id) in
                         &reschedule.upstream_fragment_dispatcher_ids
                     {
@@ -471,7 +471,7 @@ impl CommandContext {
                 let merge_update = merge_update.into_values().collect();
 
                 let mut actor_vnode_bitmap_update = HashMap::new();
-                for (_fragment_id, reschedule) in reschedules.iter() {
+                for reschedule in reschedules.values() {
                     // Record updates for all actors in this fragment.
                     for (&actor_id, bitmap) in &reschedule.vnode_bitmap_updates {
                         let bitmap = bitmap.to_protobuf();
@@ -555,7 +555,7 @@ impl CommandContext {
                 .values()
                 .flatten()
                 .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
-                .chain(table_fragments.values_actor_ids().into_iter())
+                .chain(table_fragments.values_actor_ids())
                 .collect(),
             _ => Default::default(),
         }

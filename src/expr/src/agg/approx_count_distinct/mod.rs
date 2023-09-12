@@ -173,7 +173,7 @@ impl<B: Bucket> Registers<B> {
         let mut mean = 0.0;
 
         // Get harmonic mean of all the counts in results
-        for bucket in self.registers.iter() {
+        for bucket in &*self.registers {
             let count = bucket.max();
             mean += 1.0 / ((1 << count) as f64);
         }
@@ -184,7 +184,7 @@ impl<B: Bucket> Registers<B> {
         // m * log(m/V) where V is the number of registers with value 0
         let answer = if raw_estimate <= 2.5 * m {
             let mut zero_registers: f64 = 0.0;
-            for i in self.registers.iter() {
+            for i in &*self.registers {
                 if i.max() == 0 {
                     zero_registers += 1.0;
                 }

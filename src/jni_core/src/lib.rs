@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
 #![feature(lazy_cell)]
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]

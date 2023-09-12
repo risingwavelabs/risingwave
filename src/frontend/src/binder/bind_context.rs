@@ -299,7 +299,7 @@ impl BindContext {
             c
         }));
         for (k, v) in other.indices_of {
-            let entry = self.indices_of.entry(k).or_insert_with(Vec::new);
+            let entry = self.indices_of.entry(k).or_default();
             entry.extend(v.into_iter().map(|x| x + begin));
         }
         for (k, (x, y)) in other.range_of {

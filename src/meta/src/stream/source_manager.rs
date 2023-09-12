@@ -329,7 +329,7 @@ impl SourceManagerCore {
 
                 self.source_fragments
                     .entry(source_id)
-                    .or_insert_with(BTreeSet::default)
+                    .or_default()
                     .append(&mut fragment_ids);
             }
         }
@@ -397,7 +397,7 @@ impl<T: SplitMetaData + Clone> PartialEq<Self> for ActorSplitsAssignment<T> {
 
 impl<T: SplitMetaData + Clone> PartialOrd<Self> for ActorSplitsAssignment<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        other.splits.len().partial_cmp(&self.splits.len())
+        Some(self.cmp(other))
     }
 }
 
@@ -527,7 +527,6 @@ impl SourceManager {
                     &mut managed_sources,
                     metrics.clone(),
                 )
-                .await
             }
         }
 
@@ -708,7 +707,7 @@ impl SourceManager {
         Ok(())
     }
 
-    async fn create_source_worker_async(
+    fn create_source_worker_async(
         connector_client: Option<ConnectorClient>,
         source: Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
