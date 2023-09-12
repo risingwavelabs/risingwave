@@ -128,7 +128,7 @@ fn timestamptz_to_char(
     _children: Vec<BoxedExpression>,
 ) -> Result<BoxedExpression> {
     Err(ExprError::UnsupportedFunction(
-        "to_timestamp should have been rewritten to include timezone".into(),
+        "to_char(timestamptz, varchar) should have been rewritten to include timezone".into(),
     ))
 }
 

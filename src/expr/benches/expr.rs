@@ -274,12 +274,13 @@ fn bench_expr(c: &mut Criterion) {
             println!("todo: {sig:?}");
             continue;
         }
-        if matches!(sig.func, PbType::DateTrunc | PbType::ToTimestamp1)
-            && sig.inputs_type.len() == 2
-            && sig.ret_type == DataTypeName::Timestamptz
+        if [
+            "date_trunc(varchar, timestamptz) -> timestamptz",
+            "to_timestamp1(varchar, varchar) -> timestamptz",
+            "to_char(timestamptz, varchar) -> varchar",
+        ]
+        .contains(&format!("{sig:?}").as_str())
         {
-            // ignore: date_trunc(varchar, timestamptz) -> timestamptz
-            // ignore: to_timestamp1(varchar, varchar) -> timestamptz
             println!("ignore: {sig:?}");
             continue;
         }
