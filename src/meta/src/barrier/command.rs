@@ -73,6 +73,11 @@ pub struct Reschedule {
 /// collected.
 #[derive(Debug, Clone)]
 pub enum Command {
+    /// `Recover` Command generates a barrier for recovery.
+    /// It will prompt the backfill executors to update their progress of backfilling:
+    /// Done Or InProgress, along with the epoch.
+    // Recover,
+
     /// `Plain` command generates a barrier with the mutation it carries.
     ///
     /// Barriers from all actors marked as `Created` state will be collected.
