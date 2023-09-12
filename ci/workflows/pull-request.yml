@@ -95,6 +95,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test for opendal (parallel)"
+    if: build.pull_request.labels includes "ci/run-opendal-tests"
     command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-dev"
     depends_on:
       - "build"
@@ -109,6 +110,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (parallel, in-memory)"
+    if: build.pull_request.labels includes "ci/run-e2e-parallel-in-memory-tests"
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-dev"
     depends_on: "build"
     plugins:
@@ -169,6 +171,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -183,6 +186,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink v2 test"
+    if: build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests"
     command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -197,6 +201,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end clickhouse sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-clickhouse-sink-tests"
     command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -211,6 +216,7 @@ steps:
     retry: *auto-retry
 
   - label: "e2e java-binding test"
+    if: build.pull_request.labels includes "ci/run-java-binding-tests"
     command: "ci/scripts/java-binding-test.sh -p ci-dev"
     depends_on:
       - "build"
