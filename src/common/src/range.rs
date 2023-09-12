@@ -58,13 +58,7 @@ pub trait Idx = PartialOrd<Self>
     + 'static
     + ZeroOne;
 
-pub trait RangeBoundsExt<T>
-where
-    T: Idx,
-{
-    fn start_bound(&self) -> Bound<&T>;
-    fn end_bound(&self) -> Bound<&T>;
-
+pub trait RangeBoundsExt<T: Idx>: RangeBounds<T> {
     fn start(&self) -> Option<T> {
         match self.start_bound() {
             Bound::Included(v) => Some(*v),
@@ -106,16 +100,4 @@ where
     }
 }
 
-impl<T, RB> RangeBoundsExt<T> for RB
-where
-    T: Idx,
-    RB: RangeBounds<T>,
-{
-    fn start_bound(&self) -> Bound<&T> {
-        self.start_bound()
-    }
-
-    fn end_bound(&self) -> Bound<&T> {
-        self.end_bound()
-    }
-}
+impl<T: Idx, RB: RangeBounds<T>> RangeBoundsExt<T> for RB {}

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::RangeBounds;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
@@ -26,8 +25,8 @@ use risingwave_common::range::RangeBoundsExt;
 use tokio::io::AsyncRead;
 
 use crate::object::{
-    BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectResult,
-    ObjectStore, StreamingUploader,
+    BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
+    ObjectResult, ObjectStore, StreamingUploader,
 };
 
 /// Opendal object storage.
@@ -81,11 +80,7 @@ impl ObjectStore for OpendalObjectStore {
         ))
     }
 
-    async fn read(
-        &self,
-        path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
-    ) -> ObjectResult<Bytes> {
+    async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         let data = if range.is_full() {
             self.op.read(path).await?
         } else {

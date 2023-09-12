@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io::Cursor;
-use std::ops::RangeBounds;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
 use std::task::{Context, Poll};
@@ -30,8 +29,8 @@ use tokio::io::AsyncRead;
 use tokio::sync::Mutex;
 
 use super::{
-    BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
-    StreamingUploader,
+    BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectRangeBounds, ObjectResult,
+    ObjectStore, StreamingUploader,
 };
 use crate::object::ObjectMetadataIter;
 
@@ -131,11 +130,7 @@ impl ObjectStore for InMemObjectStore {
         }))
     }
 
-    async fn read(
-        &self,
-        path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
-    ) -> ObjectResult<Bytes> {
+    async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         fail_point!("mem_read_err", |_| Err(ObjectError::internal(
             "mem read error"
         )));
@@ -234,11 +229,7 @@ impl InMemObjectStore {
         *SHARED.lock() = InMemObjectStore::new();
     }
 
-    async fn get_object(
-        &self,
-        path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
-    ) -> ObjectResult<Bytes> {
+    async fn get_object(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         let objects = self.objects.lock().await;
 
         let obj = objects

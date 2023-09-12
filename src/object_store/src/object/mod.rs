@@ -42,6 +42,8 @@ pub type ObjectStreamingUploader = MonitoredStreamingUploader;
 
 type BoxedStreamingUploader = Box<dyn StreamingUploader>;
 
+pub trait ObjectRangeBounds = RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static;
+
 /// Partitions a set of given paths into two vectors. The first vector contains all local paths, and
 /// the second contains all remote paths.
 pub fn partition_object_store_paths(paths: &[String]) -> Vec<String> {
@@ -88,11 +90,7 @@ pub trait ObjectStore: Send + Sync {
     /// If objects are PUT using a multipart upload, it's a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
     /// <https://d1.awsstatic.com/whitepapers/AmazonS3BestPractices.pdf?stod_obj2>
-    async fn read(
-        &self,
-        path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
-    ) -> ObjectResult<Bytes>;
+    async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes>;
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
     /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
@@ -193,11 +191,7 @@ impl ObjectStoreImpl {
         object_store_impl_method_body!(self, streaming_upload, dispatch_async, path)
     }
 
-    pub async fn read(
-        &self,
-        path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
-    ) -> ObjectResult<Bytes> {
+    pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         object_store_impl_method_body!(self, read, dispatch_async, path, range)
     }
 
@@ -607,11 +601,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         ))
     }
 
-    pub async fn read(
-        &self,
-        path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
-    ) -> ObjectResult<Bytes> {
+    pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         let operation_type = "read";
         let _timer = self
             .object_store_metrics

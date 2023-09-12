@@ -14,7 +14,6 @@
 
 use std::cmp;
 use std::collections::VecDeque;
-use std::ops::RangeBounds;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
@@ -49,8 +48,8 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
-    BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
-    StreamingUploader,
+    BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectRangeBounds, ObjectResult,
+    ObjectStore, StreamingUploader,
 };
 use crate::object::{try_update_failure_metric, ObjectMetadataIter};
 
@@ -349,11 +348,7 @@ impl ObjectStore for S3ObjectStore {
     }
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
-    async fn read(
-        &self,
-        path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
-    ) -> ObjectResult<Bytes> {
+    async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         fail_point!("s3_read_err", |_| Err(ObjectError::internal(
             "s3 read error"
         )));
@@ -665,7 +660,7 @@ impl S3ObjectStore {
     fn obj_store_request(
         &self,
         path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
+        range: impl ObjectRangeBounds,
     ) -> GetObjectFluentBuilder {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
 
