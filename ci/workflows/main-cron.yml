@@ -562,3 +562,22 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
+
+  - label: "connector node integration test Java {{matrix.java_version}}"
+    command: "ci/scripts/connector-node-integration-test.sh -p ci-release -v {{matrix.java_version}}"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    matrix:
+      setup:
+        java_version:
+          - "11"
+          - "17"
+    timeout_in_minutes: 10
+    retry: *auto-retry

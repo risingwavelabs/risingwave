@@ -152,6 +152,7 @@ steps:
     retry: *auto-retry
 
   - label: "connector node integration test Java {{matrix.java_version}}"
+    if: build.pull_request.labels includes "ci/run-java-connector-node-integration-tests"
     command: "ci/scripts/connector-node-integration-test.sh -p ci-dev -v {{matrix.java_version}}"
     depends_on:
       - "build"
