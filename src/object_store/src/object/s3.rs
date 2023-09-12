@@ -14,6 +14,7 @@
 
 use std::cmp;
 use std::collections::VecDeque;
+use std::ops::{Bound, RangeBounds};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
@@ -47,8 +48,8 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
-    BlockLocation, BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectResult,
-    ObjectStore, StreamingUploader,
+    BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
+    StreamingUploader,
 };
 use crate::object::{try_update_failure_metric, ObjectMetadataIter};
 
@@ -347,29 +348,26 @@ impl ObjectStore for S3ObjectStore {
     }
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+    async fn read(
+        &self,
+        path: &str,
+        range: impl RangeBounds<usize> + Clone + Send + Sync + 'static,
+    ) -> ObjectResult<Bytes> {
         fail_point!("s3_read_err", |_| Err(ObjectError::internal(
             "s3 read error"
         )));
 
-        let (start_pos, end_pos) = block_loc.as_ref().map_or((None, None), |block_loc| {
-            (
-                Some(block_loc.offset),
-                Some(
-                    block_loc.offset + block_loc.size - 1, // End is inclusive.
-                ),
-            )
-        });
+        // let start_pos = match range.start_bound() {
+        //     std::ops::Bound::Included(_) => todo!(),
+        //     std::ops::Bound::Excluded(_) => todo!(),
+        //     std::ops::Bound::Unbounded => todo!(),
+        // };
 
         // retry if occurs AWS EC2 HTTP timeout error.
         let resp = tokio_retry::RetryIf::spawn(
             self.config.get_retry_strategy(),
             || async {
-                match self
-                    .obj_store_request(path, start_pos, end_pos)
-                    .send()
-                    .await
-                {
+                match self.obj_store_request(path, range.clone()).send().await {
                     Ok(resp) => Ok(resp),
                     Err(err) => {
                         if let SdkError::DispatchFailure(e) = &err
@@ -391,24 +389,7 @@ impl ObjectStore for S3ObjectStore {
 
         let val = resp.body.collect().await?.into_bytes();
 
-        if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
-            return Err(ObjectError::internal(format!(
-                "mismatched size: expected {}, found {} when reading {} at {:?}",
-                block_loc.as_ref().unwrap().size,
-                val.len(),
-                path,
-                block_loc.as_ref().unwrap()
-            )));
-        }
         Ok(val)
-    }
-
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
-        let futures = block_locs
-            .iter()
-            .map(|block_loc| self.read(path, Some(*block_loc)))
-            .collect_vec();
-        try_join_all(futures).await
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -448,7 +429,11 @@ impl ObjectStore for S3ObjectStore {
         let resp = tokio_retry::RetryIf::spawn(
             self.config.get_retry_strategy(),
             || async {
-                match self.obj_store_request(path, start_pos, None).send().await {
+                match self
+                    .obj_store_request(path, start_pos.unwrap_or_default()..)
+                    .send()
+                    .await
+                {
                     Ok(resp) => Ok(resp),
                     Err(err) => {
                         if let SdkError::DispatchFailure(e) = &err
@@ -675,25 +660,26 @@ impl S3ObjectStore {
     fn obj_store_request(
         &self,
         path: &str,
-        start_pos: Option<usize>,
-        end_pos: Option<usize>,
+        range: impl RangeBounds<usize> + Clone + Send + Sync + 'static,
     ) -> GetObjectFluentBuilder {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
 
-        match (start_pos, end_pos) {
-            (None, None) => {
-                // No range is given. Return request as is.
-                req
-            }
-            _ => {
-                // At least one boundary is given. Return request with range limitation.
-                req.range(format!(
-                    "bytes={}-{}",
-                    start_pos.map_or(String::new(), |pos| pos.to_string()),
-                    end_pos.map_or(String::new(), |pos| pos.to_string())
-                ))
-            }
+        if range.start_bound() == Bound::Unbounded && range.end_bound() == Bound::Unbounded {
+            return req;
         }
+
+        let start = match range.start_bound() {
+            std::ops::Bound::Included(v) => v.to_string(),
+            std::ops::Bound::Excluded(v) => (v - 1).to_string(),
+            std::ops::Bound::Unbounded => String::new(),
+        };
+        let end = match range.end_bound() {
+            std::ops::Bound::Included(v) => v.to_string(),
+            std::ops::Bound::Excluded(v) => (v - 1).to_string(),
+            std::ops::Bound::Unbounded => String::new(),
+        };
+
+        req.range(format!("bytes={}-{}", start, end))
     }
 
     // When multipart upload is aborted, if any part uploads are in progress, those part uploads
