@@ -55,4 +55,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           propagate-environment: true
+          environment:
+            - BINARY_NAME
+            - GITHUB_TOKEN
     retry: *auto-retry
