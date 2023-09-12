@@ -460,7 +460,7 @@ impl OpRowMutRef<'_> {
 
     /// return if the two row ref is in the same chunk
     pub fn same_chunk(&self, other: &Self) -> bool {
-        self.c as *const _ == other.c as *const _
+        std::ptr::eq(self.c, other.c)
     }
 }
 

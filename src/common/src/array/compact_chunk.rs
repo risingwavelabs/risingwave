@@ -148,7 +148,7 @@ impl StreamChunkCompactor {
                 if prev.row_ref() == latest.row_ref() {
                     prev.set_vis(false);
                     latest.set_vis(false);
-                } else if prev.same_chunk(&latest) && prev.index() + 1 == latest.index() {
+                } else if prev.same_chunk(latest) && prev.index() + 1 == latest.index() {
                     // TODO(st1page): use next_one check in bitmap
                     prev.set_op(Op::UpdateDelete);
                     latest.set_op(Op::UpdateInsert);
