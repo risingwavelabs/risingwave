@@ -80,7 +80,12 @@ pub async fn handle_alter_table_column(
         .context("unable to parse original table definition")?
         .try_into()
         .unwrap();
-    let Statement::CreateTable { columns, source_schema, .. } = &mut definition else {
+    let Statement::CreateTable {
+        columns,
+        source_schema,
+        ..
+    } = &mut definition
+    else {
         panic!("unexpected statement: {:?}", definition);
     };
     let source_schema = source_schema
