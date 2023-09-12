@@ -16,7 +16,8 @@ use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use either::Either;
 use futures::{pin_mut, FutureExt, Stream, StreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
@@ -1178,34 +1179,91 @@ where
             .await
     }
 
+    // /// This function scans rows from the relational table with specific `pk_range` under the same
+    // /// `vnode`.
+    // pub async fn iter_row_with_pk_prefix_sub_range(
+    //     &self,
+    //     pk_prefix: impl Row,
+    //     sub_range: &(Bound<impl Row>, Bound<impl Row>),
+    //     prefetch_options: PrefetchOptions,
+    // ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+    //     let (sub_range_start_bytes, sub_range_end_bytes) =
+    //         prefix_range_to_memcomparable_v2(&self.pk_serde, sub_range);
+    //     // let (sub_range_start_bytes, sub_range_end_bytes) =
+    //     // sub_range;
+    //     let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
+    //     let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
+
+    //     let pk_prefix_bytes = Bytes::copy_from_slice(&encoded_prefix);
+    //     let start_range = match sub_range_start_bytes {
+    //         Included(start_bytes) => {
+    //             Bound::Included((encoded_prefix.chain(start_bytes)).into_iter().collect())
+    //         }
+    //         Excluded(start_bytes) => {
+    //             Bound::Excluded(encoded_prefix.chain(start_bytes).into_iter().collect())
+    //         }
+    //         Unbounded => Bound::Included(encoded_prefix),
+    //     };
+
+    //     let end_range = match sub_range_end_bytes {
+    //         Included(end_bytes) => {
+    //             Bound::Included((pk_prefix_bytes.chain(end_bytes)).into_iter().collect())
+    //         }
+    //         Excluded(end_bytes) => {
+    //             Bound::Excluded(pk_prefix_bytes.chain(end_bytes).into_iter().collect())
+    //         }
+    //         Unbounded => end_bound_of_prefix(&pk_prefix_bytes),
+    //     };
+    //     println!("这里{:?}", (start_range.clone(), end_range.clone()));
+    //     Ok(deserialize_keyed_row_stream(
+    //         self.iter_kv((start_range, end_range), None, prefetch_options)
+    //             .await?,
+    //         &self.row_serde,
+    //     ))
+    // }
+
+
+
     /// This function scans rows from the relational table with specific `pk_range` under the same
     /// `vnode`.
-    pub async fn iter_row_with_pk_prefix_sub_range(
+    pub async fn xxx(
         &self,
         pk_prefix: impl Row,
         sub_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
-        // let (sub_range_start, sub_range_end) = prefix_range_to_memcomparable(&self.pk_serde, sub_range);
-        let (sub_range_start, sub_range_end) = sub_range;
-        let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
-        let start_range = match sub_range_end {
-            Included(sub_range_start) => {
-                Bound::Included(pk_prefix.chain(*sub_range_start))
-            },
-            Excluded(start) =>  Bound::Excluded(pk_prefix.chain(*start)),
-            Unbounded => Bound::Included(pk_prefix.chain()),
+        let (start, end) = sub_range;
+        let pk_prefix = pk_prefix.to_owned_row();
+        let pk_prefix_v2 = pk_prefix.clone();
+        let pk_prefix_v3 = pk_prefix.clone();
+        let start_range = match start {
+            Included(start_bytes) => {
+                Bound::Included((&pk_prefix.chain(start_bytes)).to_owned_row())
+            }
+            Excluded(start_bytes) => {
+                Bound::Excluded((&pk_prefix.chain(start_bytes)).to_owned_row())
+            }
+            Unbounded => Bound::Included(pk_prefix),
         };
 
-        // let end_range = match sub_range_end {
-        //     Included(sub_range_end) => todo!(),
-        //     Excluded(sub_range_end) => todo!(),
-        //     Unbounded => todo!(),
-        // };
-
-        todo!()
+        let end_range = match end {
+            Included(start_bytes) => {
+                Bound::Included((&pk_prefix_v2.chain(start_bytes)).to_owned_row())
+            }
+            Excluded(start_bytes) => {
+                Bound::Excluded((&pk_prefix_v2.chain(start_bytes)).to_owned_row())
+            }
+            Unbounded => Unbounded,
+        };
+        println!("这里range {:?}", (start_range.clone(), end_range.clone()));
+        let a = prefix_range_to_memcomparable_v2(&self.pk_serde,&(start_range, end_range), pk_prefix_v3);
+        
+        Ok(deserialize_keyed_row_stream(
+            self.iter_kv(a, None, prefetch_options)
+                .await?,
+            &self.row_serde,
+        ))
     }
-
 
     /// This function scans raw key-values from the relational table with specific `pk_range` under
     /// the same `vnode`.
@@ -1314,6 +1372,17 @@ pub fn prefix_range_to_memcomparable(
     )
 }
 
+pub fn prefix_range_to_memcomparable_v2(
+    pk_serde: &OrderedRowSerde,
+    range: &(Bound<impl Row>, Bound<impl Row>),
+    pk_prefix: OwnedRow
+) -> (Bound<Bytes>, Bound<Bytes>) {
+    (
+        to_memcomparable_v2(pk_serde, &range.0, false, pk_prefix.clone()),
+        to_memcomparable_v2(pk_serde, &range.1, true, pk_prefix),
+    )
+}
+
 fn to_memcomparable<R: Row>(
     pk_serde: &OrderedRowSerde,
     bound: &Bound<R>,
@@ -1325,6 +1394,47 @@ fn to_memcomparable<R: Row>(
     };
     match bound {
         Unbounded => Unbounded,
+        Included(r) => {
+            let serialized = serialize_pk_prefix(r);
+            if is_upper {
+                end_bound_of_prefix(&serialized)
+            } else {
+                Included(serialized)
+            }
+        }
+        Excluded(r) => {
+            let serialized = serialize_pk_prefix(r);
+            if !is_upper {
+                // if lower
+                start_bound_of_excluded_prefix(&serialized)
+            } else {
+                Excluded(serialized)
+            }
+        }
+    }
+}
+
+
+fn to_memcomparable_v2<R: Row>(
+    pk_serde: &OrderedRowSerde,
+    bound: &Bound<R>,
+    is_upper: bool,
+    pk_prefix1: OwnedRow,
+) -> Bound<Bytes> {
+    let serialize_pk_prefix = |pk_prefix: &R| {
+        let prefix_serializer = pk_serde.prefix(pk_prefix.len());
+        serialize_pk(pk_prefix, &prefix_serializer)
+    };
+    match bound {
+        Unbounded => {
+            if is_upper {
+                let prefix_serializer = pk_serde.prefix(pk_prefix1.len());
+                let serialized = serialize_pk(pk_prefix1, &prefix_serializer);
+                Included(serialized)
+            } else {
+                Unbounded
+            }
+        },
         Included(r) => {
             let serialized = serialize_pk_prefix(r);
             if is_upper {
