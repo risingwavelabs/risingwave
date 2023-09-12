@@ -356,14 +356,15 @@ mod tests {
             (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
             (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
             (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
+            ("a_deprecated_param", "foo"),
         ];
 
         // To kv - missing field.
         let p = PbSystemParams::default();
         assert!(system_params_to_kv(&p).is_err());
 
-        // From kv - unrecognized field.
-        assert!(system_params_from_kv(vec![("?", "?")]).is_err());
+        // From kv - unrecognized field should be ignored
+        assert!(system_params_from_kv(vec![("?", "?")]).is_ok());
 
         // Deser & ser.
         let p = system_params_from_kv(kvs).unwrap();
