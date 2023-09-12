@@ -86,7 +86,7 @@ test_replication_with_column_pruning() {
    run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert_seed.sql
 
    # Provide snapshot
-   for i in $(seq 1 19)
+   for i in $(seq 1 18)
    do
      run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert_recurse.sql
    done

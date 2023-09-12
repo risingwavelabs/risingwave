@@ -1199,32 +1199,6 @@ where
         Ok(self.local_store.iter(key_range, read_options).await?)
     }
 
-    /// Replicated tables might not have all columns in the output, so we need to project the
-    /// output.
-    /// Instead of doing this in the `iter_with_pk_range` function, we do it in a separate function,
-    /// since `RowStream` is an TAIT, hence we can't return a `RowStream` with a different type.
-    pub async fn iter_with_pk_range_and_output_indices(
-        &self,
-        pk_range: &(Bound<OwnedRow>, Bound<OwnedRow>),
-        // Optional vnode that returns an iterator only over the given range under that vnode.
-        // For now, we require this parameter, and will panic. In the future, when `None`, we can
-        // iterate over each vnode that the `StateTableInner` owns.
-        vnode: VirtualNode,
-        // TODO(kwannoel): Refactor `PrefetchOptions` -> `StorageIterOptions`, so we can include
-        // epoch?
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<ProjectedRowStream<'_, S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>>
-    {
-        assert!(
-            IS_REPLICATED,
-            "Only replicated tables can use this function"
-        );
-        Ok(self
-            .iter_row_with_pk_range(pk_range, vnode, prefetch_options)
-            .await?
-            .map(|row| row.map(|r| r.into_owned_row().project(&self.output_indices))))
-    }
-
     async fn iter_kv_with_pk_prefix(
         &self,
         pk_prefix: impl Row,
@@ -1342,14 +1316,6 @@ where
     }
 }
 
-pub type ProjectedRowStream<
-    'a,
-    S: StateStore,
-    SD: ValueRowSerde + 'a,
-    const IS_REPLICATED: bool,
-    W: WatermarkBufferStrategy + 'a,
-    const USE_WATERMARK_CACHE: bool,
-> = impl Stream<Item = StreamExecutorResult<Project<'a, OwnedRow>>> + 'a;
 pub type KeyedRowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
     impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
 
