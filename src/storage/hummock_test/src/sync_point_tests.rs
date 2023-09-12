@@ -368,8 +368,8 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .unwrap();
     local
         .flush(vec![(
-            Bound::Included(Bytes::from(b"ggg".as_slice())),
-            Bound::Excluded(Bytes::from(b"hhh".as_slice())),
+            Bound::Included(Bytes::from(b"\0\0ggg".as_slice())),
+            Bound::Excluded(Bytes::from(b"\0\0hhh".as_slice())),
         )])
         .await
         .unwrap();
@@ -398,8 +398,8 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .unwrap();
     local
         .flush(vec![(
-            Bound::Included(Bytes::from(b"jjj".as_slice())),
-            Bound::Excluded(Bytes::from(b"kkk".as_slice())),
+            Bound::Included(Bytes::from(b"\0\0jjj".as_slice())),
+            Bound::Excluded(Bytes::from(b"\0\0kkk".as_slice())),
         )])
         .await
         .unwrap();
