@@ -115,17 +115,17 @@ impl<S: StateStore> DedupExecutor<S> {
                                 if is_vis {
                                     // The key doesn't exist before. The row should be visible.
                                     vis_builder.append(true);
-                                    cnt_builder.append(cnt);
+                                    cnt_builder.append(Some(cnt));
                                 } else {
                                     // The key exists before. The row shouldn't be visible.
                                     vis_builder.append(false);
-                                    cnt_builder.append(0);
+                                    cnt_builder.append(Some(0));
                                 }
                             }
                             None => {
                                 // The row is originally invisible.
                                 vis_builder.append(false);
-                                cnt_builder.append(0);
+                                cnt_builder.append(Some(0));
                             }
                         }
                     }
@@ -138,12 +138,10 @@ impl<S: StateStore> DedupExecutor<S> {
                         let chunk =
                             StreamChunk::new(ops.clone(), columns.clone(), Some(vis.clone()));
 
-                        let state_columns = columns.append(Arc::new(cnt));
-                        self.state_table.write_chunk(StreamChunk::new(
-                            ops,
-                            state_columns,
-                            Some(vis),
-                        ));
+                        columns.push(Arc::new(cnt.into()));
+                        let state_chunk = StreamChunk::new(ops, columns, Some(vis));
+                        println!("write chunk: {}", state_chunk.to_pretty());
+                        self.state_table.write_chunk(state_chunk);
 
                         commit_data = true;
 
@@ -203,7 +201,7 @@ impl<S: StateStore> DedupExecutor<S> {
                 let (key, value) = result;
                 if let Some(v) = value? {
                     // Only insert into the cache when we have this key in storage.
-                    tracing::info!("populate cache with key: {:?}, value {:?}", key, v);
+                    println!("populate cache with key: {:?}, value {:?}", key, v);
                     let dup_cnt = 0;
                     self.cache.insert(key.to_owned(), dup_cnt);
                 }
@@ -254,6 +252,7 @@ mod tests {
         let column_descs = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),
         ];
         let schema = Schema::new(vec![
             Field::unnamed(DataType::Int64),

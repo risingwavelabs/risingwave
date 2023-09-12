@@ -113,7 +113,7 @@ mod tests {
     fn test_dedup_cache() {
         let mut cache = DedupCache::new(Arc::new(AtomicU64::new(10000)), MetricsInfo::for_test());
 
-        cache.insert(10);
+        cache.insert(10, 1);
         assert!(cache.contains(&10));
         assert!(!cache.dedup_insert(&Op::Insert, 10).0);
 
