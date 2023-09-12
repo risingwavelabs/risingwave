@@ -33,16 +33,15 @@ pub type SystemParamsError = String;
 
 type Result<T> = core::result::Result<T, SystemParamsError>;
 
-/// Only includes undeprecated params.
+/// Define all system parameters here.
+///
 /// Macro input is { field identifier, type, default value, is mutable }
 ///
 /// Note:
 /// - Having `None` as default value means the parameter must be initialized.
 #[macro_export]
-macro_rules! for_all_undeprecated_params {
-    ($macro:ident
-        // Hack: match trailing fields to implement `for_all_params`
-        $(, { $field:ident, $type:ty, $default:expr, $is_mutable:expr })*) => {
+macro_rules! for_all_params {
+    ($macro:ident) => {
         $macro! {
             { barrier_interval_ms, u32, Some(1000_u32), true },
             { checkpoint_frequency, u64, Some(1_u64), true },
@@ -56,19 +55,7 @@ macro_rules! for_all_undeprecated_params {
             { backup_storage_directory, String, Some("backup".to_string()), false },
             { max_concurrent_creating_streaming_jobs, u32, Some(1_u32), true },
             { pause_on_next_bootstrap, bool, Some(false), true },
-            $({ $field, $type, $default, $is_mutable },)*
         }
-    };
-}
-
-/// Includes all params.
-/// Macro input is same as `for_all_undeprecated_params`.
-macro_rules! for_all_params {
-    ($macro:ident) => {
-        for_all_undeprecated_params!(
-            $macro /* Define future deprecated params here, such as
-                    * ,{ backup_storage_directory, String, "backup".to_string(), true } */
-        );
     };
 }
 
@@ -106,7 +93,7 @@ macro_rules! def_default {
     };
 }
 
-for_all_undeprecated_params!(def_default);
+for_all_params!(def_default);
 
 macro_rules! impl_check_missing_fields {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
@@ -186,10 +173,9 @@ macro_rules! impl_system_params_from_kv {
                         std::str::from_utf8(v.as_ref()).unwrap().to_string()
                     )
                 }).collect::<Vec<_>>();
-                Err(format!("unrecognized system params {:?}", unrecognized_params))
-            } else {
-                Ok(ret)
+                tracing::warn!("unrecognized system params {:?}", unrecognized_params);
             }
+            Ok(ret)
         }
     };
 }
@@ -317,12 +303,12 @@ macro_rules! impl_system_params_for_test {
 
 for_all_params!(impl_system_params_from_kv);
 for_all_params!(impl_is_mutable);
-for_all_undeprecated_params!(impl_derive_missing_fields);
-for_all_undeprecated_params!(impl_check_missing_fields);
-for_all_undeprecated_params!(impl_system_params_to_kv);
-for_all_undeprecated_params!(impl_set_system_param);
-for_all_undeprecated_params!(impl_default_validation_on_set);
-for_all_undeprecated_params!(impl_system_params_for_test);
+for_all_params!(impl_derive_missing_fields);
+for_all_params!(impl_check_missing_fields);
+for_all_params!(impl_system_params_to_kv);
+for_all_params!(impl_set_system_param);
+for_all_params!(impl_default_validation_on_set);
+for_all_params!(impl_system_params_for_test);
 
 struct OverrideValidateOnSet;
 impl ValidateOnSet for OverrideValidateOnSet {
@@ -345,7 +331,7 @@ impl ValidateOnSet for OverrideValidateOnSet {
     }
 }
 
-for_all_undeprecated_params!(impl_default_from_other_params);
+for_all_params!(impl_default_from_other_params);
 
 struct OverrideFromParams;
 impl FromParams for OverrideFromParams {}
