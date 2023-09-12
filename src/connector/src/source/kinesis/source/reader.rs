@@ -18,6 +18,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use aws_sdk_kinesis::error::{DisplayErrorContext, SdkError};
 use aws_sdk_kinesis::operation::get_records::{GetRecordsError, GetRecordsOutput};
+use aws_sdk_kinesis::primitives::DateTime;
 use aws_sdk_kinesis::types::ShardIteratorType;
 use aws_sdk_kinesis::Client as KinesisClient;
 use futures_async_stream::try_stream;
@@ -76,9 +77,16 @@ impl SplitReader for KinesisSplitReader {
                             return Err(anyhow!("scan_startup_sequence_number is required"));
                         }
                     }
+                    "timestamp" => {
+                        if let Some(ts) = &properties.timestamp_offset {
+                            KinesisOffset::Timestamp(*ts)
+                        } else {
+                            return Err(anyhow!("scan.startup.timestamp.millis is required"));
+                        }
+                    }
                     _ => {
                         return Err(anyhow!(
-                            "invalid scan_startup_mode, accept earliest/latest/sequence_number"
+                            "invalid scan_startup_mode, accept earliest/latest/sequence_number/timestamp"
                         ))
                     }
                 },
@@ -208,27 +216,37 @@ impl CommonSplitReader for KinesisSplitReader {
 }
 impl KinesisSplitReader {
     async fn new_shard_iter(&mut self) -> Result<()> {
-        let (starting_seq_num, iter_type) = if self.latest_offset.is_some() {
+        let (starting_seq_num, start_timestamp, iter_type) = if self.latest_offset.is_some() {
             (
                 self.latest_offset.clone(),
+                None,
                 ShardIteratorType::AfterSequenceNumber,
             )
         } else {
             match &self.start_position {
-                KinesisOffset::Earliest => (None, ShardIteratorType::TrimHorizon),
-                KinesisOffset::SequenceNumber(seq) => {
-                    (Some(seq.clone()), ShardIteratorType::AfterSequenceNumber)
-                }
-                KinesisOffset::Latest => (None, ShardIteratorType::Latest),
+                KinesisOffset::Earliest => (None, None, ShardIteratorType::TrimHorizon),
+                KinesisOffset::SequenceNumber(seq) => (
+                    Some(seq.clone()),
+                    None,
+                    ShardIteratorType::AfterSequenceNumber,
+                ),
+                KinesisOffset::Latest => (None, None, ShardIteratorType::Latest),
+                KinesisOffset::Timestamp(ts) => (
+                    None,
+                    Some(DateTime::from_millis(*ts)),
+                    ShardIteratorType::AtTimestamp,
+                ),
                 _ => unreachable!(),
             }
         };
 
+        // `starting_seq_num` and `starting_timestamp` will not be both set
         async fn get_shard_iter_inner(
             client: &KinesisClient,
             stream_name: &str,
             shard_id: &str,
             starting_seq_num: Option<String>,
+            starting_timestamp: Option<DateTime>,
             iter_type: ShardIteratorType,
         ) -> Result<String> {
             let resp = client
@@ -237,6 +255,7 @@ impl KinesisSplitReader {
                 .shard_id(shard_id)
                 .shard_iterator_type(iter_type)
                 .set_starting_sequence_number(starting_seq_num)
+                .set_timestamp(starting_timestamp)
                 .send()
                 .await?;
 
@@ -256,6 +275,7 @@ impl KinesisSplitReader {
                         &self.stream_name,
                         &self.shard_id,
                         starting_seq_num.clone(),
+                        start_timestamp,
                         iter_type.clone(),
                     )
                 },
@@ -311,6 +331,7 @@ mod tests {
                 // redundant seq number
                 "49629139817504901062972448413535783695568426186596941842".to_string(),
             ),
+            timestamp_offset: None,
         };
         let client = KinesisSplitReader::new(
             properties,
@@ -344,6 +365,7 @@ mod tests {
 
             scan_startup_mode: None,
             seq_offset: None,
+            timestamp_offset: None,
         };
 
         let trim_horizen_reader = KinesisSplitReader::new(

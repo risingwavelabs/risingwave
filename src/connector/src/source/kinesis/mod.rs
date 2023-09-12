@@ -25,13 +25,16 @@ pub const KINESIS_CONNECTOR: &str = "kinesis";
 #[derive(Clone, Debug, Deserialize)]
 pub struct KinesisProperties {
     #[serde(rename = "scan.startup.mode", alias = "kinesis.scan.startup.mode")]
-    // accepted values: "latest", "earliest", "sequence_number"
+    // accepted values: "latest", "earliest", "sequence_number", "timestamp"
     pub scan_startup_mode: Option<String>,
     #[serde(
         rename = "scan.startup.sequence_number",
         alias = "kinesis.scan.startup.sequence_number"
     )]
     pub seq_offset: Option<String>,
+
+    #[serde(rename = "scan.startup.timestamp.millis")]
+    pub timestamp_offset: Option<i64>,
 
     #[serde(flatten)]
     pub common: KinesisCommon,
