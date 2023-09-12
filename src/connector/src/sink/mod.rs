@@ -47,10 +47,12 @@ pub use tracing;
 
 use self::catalog::SinkType;
 use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
+use self::doris::{DorisConfig, DorisSink};
 use self::iceberg::{IcebergSink, ICEBERG_SINK, REMOTE_ICEBERG_SINK};
 use crate::sink::boxed::BoxSink;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::clickhouse::CLICKHOUSE_SINK;
+use crate::sink::doris::DORIS_SINK;
 use crate::sink::iceberg::{IcebergConfig, RemoteIcebergConfig, RemoteIcebergSink};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
@@ -282,6 +284,7 @@ pub enum SinkConfig {
     RemoteIceberg(RemoteIcebergConfig),
     BlackHole,
     ClickHouse(Box<ClickHouseConfig>),
+    Doris(Box<DorisConfig>),
     Nats(NatsConfig),
     #[cfg(any(test, madsim))]
     Test,
@@ -352,6 +355,9 @@ impl SinkConfig {
             CLICKHOUSE_SINK => Ok(SinkConfig::ClickHouse(Box::new(
                 ClickHouseConfig::from_hashmap(properties)?,
             ))),
+            DORIS_SINK => Ok(SinkConfig::Doris(Box::new(
+                DorisConfig::from_hashmap(properties)?,
+            ))),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
             REMOTE_ICEBERG_SINK => Ok(SinkConfig::RemoteIceberg(
                 RemoteIcebergConfig::from_hashmap(properties)?,
@@ -381,6 +387,7 @@ pub enum SinkImpl {
     BlackHole(BlackHoleSink),
     Kinesis(KinesisSink),
     ClickHouse(ClickHouseSink),
+    Doris(DorisSink),
     Iceberg(IcebergSink),
     Nats(NatsSink),
     RemoteIceberg(RemoteIcebergSink),
@@ -400,6 +407,7 @@ impl SinkImpl {
             SinkImpl::Nats(_) => "nats",
             SinkImpl::RemoteIceberg(_) => "iceberg",
             SinkImpl::TestSink(_) => "test",
+            SinkImpl::Doris(_) => "doris",
         }
     }
 }
@@ -416,6 +424,7 @@ macro_rules! dispatch_sink {
             SinkImpl::BlackHole($sink) => $body,
             SinkImpl::Kinesis($sink) => $body,
             SinkImpl::ClickHouse($sink) => $body,
+            SinkImpl::Doris($sink) => $body,
             SinkImpl::Iceberg($sink) => $body,
             SinkImpl::Nats($sink) => $body,
             SinkImpl::RemoteIceberg($sink) => $body,
@@ -449,6 +458,10 @@ impl SinkImpl {
             }
             #[cfg(any(test, madsim))]
             SinkConfig::Test => SinkImpl::TestSink(build_test_sink(param)?),
+            SinkConfig::Doris(cfg) => SinkImpl::Doris(DorisSink::new(*cfg,
+                param.schema(),
+                param.pk_indices,
+                param.sink_type.is_append_only())?),
         })
     }
 }

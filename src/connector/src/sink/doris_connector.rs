@@ -16,26 +16,28 @@ use core::mem;
 use core::time::Duration;
 use std::collections::HashMap;
 
+use base64::Engine;
+use base64::engine::general_purpose;
 use bytes::{BufMut, Bytes, BytesMut};
 use hyper::body::Sender;
 use hyper::client::HttpConnector;
-use hyper::{body, Body, Client as HttpClient, Request, StatusCode, Uri};
+use hyper::{body, Body, Client as HttpClient, Request, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::task::JoinHandle;
 
 use super::{Result, SinkError};
 
-const BUFFER_SIZE: usize = 128 * 1024;
+const BUFFER_SIZE: usize = 1 * 1024;
 const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024;
-pub struct DorisInsert {
+pub struct DorisInsertClient {
     url: String,
     header: HashMap<String, String>,
     sender: Option<Sender>,
     join_handle: Option<JoinHandle<Result<DorisInsertResultResponse>>>,
     buffer: BytesMut,
 }
-impl DorisInsert {
+impl DorisInsertClient {
     pub fn new(url: String,db: String, table: String) -> Self {
         let url = format!("{}/api/{}/{}/_stream_load", url, db, table);
         Self {
@@ -78,7 +80,7 @@ impl DorisInsert {
     }
 
     pub fn set_user_password(mut self, user: String, password: String) -> Self {
-        let auth = format!("Basic {}", base64::encode(format!("{}:{}", user, password)));
+        let auth = format!("Basic {}", general_purpose::STANDARD_NO_PAD.encode(format!("{}:{}", user, password)));
         self.header.insert("Authorization".to_string(), auth);
         self
     }
@@ -106,7 +108,7 @@ impl DorisInsert {
         self
     }
 
-    pub fn build(mut self) -> Result<Self> {
+    pub fn build(&mut self) -> Result<DorisInsert> {
         let mut builder = Request::put(self.url.as_str());
         for (k, v) in &self.header {
             builder = builder.header(k, v);
@@ -126,7 +128,7 @@ impl DorisInsert {
         let handle: JoinHandle<Result<DorisInsertResultResponse>> = tokio::spawn(async move {
             let response = feature.await.map_err(|err| SinkError::Http(err.into()))?;
             let status = response.status();
-            // println!("{:?}",response.headers().clone());
+            // println!("aaa{:?}",response.headers().clone());
             let raw_string = String::from_utf8(match body::to_bytes(response.into_body()).await {
                 Ok(bytes) => bytes.to_vec(),
                 Err(err) => return Err(SinkError::Http(err.into())),
@@ -145,12 +147,31 @@ impl DorisInsert {
                 )))
             }
         });
-        self.sender = Some(sender);
-        self.join_handle = Some(handle);
-        Ok(self)
+        
+        Ok(DorisInsert::new(sender, handle))
+    }
+
+}
+
+pub struct DorisInsert {
+    sender: Option<Sender>,
+    join_handle:Option<JoinHandle<Result<DorisInsertResultResponse>>>,
+    buffer: BytesMut,
+    // i: i128,
+}
+impl DorisInsert {
+    pub fn new(sender: Sender, join_handle: JoinHandle<Result<DorisInsertResultResponse>> ) -> Self {
+        Self {
+            sender: Some(sender),
+            join_handle: Some(join_handle),
+            buffer: BytesMut::with_capacity(BUFFER_SIZE),
+            // i: 0,
+        }
     }
 
     async fn send_chunk(&mut self) -> Result<()> {
+        // self.i = self.i + 1;
+        // println!("{:?}", self.i);
         if self.sender.is_none() {
             return Ok(());
         }
@@ -218,6 +239,7 @@ impl DorisInsert {
         self.sender = None;
         self.wait_handle().await
     }
+
 }
 
 pub struct DorisGet {
@@ -250,7 +272,7 @@ impl DorisGet {
         let uri = format!("{}/api/{}/{}/_schema", self.url, self.db, self.table);
         let builder = Request::get(uri);
         let response = builder
-            .header("Authorization", format!("Basic {}", base64::encode(format!("{}:{}",self.user, self.password))))
+            .header("Authorization", format!("Basic {}", general_purpose::STANDARD_NO_PAD.encode(format!("{}:{}", self.user, self.password))))
             .body(Body::empty())
             .map_err(|err| SinkError::Http(err.into()))?;
         // println!("{:?}",response);
@@ -288,7 +310,7 @@ pub struct DorisSchema {
     status: i32,
     #[serde(rename = "keysType")]
     keys_type: String,
-    properties: Vec<DorisField>,
+    pub properties: Vec<DorisField>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DorisField {
@@ -345,54 +367,39 @@ mod test {
     use std::collections::HashMap;
 
     use chrono::{Local, DateTime};
-    use rdkafka::message::ToBytes;
 
-    use crate::sink::doris_connector::DorisInsert;
+    use crate::sink::doris_connector::{DorisInsert, DorisInsertClient};
 
     use super::DorisGet;
 
 
     #[tokio::test]
     async fn test_doris_connected() {
-        let a = DorisGet::new("http://127.0.0.1:8030".to_string(), "example_tbl".to_string(), "demo".to_string(), "xxhx".to_string(), "123456".to_string());
+        let a = DorisGet::new("http://127.0.0.1:8030".to_string(), "example_tbl2".to_string(), "demo".to_string(), "xxhx".to_string(), "123456".to_string());
         let b= a.get_schema_from_doris().await.unwrap();
-        // println!("{:?}",b);
+        println!("{:?}",b);
     }
 
     #[tokio::test]
     async fn test_doris_insert() {
-
-        //`user_id` LARGEINT NOT NULL COMMENT "用户id",
-        // `date` DATE NOT NULL COMMENT "数据灌入日期时间",
-        // `city` VARCHAR(20) COMMENT "用户所在城市",
-        // `age` SMALLINT COMMENT "用户年龄",
-        // `sex` TINYINT COMMENT "用户性别",
-        // `last_visit_date` DATETIME REPLACE DEFAULT "1970-01-01 00:00:00" COMMENT "用户最后一次访问时间",
-        // `cost` BIGINT SUM DEFAULT "0" COMMENT "用户总消费",
-        // `max_dwell_time` INT MAX DEFAULT "0" COMMENT "用户最大停留时间",
-        // `min_dwell_time` INT MIN DEFAULT "99999" COMMENT "用户最小停留时间"
-            //10000,2017-10-01,北京,20,0,2017-10-01 06:00:00,20,10,10
-        for i in 0..100{
-            let mut map = HashMap::new();
+        let mut map = HashMap::new();
             map.insert("format".to_string(), "json".to_string());
             map.insert("read_json_by_line".to_string(), "true".to_string());
-            let mut a = DorisInsert::new("http://127.0.0.1:8040".to_string(),"demo".to_string(), "example_tbl".to_string())
+            let mut a = DorisInsertClient::new("http://127.0.0.1:8040".to_string(),"demo".to_string(), "example_tbl".to_string())
             .add_common_header()
             .set_user_password("xxhx".to_string(), "123456".to_string())
             // .set_label("1".to_string())
-            .set_properties(map).build().unwrap();
+            .set_properties(map);
+        for i in 0..100{
+            let mut b = a.build().unwrap(); 
             for j in 0..10000{
                 let local_time: DateTime<Local> = Local::now();
                 let format = "%Y-%m-%d %H:%M:%S";
                 let formatted_time = local_time.format(format).to_string();
                 let json = format!( "{{\"user_id\": {:?}, \"date\":\"2017-10-01\" , \"city\":\"北京\", \"age\": 20,\"sex\": 0, \"last_visit_date\":\"{}\" , \"cost\":20,\"max_dwell_time\":10,\"min_dwell_time\":10}}\n",i*10000+j,formatted_time); 
-                a.write(bytes::Bytes::from(json)).await.unwrap();
+                b.write(bytes::Bytes::from(json)).await.unwrap();
             }
-            // println!("{:?}",i);
-            a.finish().await.unwrap();
+            b.finish().await.unwrap();
         }
-        // let json = "{\"user_id\": 15651, \"date\":\"2017-10-01\" , \"city\":\"北京\", \"age\": 20,\"sex\": 0, \"last_visit_date\":\"2017-10-01 06:00:00\" , \"cost\":20,\"max_dwell_time\":10,\"min_dwell_time\":10}"; 
-        // a.write(json.to_bytes().into()).await.unwrap();
-        // a.finish().await.unwrap();
     }
 }

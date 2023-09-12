@@ -345,7 +345,7 @@ pub struct DorisCommon {
 }
 
 impl DorisCommon{
-    pub(crate) fn build_client(&self) -> anyhow::Result<DorisGet> {
+    pub(crate) fn build_get_client(&self) -> anyhow::Result<DorisGet> {
         Ok(DorisGet::new(self.url.clone(),self.table.clone(),self.database.clone(),self.user.clone(),self.password.clone()))
     }
 }
