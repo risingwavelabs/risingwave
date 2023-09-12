@@ -722,7 +722,7 @@ impl S3ObjectStore {
             .send()
             .await;
         if let Ok(config) = &get_config_result {
-            for rule in config.rules().unwrap_or_default().iter() {
+            for rule in config.rules().unwrap_or_default() {
                 if matches!(rule.status().unwrap(), ExpirationStatus::Enabled)
                     && rule.abort_incomplete_multipart_upload().is_some()
                 {

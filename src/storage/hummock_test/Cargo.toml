@@ -65,3 +65,6 @@ required-features = ["test"]
 [[bin]]
 name = "replay"
 path = "src/bin/replay/main.rs"
+
+[lints]
+workspace = true

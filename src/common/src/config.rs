@@ -370,7 +370,7 @@ pub struct ServerConfig {
     pub unrecognized: Unrecognized<Self>,
 
     /// Enable heap profile dump when memory usage is high.
-    #[serde(default = "default::server::auto_dump_heap_profile")]
+    #[serde(default)]
     pub auto_dump_heap_profile: AutoDumpHeapProfileConfig,
 }
 
@@ -660,16 +660,17 @@ impl AsyncStackTraceOption {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct AutoDumpHeapProfileConfig {
+    /// Enable to auto dump heap profile when memory usage is high
+    #[serde(default = "default::auto_dump_heap_profile::enabled")]
+    pub enabled: bool,
+
+    /// The directory to dump heap profile. If empty, the prefix in `MALLOC_CONF` will be used
     #[serde(default = "default::auto_dump_heap_profile::dir")]
     pub dir: String,
+
+    /// The proportion (number between 0 and 1) of memory usage to trigger heap profile dump
     #[serde(default = "default::auto_dump_heap_profile::threshold")]
     pub threshold: f32,
-}
-
-impl AutoDumpHeapProfileConfig {
-    pub fn enabled(&self) -> bool {
-        !self.dir.is_empty()
-    }
 }
 
 serde_with::with_prefix!(streaming_prefix "stream_");
@@ -738,8 +739,9 @@ pub struct BatchDeveloperConfig {
     pub chunk_size: usize,
 }
 
-/// The section `[system]` in `risingwave.toml`. This section is only for testing purpose and should
-/// not be documented.
+/// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
+/// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
+/// documented.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct SystemConfig {
     /// The interval of periodic barrier.
@@ -780,9 +782,6 @@ pub struct SystemConfig {
     #[serde(default = "default::system::backup_storage_directory")]
     pub backup_storage_directory: Option<String>,
 
-    #[serde(default = "default::system::telemetry_enabled")]
-    pub telemetry_enabled: Option<bool>,
-
     /// Max number of concurrent creating streaming jobs.
     #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
     pub max_concurrent_creating_streaming_jobs: Option<u32>,
@@ -793,6 +792,7 @@ pub struct SystemConfig {
 }
 
 impl SystemConfig {
+    #![allow(deprecated)]
     pub fn into_init_system_params(self) -> SystemParams {
         SystemParams {
             barrier_interval_ms: self.barrier_interval_ms,
@@ -805,9 +805,9 @@ impl SystemConfig {
             data_directory: self.data_directory,
             backup_storage_url: self.backup_storage_url,
             backup_storage_directory: self.backup_storage_directory,
-            telemetry_enabled: self.telemetry_enabled,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
             pause_on_next_bootstrap: self.pause_on_next_bootstrap,
+            telemetry_enabled: None, // deprecated
         }
     }
 }
@@ -910,7 +910,7 @@ pub mod default {
     }
 
     pub mod server {
-        use crate::config::{AutoDumpHeapProfileConfig, MetricLevel};
+        use crate::config::MetricLevel;
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
@@ -926,10 +926,6 @@ pub mod default {
 
         pub fn telemetry_enabled() -> bool {
             true
-        }
-
-        pub fn auto_dump_heap_profile() -> AutoDumpHeapProfileConfig {
-            Default::default()
         }
     }
 
@@ -1136,6 +1132,10 @@ pub mod default {
     }
 
     pub mod auto_dump_heap_profile {
+        pub fn enabled() -> bool {
+            true
+        }
+
         pub fn dir() -> String {
             "".to_string()
         }

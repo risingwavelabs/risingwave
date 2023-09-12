@@ -460,7 +460,7 @@ impl SstableMeta {
         buf.put_u32_le(MAGIC);
     }
 
-    pub fn decode(buf: &mut &[u8]) -> HummockResult<Self> {
+    pub fn decode(buf: &[u8]) -> HummockResult<Self> {
         let mut cursor = buf.len();
 
         cursor -= 4;
@@ -594,7 +594,7 @@ mod tests {
         let sz = meta.encoded_size();
         let buf = meta.encode_to_bytes();
         assert_eq!(sz, buf.len());
-        let decoded_meta = SstableMeta::decode(&mut &buf[..]).unwrap();
+        let decoded_meta = SstableMeta::decode(&buf[..]).unwrap();
         assert_eq!(decoded_meta, meta);
     }
 }

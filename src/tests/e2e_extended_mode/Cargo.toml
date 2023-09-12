@@ -27,3 +27,6 @@ tracing-subscriber = "0.3.17"
 [[bin]]
 name = "risingwave_e2e_extended_mode_test"
 path = "src/main.rs"
+
+[lints]
+workspace = true

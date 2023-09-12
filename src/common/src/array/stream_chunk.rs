@@ -374,7 +374,7 @@ impl From<OpsMut> for Arc<[Op]> {
 
 /// A mutable wrapper for `StreamChunk`. can only set the visibilities and ops in place, can not
 /// change the length.
-struct StreamChunkMut {
+pub struct StreamChunkMut {
     columns: Arc<[ArrayRef]>,
     ops: OpsMut,
     vis: VisMut,

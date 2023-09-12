@@ -84,7 +84,7 @@ impl UserManager {
                 for option in &grant_privilege_item.action_with_opts {
                     self.user_grant_relation
                         .entry(option.get_granted_by())
-                        .or_insert_with(HashSet::new)
+                        .or_default()
                         .insert(*user_id);
                 }
             }

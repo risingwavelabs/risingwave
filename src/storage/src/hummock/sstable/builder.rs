@@ -692,7 +692,7 @@ pub(super) mod tests {
         let (data, meta) = output.writer_output;
         assert_eq!(info.file_size, meta.estimated_size as u64);
         let offset = info.meta_offset as usize;
-        let meta2 = SstableMeta::decode(&mut &data[offset..]).unwrap();
+        let meta2 = SstableMeta::decode(&data[offset..]).unwrap();
         assert_eq!(meta2, meta);
     }
 
