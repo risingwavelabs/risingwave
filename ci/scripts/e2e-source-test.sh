@@ -7,6 +7,7 @@ source ci/scripts/common.sh
 
 # prepare environment
 export CONNECTOR_RPC_ENDPOINT="localhost:50051"
+export CONNECTOR_LIBS_PATH="./connector-node/libs"
 
 while getopts 'p:' opt; do
     case ${opt} in

@@ -19,6 +19,7 @@
 #![feature(result_option_inspect)]
 
 pub mod hummock_iterator;
+pub mod jvm_runtime;
 pub mod stream_chunk_iterator;
 
 use std::backtrace::Backtrace;
@@ -33,7 +34,9 @@ use jni::objects::{
     JValue, JValueGen, JValueOwned, ReleaseMode,
 };
 use jni::signature::ReturnType;
-use jni::sys::{jboolean, jbyte, jdouble, jfloat, jint, jlong, jshort, jsize, jvalue};
+use jni::sys::{
+    jboolean, jbyte, jdouble, jfloat, jint, jlong, jshort, jsize, jvalue, JNI_FALSE, JNI_TRUE,
+};
 use jni::JNIEnv;
 use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
@@ -293,6 +296,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(
     VirtualNode::COUNT as jint
 }
 
+#[cfg(not(madsim))]
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNew<'a>(
     env: EnvParam<'a>,
@@ -305,6 +309,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorN
     })
 }
 
+#[cfg(not(madsim))]
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNext<'a>(
     env: EnvParam<'a>,
@@ -820,6 +825,43 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowClose<'a>(
     pointer: Pointer<'a, JavaBindingRow>,
 ) {
     pointer.drop()
+}
+
+/// Send messages to the channel received by `CdcSplitReader`.
+/// If msg is null, just check whether the channel is closed.
+/// Return true if sending is successful, otherwise, return false so that caller can stop
+/// gracefully.
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToChannel<'a>(
+    env: EnvParam<'a>,
+    channel: Pointer<'a, GetEventStreamJniSender>,
+    msg: JByteArray<'a>,
+) -> jboolean {
+    execute_and_catch(env, move |env| {
+        // If msg is null means just check whether channel is closed.
+        if msg.is_null() {
+            if channel.as_ref().is_closed() {
+                return Ok(JNI_FALSE);
+            } else {
+                return Ok(JNI_TRUE);
+            }
+        }
+
+        let get_event_stream_response: GetEventStreamResponse =
+            Message::decode(to_guarded_slice(&msg, env)?.deref())?;
+
+        tracing::debug!("before send");
+        match channel.as_ref().blocking_send(get_event_stream_response) {
+            Ok(_) => {
+                tracing::debug!("send successfully");
+                Ok(JNI_TRUE)
+            }
+            Err(e) => {
+                tracing::debug!("send error.  {:?}", e);
+                Ok(JNI_FALSE)
+            }
+        }
+    })
 }
 
 #[cfg(test)]
