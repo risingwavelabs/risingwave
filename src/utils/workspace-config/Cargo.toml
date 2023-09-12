@@ -18,7 +18,7 @@ rw-dynamic-link = ["zstd-sys"]
 log = { version = "0.4", features = ["release_max_level_debug"] }
 # FIXME: 0.9.93 upgrades openssl-src to openssl@3, but we failed to build it.
 # fix it later https://github.com/risingwavelabs/risingwave/pull/12198
-openssl-sys = { version = "=0.9.92", optional = true, features = ["vendored"] }
+openssl-sys = { version = "=0.9.93", optional = true, features = ["vendored"] }
 sasl2-sys = { version = "0.1", optional = true, features = ["gssapi-vendored"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
 zstd-sys = { version = "2", optional = true, default-features = false, features = ["pkg-config"] }
