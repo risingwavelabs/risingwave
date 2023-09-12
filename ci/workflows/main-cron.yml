@@ -29,7 +29,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - GITHUB_TOKEN
-    timeout_in_minutes: 10
+    timeout_in_minutes: 12
     retry: *auto-retry
 
   - label: "build (deterministic simulation)"
