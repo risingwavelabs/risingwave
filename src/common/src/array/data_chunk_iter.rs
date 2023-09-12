@@ -149,7 +149,7 @@ impl<'a> RowRef<'a> {
     }
 
     pub fn with_columns(columns: &'a [ArrayRef], idx: usize) -> Self {
-        if columns.len() > 0 {
+        if !columns.is_empty() {
             assert!(idx < columns[0].len());
         }
         Self { columns, idx }

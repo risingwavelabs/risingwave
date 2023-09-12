@@ -70,6 +70,7 @@ impl Op {
         Ok(op)
     }
 
+    /// convert `UpdateDelete` to `Delete` and `UpdateInsert` to Insert
     pub fn normalize_update(self) -> Op {
         match self {
             Op::Insert => Op::Insert,
@@ -455,6 +456,11 @@ impl OpRowMutRef<'_> {
 
     pub fn row_ref(&self) -> RowRef<'_> {
         RowRef::with_columns(self.c.columns(), self.i)
+    }
+
+    /// return if the two row ref is in the same chunk
+    pub fn same_chunk(&self, other: &Self) -> bool {
+        self.c as *const _ == other.c as *const _
     }
 }
 

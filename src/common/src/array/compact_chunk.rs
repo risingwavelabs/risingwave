@@ -24,6 +24,13 @@ use super::stream_chunk::{OpRowMutRef, StreamChunkMut};
 use crate::array::{Op, RowRef, StreamChunk};
 use crate::row::{Project, RowExt};
 use crate::util::hash_util::Crc32FastBuilder;
+
+/// Compact the stream chunks with just modify the `Ops` and `Vis` of the chunk. Currently, two
+/// transformation will be applied
+/// - remove intermediate operation of the same key. The operations of the same stream key will only
+///   have three kind of patterns Insert, Delete or Update.
+/// - For the update (-old row, +old row), when old row is exactly same. The two rowOp will be
+///   removed.
 pub struct StreamChunkCompactor {
     chunks: Vec<StreamChunk>,
     stream_key: Vec<usize>,
@@ -141,6 +148,10 @@ impl StreamChunkCompactor {
                 if prev.row_ref() == latest.row_ref() {
                     prev.set_vis(false);
                     latest.set_vis(false);
+                } else if prev.same_chunk(&latest) && prev.index() + 1 == latest.index() {
+                    // TODO(st1page): use next_one check in bitmap
+                    prev.set_op(Op::UpdateDelete);
+                    latest.set_op(Op::UpdateInsert);
                 }
             }
         }
@@ -170,6 +181,8 @@ mod tests {
         let mut compactor = StreamChunkCompactor::new(pk_indices.to_vec());
         compactor.push_chunk(StreamChunk::from_pretty(
             " I I I
+            - 1 1 1
+            + 1 1 2
             + 2 5 7
             + 4 9 2
             - 2 5 7
@@ -191,6 +204,8 @@ mod tests {
             iter.next().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I I I
+                U- 1 1 1
+                U+ 1 1 2
                 + 4 9 2
                 + 2 5 5
                 - 6 6 9",
