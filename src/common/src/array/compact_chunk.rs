@@ -102,7 +102,7 @@ impl StreamChunkCompactor {
     /// and UPDATE DELETE will be converted to INSERT and DELETE, and dropped according to
     /// certain rules (see `merge_insert` and `merge_delete` for more details).
 
-    pub fn into_compacted_chunks(self) -> Vec<StreamChunk> {
+    pub fn into_compacted_chunks(self) -> impl Iterator<Item = StreamChunk> {
         let (chunks, key_indices) = self.into_inner();
 
         let estimate_size = chunks.iter().map(|c| c.cardinality()).sum();
@@ -155,18 +155,14 @@ impl StreamChunkCompactor {
                 }
             }
         }
-        chunks.into_iter().map(|(_, c)| c.into()).collect_vec()
+        chunks.into_iter().map(|(_, c)| c.into())
     }
 }
 
 pub fn merge_chunk_row(stream_chunk: StreamChunk, pk_indices: &[usize]) -> StreamChunk {
     let mut compactor = StreamChunkCompactor::new(pk_indices.to_vec());
     compactor.push_chunk(stream_chunk);
-    compactor
-        .into_compacted_chunks()
-        .into_iter()
-        .next()
-        .unwrap()
+    compactor.into_compacted_chunks().next().unwrap()
 }
 
 #[cfg(test)]
@@ -199,7 +195,7 @@ mod tests {
             + 2 2 2
             + 9 9 1",
         ));
-        let mut iter = compactor.into_compacted_chunks().into_iter();
+        let mut iter = compactor.into_compacted_chunks();
         assert_eq!(
             iter.next().unwrap().compact(),
             StreamChunk::from_pretty(
