@@ -235,7 +235,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
 
         // Ignore ready windows (all ready windows were outputted before).
         while partition.states.are_ready() {
-            partition.states.just_slide_forward();
+            partition.states.just_slide();
             partition.curr_row_buffer.pop_front();
         }
 
@@ -270,7 +270,8 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 &encoded_partition_key,
             )
             .await?;
-            let mut partition = vars.partitions.get_mut(&encoded_partition_key).unwrap();
+            let partition: &mut Partition =
+                &mut vars.partitions.get_mut(&encoded_partition_key).unwrap();
 
             // Materialize input to state table.
             this.state_table.insert(input_row);
@@ -308,7 +309,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 // The partition is ready to output, so we can produce a row.
 
                 // Get all outputs.
-                let ret_values = partition.states.curr_output()?;
+                let (ret_values, evict_hint) = partition.states.slide()?;
                 let curr_row = partition
                     .curr_row_buffer
                     .pop_front()
@@ -324,7 +325,6 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 }
 
                 // Evict unneeded rows from state table.
-                let evict_hint = partition.states.slide_forward();
                 if let StateEvictHint::CanEvict(keys_to_evict) = evict_hint {
                     for key in keys_to_evict {
                         let order_key = memcmp_encoding::decode_row(

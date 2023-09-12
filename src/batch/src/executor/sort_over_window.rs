@@ -190,12 +190,11 @@ impl SortOverWindowExecutor {
             }
         }
         for row in rows.drain(..) {
-            if let Some(chunk) =
-                chunk_builder.append_one_row(row.chain(OwnedRow::new(states.curr_output()?)))
+            if let Some(chunk) = chunk_builder
+                .append_one_row(row.chain(OwnedRow::new(states.slide_no_evict_hint()?)))
             {
                 yield chunk;
             }
-            states.just_slide_forward();
         }
     }
 }
