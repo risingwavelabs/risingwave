@@ -7516,6 +7516,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "parking_lot 0.12.1",
+ "parse-display",
  "prometheus",
  "prometheus-http-query",
  "prost",

@@ -10,7 +10,6 @@ pub struct Model {
     pub name: String,
     pub schema_id: i32,
     pub database_id: i32,
-    pub owner_id: i32,
     pub optional_associated_source_id: Option<i32>,
     pub table_type: Option<String>,
     pub columns: Option<Json>,
@@ -28,8 +27,6 @@ pub struct Model {
     pub dist_key_in_pk: Option<Vec<i32>>,
     pub dml_fragment_id: Option<i32>,
     pub cardinality: Option<Vec<i32>>,
-    pub initialized_at_epoch: Option<i32>,
-    pub created_at_epoch: Option<i32>,
     pub cleaned_by_watermark: Option<bool>,
     pub version: Option<Vec<i32>>,
 }
@@ -60,7 +57,13 @@ pub enum Relation {
         on_delete = "NoAction"
     )]
     Fragment1,
-    #[sea_orm(has_many = "super::object::Entity")]
+    #[sea_orm(
+        belongs_to = "super::object::Entity",
+        from = "Column::TableId",
+        to = "super::object::Column::Oid",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
     Object,
     #[sea_orm(
         belongs_to = "super::schema::Entity",
@@ -78,14 +81,6 @@ pub enum Relation {
         on_delete = "NoAction"
     )]
     Source,
-    #[sea_orm(
-        belongs_to = "super::user::Entity",
-        from = "Column::OwnerId",
-        to = "super::user::Column::UserId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    User,
 }
 
 impl Related<super::database::Entity> for Entity {
@@ -109,12 +104,6 @@ impl Related<super::schema::Entity> for Entity {
 impl Related<super::source::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Source.def()
-    }
-}
-
-impl Related<super::user::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::User.def()
     }
 }
 

@@ -5,11 +5,10 @@ use sea_orm::entity::prelude::*;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "database")]
 pub struct Model {
-    #[sea_orm(primary_key)]
+    #[sea_orm(primary_key, auto_increment = false)]
     pub database_id: i32,
     #[sea_orm(unique)]
     pub name: String,
-    pub owner_id: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -20,6 +19,14 @@ pub enum Relation {
     Function,
     #[sea_orm(has_many = "super::index::Entity")]
     Index,
+    #[sea_orm(
+        belongs_to = "super::object::Entity",
+        from = "Column::DatabaseId",
+        to = "super::object::Column::Oid",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    Object,
     #[sea_orm(has_many = "super::schema::Entity")]
     Schema,
     #[sea_orm(has_many = "super::sink::Entity")]
@@ -28,14 +35,6 @@ pub enum Relation {
     Source,
     #[sea_orm(has_many = "super::table::Entity")]
     Table,
-    #[sea_orm(
-        belongs_to = "super::user::Entity",
-        from = "Column::OwnerId",
-        to = "super::user::Column::UserId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    User,
     #[sea_orm(has_many = "super::view::Entity")]
     View,
 }
@@ -55,6 +54,12 @@ impl Related<super::function::Entity> for Entity {
 impl Related<super::index::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Index.def()
+    }
+}
+
+impl Related<super::object::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Object.def()
     }
 }
 
@@ -79,12 +84,6 @@ impl Related<super::source::Entity> for Entity {
 impl Related<super::table::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Table.def()
-    }
-}
-
-impl Related<super::user::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::User.def()
     }
 }
 

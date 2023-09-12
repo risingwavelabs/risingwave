@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use risingwave_pb::catalog::{PbDatabase, PbSchema};
-use sea_orm::ActiveValue;
+use parse_display::Display;
+use risingwave_pb::catalog::{PbDatabase, PbSchema, PbTable};
+use sea_orm::{ActiveValue, EntityTrait, ModelTrait};
 
-use crate::model_v2::{database, schema};
+use crate::model_v2::{database, object, schema};
 use crate::MetaError;
 
 mod catalog_controller;
@@ -28,12 +29,28 @@ impl From<sea_orm::DbErr> for MetaError {
     }
 }
 
-impl From<database::Model> for PbDatabase {
-    fn from(model: database::Model) -> Self {
+#[derive(Clone, Display, Debug)]
+#[display(style = "UPPERCASE")]
+enum ObjectType {
+    Database,
+    Schema,
+    Table,
+    Source,
+    Sink,
+    View,
+    Index,
+    Function,
+    Connection,
+}
+
+pub struct ModelWithObj<M: ModelTrait>(M, object::Model);
+
+impl From<ModelWithObj<database::Model>> for PbDatabase {
+    fn from(value: ModelWithObj<database::Model>) -> Self {
         Self {
-            id: model.database_id as _,
-            name: model.name,
-            owner: model.owner_id as _,
+            id: value.0.database_id as _,
+            name: value.0.name,
+            owner: value.1.owner_id as _,
         }
     }
 }
@@ -43,18 +60,17 @@ impl From<PbDatabase> for database::ActiveModel {
         Self {
             database_id: ActiveValue::Set(db.id as _),
             name: ActiveValue::Set(db.name),
-            owner_id: ActiveValue::Set(db.owner as _),
         }
     }
 }
 
-impl From<schema::Model> for PbSchema {
-    fn from(model: schema::Model) -> Self {
+impl From<ModelWithObj<schema::Model>> for PbSchema {
+    fn from(value: ModelWithObj<schema::Model>) -> Self {
         Self {
-            id: model.schema_id as _,
-            name: model.name,
-            database_id: model.database_id as _,
-            owner: model.owner_id as _,
+            id: value.0.schema_id as _,
+            name: value.0.name,
+            database_id: value.0.database_id as _,
+            owner: value.1.owner_id as _,
         }
     }
 }

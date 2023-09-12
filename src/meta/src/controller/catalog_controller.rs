@@ -15,19 +15,20 @@
 use std::iter;
 
 use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
-use risingwave_pb::catalog::PbDatabase;
+use risingwave_pb::catalog::{PbDatabase, PbSchema};
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
-use sea_orm::{
-    ActiveModelBehavior, ActiveModelTrait, ActiveValue, ColumnTrait, Database as SeaDB,
-    DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
-};
+use sea_orm::{ActiveModelBehavior, ActiveModelTrait, ActiveValue, ColumnTrait, Database as SeaDB, DatabaseConnection, DatabaseTransaction, EntityTrait, ModelTrait, QueryFilter, QueryTrait, TransactionTrait};
+use sea_orm::sea_query::Query;
 use tokio::sync::RwLock;
 
-use crate::manager::{DatabaseId, MetaSrvEnv, NotificationVersion};
+use crate::controller::{ModelWithObj, ObjectType};
+use crate::manager::{DatabaseId, MetaSrvEnv, NotificationVersion, UserId};
 use crate::model_v2::prelude::*;
-use crate::model_v2::{connection, database, function, index, schema, sink, source, table, view};
+use crate::model_v2::{
+    connection, database, function, index, object, schema, sink, source, table, view,
+};
 use crate::{MetaError, MetaResult};
 
 /// `CatalogController` is the controller for catalog related operations, including database, schema, table, view, etc.
@@ -68,36 +69,63 @@ impl CatalogController {
 
 impl CatalogController {
     pub async fn snapshot(&self) -> MetaResult<Vec<PbDatabase>> {
-        let dbs = Database::find().all(&self.db).await?;
-        Ok(dbs.into_iter().map(|db| db.into()).collect())
+        let dbs = Database::find()
+            .find_also_related(Object)
+            .all(&self.db)
+            .await?;
+        let _tables = Table::find()
+            .find_also_related(Object)
+            .all(&self.db)
+            .await?;
+
+        Ok(dbs
+            .into_iter()
+            .map(|(db, obj)| ModelWithObj(db, obj.unwrap()).into())
+            .collect())
+    }
+
+    async fn create_object(
+        txn: &DatabaseTransaction,
+        obj_type: ObjectType,
+        owner_id: UserId,
+    ) -> MetaResult<object::Model> {
+        let mut active_db = object::ActiveModel::new();
+        active_db.obj_type = ActiveValue::Set(obj_type.to_string());
+        active_db.owner_id = ActiveValue::Set(owner_id as _);
+        Ok(active_db.insert(txn).await?)
     }
 
     pub async fn create_database(&self, db: PbDatabase) -> MetaResult<NotificationVersion> {
         let txn = self.db.begin().await?;
-        let db: database::ActiveModel = db.into();
+        let owner_id = db.owner;
+
+        let db_obj = Self::create_object(&txn, ObjectType::Database, owner_id).await?;
+        let mut db: database::ActiveModel = db.into();
+        db.database_id = ActiveValue::Set(db_obj.oid);
         let db = db.insert(&txn).await?;
+
         let mut schemas = vec![];
         for schema_name in iter::once(DEFAULT_SCHEMA_NAME).chain(SYSTEM_SCHEMAS) {
             let mut schema = schema::ActiveModel::new();
+            let schema_obj = Self::create_object(&txn, ObjectType::Schema, owner_id).await?;
+            schema.schema_id = ActiveValue::Set(schema_obj.oid);
             schema.database_id = ActiveValue::Set(db.database_id);
             schema.name = ActiveValue::Set(schema_name.into());
-            schema.owner_id = ActiveValue::Set(db.owner_id);
-            schemas.push(schema.insert(&txn).await?);
+            let schema = schema.insert(&txn).await?;
+
+            schemas.push(ModelWithObj(schema, schema_obj).into());
         }
         txn.commit().await?;
 
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Database(db.into()),
+                NotificationInfo::Database(ModelWithObj(db, db_obj).into()),
             )
             .await;
         for schema in schemas {
             version = self
-                .notify_frontend(
-                    NotificationOperation::Add,
-                    NotificationInfo::Schema(schema.into()),
-                )
+                .notify_frontend(NotificationOperation::Add, NotificationInfo::Schema(schema))
                 .await;
         }
 
@@ -119,6 +147,12 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?
             .into();
+
+        // todo: drop objects.
+        // Object::delete_many().filter(object::Column::Oid.in_subquery(
+        //
+        // )).exec(&txn).await?;
+        //
 
         Table::delete_many()
             .filter(table::Column::DatabaseId.eq(database_id as i32))
@@ -161,6 +195,7 @@ impl CatalogController {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
     use super::*;
 
     #[tokio::test]
@@ -175,7 +210,7 @@ mod tests {
         .unwrap();
         let db = PbDatabase {
             name: "test".to_string(),
-            owner: 1,
+            owner: DEFAULT_SUPER_USER_ID,
             ..Default::default()
         };
         mgr.create_database(db).await.unwrap();

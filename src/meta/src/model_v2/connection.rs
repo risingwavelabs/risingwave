@@ -10,7 +10,6 @@ pub struct Model {
     pub name: String,
     pub schema_id: i32,
     pub database_id: i32,
-    pub owner_id: i32,
     pub info: Option<Json>,
 }
 
@@ -24,7 +23,13 @@ pub enum Relation {
         on_delete = "NoAction"
     )]
     Database,
-    #[sea_orm(has_many = "super::object::Entity")]
+    #[sea_orm(
+        belongs_to = "super::object::Entity",
+        from = "Column::ConnectionId",
+        to = "super::object::Column::Oid",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
     Object,
     #[sea_orm(
         belongs_to = "super::schema::Entity",
@@ -38,14 +43,6 @@ pub enum Relation {
     Sink,
     #[sea_orm(has_many = "super::source::Entity")]
     Source,
-    #[sea_orm(
-        belongs_to = "super::user::Entity",
-        from = "Column::OwnerId",
-        to = "super::user::Column::UserId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    User,
 }
 
 impl Related<super::database::Entity> for Entity {
@@ -75,12 +72,6 @@ impl Related<super::sink::Entity> for Entity {
 impl Related<super::source::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Source.def()
-    }
-}
-
-impl Related<super::user::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::User.def()
     }
 }
 

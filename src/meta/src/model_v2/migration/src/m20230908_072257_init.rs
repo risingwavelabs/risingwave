@@ -84,7 +84,12 @@ impl MigrationTrait for Migration {
             .create_table(
                 MigrationTable::create()
                     .table(User::Table)
-                    .col(ColumnDef::new(User::UserId).integer().primary_key())
+                    .col(
+                        ColumnDef::new(User::UserId)
+                            .integer()
+                            .primary_key()
+                            .auto_increment(),
+                    )
                     .col(ColumnDef::new(User::Name).string().not_null())
                     .col(ColumnDef::new(User::IsSuper).boolean().not_null())
                     .col(ColumnDef::new(User::CanCreateDb).boolean().not_null())
@@ -129,19 +134,13 @@ impl MigrationTrait for Migration {
             .create_table(
                 MigrationTable::create()
                     .table(Database::Table)
-                    .col(
-                        ColumnDef::new(Database::DatabaseId)
-                            .integer()
-                            .auto_increment()
-                            .primary_key(),
-                    )
+                    .col(ColumnDef::new(Database::DatabaseId).integer().primary_key())
                     .col(
                         ColumnDef::new(Database::Name)
                             .string()
                             .unique_key()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Database::OwnerId).integer().not_null())
                     .to_owned(),
             )
             .await?;
@@ -149,15 +148,9 @@ impl MigrationTrait for Migration {
             .create_table(
                 MigrationTable::create()
                     .table(Schema::Table)
-                    .col(
-                        ColumnDef::new(Schema::SchemaId)
-                            .integer()
-                            .auto_increment()
-                            .primary_key(),
-                    )
+                    .col(ColumnDef::new(Schema::SchemaId).integer().primary_key())
                     .col(ColumnDef::new(Schema::Name).string().not_null())
                     .col(ColumnDef::new(Schema::DatabaseId).integer().not_null())
-                    .col(ColumnDef::new(Schema::OwnerId).integer().not_null())
                     .to_owned(),
             )
             .await?;
@@ -165,7 +158,12 @@ impl MigrationTrait for Migration {
             .create_table(
                 MigrationTable::create()
                     .table(Fragment::Table)
-                    .col(ColumnDef::new(Fragment::FragmentId).integer().primary_key())
+                    .col(
+                        ColumnDef::new(Fragment::FragmentId)
+                            .integer()
+                            .primary_key()
+                            .auto_increment(),
+                    )
                     .col(ColumnDef::new(Fragment::TableId).integer().not_null())
                     .col(
                         ColumnDef::new(Fragment::FragmentTypeMask)
@@ -191,7 +189,12 @@ impl MigrationTrait for Migration {
             .create_table(
                 MigrationTable::create()
                     .table(Actor::Table)
-                    .col(ColumnDef::new(Actor::ActorId).integer().primary_key())
+                    .col(
+                        ColumnDef::new(Actor::ActorId)
+                            .integer()
+                            .primary_key()
+                            .auto_increment(),
+                    )
                     .col(ColumnDef::new(Actor::FragmentId).integer().not_null())
                     .col(ColumnDef::new(Actor::Status).string())
                     .col(ColumnDef::new(Actor::Splits).json())
@@ -210,7 +213,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::Name).string().not_null())
                     .col(ColumnDef::new(Table::SchemaId).integer().not_null())
                     .col(ColumnDef::new(Table::DatabaseId).integer().not_null())
-                    .col(ColumnDef::new(Table::OwnerId).integer().not_null())
                     .col(ColumnDef::new(Table::OptionalAssociatedSourceId).integer())
                     .col(ColumnDef::new(Table::TableType).string())
                     .col(ColumnDef::new(Table::Columns).json())
@@ -228,8 +230,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::DistKeyInPk).array(ColumnType::Integer))
                     .col(ColumnDef::new(Table::DmlFragmentId).integer())
                     .col(ColumnDef::new(Table::Cardinality).array(ColumnType::Integer))
-                    .col(ColumnDef::new(Table::InitializedAtEpoch).integer())
-                    .col(ColumnDef::new(Table::CreatedAtEpoch).integer())
                     .col(ColumnDef::new(Table::CleanedByWatermark).boolean())
                     .col(ColumnDef::new(Table::Version).array(ColumnType::Integer))
                     .to_owned(),
@@ -243,7 +243,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Source::Name).string().not_null())
                     .col(ColumnDef::new(Source::SchemaId).integer().not_null())
                     .col(ColumnDef::new(Source::DatabaseId).integer().not_null())
-                    .col(ColumnDef::new(Source::OwnerId).integer().not_null())
                     .col(ColumnDef::new(Source::RowIdIndex).string())
                     .col(ColumnDef::new(Source::Columns).json())
                     .col(ColumnDef::new(Source::PkColumnIds).json())
@@ -253,8 +252,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Source::WatermarkDescs).json())
                     .col(ColumnDef::new(Source::OptionalAssociatedTableId).integer())
                     .col(ColumnDef::new(Source::ConnectionId).integer())
-                    .col(ColumnDef::new(Source::InitializedAtEpoch).integer())
-                    .col(ColumnDef::new(Source::CreatedAtEpoch).integer())
                     .to_owned(),
             )
             .await?;
@@ -266,7 +263,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Sink::Name).string().not_null())
                     .col(ColumnDef::new(Sink::SchemaId).integer().not_null())
                     .col(ColumnDef::new(Sink::DatabaseId).integer().not_null())
-                    .col(ColumnDef::new(Sink::OwnerId).integer().not_null())
                     .col(ColumnDef::new(Sink::Columns).json())
                     .col(ColumnDef::new(Sink::PkColumnIds).json())
                     .col(ColumnDef::new(Sink::DistributionKey).array(ColumnType::Integer))
@@ -275,8 +271,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Sink::Properties).json())
                     .col(ColumnDef::new(Sink::Definition).string())
                     .col(ColumnDef::new(Sink::ConnectionId).integer())
-                    .col(ColumnDef::new(Sink::InitializedAtEpoch).integer())
-                    .col(ColumnDef::new(Sink::CreatedAtEpoch).integer())
                     .to_owned(),
             )
             .await?;
@@ -292,7 +286,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Connection::Name).string().not_null())
                     .col(ColumnDef::new(Connection::SchemaId).integer().not_null())
                     .col(ColumnDef::new(Connection::DatabaseId).integer().not_null())
-                    .col(ColumnDef::new(Connection::OwnerId).integer().not_null())
                     .col(ColumnDef::new(Connection::Info).json())
                     .to_owned(),
             )
@@ -305,7 +298,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(View::Name).string().not_null())
                     .col(ColumnDef::new(View::SchemaId).integer().not_null())
                     .col(ColumnDef::new(View::DatabaseId).integer().not_null())
-                    .col(ColumnDef::new(View::OwnerId).integer().not_null())
                     .col(ColumnDef::new(View::Properties).json())
                     .col(ColumnDef::new(View::Sql).string())
                     .col(ColumnDef::new(View::Columns).json())
@@ -320,13 +312,10 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Index::Name).string().not_null())
                     .col(ColumnDef::new(Index::SchemaId).integer().not_null())
                     .col(ColumnDef::new(Index::DatabaseId).integer().not_null())
-                    .col(ColumnDef::new(Index::OwnerId).integer().not_null())
                     .col(ColumnDef::new(Index::IndexTableId).integer().not_null())
                     .col(ColumnDef::new(Index::PrimaryTableId).integer().not_null())
                     .col(ColumnDef::new(Index::IndexItems).json())
                     .col(ColumnDef::new(Index::OriginalColumns).array(ColumnType::Integer))
-                    .col(ColumnDef::new(Index::InitializedAtEpoch).integer())
-                    .col(ColumnDef::new(Index::CreatedAtEpoch).integer())
                     .to_owned(),
             )
             .await?;
@@ -338,7 +327,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Function::Name).string().not_null())
                     .col(ColumnDef::new(Function::SchemaId).integer().not_null())
                     .col(ColumnDef::new(Function::DatabaseId).integer().not_null())
-                    .col(ColumnDef::new(Function::OwnerId).integer().not_null())
                     .col(ColumnDef::new(Function::ArgTypes).json())
                     .col(ColumnDef::new(Function::ReturnType).string())
                     .col(ColumnDef::new(Function::Language).string())
@@ -352,8 +340,26 @@ impl MigrationTrait for Migration {
             .create_table(
                 MigrationTable::create()
                     .table(Object::Table)
-                    .col(ColumnDef::new(Object::Oid).integer().primary_key())
+                    .col(
+                        ColumnDef::new(Object::Oid)
+                            .integer()
+                            .auto_increment()
+                            .primary_key(),
+                    )
                     .col(ColumnDef::new(Object::ObjType).string().not_null())
+                    .col(ColumnDef::new(Object::OwnerId).integer().not_null())
+                    .col(
+                        ColumnDef::new(Object::InitializedAt)
+                            .timestamp()
+                            .default(Expr::current_timestamp())
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Object::CreatedAt)
+                            .timestamp()
+                            .default(Expr::current_timestamp())
+                            .not_null(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -436,9 +442,10 @@ impl MigrationTrait for Migration {
         manager
             .create_foreign_key(
                 ForeignKey::create()
-                    .name("FK_database_owner_id")
-                    .from(Database::Table, Database::OwnerId)
-                    .to(User::Table, User::UserId)
+                    .name("FK_database_object_id")
+                    .from(Database::Table, Database::DatabaseId)
+                    .to(Object::Table, Object::Oid)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .to_owned(),
             )
             .await?;
@@ -454,9 +461,10 @@ impl MigrationTrait for Migration {
         manager
             .create_foreign_key(
                 ForeignKey::create()
-                    .name("FK_schema_owner_id")
-                    .from(Schema::Table, Schema::OwnerId)
-                    .to(User::Table, User::UserId)
+                    .name("FK_schema_object_id")
+                    .from(Schema::Table, Schema::SchemaId)
+                    .to(Object::Table, Object::Oid)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .to_owned(),
             )
             .await?;
@@ -499,9 +507,10 @@ impl MigrationTrait for Migration {
         manager
             .create_foreign_key(
                 ForeignKey::create()
-                    .name("FK_table_owner_id")
-                    .from(Table::Table, Table::OwnerId)
-                    .to(User::Table, User::UserId)
+                    .name("FK_table_object_id")
+                    .from(Table::Table, Table::TableId)
+                    .to(Object::Table, Object::Oid)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .to_owned(),
             )
             .await?;
@@ -553,9 +562,10 @@ impl MigrationTrait for Migration {
         manager
             .create_foreign_key(
                 ForeignKey::create()
-                    .name("FK_source_owner_id")
-                    .from(Source::Table, Source::OwnerId)
-                    .to(User::Table, User::UserId)
+                    .name("FK_source_object_id")
+                    .from(Source::Table, Source::SourceId)
+                    .to(Object::Table, Object::Oid)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .to_owned(),
             )
             .await?;
@@ -598,9 +608,10 @@ impl MigrationTrait for Migration {
         manager
             .create_foreign_key(
                 ForeignKey::create()
-                    .name("FK_sink_owner_id")
-                    .from(Sink::Table, Sink::OwnerId)
-                    .to(User::Table, User::UserId)
+                    .name("FK_sink_object_id")
+                    .from(Sink::Table, Sink::SinkId)
+                    .to(Object::Table, Object::Oid)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .to_owned(),
             )
             .await?;
@@ -634,9 +645,10 @@ impl MigrationTrait for Migration {
         manager
             .create_foreign_key(
                 ForeignKey::create()
-                    .name("FK_connection_owner_id")
-                    .from(Connection::Table, Connection::OwnerId)
-                    .to(User::Table, User::UserId)
+                    .name("FK_connection_object_id")
+                    .from(Connection::Table, Connection::ConnectionId)
+                    .to(Object::Table, Object::Oid)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .to_owned(),
             )
             .await?;
@@ -661,9 +673,10 @@ impl MigrationTrait for Migration {
         manager
             .create_foreign_key(
                 ForeignKey::create()
-                    .name("FK_view_owner_id")
-                    .from(View::Table, View::OwnerId)
-                    .to(User::Table, User::UserId)
+                    .name("FK_view_object_id")
+                    .from(View::Table, View::ViewId)
+                    .to(Object::Table, Object::Oid)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .to_owned(),
             )
             .await?;
@@ -688,9 +701,10 @@ impl MigrationTrait for Migration {
         manager
             .create_foreign_key(
                 ForeignKey::create()
-                    .name("FK_index_owner_id")
-                    .from(Index::Table, Index::OwnerId)
-                    .to(User::Table, User::UserId)
+                    .name("FK_index_object_id")
+                    .from(Index::Table, Index::IndexId)
+                    .to(Object::Table, Object::Oid)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .to_owned(),
             )
             .await?;
@@ -733,72 +747,19 @@ impl MigrationTrait for Migration {
         manager
             .create_foreign_key(
                 ForeignKey::create()
-                    .name("FK_function_owner_id")
-                    .from(Function::Table, Function::OwnerId)
+                    .name("FK_function_object_id")
+                    .from(Function::Table, Function::FunctionId)
+                    .to(Object::Table, Object::Oid)
+                    .on_delete(ForeignKeyAction::Cascade)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .name("FK_object_owner_id")
+                    .from(Object::Table, Object::OwnerId)
                     .to(User::Table, User::UserId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_object_oid_table")
-                    .from(Object::Table, Object::Oid)
-                    .to(Table::Table, Table::TableId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_object_oid_source")
-                    .from(Object::Table, Object::Oid)
-                    .to(Source::Table, Source::SourceId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_object_oid_sink")
-                    .from(Object::Table, Object::Oid)
-                    .to(Sink::Table, Sink::SinkId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_object_oid_index")
-                    .from(Object::Table, Object::Oid)
-                    .to(Index::Table, Index::IndexId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_object_oid_view")
-                    .from(Object::Table, Object::Oid)
-                    .to(View::Table, View::ViewId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_object_oid_connection")
-                    .from(Object::Table, Object::Oid)
-                    .to(Connection::Table, Connection::ConnectionId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_object_oid_function")
-                    .from(Object::Table, Object::Oid)
-                    .to(Function::Table, Function::FunctionId)
                     .to_owned(),
             )
             .await?;
@@ -817,6 +778,7 @@ impl MigrationTrait for Migration {
                     .name("FK_object_dependency_used_by")
                     .from(ObjectDependency::Table, ObjectDependency::UsedBy)
                     .to(Object::Table, Object::Oid)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .to_owned(),
             )
             .await?;
@@ -825,7 +787,6 @@ impl MigrationTrait for Migration {
         let insert_sys_users = Query::insert()
             .into_table(User::Table)
             .columns([
-                User::UserId,
                 User::Name,
                 User::IsSuper,
                 User::CanCreateUser,
@@ -833,7 +794,6 @@ impl MigrationTrait for Migration {
                 User::CanLogin,
             ])
             .values_panic([
-                1.into(),
                 "root".into(),
                 true.into(),
                 true.into(),
@@ -841,7 +801,6 @@ impl MigrationTrait for Migration {
                 true.into(),
             ])
             .values_panic([
-                2.into(),
                 "postgres".into(),
                 true.into(),
                 true.into(),
@@ -849,13 +808,37 @@ impl MigrationTrait for Migration {
                 true.into(),
             ])
             .to_owned();
+
+        // Since User table is newly created, we assume that the initial user id of `root` is 1 and `postgres` is 2.
+        let insert_objects = Query::insert()
+            .into_table(Object::Table)
+            .columns([Object::ObjType, Object::OwnerId])
+            .values_panic(["DATABASE".into(), 1.into()])
+            .values_panic(["SCHEMA".into(), 1.into()]) // public
+            .values_panic(["SCHEMA".into(), 1.into()]) // pg_catalog
+            .values_panic(["SCHEMA".into(), 1.into()]) // information_schema
+            .values_panic(["SCHEMA".into(), 1.into()]) // rw_catalog
+            .to_owned();
+
+        // Since all tables are newly created, we assume that the initial object id of `dev` is 1 and the schemas' ids are 2, 3, 4, 5.
         let insert_sys_database = Query::insert()
             .into_table(Database::Table)
-            .columns([Database::Name, Database::OwnerId])
-            .values_panic(["dev".into(), 1.into()])
+            .columns([Database::DatabaseId, Database::Name])
+            .values_panic([1.into(), "dev".into()])
             .to_owned();
+        let insert_sys_schemas = Query::insert()
+            .into_table(Schema::Table)
+            .columns([Schema::SchemaId, Schema::Name, Schema::DatabaseId])
+            .values_panic([2.into(), "public".into(), 1.into()])
+            .values_panic([3.into(), "pg_catalog".into(), 1.into()])
+            .values_panic([4.into(), "information_schema".into(), 1.into()])
+            .values_panic([5.into(), "rw_catalog".into(), 1.into()])
+            .to_owned();
+
         manager.exec_stmt(insert_sys_users).await?;
+        manager.exec_stmt(insert_objects).await?;
         manager.exec_stmt(insert_sys_database).await?;
+        manager.exec_stmt(insert_sys_schemas).await?;
 
         Ok(())
     }
@@ -951,7 +934,6 @@ enum Database {
     Table,
     DatabaseId,
     Name,
-    OwnerId,
 }
 
 #[derive(DeriveIden)]
@@ -960,7 +942,6 @@ enum Schema {
     SchemaId,
     Name,
     DatabaseId,
-    OwnerId,
 }
 
 #[derive(DeriveIden)]
@@ -1000,7 +981,6 @@ enum Table {
     Name,
     SchemaId,
     DatabaseId,
-    OwnerId,
     OptionalAssociatedSourceId,
     TableType,
     Columns,
@@ -1018,8 +998,6 @@ enum Table {
     DistKeyInPk,
     DmlFragmentId,
     Cardinality,
-    InitializedAtEpoch,
-    CreatedAtEpoch,
     CleanedByWatermark,
     Version,
 }
@@ -1031,7 +1009,6 @@ enum Source {
     Name,
     SchemaId,
     DatabaseId,
-    OwnerId,
     RowIdIndex,
     Columns,
     PkColumnIds,
@@ -1041,8 +1018,6 @@ enum Source {
     WatermarkDescs,
     OptionalAssociatedTableId,
     ConnectionId,
-    InitializedAtEpoch,
-    CreatedAtEpoch,
 }
 
 #[derive(DeriveIden)]
@@ -1052,7 +1027,6 @@ enum Sink {
     Name,
     SchemaId,
     DatabaseId,
-    OwnerId,
     Columns,
     PkColumnIds,
     DistributionKey,
@@ -1061,8 +1035,6 @@ enum Sink {
     Properties,
     Definition,
     ConnectionId,
-    InitializedAtEpoch,
-    CreatedAtEpoch,
 }
 
 #[derive(DeriveIden)]
@@ -1072,7 +1044,6 @@ enum Connection {
     Name,
     SchemaId,
     DatabaseId,
-    OwnerId,
     Info,
 }
 
@@ -1083,7 +1054,6 @@ enum View {
     Name,
     SchemaId,
     DatabaseId,
-    OwnerId,
     Properties,
     Sql,
     Columns,
@@ -1096,13 +1066,10 @@ enum Index {
     Name,
     SchemaId,
     DatabaseId,
-    OwnerId,
     IndexTableId,
     PrimaryTableId,
     IndexItems,
     OriginalColumns,
-    InitializedAtEpoch,
-    CreatedAtEpoch,
 }
 
 #[derive(DeriveIden)]
@@ -1112,7 +1079,6 @@ enum Function {
     Name,
     SchemaId,
     DatabaseId,
-    OwnerId,
     ArgTypes,
     ReturnType,
     Language,
@@ -1126,6 +1092,9 @@ enum Object {
     Table,
     Oid,
     ObjType,
+    OwnerId,
+    InitializedAt,
+    CreatedAt,
 }
 
 #[derive(DeriveIden)]

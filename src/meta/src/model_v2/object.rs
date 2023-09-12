@@ -5,76 +5,55 @@ use sea_orm::entity::prelude::*;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "object")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(primary_key)]
     pub oid: i32,
     pub obj_type: String,
+    pub owner_id: i32,
+    pub initialized_at: DateTime,
+    pub created_at: DateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::connection::Entity",
-        from = "Column::Oid",
-        to = "super::connection::Column::ConnectionId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
+    #[sea_orm(has_many = "super::connection::Entity")]
     Connection,
-    #[sea_orm(
-        belongs_to = "super::function::Entity",
-        from = "Column::Oid",
-        to = "super::function::Column::FunctionId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
+    #[sea_orm(has_many = "super::database::Entity")]
+    Database,
+    #[sea_orm(has_many = "super::function::Entity")]
     Function,
-    #[sea_orm(
-        belongs_to = "super::index::Entity",
-        from = "Column::Oid",
-        to = "super::index::Column::IndexId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
+    #[sea_orm(has_many = "super::index::Entity")]
     Index,
-    #[sea_orm(
-        belongs_to = "super::sink::Entity",
-        from = "Column::Oid",
-        to = "super::sink::Column::SinkId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
+    #[sea_orm(has_many = "super::schema::Entity")]
+    Schema,
+    #[sea_orm(has_many = "super::sink::Entity")]
     Sink,
-    #[sea_orm(
-        belongs_to = "super::source::Entity",
-        from = "Column::Oid",
-        to = "super::source::Column::SourceId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
+    #[sea_orm(has_many = "super::source::Entity")]
     Source,
+    #[sea_orm(has_many = "super::table::Entity")]
+    Table,
     #[sea_orm(
-        belongs_to = "super::table::Entity",
-        from = "Column::Oid",
-        to = "super::table::Column::TableId",
+        belongs_to = "super::user::Entity",
+        from = "Column::OwnerId",
+        to = "super::user::Column::UserId",
         on_update = "NoAction",
         on_delete = "NoAction"
     )]
-    Table,
+    User,
     #[sea_orm(has_many = "super::user_privilege::Entity")]
     UserPrivilege,
-    #[sea_orm(
-        belongs_to = "super::view::Entity",
-        from = "Column::Oid",
-        to = "super::view::Column::ViewId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
+    #[sea_orm(has_many = "super::view::Entity")]
     View,
 }
 
 impl Related<super::connection::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Connection.def()
+    }
+}
+
+impl Related<super::database::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Database.def()
     }
 }
 
@@ -87,6 +66,12 @@ impl Related<super::function::Entity> for Entity {
 impl Related<super::index::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Index.def()
+    }
+}
+
+impl Related<super::schema::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Schema.def()
     }
 }
 
@@ -105,6 +90,12 @@ impl Related<super::source::Entity> for Entity {
 impl Related<super::table::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Table.def()
+    }
+}
+
+impl Related<super::user::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::User.def()
     }
 }
 

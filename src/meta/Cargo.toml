@@ -38,6 +38,7 @@ mime_guess = "2"
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
+parse-display = "0.8"
 prometheus = "0.13"
 prometheus-http-query = "0.6"
 prost = "0.11"
