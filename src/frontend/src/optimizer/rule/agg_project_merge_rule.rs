@@ -16,7 +16,6 @@ use itertools::Itertools;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::generic::Agg;
 use crate::utils::IndexSet;
 
 /// Merge [`LogicalAgg`] <- [`LogicalProject`] to [`LogicalAgg`].
