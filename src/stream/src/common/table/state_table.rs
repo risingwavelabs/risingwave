@@ -1178,6 +1178,35 @@ where
             .await
     }
 
+    /// This function scans rows from the relational table with specific `pk_range` under the same
+    /// `vnode`.
+    pub async fn iter_row_with_pk_prefix_sub_range(
+        &self,
+        pk_prefix: impl Row,
+        sub_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+        // let (sub_range_start, sub_range_end) = prefix_range_to_memcomparable(&self.pk_serde, sub_range);
+        let (sub_range_start, sub_range_end) = sub_range;
+        let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
+        let start_range = match sub_range_end {
+            Included(sub_range_start) => {
+                Bound::Included(pk_prefix.chain(*sub_range_start))
+            },
+            Excluded(start) =>  Bound::Excluded(pk_prefix.chain(*start)),
+            Unbounded => Bound::Included(pk_prefix.chain()),
+        };
+
+        // let end_range = match sub_range_end {
+        //     Included(sub_range_end) => todo!(),
+        //     Excluded(sub_range_end) => todo!(),
+        //     Unbounded => todo!(),
+        // };
+
+        todo!()
+    }
+
+
     /// This function scans raw key-values from the relational table with specific `pk_range` under
     /// the same `vnode`.
     async fn iter_kv_with_pk_range(
