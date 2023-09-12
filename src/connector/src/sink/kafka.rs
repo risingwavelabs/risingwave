@@ -441,10 +441,7 @@ impl KafkaSinkWriter {
                             tokio::time::sleep(self.config.retry_interval).await;
                             continue;
                         }
-                        _ => {
-                            ret = Err(e);
-                            break;
-                        }
+                        _ => return Err(e),
                     }
                 }
             }
@@ -505,10 +502,7 @@ impl KafkaSinkWriter {
                 .drain(..)
                 .map(|delivery_future| {
                     delivery_future.map(|delivery_future_result| {
-                        match Self::map_future_result(delivery_future_result) {
-                            Ok(_) => Ok(()),
-                            Err(err) => Err(SinkError::Kafka(err)),
-                        }
+                        Self::map_future_result(delivery_future_result).map_err(SinkError::Kafka)
                     })
                 }),
         )
@@ -524,6 +518,7 @@ impl KafkaSinkWriter {
     }
 
     async fn debezium_update(&mut self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
+        // TODO: Remove the clones here, only to satisfy borrow checker at present
         let schema = self.schema.clone();
         let pk_indices = self.pk_indices.clone();
         let db_name = self.db_name.clone();
@@ -550,6 +545,7 @@ impl KafkaSinkWriter {
     }
 
     async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
+        // TODO: Remove the clones here, only to satisfy borrow checker at present
         let schema = self.schema.clone();
         let pk_indices = self.pk_indices.clone();
 
@@ -567,6 +563,7 @@ impl KafkaSinkWriter {
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+        // TODO: Remove the clones here, only to satisfy borrow checker at present
         let schema = self.schema.clone();
         let pk_indices = self.pk_indices.clone();
 
