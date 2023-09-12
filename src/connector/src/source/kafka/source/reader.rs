@@ -64,7 +64,8 @@ impl SplitReader for KafkaSplitReader {
 
         // disable partition eof
         config.set("enable.partition.eof", "false");
-        config.set("enable.auto.commit", "false");
+        // change to `RdKafkaPropertiesConsumer::enable_auto_commit` to enable auto commit
+        // config.set("enable.auto.commit", "false");
         config.set("auto.offset.reset", "smallest");
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
