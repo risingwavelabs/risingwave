@@ -873,8 +873,10 @@ fn fill_table_stream_graph_info(
                     source.id = source_id;
                     let mut source_count = 0;
 
-                    source_node.source_inner.as_mut().unwrap().source_id = source_id;
-                    source_count += 1;
+                    if let Some(source_inner) = source_node.source_inner.as_mut() {
+                        source_inner.source_id = source_id;
+                        source_count += 1;
+                    }
 
                     // Generate a random server id for mysql cdc source if needed
                     // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
