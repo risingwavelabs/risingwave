@@ -121,20 +121,38 @@ impl Parse for UserFunctionAttr {
 
 /// Check if the argument is `&mut impl Write`.
 fn arg_is_write(arg: &syn::FnArg) -> bool {
-    let syn::FnArg::Typed(arg) = arg else { return false };
-    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else { return false; };
-    let syn::Type::ImplTrait(syn::TypeImplTrait { bounds, .. }) = elem.as_ref() else { return false; };
-    let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else { return false; };
-    let Some(seg) = path.segments.last() else { return false };
+    let syn::FnArg::Typed(arg) = arg else {
+        return false;
+    };
+    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else {
+        return false;
+    };
+    let syn::Type::ImplTrait(syn::TypeImplTrait { bounds, .. }) = elem.as_ref() else {
+        return false;
+    };
+    let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else {
+        return false;
+    };
+    let Some(seg) = path.segments.last() else {
+        return false;
+    };
     seg.ident == "Write"
 }
 
 /// Check if the argument is `&Context`.
 fn arg_is_context(arg: &syn::FnArg) -> bool {
-    let syn::FnArg::Typed(arg) = arg else { return false };
-    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else { return false; };
-    let syn::Type::Path(path) = elem.as_ref() else { return false };
-    let Some(seg) = path.path.segments.last() else { return false };
+    let syn::FnArg::Typed(arg) = arg else {
+        return false;
+    };
+    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else {
+        return false;
+    };
+    let syn::Type::Path(path) = elem.as_ref() else {
+        return false;
+    };
+    let Some(seg) = path.path.segments.last() else {
+        return false;
+    };
     seg.ident == "Context"
 }
 
