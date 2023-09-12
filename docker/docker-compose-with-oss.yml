@@ -50,7 +50,7 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+oss://<bucket_name>@<data_path>"
+      - "hummock+oss://<bucket_name>"
       - "--data-directory"
       - "hummock_001"
       - "--config-path"
