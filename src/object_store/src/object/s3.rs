@@ -357,12 +357,6 @@ impl ObjectStore for S3ObjectStore {
             "s3 read error"
         )));
 
-        // let start_pos = match range.start_bound() {
-        //     std::ops::Bound::Included(_) => todo!(),
-        //     std::ops::Bound::Excluded(_) => todo!(),
-        //     std::ops::Bound::Unbounded => todo!(),
-        // };
-
         // retry if occurs AWS EC2 HTTP timeout error.
         let resp = tokio_retry::RetryIf::spawn(
             self.config.get_retry_strategy(),
@@ -388,6 +382,30 @@ impl ObjectStore for S3ObjectStore {
         .await?;
 
         let val = resp.body.collect().await?.into_bytes();
+
+        if range.start_bound() != Bound::Unbounded && range.end_bound() != Bound::Unbounded {
+            let start = match range.start_bound() {
+                Bound::Included(v) => *v,
+                Bound::Excluded(v) => *v - 1,
+                Bound::Unbounded => unreachable!(),
+            };
+            let end = match range.end_bound() {
+                Bound::Included(v) => *v + 1,
+                Bound::Excluded(v) => *v,
+                Bound::Unbounded => unreachable!(),
+            };
+            let len = end - start;
+
+            if val.len() != end - start {
+                return Err(ObjectError::internal(format!(
+                    "mismatched size: expected {}, found {} when reading {} at {:?}",
+                    len,
+                    val.len(),
+                    path,
+                    start..end,
+                )));
+            }
+        }
 
         Ok(val)
     }
