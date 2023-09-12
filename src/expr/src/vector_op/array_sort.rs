@@ -12,4 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use risingwave_jni_core::*;
+use risingwave_common::array::*;
+use risingwave_common::types::{Datum, DatumRef, DefaultOrdered, ToOwnedDatum};
+use risingwave_expr_macro::function;
+
+#[function("array_sort(list) -> list")]
+pub fn array_sort(list: ListRef<'_>) -> ListValue {
+    let mut v = list
+        .iter()
+        .map(DefaultOrdered)
+        .collect::<Vec<DefaultOrdered<DatumRef<'_>>>>();
+    v.sort();
+    ListValue::new(
+        v.into_iter()
+            .map(|x| x.0.to_owned_datum())
+            .collect::<Vec<Datum>>(),
+    )
+}

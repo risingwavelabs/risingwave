@@ -44,6 +44,7 @@
 #![feature(result_option_inspect)]
 #![feature(negative_impls)]
 #![feature(async_fn_in_trait)]
+#![feature(bound_map)]
 
 #[macro_use]
 pub mod jemalloc;
@@ -75,6 +76,8 @@ pub mod metrics;
 pub mod test_utils;
 pub mod types;
 pub mod vnode_mapping;
+
+pub mod range;
 
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};
