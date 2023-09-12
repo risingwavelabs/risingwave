@@ -101,7 +101,6 @@ impl StreamChunkCompactor {
     /// Compact a chunk by modifying the ops and the visibility of a stream chunk. All UPDATE INSERT
     /// and UPDATE DELETE will be converted to INSERT and DELETE, and dropped according to
     /// certain rules (see `merge_insert` and `merge_delete` for more details).
-
     pub fn into_compacted_chunks(self) -> Vec<StreamChunk> {
         let (chunks, key_indices) = self.into_inner();
 
