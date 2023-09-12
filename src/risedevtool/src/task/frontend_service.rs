@@ -63,7 +63,7 @@ impl FrontendService {
                 config.listen_address, config.health_check_port
             ))
             .arg("--metrics-level")
-            .arg("1");
+            .arg("info");
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         if provide_meta_node.is_empty() {

@@ -45,6 +45,21 @@ select * from mv5
 1 11 111
 2 22 222
 
+query IT rowsort
+select * from t
+----
+1 NULL
+2 22
+
+statement ok
+alter table t add column v3 int;
+
+query IT rowsort
+select * from t
+----
+1 NULL NULL
+2 22 NULL
+
 statement ok
 drop materialized view mv1
 

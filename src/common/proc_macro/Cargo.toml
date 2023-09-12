@@ -25,3 +25,5 @@ bae = "0.1.7"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
+[lints]
+workspace = true

@@ -151,3 +151,6 @@ harness = false
 [[bin]]
 name = "example-config"
 path = "src/bin/default_config.rs"
+
+[lints]
+workspace = true

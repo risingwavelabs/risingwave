@@ -196,7 +196,7 @@ mod tests {
 
         let mut stream = order_by_executor.execute();
         let res = stream.next().await;
-        assert!(matches!(res, Some(_)));
+        assert!(res.is_some());
         if let Some(res) = res {
             let res = res.unwrap();
             let col0 = res.column_at(0);
@@ -246,7 +246,7 @@ mod tests {
 
         let mut stream = order_by_executor.execute();
         let res = stream.next().await;
-        assert!(matches!(res, Some(_)));
+        assert!(res.is_some());
         if let Some(res) = res {
             let res = res.unwrap();
             let col0 = res.column_at(0);
@@ -296,7 +296,7 @@ mod tests {
 
         let mut stream = order_by_executor.execute();
         let res = stream.next().await;
-        assert!(matches!(res, Some(_)));
+        assert!(res.is_some());
         if let Some(res) = res {
             let res = res.unwrap();
             let col0 = res.column_at(0);
