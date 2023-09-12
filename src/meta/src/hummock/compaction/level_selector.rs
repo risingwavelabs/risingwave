@@ -584,12 +584,10 @@ impl LevelSelector for ManualCompactionSelector {
         _table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactionTask> {
         let overlap_strategy = create_overlap_strategy(group.compaction_config.compaction_mode());
-        let mut base_level = 1;
-        while base_level < levels.levels.len()
-            && levels.get_level(base_level).table_infos.is_empty()
-        {
-            base_level += 1;
-        }
+        let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
+        let base_level = dynamic_level_core
+            .calculate_level_base_size(levels)
+            .base_level;
         let target_level = if self.option.level == 0 {
             base_level
         } else if self.option.level == group.compaction_config.max_level as usize {
@@ -641,13 +639,9 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
             group.compaction_config.max_space_reclaim_bytes,
             levels.member_table_ids.iter().cloned().collect(),
         );
-
-        let mut base_level = 1;
-        while base_level < levels.levels.len()
-            && levels.get_level(base_level).table_infos.is_empty()
-        {
-            base_level += 1;
-        }
+        let base_level = dynamic_level_core
+            .calculate_level_base_size(levels)
+            .base_level;
         let state = self.state.entry(group.group_id).or_default();
 
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
