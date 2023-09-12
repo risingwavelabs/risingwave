@@ -2838,35 +2838,18 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=2b8907c#2b8907c3cc629da22622a17bbc6bf16dc52c7bc1"
+source = "git+https://github.com/mrcroxx/foyer?rev=2c6f080#2c6f080835f49fc6026b97fd53d389bae81e9361"
 dependencies = [
- "async-trait",
- "bytes",
- "cmsketch",
- "crossbeam",
  "foyer-common",
  "foyer-intrusive",
  "foyer-storage",
  "foyer-workspace-hack",
- "futures",
- "itertools 0.11.0",
- "libc",
- "memoffset",
- "nix 0.27.1",
- "parking_lot 0.12.1",
- "paste",
- "prometheus",
- "rand",
- "thiserror",
- "tokio",
- "tracing",
- "twox-hash",
 ]
 
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=2b8907c#2b8907c3cc629da22622a17bbc6bf16dc52c7bc1"
+source = "git+https://github.com/mrcroxx/foyer?rev=2c6f080#2c6f080835f49fc6026b97fd53d389bae81e9361"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
@@ -2880,7 +2863,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=2b8907c#2b8907c3cc629da22622a17bbc6bf16dc52c7bc1"
+source = "git+https://github.com/mrcroxx/foyer?rev=2c6f080#2c6f080835f49fc6026b97fd53d389bae81e9361"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -2890,7 +2873,6 @@ dependencies = [
  "memoffset",
  "parking_lot 0.12.1",
  "paste",
- "thiserror",
  "tracing",
  "twox-hash",
 ]
@@ -2898,7 +2880,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=2b8907c#2b8907c3cc629da22622a17bbc6bf16dc52c7bc1"
+source = "git+https://github.com/mrcroxx/foyer?rev=2c6f080#2c6f080835f49fc6026b97fd53d389bae81e9361"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2917,7 +2899,6 @@ dependencies = [
  "nix 0.27.1",
  "parking_lot 0.12.1",
  "paste",
- "pin-project",
  "prometheus",
  "rand",
  "thiserror",
@@ -2929,19 +2910,19 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=2b8907c#2b8907c3cc629da22622a17bbc6bf16dc52c7bc1"
+source = "git+https://github.com/mrcroxx/foyer?rev=2c6f080#2c6f080835f49fc6026b97fd53d389bae81e9361"
 dependencies = [
- "crossbeam-channel",
  "crossbeam-utils",
  "either",
  "futures-channel",
- "futures-core",
  "futures-executor",
  "futures-sink",
  "futures-util",
+ "hyper",
  "itertools 0.10.5",
+ "libc",
  "lock_api",
- "nix 0.27.1",
+ "memchr",
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.8",
  "proc-macro2",
@@ -2952,6 +2933,7 @@ dependencies = [
  "regex-syntax 0.7.5",
  "syn 2.0.32",
  "tokio",
+ "tracing",
  "tracing-core",
 ]
 
