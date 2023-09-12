@@ -103,6 +103,13 @@ impl UdfExpression {
         };
         let mut array = ArrayImpl::try_from(arrow_array)?;
         array.set_bitmap(array.null_bitmap() & vis);
+        if !array.data_type().equals_datatype(&self.return_type) {
+            bail!(
+                "UDF returned {:?}, but expected {:?}",
+                array.data_type(),
+                self.return_type,
+            );
+        }
         Ok(Arc::new(array))
     }
 }
