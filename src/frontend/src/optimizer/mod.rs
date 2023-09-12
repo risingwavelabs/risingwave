@@ -16,29 +16,22 @@ use std::collections::HashMap;
 use std::ops::DerefMut;
 
 pub mod plan_node;
-
 pub use plan_node::{Explain, PlanRef};
-
 pub mod property;
 
 mod delta_join_solver;
 mod heuristic_optimizer;
 mod plan_rewriter;
-
 pub use plan_rewriter::PlanRewriter;
-
 mod plan_visitor;
-
 pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
-
 mod logical_optimization;
 mod optimizer_context;
 mod plan_expr_rewriter;
 mod plan_expr_visitor;
 mod rule;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use logical_optimization::*;

@@ -698,6 +698,8 @@ fn gen_table_plan_inner(
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
 
+    let is_external_source = source_info.is_some();
+
     let source = source_info.map(|source_info| PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
@@ -732,10 +734,8 @@ fn gen_table_plan_inner(
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
-
-    println!("source catalog {:?}", source_catalog);
     let source_node: PlanRef = LogicalSource::new(
-        source_catalog.clone(),
+        source_catalog,
         columns.clone(),
         row_id_index,
         false,
@@ -778,7 +778,7 @@ fn gen_table_plan_inner(
         append_only,
         watermark_descs,
         version,
-        source_catalog.is_some(),
+        is_external_source,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
