@@ -49,14 +49,16 @@ pub fn place_vnode(
     // evenly among workers.
     let mut selected_pu_ids = Vec::new();
     while !new_pus.is_empty() {
-        new_pus.drain_filter(|ps| {
-            if let Some(p) = ps.next() {
-                selected_pu_ids.push(p.id);
-                false
-            } else {
-                true
-            }
-        });
+        new_pus
+            .extract_if(|ps| {
+                if let Some(p) = ps.next() {
+                    selected_pu_ids.push(p.id);
+                    false
+                } else {
+                    true
+                }
+            })
+            .for_each(drop);
     }
     selected_pu_ids.drain(serving_parallelism..);
     let selected_pu_id_set: HashSet<ParallelUnitId> = selected_pu_ids.iter().cloned().collect();
@@ -197,6 +199,7 @@ mod tests {
             is_serving: true,
             is_streaming: false,
         };
+
         let mut gen_pus_for_worker =
             |worker_node_id: u32, number: u32, pu_to_worker: &mut HashMap<ParallelUnitId, u32>| {
                 let mut results = vec![];
@@ -212,6 +215,7 @@ mod tests {
                 }
                 results
             };
+
         let count_same_vnode_mapping = |pm1: &ParallelUnitMapping, pm2: &ParallelUnitMapping| {
             assert_eq!(pm1.len(), 256);
             assert_eq!(pm2.len(), 256);
@@ -224,6 +228,7 @@ mod tests {
             }
             count
         };
+
         let worker_1 = WorkerNode {
             id: 1,
             parallel_units: gen_pus_for_worker(1, 1, &mut pu_to_worker),
@@ -234,6 +239,7 @@ mod tests {
             place_vnode(None, &[worker_1.clone()], 0).is_none(),
             "max_parallelism should >= 0"
         );
+
         let re_pu_mapping_2 = place_vnode(None, &[worker_1.clone()], 10000).unwrap();
         assert_eq!(re_pu_mapping_2.iter_unique().count(), 1);
         let worker_2 = WorkerNode {
@@ -248,6 +254,7 @@ mod tests {
             10000,
         )
         .unwrap();
+
         assert_eq!(re_pu_mapping.iter_unique().count(), 51);
         // 1 * 256 + 0 -> 51 * 5 + 1
         let score = count_same_vnode_mapping(&re_pu_mapping_2, &re_pu_mapping);
@@ -265,6 +272,7 @@ mod tests {
             10000,
         )
         .unwrap();
+
         // limited by total pu number
         assert_eq!(re_pu_mapping_2.iter_unique().count(), 111);
         // 51 * 5 + 1 -> 111 * 2 + 34

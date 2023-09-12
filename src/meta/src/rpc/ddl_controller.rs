@@ -836,7 +836,7 @@ impl DdlController {
 
         // 3. Mark current relation as "updating".
         self.catalog_manager
-            .start_replace_table_procedure(stream_job.table().unwrap())
+            .start_replace_table_procedure(stream_job)
             .await?;
 
         Ok(fragment_graph)
@@ -947,22 +947,18 @@ impl DdlController {
         stream_job: &StreamingJob,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
-        let StreamingJob::Table(None, table) = stream_job else {
+        let StreamingJob::Table(source, table) = stream_job else {
             unreachable!("unexpected job: {stream_job:?}")
         };
 
         self.catalog_manager
-            .finish_replace_table_procedure(table, table_col_index_mapping)
+            .finish_replace_table_procedure(source, table, table_col_index_mapping)
             .await
     }
 
     async fn cancel_replace_table(&self, stream_job: &StreamingJob) -> MetaResult<()> {
-        let StreamingJob::Table(None, table) = stream_job else {
-            unreachable!("unexpected job: {stream_job:?}")
-        };
-
         self.catalog_manager
-            .cancel_replace_table_procedure(table)
+            .cancel_replace_table_procedure(stream_job)
             .await
     }
 

@@ -37,3 +37,6 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [build-dependencies]
 walkdir = "2"
+
+[lints]
+workspace = true

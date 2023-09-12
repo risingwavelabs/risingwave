@@ -16,21 +16,19 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
     GetClusterInfoRequest, GetClusterInfoResponse, GetReschedulePlanRequest,
-    GetReschedulePlanResponse, PauseRequest, PauseResponse, Reschedule, RescheduleRequest,
-    RescheduleResponse, ResumeRequest, ResumeResponse,
+    GetReschedulePlanResponse, Reschedule, RescheduleRequest, RescheduleResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
 
-use crate::barrier::{BarrierManagerRef, BarrierScheduler, Command};
+use crate::barrier::BarrierManagerRef;
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
-use crate::model::{MetadataModel, PausedReason};
+use crate::model::MetadataModel;
 use crate::stream::{
     GlobalStreamManagerRef, ParallelUnitReschedule, RescheduleOptions, SourceManagerRef,
 };
 
 pub struct ScaleServiceImpl {
-    barrier_scheduler: BarrierScheduler,
     fragment_manager: FragmentManagerRef,
     cluster_manager: ClusterManagerRef,
     source_manager: SourceManagerRef,
@@ -41,7 +39,6 @@ pub struct ScaleServiceImpl {
 
 impl ScaleServiceImpl {
     pub fn new(
-        barrier_scheduler: BarrierScheduler,
         fragment_manager: FragmentManagerRef,
         cluster_manager: ClusterManagerRef,
         source_manager: SourceManagerRef,
@@ -50,7 +47,6 @@ impl ScaleServiceImpl {
         barrier_manager: BarrierManagerRef,
     ) -> Self {
         Self {
-            barrier_scheduler,
             fragment_manager,
             cluster_manager,
             source_manager,
@@ -63,26 +59,6 @@ impl ScaleServiceImpl {
 
 #[async_trait::async_trait]
 impl ScaleService for ScaleServiceImpl {
-    #[cfg_attr(coverage, no_coverage)]
-    async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
-        // TODO: move this out of the scale service, as scaling actually executes `pause` and
-        // `resume` with `PausedReason::ConfigChange`.
-        self.barrier_scheduler
-            .run_command(Command::pause(PausedReason::Manual))
-            .await?;
-        Ok(Response::new(PauseResponse {}))
-    }
-
-    #[cfg_attr(coverage, no_coverage)]
-    async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
-        // TODO: move this out of the scale service, as scaling actually executes `pause` and
-        // `resume` with `PausedReason::ConfigChange`.
-        self.barrier_scheduler
-            .run_command(Command::resume(PausedReason::Manual))
-            .await?;
-        Ok(Response::new(ResumeResponse {}))
-    }
-
     #[cfg_attr(coverage, no_coverage)]
     async fn get_cluster_info(
         &self,

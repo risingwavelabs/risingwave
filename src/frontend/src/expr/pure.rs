@@ -153,6 +153,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Row
             | expr_node::Type::ArrayToString
             | expr_node::Type::ArrayCat
+            | expr_node::Type::ArrayMax
+            | expr_node::Type::ArraySort
             | expr_node::Type::ArrayAppend
             | expr_node::Type::ArrayPrepend
             | expr_node::Type::FormatType

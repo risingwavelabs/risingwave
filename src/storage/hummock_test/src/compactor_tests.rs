@@ -500,17 +500,6 @@ pub(crate) mod tests {
             .unwrap()
             .to_vec();
         assert_eq!(get_val, val);
-
-        // 6. get compact task and there should be none
-        let compact_task = hummock_manager_ref
-            .get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                &mut default_level_selector(),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(6, compact_task.target_level);
     }
 
     pub(crate) async fn flush_and_commit(

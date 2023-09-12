@@ -36,3 +36,6 @@ tracing = "0.1"
 
 [dev-dependencies]
 risingwave_expr = { workspace = true }
+
+[lints]
+workspace = true

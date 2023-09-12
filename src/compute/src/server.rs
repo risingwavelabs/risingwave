@@ -23,8 +23,8 @@ use risingwave_batch::monitor::{
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
-    load_config, AsyncStackTraceOption, StorageMemoryConfig, MAX_CONNECTION_WINDOW_SIZE,
-    STREAM_WINDOW_SIZE,
+    load_config, AsyncStackTraceOption, MetricLevel, StorageMemoryConfig,
+    MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -169,9 +169,7 @@ pub async fn compute_node_serve(
     // Initialize the metrics subsystem.
     let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
     let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
-    let streaming_metrics = Arc::new(global_streaming_metrics(
-        config.streaming.streaming_metric_level,
-    ));
+    let streaming_metrics = Arc::new(global_streaming_metrics(config.server.metrics_level));
     let batch_task_metrics = Arc::new(GLOBAL_BATCH_TASK_METRICS.clone());
     let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
     let batch_manager_metrics = GLOBAL_BATCH_MANAGER_METRICS.clone();
@@ -179,10 +177,10 @@ pub async fn compute_node_serve(
 
     // Initialize state store.
     let state_store_metrics = Arc::new(global_hummock_state_store_metrics(
-        config.storage.storage_metric_level,
+        config.server.metrics_level,
     ));
     let object_store_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
-    let storage_metrics = Arc::new(global_storage_metrics(config.storage.storage_metric_level));
+    let storage_metrics = Arc::new(global_storage_metrics(config.server.metrics_level));
     let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
         meta_client.clone(),
@@ -304,8 +302,6 @@ pub async fn compute_node_serve(
     // of lru manager.
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
 
-    let telemetry_enabled = system_params.telemetry_enabled();
-
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::new(
@@ -381,7 +377,6 @@ pub async fn compute_node_serve(
     let health_srv = HealthServiceImpl::new();
 
     let telemetry_manager = TelemetryManager::new(
-        system_params_manager.watch_params(),
         Arc::new(meta_client.clone()),
         Arc::new(ComputeTelemetryCreator::new()),
     );
@@ -389,12 +384,7 @@ pub async fn compute_node_serve(
     // if the toml config file or env variable disables telemetry, do not watch system params change
     // because if any of configs disable telemetry, we should never start it
     if config.server.telemetry_enabled && telemetry_env_enabled() {
-        // if all configs are true, start reporting
-        if telemetry_enabled {
-            telemetry_manager.start_telemetry_reporting().await;
-        }
-        // if config and env are true, starting watching
-        sub_tasks.push(telemetry_manager.watch_params_change());
+        sub_tasks.push(telemetry_manager.start().await);
     } else {
         tracing::info!("Telemetry didn't start due to config");
     }
@@ -454,7 +444,7 @@ pub async fn compute_node_serve(
     join_handle_vec.push(join_handle);
 
     // Boot metrics service.
-    if config.server.metrics_level > 0 {
+    if config.server.metrics_level > MetricLevel::Disabled {
         MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 

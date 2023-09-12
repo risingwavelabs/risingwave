@@ -80,7 +80,7 @@ fn bench_order_by(c: &mut Criterion) {
                     let chunk_num = SIZE / chunk_size;
                     b.to_async(&rt).iter_batched(
                         || create_order_by_executor(chunk_size, chunk_num, single_column),
-                        |e| execute_executor(e),
+                        execute_executor,
                         BatchSize::SmallInput,
                     );
                 },

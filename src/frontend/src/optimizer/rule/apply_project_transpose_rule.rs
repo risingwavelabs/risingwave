@@ -71,7 +71,7 @@ impl Rule for ApplyProjectTransposeRule {
             .map(|expr| rewriter.rewrite_expr(expr))
             .collect_vec();
 
-        exprs.extend(new_proj_exprs.clone().into_iter());
+        exprs.extend(new_proj_exprs.clone());
 
         let mut rewriter = ApplyOnConditionRewriter {
             left_input_len: left.schema().len(),
