@@ -102,6 +102,8 @@ message ExprNode {
     BIT_LENGTH = 230;
     OVERLAY = 231;
     REGEXP_MATCH = 232;
+    REGEXP_REPLACE = 280;
+    REGEXP_COUNT = 281;
     POW = 233;
     EXP = 234;
     CHR = 235;
@@ -194,6 +196,10 @@ message ExprNode {
     ARRAY_POSITION = 542;
     ARRAY_REPLACE = 543;
     ARRAY_DIMS = 544;
+    ARRAY_TRANSFORM = 545;
+    ARRAY_MIN = 546;
+    ARRAY_MAX = 547;
+    ARRAY_SORT = 549;
 
     // Int256 functions
     HEX_TO_INT256 = 560;

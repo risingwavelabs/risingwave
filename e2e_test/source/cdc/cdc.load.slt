@@ -1,5 +1,9 @@
 # CDC source basic test
 
+# enable cdc backfill in ci
+statement ok
+set cdc_backfill='true';
+
 statement ok
 create table products ( id INT,
  name STRING,
@@ -104,6 +108,38 @@ create table orders_2 (
  database.name = 'my@db',
  table.name = 'orders',
  server.id = '5088'
+);
+
+statement error
+create table tt3_rw (
+   v1 int,
+   v2 timestamp,
+   PRIMARY KEY (v1)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ table.name = 'tt3',
+ server.id = '5089'
+);
+
+statement ok
+create table tt3_rw (
+   v1 int,
+   v2 timestamptz,
+   PRIMARY KEY (v1)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ table.name = 'tt3',
+ server.id = '5089'
 );
 
 # Some columns missing and reordered (postgres-cdc)

@@ -37,7 +37,7 @@ fn bench_hash_agg(c: &mut Criterion) {
     group.bench_function("benchmark_hash_agg", |b| {
         b.to_async(&rt).iter_batched(
             || setup_bench_hash_agg(MemoryStateStore::new()),
-            |e| execute_executor(e),
+            execute_executor,
             BatchSize::SmallInput,
         )
     });

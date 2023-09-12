@@ -45,7 +45,7 @@ use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
-    HummockResult, MonotonicDeleteEvent, SstableBuilderOptions, SstableStoreRef,
+    GetObjectId, HummockResult, MonotonicDeleteEvent, SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -58,7 +58,12 @@ pub struct CompactorRunner {
 }
 
 impl CompactorRunner {
-    pub fn new(split_index: usize, context: Arc<CompactorContext>, task: CompactTask) -> Self {
+    pub fn new(
+        split_index: usize,
+        context: CompactorContext,
+        task: CompactTask,
+        object_id_getter: Box<dyn GetObjectId>,
+    ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.compression_algorithm = match task.compression_algorithm {
             0 => CompressionAlgorithm::None,
@@ -98,12 +103,13 @@ impl CompactorRunner {
                 split_weight_by_vnode: task.split_weight_by_vnode,
                 use_block_based_filter,
             },
+            object_id_getter,
         );
 
         Self {
             compactor,
             compact_task: task,
-            sstable_store: context.sstable_store.clone(),
+            sstable_store: context.sstable_store,
             key_range,
             split_index,
         }
@@ -132,6 +138,9 @@ impl CompactorRunner {
         Ok((self.split_index, ssts, compaction_stat))
     }
 
+    // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+    // TODO: remove `allow` here after the issued is closed.
+    #[expect(clippy::needless_pass_by_ref_mut)]
     pub async fn build_delete_range_iter<F: CompactionFilter>(
         sstable_infos: &Vec<SstableInfo>,
         sstable_store: &SstableStoreRef,
@@ -229,35 +238,12 @@ impl CompactorRunner {
 /// Handles a compaction task and reports its status to hummock manager.
 /// Always return `Ok` and let hummock manager handle errors.
 pub async fn compact(
-    compactor_context: Arc<CompactorContext>,
+    compactor_context: CompactorContext,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
+    object_id_getter: Box<dyn GetObjectId>,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     let context = compactor_context.clone();
-    // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
-    // write op. The watermark is invalidated when this method exits.
-    let tracker_id = match context
-        .sstable_object_id_manager
-        .add_watermark_object_id(None)
-        .await
-    {
-        Ok(tracker_id) => tracker_id,
-        Err(err) => {
-            tracing::warn!("Failed to track pending SST object id. {:#?}", err);
-
-            // return TaskStatus::TrackSstObjectIdFailed;
-            compact_task.set_task_status(TaskStatus::TrackSstObjectIdFailed);
-            return (compact_task, HashMap::default());
-        }
-    };
-    let sstable_object_id_manager_clone = context.sstable_object_id_manager.clone();
-    let _guard = scopeguard::guard(
-        (tracker_id, sstable_object_id_manager_clone),
-        |(tracker_id, sstable_object_id_manager)| {
-            sstable_object_id_manager.remove_watermark_object_id(tracker_id);
-        },
-    );
-
     let group_label = compact_task.compaction_group_id.to_string();
     let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
     let select_table_infos = compact_task
@@ -327,7 +313,7 @@ pub async fn compact(
             .into_iter()
             .filter(|table_id| existing_table_ids.contains(table_id)),
     );
-    let multi_filter_key_extractor = match context
+    let multi_filter_key_extractor = match compactor_context
         .filter_key_extractor_manager
         .acquire(compact_table_ids.clone())
         .await
@@ -457,8 +443,12 @@ pub async fn compact(
     for (split_index, _) in compact_task.splits.iter().enumerate() {
         let filter = multi_filter.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
-        let compactor_runner =
-            CompactorRunner::new(split_index, compactor_context.clone(), compact_task.clone());
+        let compactor_runner = CompactorRunner::new(
+            split_index,
+            compactor_context.clone(),
+            compact_task.clone(),
+            object_id_getter.clone(),
+        );
         let del_agg = delete_range_agg.clone();
         let task_progress = task_progress_guard.progress.clone();
         let runner = async move {
@@ -556,7 +546,7 @@ pub async fn compact(
 /// Fills in the compact task and tries to report the task result to meta node.
 fn compact_done(
     mut compact_task: CompactTask,
-    context: Arc<CompactorContext>,
+    context: CompactorContext,
     output_ssts: Vec<CompactOutput>,
     task_status: TaskStatus,
 ) -> (CompactTask, HashMap<u32, TableStats>) {

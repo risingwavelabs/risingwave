@@ -38,7 +38,6 @@ use tokio::task::JoinHandle;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::rpc::server::ElectionClientRef;
-use crate::storage::MetaStore;
 
 #[derive(Clone)]
 pub struct MetaMetrics {
@@ -679,6 +678,11 @@ impl MetaMetrics {
             compaction_event_loop_iteration_latency,
         }
     }
+
+    #[cfg(test)]
+    pub fn for_test(registry: &Registry) -> Self {
+        Self::new(registry)
+    }
 }
 impl Default for MetaMetrics {
     fn default() -> Self {
@@ -686,8 +690,8 @@ impl Default for MetaMetrics {
     }
 }
 
-pub async fn start_worker_info_monitor<S: MetaStore>(
-    cluster_manager: ClusterManagerRef<S>,
+pub async fn start_worker_info_monitor(
+    cluster_manager: ClusterManagerRef,
     election_client: Option<ElectionClientRef>,
     interval: Duration,
     meta_metrics: Arc<MetaMetrics>,
@@ -734,11 +738,11 @@ pub async fn start_worker_info_monitor<S: MetaStore>(
     (join_handle, shutdown_tx)
 }
 
-pub async fn start_fragment_info_monitor<S: MetaStore>(
-    cluster_manager: ClusterManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
-    hummock_manager: HummockManagerRef<S>,
+pub async fn start_fragment_info_monitor(
+    cluster_manager: ClusterManagerRef,
+    catalog_manager: CatalogManagerRef,
+    fragment_manager: FragmentManagerRef,
+    hummock_manager: HummockManagerRef,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
     const COLLECT_INTERVAL_SECONDS: u64 = 60;

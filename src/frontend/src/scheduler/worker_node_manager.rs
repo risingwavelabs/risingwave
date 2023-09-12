@@ -373,11 +373,10 @@ impl WorkerNodeSelector {
     }
 
     fn apply_worker_node_mask(&self, origin: Vec<WorkerNode>) -> Vec<WorkerNode> {
-        if origin.len() <= 1 {
-            // If there is at most one worker, don't apply mask.
+        let mask = self.manager.worker_node_mask();
+        if origin.iter().all(|w| mask.contains(&w.id)) {
             return origin;
         }
-        let mask = self.manager.worker_node_mask();
         origin
             .into_iter()
             .filter(|w| !mask.contains(&w.id))

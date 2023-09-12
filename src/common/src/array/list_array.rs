@@ -15,6 +15,7 @@
 use core::fmt;
 use std::cmp::Ordering;
 use std::fmt::Debug;
+use std::future::Future;
 use std::hash::Hash;
 use std::mem::size_of;
 
@@ -29,8 +30,7 @@ use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultPartialOrd, Scalar, ScalarRefImpl, ToDatumRef,
-    ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarRefImpl, ToDatumRef, ToText,
 };
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
@@ -171,9 +171,9 @@ impl ListArrayBuilder {
 /// Each item of this `ListArray` is a `List<T>`, or called `T[]` (T array).
 ///
 /// * As other arrays, there is a null bitmap, with `1` meaning nonnull and `0` meaning null.
-/// * As [`BytesArray`], there is an offsets `Vec` and a value `Array`. The value `Array` has all
-///   items concatenated, and the offsets `Vec` stores start and end indices into it for slicing.
-///   Effectively, the inner array is the flattened form, and `offsets.len() == n + 1`.
+/// * As [`super::BytesArray`], there is an offsets `Vec` and a value `Array`. The value `Array` has
+///   all items concatenated, and the offsets `Vec` stores start and end indices into it for
+///   slicing. Effectively, the inner array is the flattened form, and `offsets.len() == n + 1`.
 ///
 /// For example, `values (array[1]), (array[]::int[]), (null), (array[2, 3]);` stores an inner
 ///  `I32Array` with `[1, 2, 3]`, along with offsets `[0, 1, 1, 1, 3]` and null bitmap `TTFT`.
@@ -270,6 +270,31 @@ impl ListArray {
         Ok(arr.into())
     }
 
+    /// Apply the function on the underlying elements.
+    /// e.g. `map_inner([[1,2,3],NULL,[4,5]], DOUBLE) = [[2,4,6],NULL,[8,10]]`
+    pub async fn map_inner<E, Fut, F>(self, f: F) -> std::result::Result<ListArray, E>
+    where
+        F: FnOnce(ArrayImpl) -> Fut,
+        Fut: Future<Output = std::result::Result<ArrayImpl, E>>,
+    {
+        let Self {
+            bitmap,
+            offsets,
+            value,
+            ..
+        } = self;
+
+        let new_value = (f)(*value).await?;
+        let new_value_type = new_value.data_type();
+
+        Ok(Self {
+            offsets,
+            bitmap,
+            value: Box::new(new_value),
+            value_type: new_value_type,
+        })
+    }
+
     // Used for testing purposes
     pub fn from_iter(
         values: impl IntoIterator<Item = Option<ArrayImpl>>,
@@ -324,13 +349,13 @@ pub struct ListValue {
 
 impl PartialOrd for ListValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for ListValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
+        self.as_scalar_ref().cmp(&other.as_scalar_ref())
     }
 }
 
@@ -506,11 +531,19 @@ impl PartialEq for ListRef<'_> {
     }
 }
 
+impl Eq for ListRef<'_> {}
+
 impl PartialOrd for ListRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ListRef<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
         iter_elems_ref!(*self, lhs, {
             iter_elems_ref!(*other, rhs, {
-                lhs.partial_cmp_by(rhs, |lv, rv| lv.default_partial_cmp(&rv))
+                lhs.cmp_by(rhs, |lv, rv| lv.default_cmp(&rv))
             })
         })
     }
@@ -570,15 +603,6 @@ impl ToText for ListRef<'_> {
             DataType::List { .. } => self.write(f),
             _ => unreachable!(),
         }
-    }
-}
-
-impl Eq for ListRef<'_> {}
-
-impl Ord for ListRef<'_> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // The order between two lists is deterministic.
-        self.partial_cmp(other).unwrap()
     }
 }
 

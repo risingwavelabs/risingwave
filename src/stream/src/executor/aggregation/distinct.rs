@@ -60,7 +60,6 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         group_key: Option<&GroupKey>,
         ctx: ActorContextRef,
     ) -> StreamExecutorResult<()> {
-        let column = column;
         let n_calls = visibilities.len();
 
         let mut prev_counts_map = HashMap::new(); // also serves as changeset
@@ -189,7 +188,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
     }
 
     /// Flush the deduplication table.
-    fn flush(&mut self, dedup_table: &mut StateTable<S>, ctx: ActorContextRef) {
+    fn flush(&mut self, dedup_table: &StateTable<S>, ctx: ActorContextRef) {
         // TODO(rc): now we flush the table in `dedup` method.
         // WARN: if you want to change to batching the write to table. please remember to change
         // `self.cache.evict()` too.

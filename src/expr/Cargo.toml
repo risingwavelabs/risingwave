@@ -17,8 +17,8 @@ normal = ["workspace-hack", "ctor"]
 [dependencies]
 aho-corasick = "1"
 anyhow = "1"
-arrow-array = "45"
-arrow-schema = "45"
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
 async-trait = "0.1"
 auto_enums = "0.8"
 await-tree = { workspace = true }
@@ -65,3 +65,6 @@ serde_json = "1"
 [[bench]]
 name = "expr"
 harness = false
+
+[lints]
+workspace = true

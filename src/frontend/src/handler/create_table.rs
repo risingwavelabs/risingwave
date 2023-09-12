@@ -19,10 +19,13 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, TableId, TableVersionId, INITIAL_SOURCE_VERSION_ID,
+    ColumnCatalog, ColumnDesc, TableDesc, TableId, TableVersionId, INITIAL_SOURCE_VERSION_ID,
     INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
 };
+use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::external::ExternalTableType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -194,9 +197,11 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
 
 fn check_generated_column_constraints(
     column_name: &String,
+    column_id: ColumnId,
     expr: &ExprImpl,
     column_catalogs: &[ColumnCatalog],
     generated_column_names: &[String],
+    pk_column_ids: &[ColumnId],
 ) -> Result<()> {
     let input_refs = expr.collect_input_refs(column_catalogs.len());
     for idx in input_refs.ones() {
@@ -211,6 +216,14 @@ fn check_generated_column_constraints(
             .into());
         }
     }
+
+    if pk_column_ids.contains(&column_id) && expr.is_impure() {
+        return Err(ErrorCode::BindError(
+            format!("Generated columns should not be part of the primary key. Here column \"{}\" is defined as part of the primary key.", column_name),
+        )
+        .into());
+    }
+
     Ok(())
 }
 
@@ -240,6 +253,7 @@ pub fn bind_sql_column_constraints(
     table_name: String,
     column_catalogs: &mut [ColumnCatalog],
     columns: Vec<ColumnDef>,
+    pk_column_ids: &[ColumnId],
 ) -> Result<()> {
     let generated_column_names = {
         let mut names = vec![];
@@ -268,9 +282,11 @@ pub fn bind_sql_column_constraints(
 
                     check_generated_column_constraints(
                         &column.name.real_value(),
+                        column_catalogs[idx].column_id(),
                         &expr_impl,
                         column_catalogs,
                         &generated_column_names,
+                        pk_column_ids,
                     )?;
 
                     column_catalogs[idx].column_desc.generated_or_default_column = Some(
@@ -434,7 +450,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     ensure_table_constraints_supported(&constraints)?;
     let pk_names = bind_pk_names(&column_defs, &constraints)?;
 
-    let (columns_from_resolve_source, pk_names, source_info) =
+    let (columns_from_resolve_source, pk_names, mut source_info) =
         try_bind_columns_from_source(&source_schema, pk_names, &column_defs, &properties).await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
@@ -457,7 +473,13 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let definition = context.normalized_sql().to_owned();
 
-    bind_sql_column_constraints(session, table_name.real_value(), &mut columns, column_defs)?;
+    bind_sql_column_constraints(
+        session,
+        table_name.real_value(),
+        &mut columns,
+        column_defs,
+        &pk_column_ids,
+    )?;
 
     check_source_schema(&properties, row_id_index, &columns)?;
 
@@ -467,6 +489,51 @@ pub(crate) async fn gen_create_table_plan_with_source(
             "Generated columns are only allowed in an append only source.".to_string(),
         )
         .into());
+    }
+
+    let table_type = ExternalTableType::from_properties(&properties);
+    if table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
+        // Add a column for storing the event offset
+        let offset_column = ColumnCatalog::offset_column();
+        let _offset_index = columns.len();
+        columns.push(offset_column);
+
+        const CDC_SNAPSHOT_MODE_KEY: &str = "debezium.snapshot.mode";
+        // debezium connector will only consume changelogs from latest offset on this mode
+        properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), "rw_cdc_backfill".into());
+
+        let pk_column_indices = {
+            let mut id_to_idx = HashMap::new();
+            columns.iter().enumerate().for_each(|(idx, c)| {
+                id_to_idx.insert(c.column_id(), idx);
+            });
+            // pk column id must exist in table columns.
+            pk_column_ids
+                .iter()
+                .map(|c| id_to_idx.get(c).copied().unwrap())
+                .collect_vec()
+        };
+        let table_pk = pk_column_indices
+            .iter()
+            .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
+            .collect();
+
+        let upstream_table_desc = TableDesc {
+            table_id: TableId::placeholder(),
+            pk: table_pk,
+            columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
+            distribution_key: pk_column_indices.clone(),
+            stream_key: pk_column_indices,
+            append_only,
+            retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
+            value_indices: (0..columns.len()).collect_vec(),
+            read_prefix_len_hint: 0,
+            watermark_columns: Default::default(),
+            versioned: false,
+        };
+        tracing::debug!("upstream table desc: {:?}", upstream_table_desc);
+        // save external table info to `source_info`
+        source_info.upstream_table = Some(upstream_table_desc.to_protobuf());
     }
 
     gen_table_plan_inner(
@@ -544,6 +611,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         table_name.real_value(),
         &mut columns,
         column_defs,
+        &pk_column_ids,
     )?;
 
     gen_table_plan_inner(

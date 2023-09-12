@@ -18,9 +18,8 @@
 //! for the rationale behind this approach.
 
 #![feature(stmt_expr_attributes)]
-#![cfg(madsim)]
 #![feature(lazy_cell)]
-#![feature(drain_filter)]
+#![feature(extract_if)]
 
 mod backfill_tests;
 mod batch;

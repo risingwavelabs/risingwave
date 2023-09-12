@@ -75,6 +75,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("node_body", "#[derive(::enum_as_inner::EnumAsInner)]")
         .type_attribute("rex_node", "#[derive(::enum_as_inner::EnumAsInner)]")
         .type_attribute(
+            "meta.PausedReason",
+            "#[derive(::enum_as_inner::EnumAsInner)]",
+        )
+        .type_attribute(
             "stream_plan.Barrier.BarrierKind",
             "#[derive(::enum_as_inner::EnumAsInner)]",
         )
@@ -97,6 +101,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.GeneratedColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.DefaultColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.Cardinality", "#[derive(Eq, Hash, Copy)]")
+        .type_attribute("plan_common.StorageTableDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
+        .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")
         // ===================
         .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])

@@ -108,7 +108,7 @@ pub async fn generate(
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
-            Ok(skipped) if skipped == 0 => {
+            Ok(0) => {
                 generated_queries += 1;
             }
             _ => {}
@@ -129,7 +129,7 @@ pub async fn generate(
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
-            Ok(skipped) if skipped == 0 => {
+            Ok(0) => {
                 generated_queries += 1;
             }
             _ => {}
@@ -385,7 +385,7 @@ async fn test_stream_queries<R: Rng>(
 }
 
 fn get_seed_table_sql(testdata: &str) -> String {
-    let seed_files = vec!["tpch.sql", "nexmark.sql", "alltypes.sql"];
+    let seed_files = ["tpch.sql", "nexmark.sql", "alltypes.sql"];
     seed_files
         .iter()
         .map(|filename| read_file_contents(format!("{}/{}", testdata, filename)).unwrap())
@@ -454,7 +454,7 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
         drop_mview_table(mview, client).await;
     }
 
-    let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql", "drop_alltypes.sql"];
+    let seed_files = ["drop_tpch.sql", "drop_nexmark.sql", "drop_alltypes.sql"];
     let sql = seed_files
         .iter()
         .map(|filename| read_file_contents(format!("{}/{}", testdata, filename)).unwrap())
@@ -538,7 +538,7 @@ async fn run_query_inner(
 /// Create the tables defined in testdata, along with some mviews.
 /// Just test number of rows for now.
 /// TODO(kwannoel): Test row contents as well. That requires us to run a batch query
-/// with select * ORDER BY <all columns>.
+/// with `select * ORDER BY <all columns>`.
 async fn diff_stream_and_batch(
     rng: &mut impl Rng,
     mvs_and_base_tables: Vec<Table>,

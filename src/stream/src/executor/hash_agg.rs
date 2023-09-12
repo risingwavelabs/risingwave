@@ -32,8 +32,8 @@ use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
 use super::aggregation::{
-    agg_call_filter_res, iter_table_storage, AggStateStorage, ChunkBuilder, DistinctDeduplicater,
-    GroupKey, OnlyOutputIfHasInput,
+    agg_call_filter_res, iter_table_storage, AggStateStorage, DistinctDeduplicater, GroupKey,
+    OnlyOutputIfHasInput,
 };
 use super::sort_buffer::SortBuffer;
 use super::{
@@ -43,6 +43,7 @@ use super::{
 use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
+use crate::common::StreamChunkBuilder;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggGroup as GenericAggGroup};
 use crate::executor::error::StreamExecutorError;
@@ -152,7 +153,7 @@ struct ExecutionVars<K: HashKey, S: StateStore> {
     window_watermark: Option<ScalarImpl>,
 
     /// Stream chunk builder.
-    chunk_builder: ChunkBuilder,
+    chunk_builder: StreamChunkBuilder,
 
     buffer: SortBuffer<S>,
 }
@@ -270,7 +271,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     async fn ensure_keys_in_cache(
-        this: &mut ExecutorInner<K, S>,
+        this: &ExecutorInner<K, S>,
         cache: &mut AggGroupCache<K, S>,
         keys: impl IntoIterator<Item = &K>,
         stats: &mut ExecutionStats,
@@ -563,7 +564,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
-            chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
+            chunk_builder: StreamChunkBuilder::new(this.chunk_size, this.info.schema.data_types()),
             buffer: SortBuffer::new(window_col_idx_in_group_key, &this.result_table),
         };
 

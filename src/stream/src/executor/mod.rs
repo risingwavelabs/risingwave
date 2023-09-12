@@ -26,7 +26,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, DefaultOrd, DefaultPartialOrd, ScalarImpl};
+use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
@@ -65,6 +65,7 @@ mod dynamic_filter;
 mod error;
 mod expand;
 mod filter;
+mod flow_control;
 mod hash_agg;
 pub mod hash_join;
 mod hop_window;
@@ -103,7 +104,9 @@ pub mod test_utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
+pub use backfill::cdc_backfill::*;
 pub use backfill::no_shuffle_backfill::*;
+pub use backfill::upstream_table::*;
 pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
@@ -113,6 +116,7 @@ pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
+pub use flow_control::FlowControlExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
@@ -231,6 +235,7 @@ pub enum Mutation {
         added_actors: HashSet<ActorId>,
         // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
         splits: HashMap<ActorId, Vec<SplitImpl>>,
+        pause: bool,
     },
     SourceChangeSplit(HashMap<ActorId, Vec<SplitImpl>>),
     Pause,
@@ -317,9 +322,15 @@ impl Barrier {
         }
     }
 
-    /// Whether this barrier is for pause.
-    pub fn is_pause(&self) -> bool {
-        matches!(self.mutation.as_deref(), Some(Mutation::Pause))
+    /// Whether this barrier requires the executor to pause its data stream on startup.
+    pub fn is_pause_on_startup(&self) -> bool {
+        match self.mutation.as_deref() {
+            Some(
+                  Mutation::Update { .. } // new actors for scaling
+                | Mutation::Add { pause: true, .. } // new streaming job, or recovery
+            ) => true,
+            _ => false,
+        }
     }
 
     /// Whether this barrier is for configuration change. Used for source executor initialization.
@@ -438,6 +449,7 @@ impl Mutation {
                 adds,
                 added_actors,
                 splits,
+                pause,
             } => PbMutation::Add(AddMutation {
                 actor_dispatchers: adds
                     .iter()
@@ -452,6 +464,7 @@ impl Mutation {
                     .collect(),
                 added_actors: added_actors.iter().copied().collect(),
                 actor_splits: actor_splits_to_protobuf(splits),
+                pause: *pause,
             }),
             Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
@@ -536,6 +549,7 @@ impl Mutation {
                         )
                     })
                     .collect(),
+                pause: add.pause,
             },
 
             PbMutation::Splits(s) => {
@@ -613,11 +627,7 @@ pub struct Watermark {
 
 impl PartialOrd for Watermark {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.col_idx == other.col_idx {
-            self.val.default_partial_cmp(&other.val)
-        } else {
-            None
-        }
+        Some(self.cmp(other))
     }
 }
 

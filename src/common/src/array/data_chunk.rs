@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Display;
 use std::hash::BuildHasher;
 use std::sync::Arc;
 use std::{fmt, usize};
 
 use bytes::Bytes;
+use either::Either;
 use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -65,6 +67,8 @@ pub struct DataChunk {
 }
 
 impl DataChunk {
+    pub(crate) const PRETTY_TABLE_PRESET: &'static str = "||--+-++|    ++++++";
+
     /// Create a `DataChunk` with `columns` and visibility. The visibility can either be a `Bitmap`
     /// or a simple cardinality number.
     pub fn new<V: Into<Vis>>(columns: Vec<ArrayRef>, vis: V) -> Self {
@@ -224,7 +228,7 @@ impl DataChunk {
             columns: Default::default(),
         };
         let column_ref = &mut proto.columns;
-        for array in self.columns.iter() {
+        for array in &*self.columns {
             column_ref.push(array.to_protobuf());
         }
         proto
@@ -367,7 +371,7 @@ impl DataChunk {
             let array = self.column_at(*column_idx);
             array.hash_vec(&mut states[..]);
         }
-        finalize_hashers(&mut states[..])
+        finalize_hashers(&states[..])
             .into_iter()
             .map(|hash_code| hash_code.into())
             .collect_vec()
@@ -392,24 +396,31 @@ impl DataChunk {
         RowRef::new(self, pos)
     }
 
-    /// `to_pretty_string` returns a table-like text representation of the `DataChunk`.
-    pub fn to_pretty_string(&self) -> String {
+    /// Returns a table-like text representation of the `DataChunk`.
+    pub fn to_pretty(&self) -> impl Display {
         use comfy_table::Table;
+
+        if self.cardinality() == 0 {
+            return Either::Left("(empty)");
+        }
+
         let mut table = Table::new();
-        table.load_preset("||--+-++|    ++++++\n");
+        table.load_preset(Self::PRETTY_TABLE_PRESET);
+
         for row in self.rows() {
             let cells: Vec<_> = row
                 .iter()
                 .map(|v| {
                     match v {
-                        None => "".to_owned(), // null
+                        None => "".to_owned(), // NULL
                         Some(scalar) => scalar.to_text(),
                     }
                 })
                 .collect();
             table.add_row(cells);
         }
-        table.to_string()
+
+        Either::Right(table)
     }
 
     /// Keep the specified columns and set the rest elements to null.
@@ -491,7 +502,7 @@ impl DataChunk {
     fn partition_sizes(&self) -> (usize, Vec<&ArrayRef>) {
         let mut col_variable: Vec<&ArrayRef> = vec![];
         let mut row_len_fixed: usize = 0;
-        for c in self.columns.iter() {
+        for c in &*self.columns {
             if let Some(field_len) = try_get_exact_serialize_datum_size(c) {
                 row_len_fixed += field_len;
             } else {
@@ -547,8 +558,7 @@ impl DataChunk {
                 }
 
                 // Then do the actual serialization
-                for c in self.columns.iter() {
-                    let c = c;
+                for c in &*self.columns {
                     assert_eq!(c.len(), rows_num);
                     for (i, buffer) in buffers.iter_mut().enumerate() {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
@@ -569,8 +579,7 @@ impl DataChunk {
                         buffers.push(Self::init_buffer(row_len_fixed, &col_variable, i));
                     }
                 }
-                for c in self.columns.iter() {
-                    let c = c;
+                for c in &*self.columns {
                     assert_eq!(c.len(), *rows_num);
                     for (i, buffer) in buffers.iter_mut().enumerate() {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
@@ -626,7 +635,7 @@ impl fmt::Debug for DataChunk {
             "DataChunk {{ cardinality = {}, capacity = {}, data = \n{} }}",
             self.cardinality(),
             self.capacity(),
-            self.to_pretty_string()
+            self.to_pretty()
         )
     }
 }
@@ -828,7 +837,7 @@ impl DataChunkTestExt for DataChunk {
         let cols = self.columns();
         let vis = &self.vis2;
         let n = vis.len();
-        for col in cols.iter() {
+        for col in cols {
             assert_eq!(col.len(), n);
         }
     }
@@ -1007,7 +1016,7 @@ mod tests {
             4,
         );
         assert_eq!(
-            chunk.to_pretty_string(),
+            chunk.to_pretty().to_string(),
             "\
 +---+---+
 | 1 | 6 |

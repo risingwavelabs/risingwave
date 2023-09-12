@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rustdoc::private_intra_doc_links)]
 #![allow(non_snake_case)] // for `ctor` generated code
 #![feature(let_chains)]
 #![feature(assert_matches)]
@@ -23,6 +22,7 @@
 #![feature(round_ties_even)]
 #![feature(generators)]
 #![feature(test)]
+#![feature(arc_unwrap_or_clone)]
 
 pub mod agg;
 mod error;

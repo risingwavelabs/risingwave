@@ -17,8 +17,9 @@ use std::collections::HashMap;
 use std::ops::Bound;
 
 use await_tree::InstrumentAwait;
+use bytes::Bytes;
 use futures::future::try_join_all;
-use futures::Stream;
+use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
@@ -32,7 +33,11 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
-use risingwave_storage::table::collect_data_chunk_with_builder;
+use risingwave_connector::error::ConnectorError;
+use risingwave_connector::source::external::{
+    CdcOffset, ExternalTableReader, ExternalTableReaderImpl,
+};
+use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTableInner;
@@ -112,6 +117,25 @@ pub(crate) fn mark_chunk(
     mark_chunk_inner(chunk, current_pos, pk_in_output_indices, pk_order)
 }
 
+pub(crate) fn mark_cdc_chunk(
+    table_reader: &ExternalTableReaderImpl,
+    chunk: StreamChunk,
+    current_pos: &OwnedRow,
+    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_order: &[OrderType],
+    last_cdc_offset: Option<CdcOffset>,
+) -> StreamExecutorResult<StreamChunk> {
+    let chunk = chunk.compact();
+    mark_cdc_chunk_inner(
+        table_reader,
+        chunk,
+        current_pos,
+        last_cdc_offset,
+        pk_in_output_indices,
+        pk_order,
+    )
+}
+
 /// Mark chunk:
 /// For each row of the chunk, forward it to downstream if its pk <= `current_pos` for the
 /// corresponding `vnode`, otherwise ignore it.
@@ -178,6 +202,55 @@ fn mark_chunk_inner(
     }
     let (columns, _) = data.into_parts();
     StreamChunk::new(ops, columns, Some(new_visibility.finish()))
+}
+
+fn mark_cdc_chunk_inner(
+    table_reader: &ExternalTableReaderImpl,
+    chunk: StreamChunk,
+    current_pos: &OwnedRow,
+    last_cdc_offset: Option<CdcOffset>,
+    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_order: &[OrderType],
+) -> StreamExecutorResult<StreamChunk> {
+    let (data, ops) = chunk.into_parts();
+    let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
+
+    // `_rw_offset` must be placed at the last column right now
+    let offset_col_idx = data.dimension() - 1;
+    for v in data.rows().map(|row| {
+        let offset_datum = row.datum_at(offset_col_idx).unwrap();
+        let event_offset = table_reader.parse_binlog_offset(offset_datum.into_utf8())?;
+        let visible = {
+            // filter changelog events with binlog range
+            let in_binlog_range = if let Some(binlog_low) = &last_cdc_offset {
+                binlog_low <= &event_offset
+            } else {
+                true
+            };
+
+            if in_binlog_range {
+                let lhs = row.project(pk_in_output_indices);
+                let rhs = current_pos;
+                let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+                match order {
+                    Ordering::Less | Ordering::Equal => true,
+                    Ordering::Greater => false,
+                }
+            } else {
+                false
+            }
+        };
+        Ok::<_, ConnectorError>(visible)
+    }) {
+        new_visibility.append(v?);
+    }
+
+    let (columns, _) = data.into_parts();
+    Ok(StreamChunk::new(
+        ops,
+        columns,
+        Some(new_visibility.finish()),
+    ))
 }
 
 /// Builds a new stream chunk with `output_indices`.
@@ -262,6 +335,9 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
 }
 
 /// Flush the data
+// This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+// TODO: remove `allow` here after the issued is closed.
+#[expect(clippy::needless_pass_by_ref_mut)]
 pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     epoch: EpochPair,
@@ -345,6 +421,18 @@ pub(crate) fn get_new_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) -
         .into_owned_row()
 }
 
+pub(crate) fn get_cdc_chunk_last_offset(
+    table_reader: &ExternalTableReaderImpl,
+    chunk: &StreamChunk,
+) -> StreamExecutorResult<Option<CdcOffset>> {
+    let row = chunk.rows().last().unwrap().1;
+    let offset_col = row.iter().last().unwrap();
+    let output = offset_col.map(|scalar| {
+        Ok::<_, ConnectorError>(table_reader.parse_binlog_offset(scalar.into_utf8()))?
+    });
+    output.transpose().map_err(|e| e.into())
+}
+
 // NOTE(kwannoel): ["None" ..] encoding should be appropriate to mark
 // the case where upstream snapshot is empty.
 // This is so we can persist backfill state as "finished".
@@ -375,19 +463,28 @@ pub(crate) fn compute_bounds(
     }
 }
 
+#[try_stream(ok = OwnedRow, error = StreamExecutorError)]
+pub(crate) async fn owned_row_iter<S, E>(storage_iter: S)
+where
+    StreamExecutorError: From<E>,
+    S: Stream<Item = Result<KeyedRow<Bytes>, E>>,
+{
+    pin_mut!(storage_iter);
+    while let Some(row) = storage_iter.next().await {
+        let row = row?;
+        yield row.into_owned_row()
+    }
+}
+
 #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-pub(crate) async fn iter_chunks<'a, S, E>(
-    mut iter: S,
-    chunk_size: usize,
-    builder: &'a mut DataChunkBuilder,
-) where
+pub(crate) async fn iter_chunks<'a, S, E>(mut iter: S, builder: &'a mut DataChunkBuilder)
+where
     StreamExecutorError: From<E>,
     S: Stream<Item = Result<OwnedRow, E>> + Unpin + 'a,
 {
-    while let Some(data_chunk) =
-        collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder)
-            .instrument_await("backfill_snapshot_read")
-            .await?
+    while let Some(data_chunk) = collect_data_chunk_with_builder(&mut iter, builder)
+        .instrument_await("backfill_snapshot_read")
+        .await?
     {
         debug_assert!(data_chunk.cardinality() > 0);
         let ops = vec![Op::Insert; data_chunk.capacity()];
@@ -408,7 +505,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     epoch: EpochPair,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     is_finished: bool,
-    backfill_state: &mut BackfillState,
+    backfill_state: &BackfillState,
     committed_progress: &mut HashMap<VirtualNode, Vec<Datum>>,
     temporary_state: &mut [Datum],
 ) -> StreamExecutorResult<()> {

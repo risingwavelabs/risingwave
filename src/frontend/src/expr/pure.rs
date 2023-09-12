@@ -103,6 +103,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::BitLength
             | expr_node::Type::Overlay
             | expr_node::Type::RegexpMatch
+            | expr_node::Type::RegexpReplace
+            | expr_node::Type::RegexpCount
             | expr_node::Type::Pow
             | expr_node::Type::Exp
             | expr_node::Type::Ln
@@ -151,10 +153,13 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Row
             | expr_node::Type::ArrayToString
             | expr_node::Type::ArrayCat
+            | expr_node::Type::ArrayMax
+            | expr_node::Type::ArraySort
             | expr_node::Type::ArrayAppend
             | expr_node::Type::ArrayPrepend
             | expr_node::Type::FormatType
             | expr_node::Type::ArrayDistinct
+            | expr_node::Type::ArrayMin
             | expr_node::Type::ArrayDims
             | expr_node::Type::ArrayLength
             | expr_node::Type::Cardinality
@@ -189,7 +194,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
-            | expr_node::Type::Format =>
+            | expr_node::Type::Format
+            | expr_node::Type::ArrayTransform =>
             // expression output is deterministic(same result for the same input)
             {
                 let x = func_call

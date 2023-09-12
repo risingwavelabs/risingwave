@@ -15,7 +15,6 @@
 use anyhow::{anyhow, ensure, Context, Result};
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, TimeZone, Utc};
-use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use google_cloud_pubsub::client::Client;
 use google_cloud_pubsub::subscription::{SeekTo, Subscription};
@@ -23,8 +22,8 @@ use risingwave_common::bail;
 use tonic::Code;
 
 use super::TaggedReceivedMessage;
-use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
+use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::google_pubsub::PubsubProperties;
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
@@ -32,8 +31,6 @@ use crate::source::{
 };
 
 const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
-
-impl_common_split_reader_logic!(PubsubSplitReader, PubsubProperties);
 
 pub struct PubsubSplitReader {
     subscription: Subscription,
@@ -44,8 +41,8 @@ pub struct PubsubSplitReader {
     source_ctx: SourceContextRef,
 }
 
-impl PubsubSplitReader {
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+impl CommonSplitReader for PubsubSplitReader {
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
         loop {
             let pull_result = self
@@ -172,6 +169,8 @@ impl SplitReader for PubsubSplitReader {
     }
 
     fn into_stream(self) -> BoxSourceWithStateStream {
-        self.into_chunk_stream()
+        let parser_config = self.parser_config.clone();
+        let source_context = self.source_ctx.clone();
+        into_chunk_stream(self, parser_config, source_context)
     }
 }

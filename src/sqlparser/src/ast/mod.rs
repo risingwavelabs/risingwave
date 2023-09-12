@@ -181,7 +181,7 @@ impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.quote_style {
             Some(q) if q == '"' || q == '\'' || q == '`' => write!(f, "{}{}{}", q, self.value, q),
-            Some(q) if q == '[' => write!(f, "[{}]", self.value),
+            Some('[') => write!(f, "[{}]", self.value),
             None => f.write_str(&self.value),
             _ => panic!("unexpected quote style"),
         }
@@ -354,32 +354,32 @@ pub enum Expr {
         timestamp: Box<Expr>,
         time_zone: String,
     },
-    /// EXTRACT(DateTimeField FROM <expr>)
+    /// `EXTRACT(DateTimeField FROM <expr>)`
     Extract {
         field: String,
         expr: Box<Expr>,
     },
-    /// SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])
+    /// `SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])`
     Substring {
         expr: Box<Expr>,
         substring_from: Option<Box<Expr>>,
         substring_for: Option<Box<Expr>>,
     },
-    /// POSITION(<expr> IN <expr>)
+    /// `POSITION(<expr> IN <expr>)`
     Position {
         substring: Box<Expr>,
         string: Box<Expr>,
     },
-    /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
+    /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
     Overlay {
         expr: Box<Expr>,
         new_substring: Box<Expr>,
         start: Box<Expr>,
         count: Option<Box<Expr>>,
     },
-    /// TRIM([BOTH | LEADING | TRAILING] [<expr>] FROM <expr>)\
+    /// `TRIM([BOTH | LEADING | TRAILING] [<expr>] FROM <expr>)`\
     /// Or\
-    /// TRIM([BOTH | LEADING | TRAILING] [FROM] <expr> [, <expr>])
+    /// `TRIM([BOTH | LEADING | TRAILING] [FROM] <expr> [, <expr>])`
     Trim {
         expr: Box<Expr>,
         // ([BOTH | LEADING | TRAILING], <expr>)
@@ -1104,7 +1104,7 @@ pub enum Statement {
     CreateConnection { stmt: CreateConnectionStatement },
     /// CREATE FUNCTION
     ///
-    /// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
+    /// Postgres: <https://www.postgresql.org/docs/15/sql-createfunction.html>
     CreateFunction {
         or_replace: bool,
         temporary: bool,
@@ -1186,7 +1186,7 @@ pub enum Statement {
         /// `CASCADE` or `RESTRICT`
         option: Option<ReferentialAction>,
     },
-    /// SET <variable>
+    /// `SET <variable>`
     ///
     /// Note: this is not a standard SQL statement, but it is supported by at
     /// least MySQL and PostgreSQL. Not all MySQL-specific syntactic forms are
@@ -1196,7 +1196,7 @@ pub enum Statement {
         variable: Ident,
         value: Vec<SetVariableValue>,
     },
-    /// SHOW <variable>
+    /// `SHOW <variable>`
     ///
     /// Note: this is a PostgreSQL-specific statement.
     ShowVariable { variable: Vec<Ident> },

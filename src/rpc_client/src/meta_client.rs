@@ -735,16 +735,16 @@ impl MetaClient {
         Ok(resp.states)
     }
 
-    pub async fn pause(&self) -> Result<()> {
+    pub async fn pause(&self) -> Result<PauseResponse> {
         let request = PauseRequest {};
-        let _resp = self.inner.pause(request).await?;
-        Ok(())
+        let resp = self.inner.pause(request).await?;
+        Ok(resp)
     }
 
-    pub async fn resume(&self) -> Result<()> {
+    pub async fn resume(&self) -> Result<ResumeResponse> {
         let request = ResumeRequest {};
-        let _resp = self.inner.resume(request).await?;
-        Ok(())
+        let resp = self.inner.resume(request).await?;
+        Ok(resp)
     }
 
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
@@ -1307,7 +1307,7 @@ impl GrpcMetaClientCore {
 
 /// Client to meta server. Cloning the instance is lightweight.
 ///
-/// It is a wrapper of tonic client. See [`rpc_client_method_impl`].
+/// It is a wrapper of tonic client. See [`crate::rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
     member_monitor_event_sender: mpsc::Sender<Sender<Result<()>>>,
@@ -1369,7 +1369,7 @@ impl MetaMemberManagement {
             Either::Right(member_group) => {
                 let mut fetched_members = None;
 
-                for (addr, client) in member_group.members.iter_mut() {
+                for (addr, client) in &mut member_group.members {
                     let client: Result<MetaMemberClient> = try {
                         match client {
                             Some(cached_client) => cached_client.to_owned(),
@@ -1458,7 +1458,7 @@ impl GrpcMetaClient {
     // Max retry times for connecting to meta server.
     const INIT_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
-    async fn start_meta_member_monitor(
+    fn start_meta_member_monitor(
         &self,
         init_leader_addr: String,
         members: Either<MetaMemberClient, MetaMemberGroup>,
@@ -1559,9 +1559,7 @@ impl GrpcMetaClient {
             }
         };
 
-        client
-            .start_meta_member_monitor(addr, members, force_refresh_receiver, config)
-            .await?;
+        client.start_meta_member_monitor(addr, members, force_refresh_receiver, config)?;
 
         client.force_refresh_leader().await?;
 
@@ -1647,6 +1645,8 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
+            ,{ stream_client, pause, PauseRequest, PauseResponse }
+            ,{ stream_client, resume, ResumeRequest, ResumeResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
@@ -1712,8 +1712,6 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
-            ,{ scale_client, pause, PauseRequest, PauseResponse }
-            ,{ scale_client, resume, ResumeRequest, ResumeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
             ,{ scale_client, get_reschedule_plan, GetReschedulePlanRequest, GetReschedulePlanResponse }

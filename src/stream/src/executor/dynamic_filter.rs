@@ -232,11 +232,11 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
 
     async fn recover_rhs(&mut self) -> Result<Option<RowData>, StreamExecutorError> {
         // Recover value for RHS if available
-        let rhs_stream = self.right_table.iter(Default::default()).await?;
+        let rhs_stream = self.right_table.iter_row(Default::default()).await?;
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {
-            let value = res?;
+            let value = res?.into_owned_row();
             assert!(rhs_stream.next().await.is_none());
             Ok(Some(value))
         } else {
@@ -253,7 +253,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         let input_l = self.source_l.take().unwrap();
         let input_r = self.source_r.take().unwrap();
 
-        let left_len = input_l.schema().len();
         // Derive the dynamic expression
         let l_data_type = input_l.schema().data_types()[self.key_l].clone();
         let r_data_type = input_r.schema().data_types()[0].clone();
@@ -276,6 +275,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
             input_l.execute(),
             input_r.execute(),
             self.ctx.id,
+            self.ctx.fragment_id,
             self.metrics.clone(),
         );
 
@@ -297,14 +297,8 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
-        let (left_to_output, _) =
-            StreamChunkBuilder::get_i2o_mapping(0..self.schema.len(), left_len, 0);
-        let mut stream_chunk_builder = StreamChunkBuilder::new(
-            self.chunk_size,
-            &self.schema.data_types(),
-            vec![],
-            left_to_output,
-        );
+        let mut stream_chunk_builder =
+            StreamChunkBuilder::new(self.chunk_size, self.schema.data_types());
 
         let watermark_can_clean_state = !matches!(self.comparator, LessThan | LessThanOrEqual);
         let mut unused_clean_hint = None;
@@ -387,7 +381,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         // TODO: prefetching for append-only case.
                         let streams = futures::future::try_join_all(
                             self.left_table.vnodes().iter_vnodes().map(|vnode| {
-                                self.left_table.iter_with_pk_range(
+                                self.left_table.iter_row_with_pk_range(
                                     &range,
                                     vnode,
                                     PrefetchOptions::new_for_exhaust_iter(),
@@ -401,10 +395,10 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         #[for_await]
                         for res in stream::select_all(streams) {
                             let row = res?;
-                            if let Some(chunk) = stream_chunk_builder.append_row_matched(
+                            if let Some(chunk) = stream_chunk_builder.append_row(
                                 // All rows have a single identity at this point
                                 if is_insert { Op::Insert } else { Op::Delete },
-                                row,
+                                row.as_ref(),
                             ) {
                                 yield Message::Chunk(chunk);
                             }
