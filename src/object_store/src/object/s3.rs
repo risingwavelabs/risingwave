@@ -674,7 +674,7 @@ impl S3ObjectStore {
         }
 
         let start = range.start().map(|v| v.to_string()).unwrap_or_default();
-        let end = range.end().map(|v| v.to_string()).unwrap_or_default();
+        let end = range.end().map(|v| (v - 1).to_string()).unwrap_or_default(); // included
 
         req.range(format!("bytes={}-{}", start, end))
     }
