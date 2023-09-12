@@ -18,7 +18,7 @@ use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use num_traits::FromBytes;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -106,32 +106,44 @@ impl<S: StateStore> DedupExecutor<S> {
 
                     // Now check for duplication and insert new keys into the cache.
                     let mut vis_builder = BitmapBuilder::with_capacity(chunk.capacity());
+                    let mut cnt_builder = I64ArrayBuilder::new(chunk.capacity());
+
                     for (key, op) in keys.into_iter().zip(ops.iter()) {
                         match key {
                             Some(key) => {
-                                if self.cache.dedup_insert(op, key) {
+                                let (is_vis, cnt) = self.cache.dedup_insert(op, key);
+                                if is_vis {
                                     // The key doesn't exist before. The row should be visible.
                                     vis_builder.append(true);
+                                    cnt_builder.append(cnt);
                                 } else {
                                     // The key exists before. The row shouldn't be visible.
                                     vis_builder.append(false);
+                                    cnt_builder.append(0);
                                 }
                             }
                             None => {
                                 // The row is originally invisible.
                                 vis_builder.append(false);
+                                cnt_builder.append(0);
                             }
                         }
                     }
 
                     let vis = vis_builder.finish();
+                    let cnt = cnt_builder.finish();
                     if vis.count_ones() > 0 {
                         // Construct the new chunk and write the data to state table.
-                        let (ops, columns, _) = chunk.into_inner();
-                        let chunk = StreamChunk::new(ops, columns, Some(vis));
+                        let (ops, mut columns, _) = chunk.into_inner();
+                        let chunk =
+                            StreamChunk::new(ops.clone(), columns.clone(), Some(vis.clone()));
 
-                        // todo: state table should also keep the count row
-                        self.state_table.write_chunk(chunk.clone());
+                        let state_columns = columns.append(Arc::new(cnt));
+                        self.state_table.write_chunk(StreamChunk::new(
+                            ops,
+                            state_columns,
+                            Some(vis),
+                        ));
 
                         commit_data = true;
 
@@ -189,11 +201,11 @@ impl<S: StateStore> DedupExecutor<S> {
             let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
             while let Some(result) = buffered.next().await {
                 let (key, value) = result;
-
-                // todo: state table should also load prev count
-                if value?.is_some() {
+                if let Some(v) = value? {
                     // Only insert into the cache when we have this key in storage.
-                    self.cache.insert(key.to_owned());
+                    tracing::info!("populate cache with key: {:?}, value {:?}", key, v);
+                    let dup_cnt = 0;
+                    self.cache.insert(key.to_owned(), dup_cnt);
                 }
             }
         }

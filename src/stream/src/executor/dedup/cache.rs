@@ -36,46 +36,46 @@ impl<K: Hash + Eq + EstimateSize + Debug> DedupCache<K> {
 
     /// insert a `key` into the cache and return whether the key is duplicated.
     /// If duplicated, the cache will update the row count. If row count is 0, will return true.
-    pub fn dedup_insert(&mut self, op: &Op, key: K) -> bool {
+    /// Also, returns the dup_count of the key as i64 after inserting the record.
+    pub fn dedup_insert(&mut self, op: &Op, key: K) -> (bool, i64) {
         let row_cnt = self.inner.get(&key);
         match (row_cnt.cloned(), op) {
             (Some(row_cnt), Op::Insert | Op::UpdateInsert) => {
                 self.inner.put(key, row_cnt + 1);
                 if row_cnt == 0 {
                     // row_cnt 0 -> 1
-                    true
+                    (true, 1)
                 } else {
-                    false
+                    (false, row_cnt + 1)
                 }
             }
             (Some(row_cnt), Op::Delete | Op::UpdateDelete) => {
                 if row_cnt == 1 {
                     // row_cnt 1 -> 0
                     self.inner.put(key, row_cnt - 1);
-                    true
+                    (true, row_cnt - 1)
                 } else if row_cnt == 0 {
                     tracing::debug!("trying to delete a non-existing key from cache: {:?}", key);
-                    false
+                    (false, 0)
                 } else {
                     self.inner.put(key, row_cnt - 1);
-                    false
+                    (false, row_cnt - 1)
                 }
             }
             (None, Op::Insert | Op::UpdateInsert) => {
                 // row_cnt 0 -> 1
-                self.inner.put(key, 1).is_none()
+                (self.inner.put(key, 1).is_none(), 1)
             }
             (None, Op::Delete | Op::UpdateDelete) => {
                 tracing::debug!("trying to delete a non-existing key from cache: {:?}", key);
-                false
+                (false, 0)
             }
-        };
-        false
+        }
     }
 
     /// Insert a `key` into the cache without checking for duplication.
-    pub fn insert(&mut self, key: K) {
-        self.inner.push(key, 1);
+    pub fn insert(&mut self, key: K, dup_count: i64) {
+        self.inner.push(key, dup_count);
     }
 
     /// Check whether the given key is in the cache.
@@ -115,11 +115,11 @@ mod tests {
 
         cache.insert(10);
         assert!(cache.contains(&10));
-        assert!(!cache.dedup_insert(&Op::Insert, 10));
+        assert!(!cache.dedup_insert(&Op::Insert, 10).0);
 
-        assert!(cache.dedup_insert(&Op::Insert, 20));
+        assert!(cache.dedup_insert(&Op::Insert, 20).0);
         assert!(cache.contains(&20));
-        assert!(!cache.dedup_insert(&Op::Insert, 20));
+        assert!(!cache.dedup_insert(&Op::Insert, 20).0);
 
         cache.clear();
         assert!(!cache.contains(&10));
