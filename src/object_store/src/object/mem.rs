@@ -24,6 +24,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use fail::fail_point;
 use futures::Stream;
 use itertools::Itertools;
+use risingwave_common::range::RangeBoundsExt;
 use thiserror::Error;
 use tokio::io::AsyncRead;
 use tokio::sync::Mutex;
@@ -133,7 +134,7 @@ impl ObjectStore for InMemObjectStore {
     async fn read(
         &self,
         path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + 'static,
+        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
     ) -> ObjectResult<Bytes> {
         fail_point!("mem_read_err", |_| Err(ObjectError::internal(
             "mem read error"
@@ -236,7 +237,7 @@ impl InMemObjectStore {
     async fn get_object(
         &self,
         path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + 'static,
+        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
     ) -> ObjectResult<Bytes> {
         let objects = self.objects.lock().await;
 
@@ -245,22 +246,11 @@ impl InMemObjectStore {
             .map(|(_, obj)| obj)
             .ok_or_else(|| Error::not_found(format!("no object at path '{}'", path)))?;
 
-        let start = match range.start_bound() {
-            std::ops::Bound::Included(v) => *v,
-            std::ops::Bound::Excluded(v) => *v - 1,
-            std::ops::Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            std::ops::Bound::Included(v) => *v + 1,
-            std::ops::Bound::Excluded(v) => *v,
-            std::ops::Bound::Unbounded => obj.len(),
-        };
-
-        if end > obj.len() {
+        if let Some(end) = range.end() && end > obj.len() {
             return Err(Error::other("bad block offset and size").into());
         }
 
-        Ok(obj.slice(start..end))
+        Ok(obj.slice(range))
     }
 }
 

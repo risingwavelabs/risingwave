@@ -91,7 +91,7 @@ pub trait ObjectStore: Send + Sync {
     async fn read(
         &self,
         path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + 'static,
+        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
     ) -> ObjectResult<Bytes>;
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
@@ -196,7 +196,7 @@ impl ObjectStoreImpl {
     pub async fn read(
         &self,
         path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + 'static,
+        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
     ) -> ObjectResult<Bytes> {
         object_store_impl_method_body!(self, read, dispatch_async, path, range)
     }
@@ -610,7 +610,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn read(
         &self,
         path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + 'static,
+        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
     ) -> ObjectResult<Bytes> {
         let operation_type = "read";
         let _timer = self

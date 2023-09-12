@@ -14,7 +14,7 @@
 
 use std::cmp;
 use std::collections::VecDeque;
-use std::ops::{Bound, RangeBounds};
+use std::ops::RangeBounds;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
@@ -42,6 +42,7 @@ use hyper::Body;
 use itertools::Itertools;
 use risingwave_common::config::default::s3_objstore_config;
 use risingwave_common::monitor::connection::monitor_connector;
+use risingwave_common::range::RangeBoundsExt;
 use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -351,7 +352,7 @@ impl ObjectStore for S3ObjectStore {
     async fn read(
         &self,
         path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + 'static,
+        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
     ) -> ObjectResult<Bytes> {
         fail_point!("s3_read_err", |_| Err(ObjectError::internal(
             "s3 read error"
@@ -383,28 +384,14 @@ impl ObjectStore for S3ObjectStore {
 
         let val = resp.body.collect().await?.into_bytes();
 
-        if range.start_bound() != Bound::Unbounded && range.end_bound() != Bound::Unbounded {
-            let start = match range.start_bound() {
-                Bound::Included(v) => *v,
-                Bound::Excluded(v) => *v - 1,
-                Bound::Unbounded => unreachable!(),
-            };
-            let end = match range.end_bound() {
-                Bound::Included(v) => *v + 1,
-                Bound::Excluded(v) => *v,
-                Bound::Unbounded => unreachable!(),
-            };
-            let len = end - start;
-
-            if val.len() != end - start {
-                return Err(ObjectError::internal(format!(
-                    "mismatched size: expected {}, found {} when reading {} at {:?}",
-                    len,
-                    val.len(),
-                    path,
-                    start..end,
-                )));
-            }
+        if let Some(len) = range.len() && len != val.len() {
+            return Err(ObjectError::internal(format!(
+                "mismatched size: expected {}, found {} when reading {} at {:?}",
+                len,
+                val.len(),
+                path,
+                range,
+            )));
         }
 
         Ok(val)
@@ -678,24 +665,16 @@ impl S3ObjectStore {
     fn obj_store_request(
         &self,
         path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + 'static,
+        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
     ) -> GetObjectFluentBuilder {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
 
-        if range.start_bound() == Bound::Unbounded && range.end_bound() == Bound::Unbounded {
+        if range.is_full() {
             return req;
         }
 
-        let start = match range.start_bound() {
-            std::ops::Bound::Included(v) => v.to_string(),
-            std::ops::Bound::Excluded(v) => (v - 1).to_string(),
-            std::ops::Bound::Unbounded => String::new(),
-        };
-        let end = match range.end_bound() {
-            std::ops::Bound::Included(v) => v.to_string(),
-            std::ops::Bound::Excluded(v) => (v - 1).to_string(),
-            std::ops::Bound::Unbounded => String::new(),
-        };
+        let start = range.start().map(|v| v.to_string()).unwrap_or_default();
+        let end = range.end().map(|v| v.to_string()).unwrap_or_default();
 
         req.range(format!("bytes={}-{}", start, end))
     }

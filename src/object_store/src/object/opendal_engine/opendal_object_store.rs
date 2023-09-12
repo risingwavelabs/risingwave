@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::{Bound, RangeBounds};
+use std::ops::RangeBounds;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
@@ -22,6 +22,7 @@ use futures::future::BoxFuture;
 use futures::{FutureExt, Stream, StreamExt};
 use opendal::services::Memory;
 use opendal::{Entry, Error, Lister, Metakey, Operator, Writer};
+use risingwave_common::range::RangeBoundsExt;
 use tokio::io::AsyncRead;
 
 use crate::object::{
@@ -83,40 +84,24 @@ impl ObjectStore for OpendalObjectStore {
     async fn read(
         &self,
         path: &str,
-        range: impl RangeBounds<usize> + Clone + Send + Sync + 'static,
+        range: impl RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static,
     ) -> ObjectResult<Bytes> {
-        let data = if range.start_bound() == Bound::Unbounded
-            && range.end_bound() == Bound::Unbounded
-        {
+        let data = if range.is_full() {
             self.op.read(path).await?
         } else {
-            let data = self
-                .op
-                .range_read(
-                    path,
-                    (
-                        range.start_bound().map(|v| *v as u64),
-                        range.end_bound().map(|v| *v as u64),
-                    ),
-                )
-                .await?;
-            if range.start_bound() != Bound::Unbounded && range.end_bound() != Bound::Unbounded {
-                let start = match range.start_bound() {
-                    Bound::Included(v) => *v,
-                    Bound::Excluded(v) => *v - 1,
-                    Bound::Unbounded => unreachable!(),
-                };
-                let end = match range.end_bound() {
-                    Bound::Included(v) => *v + 1,
-                    Bound::Excluded(v) => *v,
-                    Bound::Unbounded => unreachable!(),
-                };
-                if data.len() != end - start {
-                    return Err(ObjectError::internal("bad block offset and size"));
-                }
-            }
-            data
+            self.op.range_read(path, range.map(|v| *v as u64)).await?
         };
+
+        if let Some(len) = range.len() && len != data.len() {
+            return Err(ObjectError::internal(format!(
+                "mismatched size: expected {}, found {} when reading {} at {:?}",
+                len,
+                data.len(),
+                path,
+                range,
+            )));
+        }
+
         Ok(Bytes::from(data))
     }
 
