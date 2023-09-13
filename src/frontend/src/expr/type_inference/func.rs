@@ -623,7 +623,16 @@ fn infer_type_for_special(
             ensure_arity!("array_sum", | inputs | == 1);
             inputs[0].ensure_array_type()?;
 
-            Ok(Some(inputs[0].return_type().as_list().clone()))
+            let return_type = match inputs[0].return_type().as_list().clone() {
+                DataType::Int16 | DataType::Int32 => DataType::Int64,
+                DataType::Int64 | DataType::Decimal => DataType::Decimal,
+                DataType::Float32 => DataType::Float32,
+                DataType::Float64 => DataType::Float64,
+                DataType::Interval => DataType::Interval,
+                _ => return Err(ErrorCode::InvalidParameterValue("".to_string()).into()),
+            };
+
+            Ok(Some(return_type))
         }
         ExprType::StringToArray => {
             ensure_arity!("string_to_array", 2 <= | inputs | <= 3);
