@@ -120,11 +120,11 @@ insert into t values (Array['a','b', 'c']), (Array['d','e']);
 query I rowsort
 select * from mv;
 ----
-{a,b,c} c 3
-{a,b,c} b 2
 {a,b,c} a 1
-{d,e}   e 2
+{a,b,c} b 2
+{a,b,c} c 3
 {d,e}   d 1
+{d,e}   e 2
 
 statement ok
 drop materialized view mv;
