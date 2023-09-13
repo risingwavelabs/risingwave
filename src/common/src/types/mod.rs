@@ -422,13 +422,13 @@ impl DataType {
     ///
     /// ```
     /// use risingwave_common::types::DataType::*;
-    /// assert_eq!(List(Box::new(Int32)).unnest_list(), Int32);
-    /// assert_eq!(List(Box::new(List(Box::new(Int32)))).unnest_list(), Int32);
+    /// assert_eq!(List(Box::new(Int32)).unnest_list(), &Int32);
+    /// assert_eq!(List(Box::new(List(Box::new(Int32)))).unnest_list(), &Int32);
     /// ```
-    pub fn unnest_list(&self) -> Self {
+    pub fn unnest_list(&self) -> &Self {
         match self {
             DataType::List(inner) => inner.unnest_list(),
-            _ => self.clone(),
+            _ => self,
         }
     }
 

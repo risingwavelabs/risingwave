@@ -20,6 +20,8 @@ use risingwave_common::array::*;
 use risingwave_common::types::ToText;
 use risingwave_expr_macro::function;
 
+use crate::expr::Context;
+
 /// Converts each array element to its text representation, and concatenates those
 /// separated by the delimiter string. If `null_string` is given and is not NULL,
 /// then NULL array entries are represented by that string; otherwise, they are omitted.
@@ -81,7 +83,8 @@ use risingwave_expr_macro::function;
 /// one,*,three,four
 /// ```
 #[function("array_to_string(list, varchar) -> varchar")]
-fn array_to_string(array: ListRef<'_>, delimiter: &str, writer: &mut impl Write) {
+fn array_to_string(array: ListRef<'_>, delimiter: &str, ctx: &Context, writer: &mut impl Write) {
+    let element_data_type = ctx.arg_types[0].unnest_list();
     let mut first = true;
     for element in array.flatten() {
         let Some(element) = element else { continue };
@@ -90,7 +93,7 @@ fn array_to_string(array: ListRef<'_>, delimiter: &str, writer: &mut impl Write)
         } else {
             first = false;
         }
-        element.write(writer).unwrap();
+        element.write_with_type(element_data_type, writer).unwrap();
     }
 }
 
@@ -99,8 +102,10 @@ fn array_to_string_with_null(
     array: ListRef<'_>,
     delimiter: &str,
     null_string: &str,
+    ctx: &Context,
     writer: &mut impl Write,
 ) {
+    let element_data_type = ctx.arg_types[0].unnest_list();
     let mut first = true;
     for element in array.flatten() {
         if !first {
@@ -109,7 +114,7 @@ fn array_to_string_with_null(
             first = false;
         }
         match element {
-            Some(s) => s.write(writer).unwrap(),
+            Some(s) => s.write_with_type(element_data_type, writer).unwrap(),
             None => write!(writer, "{}", null_string).unwrap(),
         }
     }
