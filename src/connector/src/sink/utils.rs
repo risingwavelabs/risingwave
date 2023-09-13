@@ -14,7 +14,7 @@
 
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_chunk::Op;
-use risingwave_common::array::{RowRef, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use serde_json::{json, Map, Value};
 use tracing::warn;
@@ -57,6 +57,8 @@ pub async fn gen_debezium_message_stream<'a>(
 
     let mut update_cache: Option<Map<String, Value>> = None;
 
+    let encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
+
     for (op, row) in chunk.rows() {
         let event_key_object: Option<Value> = Some(json!({
             "schema": json!({
@@ -65,14 +67,14 @@ pub async fn gen_debezium_message_stream<'a>(
                 "optional": false,
                 "name": concat_debezium_name_field(db_name, sink_from_name, "Key"),
             }),
-            "payload": pk_to_json(row, &schema.fields, pk_indices)?,
+            "payload": encoder.encode(row, &schema.fields, pk_indices.iter().copied())?,
         }));
         let event_object: Option<Value> = match op {
             Op::Insert => Some(json!({
                 "schema": schema_to_json(schema, db_name, sink_from_name),
                 "payload": {
                     "before": null,
-                    "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
+                    "after": encoder.encode_all(row, &schema.fields)?,
                     "op": "c",
                     "ts_ms": ts_ms,
                     "source": source_field,
@@ -82,7 +84,7 @@ pub async fn gen_debezium_message_stream<'a>(
                 let value_obj = Some(json!({
                     "schema": schema_to_json(schema, db_name, sink_from_name),
                     "payload": {
-                        "before": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
+                        "before": encoder.encode_all(row, &schema.fields)?,
                         "after": null,
                         "op": "d",
                         "ts_ms": ts_ms,
@@ -100,11 +102,7 @@ pub async fn gen_debezium_message_stream<'a>(
                 continue;
             }
             Op::UpdateDelete => {
-                update_cache = Some(record_to_json(
-                    row,
-                    &schema.fields,
-                    TimestampHandlingMode::Milli,
-                )?);
+                update_cache = Some(encoder.encode_all(row, &schema.fields)?);
                 continue;
             }
             Op::UpdateInsert => {
@@ -113,7 +111,7 @@ pub async fn gen_debezium_message_stream<'a>(
                         "schema": schema_to_json(schema, db_name, sink_from_name),
                         "payload": {
                             "before": before,
-                            "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
+                            "after": encoder.encode_all(row, &schema.fields)?,
                             "op": "u",
                             "ts_ms": ts_ms,
                             "source": source_field,
@@ -240,34 +238,15 @@ pub(crate) fn field_to_json(field: &Field) -> Value {
     })
 }
 
-pub(crate) fn pk_to_json(
-    row: RowRef<'_>,
-    schema: &[Field],
-    pk_indices: &[usize],
-) -> Result<Map<String, Value>> {
-    JsonEncoder::new(TimestampHandlingMode::Milli).encode(row, schema, pk_indices.iter().copied())
-}
-
 pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>> {
+    let encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
     let mut records: Vec<String> = Vec::with_capacity(chunk.capacity());
     for (_, row) in chunk.rows() {
-        let record = Value::Object(record_to_json(
-            row,
-            &schema.fields,
-            TimestampHandlingMode::Milli,
-        )?);
+        let record = Value::Object(encoder.encode_all(row, &schema.fields)?);
         records.push(record.to_string());
     }
 
     Ok(records)
-}
-
-pub fn record_to_json(
-    row: RowRef<'_>,
-    schema: &[Field],
-    timestamp_handling_mode: TimestampHandlingMode,
-) -> Result<Map<String, Value>> {
-    JsonEncoder::new(timestamp_handling_mode).encode_all(row, schema)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -279,26 +258,24 @@ pub async fn gen_upsert_message_stream<'a>(
     pk_indices: &'a [usize],
     chunk: StreamChunk,
     _opts: UpsertAdapterOpts,
+    key_encoder: JsonEncoder,
+    val_encoder: JsonEncoder,
 ) {
     for (op, row) in chunk.rows() {
-        let event_key_object = Some(Value::Object(pk_to_json(row, &schema.fields, pk_indices)?));
+        let event_key_object = Some(Value::Object(key_encoder.encode(
+            row,
+            &schema.fields,
+            pk_indices.iter().copied(),
+        )?));
 
         let event_object = match op {
-            Op::Insert => Some(Value::Object(record_to_json(
-                row,
-                &schema.fields,
-                TimestampHandlingMode::Milli,
-            )?)),
+            Op::Insert => Some(Value::Object(val_encoder.encode_all(row, &schema.fields)?)),
             Op::Delete => Some(Value::Null),
             Op::UpdateDelete => {
                 // upsert semantic does not require update delete event
                 continue;
             }
-            Op::UpdateInsert => Some(Value::Object(record_to_json(
-                row,
-                &schema.fields,
-                TimestampHandlingMode::Milli,
-            )?)),
+            Op::UpdateInsert => Some(Value::Object(val_encoder.encode_all(row, &schema.fields)?)),
         };
 
         yield (event_key_object, event_object);
@@ -314,17 +291,19 @@ pub async fn gen_append_only_message_stream<'a>(
     pk_indices: &'a [usize],
     chunk: StreamChunk,
     _opts: AppendOnlyAdapterOpts,
+    key_encoder: JsonEncoder,
+    val_encoder: JsonEncoder,
 ) {
     for (op, row) in chunk.rows() {
         if op != Op::Insert {
             continue;
         }
-        let event_key_object = Some(Value::Object(pk_to_json(row, &schema.fields, pk_indices)?));
-        let event_object = Some(Value::Object(record_to_json(
+        let event_key_object = Some(Value::Object(key_encoder.encode(
             row,
             &schema.fields,
-            TimestampHandlingMode::Milli,
+            pk_indices.iter().copied(),
         )?));
+        let event_object = Some(Value::Object(val_encoder.encode_all(row, &schema.fields)?));
 
         yield (event_key_object, event_object);
     }

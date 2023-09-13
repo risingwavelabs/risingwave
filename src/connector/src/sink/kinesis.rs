@@ -31,6 +31,7 @@ use tokio_retry::Retry;
 
 use super::SinkParam;
 use crate::common::KinesisCommon;
+use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
@@ -202,11 +203,15 @@ impl KinesisSinkWriter {
     }
 
     async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
+        let key_encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
         let upsert_stream = gen_upsert_message_stream(
             &self.schema,
             &self.pk_indices,
             chunk,
             UpsertAdapterOpts::default(),
+            key_encoder,
+            val_encoder,
         );
 
         crate::impl_load_stream_write_record!(upsert_stream, self.put_record);
@@ -214,11 +219,15 @@ impl KinesisSinkWriter {
     }
 
     async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
+        let key_encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
         let append_only_stream = gen_append_only_message_stream(
             &self.schema,
             &self.pk_indices,
             chunk,
             AppendOnlyAdapterOpts::default(),
+            key_encoder,
+            val_encoder,
         );
 
         crate::impl_load_stream_write_record!(append_only_stream, self.put_record);
