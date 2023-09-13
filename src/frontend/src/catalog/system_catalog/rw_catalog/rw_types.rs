@@ -32,7 +32,7 @@ macro_rules! impl_pg_type_data {
             // Note: rw doesn't support `text` type, returning it is just a workaround to be compatible
             // with PostgreSQL.
             (25, "text", "text_in"),
-            (1301, "rw_int256", "rw_int1256_in"),
+            (1301, "rw_int256", "rw_int256_in"),
         ]
     }
 }
