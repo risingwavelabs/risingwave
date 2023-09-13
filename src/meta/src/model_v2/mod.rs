@@ -3,6 +3,7 @@
 pub mod prelude;
 
 pub mod actor;
+pub mod cluster;
 pub mod connection;
 pub mod database;
 pub mod fragment;
@@ -13,6 +14,7 @@ pub mod object_dependency;
 pub mod schema;
 pub mod sink;
 pub mod source;
+pub mod system_parameter;
 pub mod table;
 pub mod user;
 pub mod user_privilege;

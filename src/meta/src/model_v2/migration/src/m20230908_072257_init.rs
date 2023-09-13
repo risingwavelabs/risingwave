@@ -7,6 +7,7 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         // 1. check if the table exists.
+        assert!(!manager.has_table(Cluster::Table.to_string()).await?);
         assert!(!manager.has_table(Worker::Table.to_string()).await?);
         assert!(!manager.has_table(WorkerProperty::Table.to_string()).await?);
         assert!(!manager.has_table(User::Table.to_string()).await?);
@@ -28,8 +29,32 @@ impl MigrationTrait for Migration {
                 .has_table(ObjectDependency::Table.to_string())
                 .await?
         );
+        assert!(
+            !manager
+                .has_table(SystemParameter::Table.to_string())
+                .await?
+        );
 
         // 2. create tables.
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(Cluster::Table)
+                    .col(
+                        ColumnDef::new(Cluster::ClusterId)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(
+                        ColumnDef::new(Cluster::CreatedAt)
+                            .timestamp()
+                            .default(Expr::current_timestamp())
+                            .not_null(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
         manager
             .create_table(
                 MigrationTable::create()
@@ -377,6 +402,26 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(SystemParameter::Table)
+                    .col(
+                        ColumnDef::new(SystemParameter::Name)
+                            .string()
+                            .primary_key()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(SystemParameter::Value).string().not_null())
+                    .col(
+                        ColumnDef::new(SystemParameter::IsMutable)
+                            .boolean()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(SystemParameter::Description).string())
+                    .to_owned(),
+            )
+            .await?;
 
         // 3. create indexes.
         manager
@@ -474,6 +519,7 @@ impl MigrationTrait for Migration {
                     .name("FK_fragment_table_id")
                     .from(Fragment::Table, Fragment::TableId)
                     .to(Table::Table, Table::TableId)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .to_owned(),
             )
             .await?;
@@ -483,6 +529,7 @@ impl MigrationTrait for Migration {
                     .name("FK_actor_fragment_id")
                     .from(Actor::Table, Actor::FragmentId)
                     .to(Fragment::Table, Fragment::FragmentId)
+                    .on_delete(ForeignKeyAction::Cascade)
                     .to_owned(),
             )
             .await?;
@@ -784,6 +831,11 @@ impl MigrationTrait for Migration {
             .await?;
 
         // 4. initialize data.
+        let insert_cluster_id = Query::insert()
+            .into_table(Cluster::Table)
+            .columns([Cluster::ClusterId])
+            .values_panic([uuid::Uuid::new_v4().into()])
+            .to_owned();
         let insert_sys_users = Query::insert()
             .into_table(User::Table)
             .columns([
@@ -835,6 +887,7 @@ impl MigrationTrait for Migration {
             .values_panic([5.into(), "rw_catalog".into(), 1.into()])
             .to_owned();
 
+        manager.exec_stmt(insert_cluster_id).await?;
         manager.exec_stmt(insert_sys_users).await?;
         manager.exec_stmt(insert_objects).await?;
         manager.exec_stmt(insert_sys_database).await?;
@@ -863,6 +916,7 @@ impl MigrationTrait for Migration {
         // drop tables cascade.
         drop_tables!(
             manager,
+            Cluster,
             Worker,
             WorkerProperty,
             User,
@@ -879,10 +933,18 @@ impl MigrationTrait for Migration {
             Index,
             Function,
             Object,
-            ObjectDependency
+            ObjectDependency,
+            SystemParameter
         );
         Ok(())
     }
+}
+
+#[derive(DeriveIden)]
+enum Cluster {
+    Table,
+    ClusterId,
+    CreatedAt,
 }
 
 #[derive(DeriveIden)]
@@ -1103,4 +1165,13 @@ enum ObjectDependency {
     Id,
     Oid,
     UsedBy,
+}
+
+#[derive(DeriveIden)]
+enum SystemParameter {
+    Table,
+    Name,
+    Value,
+    IsMutable,
+    Description,
 }

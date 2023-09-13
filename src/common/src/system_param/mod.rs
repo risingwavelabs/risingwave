@@ -129,7 +129,7 @@ macro_rules! impl_system_params_to_kv {
 
 macro_rules! impl_derive_missing_fields {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
-        fn derive_missing_fields(params: &mut PbSystemParams) {
+        pub fn derive_missing_fields(params: &mut PbSystemParams) {
             $(
                 if params.$field.is_none() && let Some(v) = OverrideFromParams::$field(params) {
                     params.$field = Some(v);
@@ -246,7 +246,7 @@ macro_rules! impl_default_from_other_params {
 
 macro_rules! impl_set_system_param {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
-        pub fn set_system_param(params: &mut PbSystemParams, key: &str, value: Option<String>) -> Result<()> {
+        pub fn set_system_param(params: &mut PbSystemParams, key: &str, value: Option<String>) -> Result<String> {
              match key {
                 $(
                     key_of!($field) => {
@@ -256,7 +256,8 @@ macro_rules! impl_set_system_param {
                             $default.ok_or_else(|| format!("{} does not have a default value", key))?
                         };
                         OverrideValidateOnSet::$field(&v)?;
-                        params.$field = Some(v);
+                        params.$field = Some(v.clone());
+                        return Ok(v.to_string())
                     },
                 )*
                 _ => {
@@ -266,7 +267,6 @@ macro_rules! impl_set_system_param {
                     ));
                 }
             };
-            Ok(())
         }
     };
 }

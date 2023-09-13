@@ -14,13 +14,16 @@
 
 use anyhow::anyhow;
 use parse_display::Display;
-use risingwave_pb::catalog::{PbDatabase, PbSchema, PbTable};
-use sea_orm::{ActiveValue, EntityTrait, ModelTrait};
+use risingwave_pb::catalog::{PbDatabase, PbSchema};
+use sea_orm::{ActiveValue, ModelTrait};
 
 use crate::model_v2::{database, object, schema};
 use crate::MetaError;
 
+#[allow(dead_code)]
 mod catalog_controller;
+#[allow(dead_code)]
+mod system_param_controller;
 
 // todo: refine the error transform.
 impl From<sea_orm::DbErr> for MetaError {
@@ -31,6 +34,7 @@ impl From<sea_orm::DbErr> for MetaError {
 
 #[derive(Clone, Display, Debug)]
 #[display(style = "UPPERCASE")]
+#[allow(dead_code)]
 enum ObjectType {
     Database,
     Schema,

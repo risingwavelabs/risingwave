@@ -13,14 +13,20 @@
 // limitations under the License.
 
 use std::iter;
+use std::time::Duration;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
-use risingwave_pb::catalog::{PbDatabase, PbSchema};
+use risingwave_pb::catalog::PbDatabase;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
-use sea_orm::{ActiveModelBehavior, ActiveModelTrait, ActiveValue, ColumnTrait, Database as SeaDB, DatabaseConnection, DatabaseTransaction, EntityTrait, ModelTrait, QueryFilter, QueryTrait, TransactionTrait};
-use sea_orm::sea_query::Query;
+use sea_orm::sea_query::{Query, UnionType};
+use sea_orm::{
+    ActiveModelBehavior, ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions,
+    ConnectionTrait, Database as SeaDB, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    ModelTrait, QueryFilter, QuerySelect, TransactionTrait,
+};
 use tokio::sync::RwLock;
 
 use crate::controller::{ModelWithObj, ObjectType};
@@ -34,27 +40,34 @@ use crate::{MetaError, MetaResult};
 /// `CatalogController` is the controller for catalog related operations, including database, schema, table, view, etc.
 pub struct CatalogController {
     env: MetaSrvEnv,
-    db: DatabaseConnection,
-    // todo: replace it with monotonic timestamp.
-    revision: RwLock<u64>,
+    inner: RwLock<CatalogControllerInner>,
+}
+
+pub struct ReleaseContext {
+    streaming_jobs: Vec<i32>,
+    source_ids: Vec<i32>,
+    connections: Vec<serde_json::Value>,
 }
 
 impl CatalogController {
     pub async fn new(env: MetaSrvEnv, url: &str) -> MetaResult<Self> {
-        let db = SeaDB::connect(url).await?;
+        let mut opts = ConnectOptions::new(url);
+        opts.max_connections(20)
+            .connect_timeout(Duration::from_secs(10));
+
+        let db = SeaDB::connect(opts).await?;
         Ok(Self {
             env,
-            db,
-            revision: RwLock::new(0),
+            inner: RwLock::new(CatalogControllerInner { db }),
         })
     }
 }
 
-impl CatalogController {
-    pub async fn get_revision(&self) -> u64 {
-        *self.revision.read().await
-    }
+struct CatalogControllerInner {
+    db: DatabaseConnection,
+}
 
+impl CatalogController {
     async fn notify_frontend(
         &self,
         operation: NotificationOperation,
@@ -69,13 +82,14 @@ impl CatalogController {
 
 impl CatalogController {
     pub async fn snapshot(&self) -> MetaResult<Vec<PbDatabase>> {
+        let inner = self.inner.read().await;
         let dbs = Database::find()
             .find_also_related(Object)
-            .all(&self.db)
+            .all(&inner.db)
             .await?;
         let _tables = Table::find()
             .find_also_related(Object)
-            .all(&self.db)
+            .all(&inner.db)
             .await?;
 
         Ok(dbs
@@ -96,7 +110,8 @@ impl CatalogController {
     }
 
     pub async fn create_database(&self, db: PbDatabase) -> MetaResult<NotificationVersion> {
-        let txn = self.db.begin().await?;
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
         let owner_id = db.owner;
 
         let db_obj = Self::create_object(&txn, ObjectType::Database, owner_id).await?;
@@ -132,70 +147,125 @@ impl CatalogController {
         Ok(version)
     }
 
-    pub async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<()> {
-        let _tables = Table::find()
-            .filter(table::Column::DatabaseId.eq(database_id as i32))
-            .all(&self.db)
-            .await?;
-        // 1. unregister source.
-        // 2. fragments + actors, streaming manager drop streaming job.
-        // 3. connection to drop.
+    pub async fn drop_database(
+        &self,
+        database_id: DatabaseId,
+    ) -> MetaResult<(ReleaseContext, NotificationVersion)> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
 
-        let txn = self.db.begin().await?;
-        let db: database::ActiveModel = Database::find_by_id(database_id as i32)
+        let db = Database::find_by_id(database_id as i32)
             .one(&txn)
             .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?
-            .into();
+            .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;
+        let db_obj = db.find_related(Object).one(&txn).await?;
+        let pb_db = ModelWithObj(db.clone(), db_obj.unwrap()).into();
 
-        // todo: drop objects.
-        // Object::delete_many().filter(object::Column::Oid.in_subquery(
-        //
-        // )).exec(&txn).await?;
-        //
+        let tables = db.find_related(Table).all(&txn).await?;
+        let sinks = db.find_related(Sink).all(&txn).await?;
+        let indexes = db.find_related(Index).all(&txn).await?;
+        let streaming_jobs = tables
+            .into_iter()
+            .map(|t| t.table_id)
+            .chain(sinks.into_iter().map(|s| s.sink_id))
+            .chain(indexes.into_iter().map(|i| i.index_id))
+            .collect::<Vec<_>>();
+        let source_ids = db
+            .find_related(Source)
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(|s| s.source_id)
+            .collect_vec();
+        let connections = db
+            .find_related(Connection)
+            .all(&txn)
+            .await?
+            .into_iter()
+            .flat_map(|c| c.info)
+            .collect_vec();
 
-        Table::delete_many()
-            .filter(table::Column::DatabaseId.eq(database_id as i32))
+        let mut query_schema = Query::select()
+            .column(schema::Column::SchemaId)
+            .from(schema::Entity)
+            .and_where(schema::Column::DatabaseId.eq(database_id as i32))
+            .to_owned();
+        let query_table = Query::select()
+            .column(table::Column::TableId)
+            .from(table::Entity)
+            .and_where(table::Column::DatabaseId.eq(database_id as i32))
+            .to_owned();
+        let query_source = Query::select()
+            .column(source::Column::SourceId)
+            .from(source::Entity)
+            .and_where(source::Column::DatabaseId.eq(database_id as i32))
+            .to_owned();
+        let query_sink = Query::select()
+            .column(sink::Column::SinkId)
+            .from(sink::Entity)
+            .and_where(sink::Column::DatabaseId.eq(database_id as i32))
+            .to_owned();
+        let query_index = Query::select()
+            .column(index::Column::IndexId)
+            .from(index::Entity)
+            .and_where(index::Column::DatabaseId.eq(database_id as i32))
+            .to_owned();
+        let query_view = Query::select()
+            .column(view::Column::ViewId)
+            .from(view::Entity)
+            .and_where(view::Column::DatabaseId.eq(database_id as i32))
+            .to_owned();
+        let query_function = Query::select()
+            .column(function::Column::FunctionId)
+            .from(function::Entity)
+            .and_where(function::Column::DatabaseId.eq(database_id as i32))
+            .to_owned();
+        let query_connection = Query::select()
+            .column(connection::Column::ConnectionId)
+            .from(connection::Entity)
+            .and_where(connection::Column::DatabaseId.eq(database_id as i32))
+            .to_owned();
+        let query_all = query_schema
+            .union(UnionType::All, query_table)
+            .union(UnionType::All, query_source)
+            .union(UnionType::All, query_sink)
+            .union(UnionType::All, query_index)
+            .union(UnionType::All, query_view)
+            .union(UnionType::All, query_function)
+            .union(UnionType::All, query_connection)
+            .to_owned();
+        // drop related objects, the relations will be dropped cascade.
+        Object::delete_many()
+            .filter(object::Column::Oid.in_subquery(query_all))
             .exec(&txn)
             .await?;
-        Source::delete_many()
-            .filter(source::Column::DatabaseId.eq(database_id as i32))
+        Database::delete(database::ActiveModel::from(db))
             .exec(&txn)
             .await?;
-        Sink::delete_many()
-            .filter(sink::Column::DatabaseId.eq(database_id as i32))
-            .exec(&txn)
-            .await?;
-        Index::delete_many()
-            .filter(index::Column::DatabaseId.eq(database_id as i32))
-            .exec(&txn)
-            .await?;
-        Function::delete_many()
-            .filter(function::Column::DatabaseId.eq(database_id as i32))
-            .exec(&txn)
-            .await?;
-        Connection::delete_many()
-            .filter(connection::Column::DatabaseId.eq(database_id as i32))
-            .exec(&txn)
-            .await?;
-        View::delete_many()
-            .filter(view::Column::DatabaseId.eq(database_id as i32))
-            .exec(&txn)
-            .await?;
-        Schema::delete_many()
-            .filter(schema::Column::DatabaseId.eq(database_id as i32))
-            .exec(&txn)
-            .await?;
-        Database::delete(db).exec(&txn).await?;
 
         txn.commit().await?;
-        Ok(())
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Delete,
+                NotificationInfo::Database(pb_db),
+            )
+            .await;
+        Ok((
+            ReleaseContext {
+                streaming_jobs,
+                source_ids,
+                connections,
+            },
+            version,
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
+
     use super::*;
 
     #[tokio::test]
@@ -216,7 +286,7 @@ mod tests {
         mgr.create_database(db).await.unwrap();
         let db = Database::find()
             .filter(database::Column::Name.eq("test"))
-            .one(&mgr.db)
+            .one(&mgr.inner.read().await.db)
             .await
             .unwrap()
             .unwrap();
