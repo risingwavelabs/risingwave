@@ -32,7 +32,9 @@ use risingwave_connector::sink::{
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
-use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
+use crate::common::log_store::{
+    LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
+};
 use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
@@ -259,7 +261,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 }
             };
             match item {
-                LogStoreReadItem::StreamChunk(chunk) => {
+                LogStoreReadItem::StreamChunk { chunk, .. } => {
                     let chunk = if visible_columns.len() != columns.len() {
                         // Do projection here because we may have columns that aren't visible to
                         // the downstream.
@@ -273,20 +275,22 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     }
                 }
                 LogStoreReadItem::Barrier { is_checkpoint } => {
+                    let prev_epoch = match state {
+                        LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
+                        _ => unreachable!("epoch must have begun before handling barrier"),
+                    };
                     if is_checkpoint {
                         let start_time = Instant::now();
                         sink_writer.barrier(true).await?;
                         sink_metrics
                             .sink_commit_duration_metrics
                             .observe(start_time.elapsed().as_millis() as f64);
-                        log_reader.truncate().await?;
+                        log_reader
+                            .truncate(TruncateOffset::Barrier { epoch: prev_epoch })
+                            .await?;
                     } else {
                         sink_writer.barrier(false).await?;
                     }
-                    let prev_epoch = match state {
-                        LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
-                        _ => unreachable!("epoch must have begun before handling barrier"),
-                    };
                     state = LogConsumerState::BarrierReceived { prev_epoch }
                 }
                 LogStoreReadItem::UpdateVnodeBitmap(vnode_bitmap) => {

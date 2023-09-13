@@ -15,6 +15,7 @@
 pub mod in_mem;
 pub mod kv_log_store;
 
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::future::Future;
 use std::sync::Arc;
@@ -41,11 +42,50 @@ pub enum LogStoreError {
 }
 
 pub type LogStoreResult<T> = Result<T, LogStoreError>;
+pub type ChunkId = usize;
+
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum TruncateOffset {
+    Chunk { epoch: u64, chunk_id: ChunkId },
+    Barrier { epoch: u64 },
+}
+
+impl PartialOrd for TruncateOffset {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let extract = |offset: &TruncateOffset| match offset {
+            TruncateOffset::Chunk { epoch, chunk_id } => (*epoch, *chunk_id),
+            TruncateOffset::Barrier { epoch } => (*epoch, usize::MAX),
+        };
+        let this = extract(self);
+        let other = extract(other);
+        this.partial_cmp(&other)
+    }
+}
+
+impl TruncateOffset {
+    pub fn next_chunk_id(&self) -> ChunkId {
+        match self {
+            TruncateOffset::Chunk { chunk_id, .. } => chunk_id + 1,
+            TruncateOffset::Barrier { .. } => 0,
+        }
+    }
+
+    pub fn epoch(&self) -> u64 {
+        match self {
+            TruncateOffset::Chunk { epoch, .. } | TruncateOffset::Barrier { epoch } => *epoch,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum LogStoreReadItem {
-    StreamChunk(StreamChunk),
-    Barrier { is_checkpoint: bool },
+    StreamChunk {
+        chunk: StreamChunk,
+        chunk_id: ChunkId,
+    },
+    Barrier {
+        is_checkpoint: bool,
+    },
     UpdateVnodeBitmap(Arc<Bitmap>),
 }
 
@@ -84,7 +124,10 @@ pub trait LogReader {
 
     /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
     /// from the current offset.
-    fn truncate(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 }
 
 pub trait LogStoreFactory: 'static {
@@ -92,4 +135,59 @@ pub trait LogStoreFactory: 'static {
     type Writer: LogWriter + Send + 'static;
 
     fn build(self) -> impl Future<Output = (Self::Reader, Self::Writer)> + Send;
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::log_store::TruncateOffset;
+
+    #[test]
+    fn test_truncate_offset_cmp() {
+        assert!(
+            TruncateOffset::Barrier { epoch: 232 }
+                < TruncateOffset::Chunk {
+                    epoch: 233,
+                    chunk_id: 1
+                }
+        );
+        assert_eq!(
+            TruncateOffset::Chunk {
+                epoch: 1,
+                chunk_id: 1
+            },
+            TruncateOffset::Chunk {
+                epoch: 1,
+                chunk_id: 1
+            }
+        );
+        assert!(
+            TruncateOffset::Chunk {
+                epoch: 1,
+                chunk_id: 1
+            } < TruncateOffset::Chunk {
+                epoch: 1,
+                chunk_id: 2
+            }
+        );
+        assert!(
+            TruncateOffset::Barrier { epoch: 1 }
+                > TruncateOffset::Chunk {
+                    epoch: 1,
+                    chunk_id: 2
+                }
+        );
+        assert!(
+            TruncateOffset::Chunk {
+                epoch: 1,
+                chunk_id: 2
+            } < TruncateOffset::Barrier { epoch: 1 }
+        );
+        assert!(
+            TruncateOffset::Chunk {
+                epoch: 2,
+                chunk_id: 2
+            } > TruncateOffset::Barrier { epoch: 1 }
+        );
+        assert!(TruncateOffset::Barrier { epoch: 2 } > TruncateOffset::Barrier { epoch: 1 });
+    }
 }
