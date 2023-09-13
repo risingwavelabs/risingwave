@@ -158,7 +158,6 @@ impl CompactionPicker for TierCompactionPicker {
 pub mod tests {
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::new_sub_level;
     use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::{LevelType, OverlappingLevel};
@@ -257,11 +256,8 @@ pub mod tests {
         // sub-level 0 is excluded because it's nonoverlapping and violating
         // sub_level_max_compaction_bytes.
         let mut picker = TierCompactionPicker::new(config);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        assert_eq!(ret.input_levels.len(), 1);
-        assert!(can_concat(&ret.input_levels[0].table_infos));
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none())
     }
 
     #[test]
