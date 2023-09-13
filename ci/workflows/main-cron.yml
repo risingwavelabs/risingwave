@@ -148,7 +148,7 @@ steps:
   # The timeout should be strictly more than timeout in `pull-request.yml`.
   # This ensures our `main-cron` workflow will be stable.
   - label: "unit test"
-    command: "ci/scripts/unit-test.sh"
+    command: "ci/scripts/unit-test.sh -a"
     plugins:
       - ./ci/plugins/swapfile
       - seek-oss/aws-sm#v2.3.1:
