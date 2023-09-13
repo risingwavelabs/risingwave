@@ -197,6 +197,14 @@ fn bench_expr(c: &mut Criterion) {
                 .map(Some),
             )
             .into_ref(),
+            // 29: timestamp string for to_timestamp
+            Utf8Array::from_iter_display(
+                [Some("2021/04/01 00:00:00")]
+                    .into_iter()
+                    .cycle()
+                    .take(CHUNK_SIZE),
+            )
+            .into_ref(),
         ],
         CHUNK_SIZE,
     ));
@@ -240,6 +248,7 @@ fn bench_expr(c: &mut Criterion) {
     const TIMESTAMP_STRING: usize = 22;
     const TIMESTAMPTZ_STRING: usize = 23;
     const INTERVAL_STRING: usize = 24;
+    const TIMESTAMP_FORMATTED_STRING: usize = 29;
 
     c.bench_function("inputref", |bencher| {
         let inputref = inputrefs[0].clone().boxed();
@@ -285,24 +294,25 @@ fn bench_expr(c: &mut Criterion) {
             continue;
         }
 
+        fn string_literal(s: &str) -> BoxedExpression {
+            LiteralExpression::new(DataType::Varchar, Some(s.into())).boxed()
+        }
+
         let mut children = vec![];
         for (i, t) in sig.inputs_type.iter().enumerate() {
             use DataTypeName::*;
             let idx = match (sig.func, i) {
+                (PbType::ToTimestamp1, 0) => TIMESTAMP_FORMATTED_STRING,
                 (PbType::ToChar | PbType::ToTimestamp1, 1) => {
-                    children.push(
-                        LiteralExpression::new(
-                            DataType::Varchar,
-                            Some("YYYY/MM/DD HH:MM:SS".into()),
-                        )
-                        .boxed(),
-                    );
+                    children.push(string_literal("YYYY/MM/DD HH:MM:SS"));
+                    continue;
+                }
+                (PbType::ToChar | PbType::ToTimestamp1, 2) => {
+                    children.push(string_literal("Australia/Sydney"));
                     continue;
                 }
                 (PbType::IsJson, 1) => {
-                    children.push(
-                        LiteralExpression::new(DataType::Varchar, Some("VALUE".into())).boxed(),
-                    );
+                    children.push(string_literal("VALUE"));
                     continue;
                 }
                 (PbType::Cast, 0) if *t == DataTypeName::Varchar => match sig.ret_type {
