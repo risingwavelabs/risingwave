@@ -392,7 +392,7 @@ impl MigrationTrait for Migration {
             .create_table(
                 MigrationTable::create()
                     .table(ObjectDependency::Table)
-                    .col(ColumnDef::new(ObjectDependency::Id).integer().primary_key())
+                    .col(ColumnDef::new(ObjectDependency::Id).integer().auto_increment().primary_key())
                     .col(ColumnDef::new(ObjectDependency::Oid).integer().not_null())
                     .col(
                         ColumnDef::new(ObjectDependency::UsedBy)

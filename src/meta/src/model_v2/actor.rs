@@ -23,7 +23,7 @@ pub enum Relation {
         from = "Column::FragmentId",
         to = "super::fragment::Column::FragmentId",
         on_update = "NoAction",
-        on_delete = "NoAction"
+        on_delete = "Cascade"
     )]
     Fragment,
 }
