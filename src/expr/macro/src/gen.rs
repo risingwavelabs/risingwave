@@ -68,7 +68,7 @@ impl FunctionAttr {
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::func::FuncSign };
-        let varargs = self.args.len() == 1 && &self.args[0] == "...";
+        let variadic = self.args.len() == 1 && &self.args[0] == "...";
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
@@ -83,7 +83,7 @@ impl FunctionAttr {
                 unsafe { crate::sig::func::_register(#descriptor_type {
                     func: risingwave_pb::expr::expr_node::Type::#pb_type,
                     inputs_type: &[#(#args),*],
-                    varargs: #varargs,
+                    variadic: #variadic,
                     ret_type: #ret,
                     build: #build_fn,
                     deprecated: #deprecated,
@@ -102,7 +102,7 @@ impl FunctionAttr {
         optimize_const: bool,
     ) -> Result<TokenStream2> {
         let num_args = self.args.len();
-        let varargs = self.args.len() == 1 && &self.args[0] == "...";
+        let variadic = self.args.len() == 1 && &self.args[0] == "...";
         let fn_name = format_ident!("{}", user_fn.name);
         let struct_name = match optimize_const {
             true => format_ident!("{}OptimizeConst", utils::to_camel_case(&self.ident_name())),
@@ -213,7 +213,7 @@ impl FunctionAttr {
         };
 
         // ensure the number of children matches when arguments are fixed
-        let check_children = match varargs {
+        let check_children = match variadic {
             true => quote! {},
             false => quote! { crate::ensure!(children.len() == #num_args); },
         };
@@ -221,7 +221,7 @@ impl FunctionAttr {
         // evaluate child expressions and
         // - build a chunk if arguments are variable
         // - downcast arrays if arguments are fixed
-        let eval_children = if varargs {
+        let eval_children = if variadic {
             quote! {
                 let mut columns = Vec::with_capacity(self.children.len());
                 for child in &self.children {
@@ -240,7 +240,7 @@ impl FunctionAttr {
         // evaluate child expressions and
         // - build a row if arguments are variable
         // - downcast scalars if arguments are fixed
-        let eval_row_children = if varargs {
+        let eval_row_children = if variadic {
             quote! {
                 let mut row = Vec::with_capacity(self.children.len());
                 for child in &self.children {
@@ -284,7 +284,7 @@ impl FunctionAttr {
         };
         // call the user defined function
         // inputs: [ Option<impl ScalarRef> ]
-        let mut output = match varargs {
+        let mut output = match variadic {
             true => quote! { #fn_name(row, #context #writer) },
             false => {
                 quote! { #fn_name #generic(#(#non_prebuilt_inputs,)* #prebuilt_arg #context #writer) }
@@ -300,7 +300,7 @@ impl FunctionAttr {
         };
         // if user function accepts non-option arguments, we assume the function
         // returns null on null input, so we need to unwrap the inputs before calling.
-        if !varargs && !user_fn.arg_option {
+        if !variadic && !user_fn.arg_option {
             output = quote! {
                 match (#(#inputs,)*) {
                     (#(Some(#inputs),)*) => #output,
@@ -349,7 +349,7 @@ impl FunctionAttr {
                 let c = #fn_name(#(#arrays),*);
                 Ok(Arc::new(c.into()))
             }
-        } else if varargs {
+        } else if variadic {
             quote! {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
                 for row in chunk.rows_with_holes() {

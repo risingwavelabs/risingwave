@@ -53,7 +53,7 @@ impl FuncSigMap {
     pub fn get(&self, ty: PbType, args: &[DataTypeName], ret: DataTypeName) -> Option<&FuncSign> {
         let v = self.0.get(&ty)?;
         v.iter()
-            .find(|d| (d.varargs || d.inputs_type == args) && d.ret_type == ret)
+            .find(|d| (d.variadic || d.inputs_type == args) && d.ret_type == ret)
     }
 
     /// Returns all function signatures with the same type and number of arguments.
@@ -62,7 +62,7 @@ impl FuncSigMap {
         match self.0.get(&ty) {
             Some(v) => v
                 .iter()
-                .filter(|d| (d.varargs || d.inputs_type.len() == nargs) && !d.deprecated)
+                .filter(|d| (d.variadic || d.inputs_type.len() == nargs) && !d.deprecated)
                 .collect(),
             None => vec![],
         }
@@ -74,7 +74,7 @@ impl FuncSigMap {
 pub struct FuncSign {
     pub func: PbType,
     pub inputs_type: &'static [DataTypeName],
-    pub varargs: bool,
+    pub variadic: bool,
     pub ret_type: DataTypeName,
     pub build: fn(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression>,
     /// Whether the function is deprecated and should not be used in the frontend.
