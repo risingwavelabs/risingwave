@@ -30,10 +30,9 @@ use tokio::sync::mpsc;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::{CdcProperties, CdcSourceType, CdcSourceTypeTrait, DebeziumCdcSplit};
-use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
-    SplitReader,
+    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
+    SplitId, SplitMetaData, SplitReader,
 };
 
 pub struct CdcSplitReader<T: CdcSourceTypeTrait> {
@@ -53,22 +52,20 @@ pub struct CdcSplitReader<T: CdcSourceTypeTrait> {
 const DEFAULT_CHANNEL_SIZE: usize = 16;
 
 #[async_trait]
-impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T>
-where
-    DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = anyhow::Error>,
-{
+impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
     type Properties = CdcProperties<T>;
+    type Split = DebeziumCdcSplit<T>;
 
     #[allow(clippy::unused_async)]
     async fn new(
         conn_props: CdcProperties<T>,
-        splits: Vec<SplitImpl>,
+        splits: Vec<DebeziumCdcSplit<T>>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         assert_eq!(splits.len(), 1);
-        let split = DebeziumCdcSplit::<T>::try_from(splits.into_iter().next().unwrap())?;
+        let split = splits.into_iter().next().unwrap();
         let split_id = split.id();
         match T::source_type() {
             CdcSourceType::Mysql | CdcSourceType::Postgres => Ok(Self {
@@ -101,10 +98,7 @@ where
     }
 }
 
-impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T>
-where
-    Self: SplitReader,
-{
+impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
     #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
         // rewrite the hostname and port for the split

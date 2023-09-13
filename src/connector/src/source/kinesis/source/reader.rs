@@ -25,13 +25,12 @@ use futures_async_stream::try_stream;
 use tokio_retry;
 
 use crate::parser::ParserConfig;
-use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::kinesis::source::message::KinesisMessage;
-use crate::source::kinesis::split::KinesisOffset;
+use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::source::kinesis::KinesisProperties;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
-    SplitMetaData, SplitReader,
+    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
+    SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
 #[derive(Debug, Clone)]
@@ -52,17 +51,18 @@ pub struct KinesisSplitReader {
 #[async_trait]
 impl SplitReader for KinesisSplitReader {
     type Properties = KinesisProperties;
+    type Split = KinesisSplit;
 
     async fn new(
         properties: KinesisProperties,
-        splits: Vec<SplitImpl>,
+        splits: Vec<KinesisSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         assert!(splits.len() == 1);
 
-        let split = splits.into_iter().next().unwrap().into_kinesis().unwrap();
+        let split = splits.into_iter().next().unwrap();
 
         let start_position = match &split.start_position {
             KinesisOffset::None => match &properties.scan_startup_mode {
@@ -335,11 +335,11 @@ mod tests {
         };
         let client = KinesisSplitReader::new(
             properties,
-            vec![SplitImpl::Kinesis(KinesisSplit {
+            vec![KinesisSplit {
                 shard_id: "shardId-000000000001".to_string().into(),
                 start_position: KinesisOffset::Earliest,
                 end_position: KinesisOffset::None,
-            })],
+            }],
             Default::default(),
             Default::default(),
             None,
@@ -370,11 +370,11 @@ mod tests {
 
         let trim_horizen_reader = KinesisSplitReader::new(
             properties.clone(),
-            vec![SplitImpl::Kinesis(KinesisSplit {
+            vec![KinesisSplit {
                 shard_id: "shardId-000000000001".to_string().into(),
                 start_position: KinesisOffset::Earliest,
                 end_position: KinesisOffset::None,
-            })],
+            }],
             Default::default(),
             Default::default(),
             None,
@@ -386,13 +386,13 @@ mod tests {
 
         let offset_reader = KinesisSplitReader::new(
             properties.clone(),
-            vec![SplitImpl::Kinesis(KinesisSplit {
+            vec![KinesisSplit {
                 shard_id: "shardId-000000000001".to_string().into(),
                 start_position: KinesisOffset::SequenceNumber(
                     "49629139817504901062972448413535783695568426186596941842".to_string(),
                 ),
                 end_position: KinesisOffset::None,
-            })],
+            }],
             Default::default(),
             Default::default(),
             None,
