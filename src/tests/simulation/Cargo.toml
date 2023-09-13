@@ -48,7 +48,7 @@ sqllogictest = "0.15.3"
 tempfile = "3"
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
     "profiling",
-], rev = "b7f9f3" }
+], rev = "64a2d9" }
 tokio = { version = "0.2.23", package = "madsim-tokio" }
 tokio-postgres = "0.7"
 tracing = "0.1"
