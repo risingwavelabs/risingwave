@@ -125,11 +125,10 @@ impl ToBatch for LogicalUnion {
         // Convert union to union all + agg
         if !self.all() {
             let batch_union = BatchUnion::new(new_logical).into();
-            Ok(BatchHashAgg::new(generic::Agg::new(
-                vec![],
-                (0..self.base.schema.len()).collect(),
-                batch_union,
-            ))
+            Ok(BatchHashAgg::new(
+                generic::Agg::new(vec![], (0..self.base.schema.len()).collect(), batch_union)
+                    .with_enable_two_phase(false),
+            )
             .into())
         } else {
             Ok(BatchUnion::new(new_logical).into())

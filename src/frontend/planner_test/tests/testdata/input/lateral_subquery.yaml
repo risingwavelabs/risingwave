@@ -85,3 +85,10 @@
     AS max_sale on true;
   expected_outputs:
     - binder_error
+- name: implicit lateral subquery of correlated table function
+  sql: |
+    create table t(x int , arr int[]);
+    select * from t cross join unnest(arr);
+  expected_outputs:
+    - batch_plan
+    - stream_plan

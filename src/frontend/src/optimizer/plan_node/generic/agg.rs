@@ -54,6 +54,7 @@ pub struct Agg<PlanRef> {
     pub group_key: IndexSet,
     pub grouping_sets: Vec<IndexSet>,
     pub input: PlanRef,
+    pub enable_two_phase: bool,
 }
 
 impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
@@ -91,7 +92,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     fn two_phase_agg_enabled(&self) -> bool {
-        self.ctx().session_ctx().config().get_enable_two_phase_agg()
+        self.enable_two_phase
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
@@ -138,26 +139,28 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: IndexSet, input: PlanRef) -> Self {
+        let enable_two_phase = input
+            .ctx()
+            .session_ctx()
+            .config()
+            .get_enable_two_phase_agg();
         Self {
             agg_calls,
             group_key,
             input,
             grouping_sets: vec![],
+            enable_two_phase,
         }
     }
 
-    pub fn new_with_grouping_sets(
-        agg_calls: Vec<PlanAggCall>,
-        group_key: IndexSet,
-        grouping_sets: Vec<IndexSet>,
-        input: PlanRef,
-    ) -> Self {
-        Self {
-            agg_calls,
-            group_key,
-            grouping_sets,
-            input,
-        }
+    pub fn with_grouping_sets(mut self, grouping_sets: Vec<IndexSet>) -> Self {
+        self.grouping_sets = grouping_sets;
+        self
+    }
+
+    pub fn with_enable_two_phase(mut self, enable_two_phase: bool) -> Self {
+        self.enable_two_phase = enable_two_phase;
+        self
     }
 }
 
@@ -583,12 +586,13 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .collect()
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef) {
+    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef, bool) {
         (
             self.agg_calls,
             self.group_key,
             self.grouping_sets,
             self.input,
+            self.enable_two_phase,
         )
     }
 
