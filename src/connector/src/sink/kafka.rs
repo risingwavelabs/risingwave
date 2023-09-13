@@ -332,7 +332,7 @@ enum KafkaSinkState {
 /// The delivery buffer queue size
 /// When the `DeliveryFuture` the current `future_delivery_buffer`
 /// is buffering is greater than this size, then enforcing commit once
-const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 1024;
+const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 65536;
 
 pub struct KafkaSinkWriter {
     pub config: KafkaConfig,
