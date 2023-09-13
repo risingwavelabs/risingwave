@@ -36,6 +36,7 @@ import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
 import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.client.RestHighLevelClientBuilder;
 import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.core.TimeValue;
@@ -76,8 +77,11 @@ public class EsSink7 extends SinkWriterBase {
 
         this.config = config;
         this.client =
-                new RestHighLevelClient(
-                        configureRestClientBuilder(RestClient.builder(host), config));
+                new RestHighLevelClientBuilder(
+                                configureRestClientBuilder(RestClient.builder(host), config)
+                                        .build())
+                        .setApiCompatibilityMode(true)
+                        .build();
         // Test connection
         try {
             boolean isConnected = this.client.ping(RequestOptions.DEFAULT);
