@@ -220,6 +220,10 @@ message ExprNode {
     VNODE = 1101;
     // Non-deterministic functions
     PROCTIME = 2023;
+    // Async functions
+    PG_SLEEP = 3001;
+    PG_SLEEP_FOR = 3002;
+    PG_SLEEP_UNTIL = 3003;
   }
   Type function_type = 1;
   data.DataType return_type = 3;

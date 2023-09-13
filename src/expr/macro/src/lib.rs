@@ -454,6 +454,8 @@ struct FunctionAttr {
 struct UserFunctionAttr {
     /// Function name
     name: String,
+    /// Whether the function is async.
+    async_: bool,
     /// Whether contains argument `&Context`.
     context: bool,
     /// The last argument type is `&mut dyn Write`.
@@ -495,7 +497,8 @@ impl FunctionAttr {
 impl UserFunctionAttr {
     /// Returns true if the function is like `fn(T1, T2, .., Tn) -> T`.
     fn is_pure(&self) -> bool {
-        !self.write
+        !self.async_
+            && !self.write
             && !self.context
             && !self.arg_option
             && self.return_type_kind == ReturnTypeKind::T

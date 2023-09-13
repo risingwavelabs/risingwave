@@ -47,6 +47,7 @@ pub mod overlay;
 pub mod position;
 pub mod proctime;
 pub mod regexp;
+pub mod delay;
 pub mod repeat;
 pub mod replace;
 pub mod round;

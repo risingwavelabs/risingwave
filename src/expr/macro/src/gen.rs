@@ -235,11 +235,13 @@ impl FunctionAttr {
             true => quote! { &mut writer, },
             false => quote! {},
         };
+        let await_ = user_fn.async_.then(|| quote! { .await });
         // call the user defined function
         // inputs: [ Option<impl ScalarRef> ]
-        let mut output =
-            quote! { #fn_name #generic(#(#non_prebuilt_inputs,)* #prebuilt_arg #context #writer) };
+        let mut output = quote! { #fn_name #generic(#(#non_prebuilt_inputs,)* #prebuilt_arg #context #writer) #await_ };
         output = match user_fn.return_type_kind {
+            // void functions should return null
+            _ if self.ret == "void" => quote! { { #output; Option::<i32>::None } },
             ReturnTypeKind::T => quote! { Some(#output) },
             ReturnTypeKind::Option => output,
             ReturnTypeKind::Result => quote! { Some(#output?) },

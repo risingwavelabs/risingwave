@@ -28,9 +28,10 @@ impl Parse for FunctionAttr {
 
         let sig = input.parse::<LitStr>()?;
         let sig_str = sig.value();
-        let (name_args, ret) = sig_str
-            .split_once("->")
-            .ok_or_else(|| Error::new_spanned(&sig, "expected '->'"))?;
+        let (name_args, ret) = match sig_str.split_once("->") {
+            Some((name_args, ret)) => (name_args, ret),
+            None => (sig_str.as_str(), "void"),
+        };
         let (name, args) = name_args
             .split_once('(')
             .ok_or_else(|| Error::new_spanned(&sig, "expected '('"))?;
@@ -106,6 +107,7 @@ impl Parse for UserFunctionAttr {
         };
         Ok(UserFunctionAttr {
             name: sig.ident.to_string(),
+            async_: sig.asyncness.is_some(),
             write: sig.inputs.iter().any(arg_is_write),
             context: sig.inputs.iter().any(arg_is_context),
             retract: last_arg_is_retract(sig),
