@@ -224,3 +224,7 @@
     LogicalProject { exprs: [2:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: 'BatchValues { rows: [[2:Int32]] }'
+- sql: |
+    select 'boolin'::regproc
+  logical_plan: ''
+  batch_plan: ''
