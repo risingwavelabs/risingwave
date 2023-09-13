@@ -377,8 +377,8 @@ mod tests {
         let p = PbSystemParams::default();
         assert!(system_params_to_kv(&p).is_err());
 
-        // From kv - unrecognized field.
-        assert!(system_params_from_kv(vec![("?", "?")]).is_err());
+        // From kv - unrecognized field should be ignored
+        assert!(system_params_from_kv(vec![("?", "?")]).is_ok());
 
         // Deser & ser.
         let p = system_params_from_kv(kvs).unwrap();
