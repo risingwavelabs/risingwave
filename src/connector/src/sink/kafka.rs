@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
+use futures::future::try_join_all;
+use futures::{Future, FutureExt};
 use futures_async_stream::for_await;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
@@ -32,7 +34,8 @@ use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
 
 use super::{
-    Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
 use crate::sink::utils::{
@@ -260,20 +263,19 @@ pub struct KafkaSink {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+    db_name: String,
+    sink_from_name: String,
 }
 
 impl KafkaSink {
-    pub fn new(
-        config: KafkaConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        is_append_only: bool,
-    ) -> Self {
+    pub fn new(config: KafkaConfig, param: SinkParam) -> Self {
         Self {
             config,
-            schema,
-            pk_indices,
-            is_append_only,
+            schema: param.schema(),
+            pk_indices: param.downstream_pk,
+            is_append_only: param.sink_type.is_append_only(),
+            db_name: param.db_name,
+            sink_from_name: param.sink_from_name,
         }
     }
 }
@@ -290,6 +292,8 @@ impl Sink for KafkaSink {
                 self.schema.clone(),
                 self.pk_indices.clone(),
                 self.is_append_only,
+                self.db_name.clone(),
+                self.sink_from_name.clone(),
                 format!("sink-{:?}", writer_param.executor_id),
             )
             .await?,
@@ -325,6 +329,11 @@ enum KafkaSinkState {
     Running(u64),
 }
 
+/// The delivery buffer queue size
+/// When the `DeliveryFuture` the current `future_delivery_buffer`
+/// is buffering is greater than this size, then enforcing commit once
+const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 65536;
+
 pub struct KafkaSinkWriter {
     pub config: KafkaConfig,
     pub inner: FutureProducer<PrivateLinkProducerContext>,
@@ -333,6 +342,9 @@ pub struct KafkaSinkWriter {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+    future_delivery_buffer: VecDeque<DeliveryFuture>,
+    db_name: String,
+    sink_from_name: String,
 }
 
 impl KafkaSinkWriter {
@@ -341,6 +353,8 @@ impl KafkaSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
+        db_name: String,
+        sink_from_name: String,
         identifier: String,
     ) -> Result<Self> {
         let inner: FutureProducer<PrivateLinkProducerContext> = {
@@ -376,100 +390,147 @@ impl KafkaSinkWriter {
             schema,
             pk_indices,
             is_append_only,
+            future_delivery_buffer: VecDeque::new(),
+            db_name,
+            sink_from_name,
         })
-    }
-
-    /// The wrapper function for the actual `FutureProducer::send_result`
-    /// Just for better error handling purpose
-    #[expect(clippy::unused_async)]
-    async fn send_result_inner<'a, K, P>(
-        &'a self,
-        record: FutureRecord<'a, K, P>,
-    ) -> core::result::Result<DeliveryFuture, (KafkaError, FutureRecord<'a, K, P>)>
-    where
-        K: ToBytes + ?Sized,
-        P: ToBytes + ?Sized,
-    {
-        self.inner.send_result(record)
     }
 
     /// The actual `send_result` function, will be called when the `KafkaSinkWriter` needs to sink
     /// messages
-    async fn send_result<'a, K, P>(&'a self, mut record: FutureRecord<'a, K, P>) -> KafkaResult<()>
+    async fn send_result<'a, K, P>(
+        &'a mut self,
+        mut record: FutureRecord<'a, K, P>,
+    ) -> KafkaResult<()>
     where
         K: ToBytes + ?Sized,
         P: ToBytes + ?Sized,
     {
-        // The error to be returned
-        let mut err = KafkaError::Canceled;
+        let mut success_flag = false;
+
+        let mut ret = Ok(());
 
         for _ in 0..self.config.max_retry_num {
-            match self.send_result_inner(record).await {
-                Ok(delivery_future) => match delivery_future.await {
-                    Ok(delivery_future_result) => match delivery_future_result {
-                        // Successfully sent the record
-                        // Will return the partition and offset of the message (i32, i64)
-                        Ok(_) => return Ok(()),
-                        // If the message failed to be delivered. (i.e., flush)
-                        // The error & the copy of the original message will be returned
-                        // i.e., (KafkaError, OwnedMessage)
-                        // We will just stop the loop, and return the error
-                        // The sink executor will back to the latest checkpoint
-                        Err((k_err, _msg)) => {
-                            err = k_err;
-                            break;
-                        }
-                    },
-                    // Nothing to do here, since the err has already been set to
-                    // KafkaError::Canceled. This represents the producer is dropped
-                    // before the delivery status is received
-                    Err(_) => break,
-                },
+            match self.inner.send_result(record) {
+                Ok(delivery_future) => {
+                    // First check if the current length is
+                    // greater than the preset limit
+                    while self.future_delivery_buffer.len() >= KAFKA_WRITER_MAX_QUEUE_SIZE {
+                        Self::map_future_result(
+                            self.future_delivery_buffer
+                                .pop_front()
+                                .expect("Expect the future not to be None")
+                                .await,
+                        )?;
+                    }
+
+                    self.future_delivery_buffer.push_back(delivery_future);
+                    success_flag = true;
+                    break;
+                }
                 // The enqueue buffer is full, `send_result` will immediately return
                 // We can retry for another round after sleeping for sometime
                 Err((e, rec)) => {
-                    err = e;
                     record = rec;
-                    match err {
+                    match e {
                         KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
                             tokio::time::sleep(self.config.retry_interval).await;
                             continue;
                         }
-                        _ => break,
+                        _ => return Err(e),
                     }
                 }
             }
         }
 
-        Err(err)
+        if !success_flag {
+            // In this case, after trying `max_retry_num`
+            // The enqueue buffer is still full
+            ret = Err(KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull));
+        }
+
+        ret
     }
 
     async fn write_json_objects(
-        &self,
+        &mut self,
         event_key_object: Option<Value>,
         event_object: Option<Value>,
     ) -> Result<()> {
+        let topic = self.config.common.topic.clone();
         // here we assume the key part always exists and value part is optional.
         // if value is None, we will skip the payload part.
         let key_str = event_key_object.unwrap().to_string();
-        let mut record = FutureRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
-            .key(key_str.as_bytes());
+        let mut record = FutureRecord::<[u8], [u8]>::to(topic.as_str()).key(key_str.as_bytes());
         let payload;
         if let Some(value) = event_object {
             payload = value.to_string();
             record = record.payload(payload.as_bytes());
         }
+        // Send the data but not wait it to finish sinking
+        // Will join all `DeliveryFuture` during commit
         self.send_result(record).await?;
         Ok(())
     }
 
-    async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
+    fn map_future_result(
+        delivery_future_result: <DeliveryFuture as Future>::Output,
+    ) -> KafkaResult<()> {
+        match delivery_future_result {
+            // Successfully sent the record
+            // Will return the partition and offset of the message (i32, i64)
+            // Note that `Vec<()>` won't cause memory allocation
+            Ok(Ok(_)) => Ok(()),
+            // If the message failed to be delivered. (i.e., flush)
+            // The error & the copy of the original message will be returned
+            // i.e., (KafkaError, OwnedMessage)
+            // We will just stop the loop, and return the error
+            // The sink executor will back to the latest checkpoint
+            Ok(Err((k_err, _msg))) => Err(k_err),
+            // This represents the producer is dropped
+            // before the delivery status is received
+            // Return `KafkaError::Canceled`
+            Err(_) => Err(KafkaError::Canceled),
+        }
+    }
+
+    async fn commit_inner(&mut self) -> Result<()> {
+        let _v = try_join_all(
+            self.future_delivery_buffer
+                .drain(..)
+                .map(|delivery_future| {
+                    delivery_future.map(|delivery_future_result| {
+                        Self::map_future_result(delivery_future_result).map_err(SinkError::Kafka)
+                    })
+                }),
+        )
+        .await?;
+
+        // Sanity check
+        debug_assert!(
+            self.future_delivery_buffer.is_empty(),
+            "The buffer after `commit_inner` must be empty"
+        );
+
+        Ok(())
+    }
+
+    async fn debezium_update(&mut self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
+        // TODO: Remove the clones here, only to satisfy borrow checker at present
+        let schema = self.schema.clone();
+        let pk_indices = self.pk_indices.clone();
+        let db_name = self.db_name.clone();
+        let sink_from_name = self.sink_from_name.clone();
+
+        // Initialize the dbz_stream
         let dbz_stream = gen_debezium_message_stream(
-            &self.schema,
-            &self.pk_indices,
+            &schema,
+            &pk_indices,
             chunk,
             ts_ms,
             DebeziumAdapterOpts::default(),
+            &db_name,
+            &sink_from_name,
         );
 
         #[for_await]
@@ -481,13 +542,14 @@ impl KafkaSinkWriter {
         Ok(())
     }
 
-    async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
-        let upsert_stream = gen_upsert_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            UpsertAdapterOpts::default(),
-        );
+    async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
+        // TODO: Remove the clones here, only to satisfy borrow checker at present
+        let schema = self.schema.clone();
+        let pk_indices = self.pk_indices.clone();
+
+        // Initialize the upsert_stream
+        let upsert_stream =
+            gen_upsert_message_stream(&schema, &pk_indices, chunk, UpsertAdapterOpts::default());
 
         #[for_await]
         for msg in upsert_stream {
@@ -498,10 +560,15 @@ impl KafkaSinkWriter {
         Ok(())
     }
 
-    async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
+    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+        // TODO: Remove the clones here, only to satisfy borrow checker at present
+        let schema = self.schema.clone();
+        let pk_indices = self.pk_indices.clone();
+
+        // Initialize the append_only_stream
         let append_only_stream = gen_append_only_message_stream(
-            &self.schema,
-            &self.pk_indices,
+            &schema,
+            &pk_indices,
             chunk,
             AppendOnlyAdapterOpts::default(),
         );
@@ -551,6 +618,8 @@ impl SinkWriterV1 for KafkaSinkWriter {
     }
 
     async fn commit(&mut self) -> Result<()> {
+        // Group delivery (await the `FutureRecord`) here
+        self.commit_inner().await?;
         Ok(())
     }
 
@@ -691,7 +760,7 @@ mod test {
     }
 
     /// Note: Please enable the kafka by running `./risedev configure` before commenting #[ignore]
-    /// to run the test
+    /// to run the test, also remember to modify `risedev.yml`
     #[ignore]
     #[tokio::test]
     async fn test_kafka_producer() -> Result<()> {
@@ -730,6 +799,8 @@ mod test {
             pk_indices,
             true,
             "test_sink_1".to_string(),
+            "test_db".into(),
+            "test_table".into(),
         )
         .await
         .unwrap();
@@ -818,8 +889,8 @@ mod test {
         ]);
 
         let json_chunk = chunk_to_json(chunk, &schema).unwrap();
-        let schema_json = schema_to_json(&schema);
-        assert_eq!(schema_json, serde_json::from_str::<Value>("{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.RisingWave.RisingWave.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.RisingWave.RisingWave.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"source\",\"fields\":[{\"field\":\"db\",\"optional\":false,\"type\":\"string\"},{\"field\":\"table\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.RisingWave.RisingWave.Source\",\"optional\":false,\"type\":\"struct\"},{\"field\":\"op\",\"optional\":false,\"type\":\"string\"},{\"field\":\"ts_ms\",\"optional\":false,\"type\":\"int64\"}],\"name\":\"RisingWave.RisingWave.RisingWave.Envelope\",\"optional\":false,\"type\":\"struct\"}").unwrap());
+        let schema_json = schema_to_json(&schema, "test_db", "test_table");
+        assert_eq!(schema_json, serde_json::from_str::<Value>("{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"source\",\"fields\":[{\"field\":\"db\",\"optional\":false,\"type\":\"string\"},{\"field\":\"table\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Source\",\"optional\":false,\"type\":\"struct\"},{\"field\":\"op\",\"optional\":false,\"type\":\"string\"},{\"field\":\"ts_ms\",\"optional\":false,\"type\":\"int64\"}],\"name\":\"RisingWave.test_db.test_table.Envelope\",\"optional\":false,\"type\":\"struct\"}").unwrap());
         assert_eq!(
             serde_json::from_str::<Value>(&json_chunk[0]).unwrap(),
             serde_json::from_str::<Value>("{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":0,\"v5\":0.0}}")

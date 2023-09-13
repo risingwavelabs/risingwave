@@ -117,7 +117,7 @@ impl LookupEntryState {
     fn new(value: VecWithKvSize<OwnedRow>) -> Self {
         let kv_heap_size = value.get_kv_size();
         Self {
-            inner: HashSet::from_iter(value.into_iter()),
+            inner: HashSet::from_iter(value),
             kv_heap_size: KvSize::with_size(kv_heap_size),
         }
     }

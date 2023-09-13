@@ -61,7 +61,7 @@ pub(crate) fn test_log_store_table_schema() -> Vec<ColumnDesc> {
         ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32), // Seq id
         ColumnDesc::unnamed(ColumnId::from(2), DataType::Int16), // op code
     ];
-    column_descs.extend(test_payload_schema().into_iter());
+    column_descs.extend(test_payload_schema());
     column_descs
 }
 

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![expect(clippy::arc_with_non_send_sync, reason = "FIXME: later")]
+
 pub mod compaction_config;
 mod level_selector;
 mod overlap_strategy;
@@ -247,25 +249,25 @@ impl LocalSelectorStatistic {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "write-amp"])
-                    .inc_by(stats.skip_by_write_amp_limit);
+                    .inc();
             }
             if stats.skip_by_count_limit > 0 {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "count"])
-                    .inc_by(stats.skip_by_count_limit);
+                    .inc();
             }
             if stats.skip_by_pending_files > 0 {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "pending-files"])
-                    .inc_by(stats.skip_by_pending_files);
+                    .inc();
             }
             if stats.skip_by_overlapping > 0 {
                 metrics
                     .compact_skip_frequency
                     .with_label_values(&[level_label.as_str(), "overlapping"])
-                    .inc_by(stats.skip_by_overlapping);
+                    .inc();
             }
             metrics
                 .compact_skip_frequency

@@ -157,7 +157,7 @@ impl MonitorService for MonitorServiceImpl {
         } else {
             Ok(Response::new(HeapProfilingResponse {}))
         };
-        unsafe { Box::from_raw(file_path_ptr) };
+        let _ = unsafe { Box::from_raw(file_path_ptr) };
         response
     }
 

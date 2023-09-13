@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rustdoc::private_intra_doc_links)]
 //! Defines all kinds of node in the plan tree, each node represent a relational expression.
 //!
 //! We use a immutable style tree structure, every Node are immutable and cannot be modified after
@@ -331,7 +330,7 @@ impl PlanRef {
                     .map(|mut c| Condition {
                         conjunctions: c
                             .conjunctions
-                            .drain_filter(|e| e.count_nows() == 0 && e.is_pure())
+                            .extract_if(|e| e.count_nows() == 0 && e.is_pure())
                             .collect(),
                     })
                     .reduce(|a, b| a.or(b))

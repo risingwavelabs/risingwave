@@ -375,6 +375,18 @@ impl DataType {
         }
     }
 
+    /// Returns the inner type of a list type.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the type is not a list type.
+    pub fn as_list(&self) -> &DataType {
+        match self {
+            DataType::List(t) => t,
+            _ => panic!("expect list type"),
+        }
+    }
+
     /// WARNING: Currently this should only be used in `WatermarkFilterExecutor`. Please be careful
     /// if you want to use this.
     pub fn min_value(&self) -> ScalarImpl {
@@ -430,6 +442,14 @@ impl DataType {
             t = inner;
         }
         d
+    }
+
+    /// Compares the datatype with another, ignoring nested field names and metadata.
+    pub fn equals_datatype(&self, other: &DataType) -> bool {
+        match (self, other) {
+            (Self::Struct(s1), Self::Struct(s2)) => s1.equals_datatype(s2),
+            _ => self == other,
+        }
     }
 }
 

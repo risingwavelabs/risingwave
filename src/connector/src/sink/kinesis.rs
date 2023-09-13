@@ -22,7 +22,6 @@ use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::Client as KinesisClient;
 use futures_async_stream::for_await;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
@@ -30,6 +29,7 @@ use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
+use super::SinkParam;
 use crate::common::KinesisCommon;
 use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
@@ -48,20 +48,19 @@ pub struct KinesisSink {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+    db_name: String,
+    sink_from_name: String,
 }
 
 impl KinesisSink {
-    pub fn new(
-        config: KinesisSinkConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        is_append_only: bool,
-    ) -> Self {
+    pub fn new(config: KinesisSinkConfig, param: SinkParam) -> Self {
         Self {
             config,
-            schema,
-            pk_indices,
-            is_append_only,
+            schema: param.schema(),
+            pk_indices: param.downstream_pk,
+            is_append_only: param.sink_type.is_append_only(),
+            db_name: param.db_name,
+            sink_from_name: param.sink_from_name,
         }
     }
 }
@@ -100,6 +99,8 @@ impl Sink for KinesisSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
+            self.db_name.clone(),
+            self.sink_from_name.clone(),
         )
         .await
     }
@@ -142,6 +143,8 @@ pub struct KinesisSinkWriter {
     pk_indices: Vec<usize>,
     client: KinesisClient,
     is_append_only: bool,
+    db_name: String,
+    sink_from_name: String,
 }
 
 impl KinesisSinkWriter {
@@ -150,6 +153,8 @@ impl KinesisSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
+        db_name: String,
+        sink_from_name: String,
     ) -> Result<Self> {
         let client = config
             .common
@@ -162,6 +167,8 @@ impl KinesisSinkWriter {
             pk_indices,
             client,
             is_append_only,
+            db_name,
+            sink_from_name,
         })
     }
 
@@ -225,6 +232,8 @@ impl KinesisSinkWriter {
             chunk,
             ts_ms,
             DebeziumAdapterOpts::default(),
+            &self.db_name,
+            &self.sink_from_name,
         );
 
         crate::impl_load_stream_write_record!(dbz_stream, self.put_record);
@@ -260,14 +269,6 @@ impl SinkWriter for KinesisSinkWriter {
     }
 
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }

@@ -74,14 +74,7 @@ pub fn build_memory_control_policy(
     total_memory_bytes: usize,
     auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
 ) -> Result<MemoryControlRef> {
-    use risingwave_common::bail;
-    use tikv_jemalloc_ctl::opt;
-
     use self::policy::JemallocMemoryControl;
-
-    if !opt::prof::read().unwrap() && auto_dump_heap_profile_config.enabled() {
-        bail!("Auto heap profile dump should not be enabled with Jemalloc profile disable");
-    }
 
     Ok(Box::new(JemallocMemoryControl::new(
         total_memory_bytes,
@@ -122,6 +115,14 @@ impl MemoryControl for DummyPolicy {
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
 /// size must be larger than `MIN_SYSTEM_RESERVED_MEMORY_MB`
 pub fn reserve_memory_bytes(total_memory_bytes: usize) -> (usize, usize) {
+    if total_memory_bytes < MIN_COMPUTE_MEMORY_MB << 20 {
+        panic!(
+            "The total memory size ({}) is too small. It must be at least {} MB.",
+            convert(total_memory_bytes as _),
+            MIN_COMPUTE_MEMORY_MB
+        );
+    }
+
     let reserved = std::cmp::max(
         (total_memory_bytes as f64 * SYSTEM_RESERVED_MEMORY_PROPORTION).ceil() as usize,
         MIN_SYSTEM_RESERVED_MEMORY_MB << 20,

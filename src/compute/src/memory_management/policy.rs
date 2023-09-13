@@ -22,7 +22,9 @@ use risingwave_batch::task::BatchManager;
 use risingwave_common::config::AutoDumpHeapProfileConfig;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::task::LocalStreamManager;
-use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, prof as jemalloc_prof, stats as jemalloc_stats};
+use tikv_jemalloc_ctl::{
+    epoch as jemalloc_epoch, opt as jemalloc_opt, prof as jemalloc_prof, stats as jemalloc_stats,
+};
 
 use super::{MemoryControl, MemoryControlStats};
 
@@ -100,22 +102,39 @@ impl JemallocMemoryControl {
     }
 
     fn dump_heap_prof(&self, cur_used_memory_bytes: usize, prev_used_memory_bytes: usize) {
-        if !self.auto_dump_heap_profile_config.enabled() {
+        if !self.auto_dump_heap_profile_config.enabled {
             return;
         }
+
         if cur_used_memory_bytes > self.threshold_auto_dump_heap_profile
             && prev_used_memory_bytes <= self.threshold_auto_dump_heap_profile
         {
+            let opt_prof = jemalloc_opt::prof::read().unwrap();
+            if !opt_prof {
+                tracing::info!("Cannot dump heap profile because Jemalloc prof is not enabled");
+                return;
+            }
+
             let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
             let file_name = format!(
                 "{}.auto-dump-heap-prof.compute.dump.{}\0",
                 time_prefix, self.dump_seq,
             );
-            let file_path = Path::new(&self.auto_dump_heap_profile_config.dir)
-                .join(Path::new(&file_name))
-                .to_str()
-                .unwrap()
-                .to_string();
+
+            let file_path = if !self.auto_dump_heap_profile_config.dir.is_empty() {
+                Path::new(&self.auto_dump_heap_profile_config.dir)
+                    .join(Path::new(&file_name))
+                    .to_str()
+                    .unwrap()
+                    .to_string()
+            } else {
+                let prof_prefix_mib = jemalloc_prof::prefix::mib().unwrap();
+                let prof_prefix = prof_prefix_mib.read().unwrap();
+                let mut file_path = prof_prefix.to_string_lossy().to_string();
+                file_path.push_str(&file_name);
+                file_path
+            };
+
             let file_path_str = Box::leak(file_path.into_boxed_str());
             let file_path_bytes = unsafe { file_path_str.as_bytes_mut() };
             let file_path_ptr = file_path_bytes.as_mut_ptr();
@@ -124,8 +143,10 @@ impl JemallocMemoryControl {
                 .write(CStr::from_bytes_with_nul(file_path_bytes).unwrap())
             {
                 tracing::warn!("Auto Jemalloc dump heap file failed! {:?}", e);
+            } else {
+                tracing::info!("Successfully dumped heap profile to {}", file_name);
             }
-            unsafe { Box::from_raw(file_path_ptr) };
+            let _ = unsafe { Box::from_raw(file_path_ptr) };
         }
     }
 }

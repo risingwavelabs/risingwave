@@ -16,9 +16,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_nats::jetstream::context::Context;
-use async_nats::jetstream::stream::Stream;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
 use risingwave_rpc_client::ConnectorClient;
@@ -54,7 +52,6 @@ pub struct NatsSink {
 pub struct NatsSinkWriter {
     pub config: NatsConfig,
     context: Context,
-    stream: Stream,
     schema: Schema,
 }
 
@@ -94,8 +91,8 @@ impl Sink for NatsSink {
                 "Nats sink only support append-only mode"
             )));
         }
-        match self.config.common.build_context().await {
-            Ok(_jetstream) => {}
+        match self.config.common.build_client().await {
+            Ok(_client) => {}
             Err(error) => {
                 return Err(SinkError::Nats(anyhow_error!(
                     "validate nats sink error: {:?}",
@@ -118,15 +115,9 @@ impl NatsSinkWriter {
             .build_context()
             .await
             .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
-        let stream = config
-            .common
-            .build_or_get_stream(context.clone())
-            .await
-            .map_err(|e| SinkError::Nats(anyhow_error!("nats sink error: {:?}", e)))?;
         Ok::<_, SinkError>(Self {
             config: config.clone(),
             context,
-            stream,
             schema: schema.clone(),
         })
     }
@@ -161,14 +152,6 @@ impl SinkWriter for NatsSinkWriter {
     }
 
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }

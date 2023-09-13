@@ -75,7 +75,7 @@ impl Rule for ApplyProjectSetTransposeRule {
             .map(|expr| rewriter.rewrite_expr(expr))
             .collect_vec();
 
-        exprs.extend(new_proj_exprs.clone().into_iter());
+        exprs.extend(new_proj_exprs.clone());
 
         let mut rewriter =
             ApplyOnCondRewriterForProjectSet::new(left.schema().len(), new_proj_exprs);

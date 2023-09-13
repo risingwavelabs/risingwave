@@ -49,7 +49,6 @@ use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::manager::WorkerId;
 use crate::model::MetadataModel;
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::{MemStore, MetaStore};
 
 fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
     pin_versions.iter().len()
@@ -484,7 +483,7 @@ async fn test_hummock_manager_basic() {
     let mut epoch = 1;
     let mut register_log_count = 0;
     let mut commit_log_count = 0;
-    let commit_one = |epoch: HummockEpoch, hummock_manager: HummockManagerRef<MemStore>| async move {
+    let commit_one = |epoch: HummockEpoch, hummock_manager: HummockManagerRef| async move {
         let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
             &hummock_manager,
@@ -882,8 +881,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     let _tx = compactor_manager.add_compactor(context_id);
 
-    let (join_handle, shutdown_tx) =
-        HummockManager::hummock_timer_task(hummock_manager.clone()).await;
+    let (join_handle, shutdown_tx) = HummockManager::hummock_timer_task(hummock_manager.clone());
 
     // No compaction task available.
     assert!(hummock_manager
@@ -995,8 +993,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     let _tx = compactor_manager.add_compactor(context_id);
 
-    let (join_handle, shutdown_tx) =
-        HummockManager::hummock_timer_task(hummock_manager.clone()).await;
+    let (join_handle, shutdown_tx) = HummockManager::hummock_timer_task(hummock_manager.clone());
 
     // No compaction task available.
     assert!(hummock_manager
@@ -1320,8 +1317,8 @@ async fn test_split_compaction_group_on_commit() {
     );
 }
 
-async fn get_branched_ssts<S: MetaStore>(
-    hummock_manager: &HummockManager<S>,
+async fn get_branched_ssts(
+    hummock_manager: &HummockManager,
 ) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
     hummock_manager
         .versioning
@@ -1699,8 +1696,8 @@ async fn test_split_compaction_group_trivial_expired() {
     assert!(!ret);
 }
 
-async fn get_manual_compact_task<S: MetaStore>(
-    hummock_manager: &HummockManager<S>,
+async fn get_manual_compact_task(
+    hummock_manager: &HummockManager,
     context_id: HummockContextId,
 ) -> CompactTask {
     hummock_manager.compactor_manager.add_compactor(context_id);

@@ -56,6 +56,7 @@ if namespace_filter_enabled:
         ]
     )
 
+
 class Layout:
 
     def __init__(self):
@@ -96,6 +97,7 @@ class Layout:
 
 
 class Panels:
+    # Common options for timeseries panels
     common_options = {
         "fillOpacity": 10,
         "interval": "1s",
@@ -197,10 +199,10 @@ class Panels:
         )
 
     def timeseries_latency_ms(self,
-                           title,
-                           description,
-                           targets,
-                           legendCols=["mean"]):
+                              title,
+                              description,
+                              targets,
+                              legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -524,7 +526,8 @@ def metric(name, filter=None, node_filter_enabled=True, table_id_filter_enabled=
     if risingwave_name_filter_enabled:
         filters.append("risingwave_name=~\"$instance\"")
     if table_id_filter_enabled:
-        filters.append("table_id=~\"$table\"")
+        # We use "%table|" instead of "%table" here to match empty string for the table_id filter
+        filters.append("table_id=~\"$table|\"")
     if node_filter_enabled:
         filters.append("job=~\"$job\"")
         filters.append("instance=~\"$node\"")
@@ -532,6 +535,7 @@ def metric(name, filter=None, node_filter_enabled=True, table_id_filter_enabled=
         return f"{name}{{{','.join(filters)}}}"
     else:
         return name
+
 
 def table_metric(name, filter=None):
     return metric(name, filter, True, True)

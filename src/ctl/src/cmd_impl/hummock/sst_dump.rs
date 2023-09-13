@@ -31,7 +31,7 @@ use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_object_store::object::{BlockLocation, ObjectMetadata, ObjectStoreImpl};
+use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
 use risingwave_pb::hummock::{Level, SstableInfo};
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
@@ -176,20 +176,15 @@ async fn get_meta_offset_from_object(
     obj: &ObjectMetadata,
     obj_store: &ObjectStoreImpl,
 ) -> anyhow::Result<u64> {
-    let meta_offset_loc = BlockLocation {
-        offset: obj.total_size
-            - (
-                // version, magic
-                2 * std::mem::size_of::<u32>() +
-                // footer, checksum
-                2 * std::mem::size_of::<u64>()
-            ),
-        size: std::mem::size_of::<u64>(),
-    };
-    Ok(obj_store
-        .read(&obj.key, Some(meta_offset_loc))
-        .await?
-        .get_u64_le())
+    let start = obj.total_size
+        - (
+            // version, magic
+            2 * std::mem::size_of::<u32>() +
+        // footer, checksum
+        2 * std::mem::size_of::<u64>()
+        );
+    let end = start + std::mem::size_of::<u64>();
+    Ok(obj_store.read(&obj.key, start..end).await?.get_u64_le())
 }
 
 pub async fn sst_dump_via_sstable_store(
@@ -281,11 +276,8 @@ async fn print_block(
 
     // Retrieve encoded block data in bytes
     let store = sstable_store.store();
-    let block_loc = BlockLocation {
-        offset: block_meta.offset as usize,
-        size: block_meta.len as usize,
-    };
-    let block_data = store.read(&data_path, Some(block_loc)).await?;
+    let range = block_meta.offset as usize..block_meta.offset as usize + block_meta.len as usize;
+    let block_data = store.read(&data_path, range).await?;
 
     // Retrieve checksum and compression algorithm used from the encoded block data
     let len = block_data.len();

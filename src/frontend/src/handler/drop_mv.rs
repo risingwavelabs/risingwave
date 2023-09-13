@@ -52,7 +52,7 @@ pub async fn handle_drop_mv(
                             .into())
                     } else {
                         match e {
-                            CatalogError::NotFound(kind, name) if kind == "table" => {
+                            CatalogError::NotFound("table", name) => {
                                 Err(CatalogError::NotFound("materialized view", name).into())
                             }
                             _ => Err(e.into()),

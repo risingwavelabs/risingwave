@@ -420,8 +420,10 @@ mod tests {
             sink_id,
             properties: Default::default(),
             columns: vec![],
-            pk_indices: vec![],
+            downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
         };
 
         let epoch1 = 233;
@@ -432,7 +434,7 @@ mod tests {
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-            for i in indexes.iter() {
+            for i in indexes {
                 builder.set(*i, true);
             }
             builder.finish()
@@ -591,8 +593,10 @@ mod tests {
             sink_id,
             properties: Default::default(),
             columns: vec![],
-            pk_indices: vec![],
+            downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
         };
 
         let (manager, (_join_handle, _stop_tx)) = SinkCoordinatorManager::start_worker(None);
@@ -627,8 +631,10 @@ mod tests {
             sink_id,
             properties: Default::default(),
             columns: vec![],
-            pk_indices: vec![],
+            downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
         };
 
         let epoch = 233;
@@ -638,7 +644,7 @@ mod tests {
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-            for i in indexes.iter() {
+            for i in indexes {
                 builder.set(*i, true);
             }
             builder.finish()
@@ -707,8 +713,10 @@ mod tests {
             sink_id,
             properties: Default::default(),
             columns: vec![],
-            pk_indices: vec![],
+            downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
         };
 
         let epoch = 233;
@@ -718,7 +726,7 @@ mod tests {
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-            for i in indexes.iter() {
+            for i in indexes {
                 builder.set(*i, true);
             }
             builder.finish()

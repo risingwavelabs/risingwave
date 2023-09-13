@@ -281,6 +281,32 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/standalone"
 '''
 
+[tasks.codesign-binaries]
+private = true
+category = "RiseDev - Build"
+description = "Codesign all binaries to support coredump"
+# If core dump is enabled by RiseDev and we're on an Apple Silicon platform,
+# codesign the binary before running.
+# https://developer.apple.com/forums/thread/694233?answerId=695943022#695943022
+condition = { env_set = [
+  "ENABLE_COREDUMP",
+], env = { "SYSTEM" = "darwin-arm64" } }
+script = '''
+#!/usr/bin/env bash
+set -e
+
+binaries=()
+
+if [[ "$ENABLE_ALL_IN_ONE" == "true" ]]; then
+  binaries=("risingwave")
+else
+  binaries=("meta-node" "compute-node" "frontend" "compactor")
+fi
+
+echo -n "${binaries[*]}" | parallel -d ' ' \
+  "codesign -s - -f --entitlements scripts/coredump/coredump.entitlements \"target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/{}\""
+'''
+
 [tasks.link-user-bin]
 private = true
 category = "RiseDev - Build"
@@ -307,6 +333,7 @@ dependencies = [
   "link-standalone-binaries",
   "link-all-in-one-binaries",
   "link-user-bin",
+  "codesign-binaries",
 ]
 
 [tasks.b]
@@ -478,6 +505,11 @@ dependencies = [
   "download-redis",
 ]
 
+[tasks.pre-start-playground]
+category = "RiseDev - Prepare"
+description = "Preparation steps for playground"
+dependencies = ["build-connector-node"]
+
 [tasks.check-risedev-env-file]
 private = true
 category = "RiseDev - Prepare"
@@ -521,13 +553,16 @@ alias = "playground"
 [tasks.playground]
 category = "RiseDev - Start/Stop"
 description = "🌟 Start a lite RisingWave playground using risingwave all-in-one binary"
-dependencies = ["build-connector-node"]
+dependencies = ["pre-start-playground"]
 script = '''
 #!/usr/bin/env bash
 
 set -ex
 
-RUST_BACKTRACE=1 \
+if [[ $ENABLE_COREDUMP == "true" ]]; then
+  ulimit -c unlimited
+fi
+
 cargo run -p risingwave_cmd_all \
           --profile "${RISINGWAVE_BUILD_PROFILE}" \
           ${RISINGWAVE_FEATURE_FLAGS} \
@@ -543,7 +578,10 @@ script = '''
 
 set -euo pipefail
 
-RUST_BACKTRACE=1 \
+if [[ $ENABLE_COREDUMP == "true" ]]; then
+  ulimit -c unlimited
+fi
+
 cargo run -p risingwave_cmd_all \
           --profile "${RISINGWAVE_BUILD_PROFILE}" \
           ${RISINGWAVE_FEATURE_FLAGS} \
@@ -570,8 +608,18 @@ alias = "dev"
 [tasks.dev]
 category = "RiseDev - Start/Stop"
 dependencies = ["pre-start-dev"]
-script = "RUST_BACKTRACE=1 target/${BUILD_MODE_DIR}/risedev-dev ${@}"
 description = "🌟 Start a full RisingWave dev cluster using risedev-dev"
+script = '''
+#!/usr/bin/env bash
+
+set -ex
+
+if [[ $ENABLE_COREDUMP == "true" ]]; then
+  ulimit -c unlimited
+fi
+
+target/${BUILD_MODE_DIR}/risedev-dev ${@}
+'''
 
 [tasks.kill-risedev]
 category = "RiseDev - Start/Stop"
@@ -579,7 +627,53 @@ description = "Kill RisingWave dev cluster"
 script = '''
 #!/usr/bin/env bash
 
-tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+set -euo pipefail
+
+wait_kafka_exit() {
+  # Follow kafka-server-stop.sh
+  while [[ -n "$(ps ax | grep ' kafka\.Kafka ' | grep java | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for kafka to exit"
+    sleep 1
+  done
+}
+
+wait_zookeeper_exit() {
+  # Follow zookeeper-server-stop.sh
+  while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for zookeeper to exit"
+    sleep 1
+  done
+}
+
+kill_kafka() {
+  ${PREFIX_BIN}/kafka/bin/kafka-server-stop.sh
+  wait_kafka_exit
+}
+
+kill_zookeeper() {
+  ${PREFIX_BIN}/kafka/bin/zookeeper-server-stop.sh
+  wait_zookeeper_exit
+}
+
+# Kill other components
+tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
+| grep -v 'kafka' \
+| grep -v 'zookeeper' \
+| awk '{ print $2 }' \
+| xargs -I {} tmux send-keys -t {} C-c C-d
+
+if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
+then
+  echo "kill kafka"
+  kill_kafka
+
+  echo "kill zookeeper"
+  kill_zookeeper
+
+  # Kill their tmux sessions
+  tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+fi
+
 tmux kill-session -t risedev
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
@@ -653,6 +747,10 @@ echo
 
 echo "check: $(tput setaf 4)protoc >= 3.12.0$(tput sgr0)"
 protoc --version || echo "$(tput setaf 3)protoc$(tput sgr0) not found."
+echo
+
+echo "check: $(tput setaf 4)parallel >= 2022XXXX$(tput sgr0)"
+parallel --version || echo "$(tput setaf 3)parallel$(tput sgr0) not found."
 echo
 """
 description = "Install (or upgrade) required tools to do pre-CI check and run e2e tests"
@@ -1238,3 +1336,8 @@ cat << EOF > src/config/example.toml
 EOF
 cargo run -p risingwave_common --bin example-config >> src/config/example.toml
 '''
+
+[tasks.backwards-compat-test]
+category = "RiseDev - Backwards Compatibility Test"
+description = "Run backwards compatibility test"
+script = "./backwards-compat-tests/scripts/run_local.sh"

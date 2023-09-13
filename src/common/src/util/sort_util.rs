@@ -446,7 +446,7 @@ pub fn compare_rows_in_chunk(
     rhs_idx: usize,
     column_orders: &[ColumnOrder],
 ) -> Result<Ordering> {
-    for column_order in column_orders.iter() {
+    for column_order in column_orders {
         let lhs_array = lhs_data_chunk.column_at(column_order.column_index);
         let rhs_array = rhs_data_chunk.column_at(column_order.column_index);
 
@@ -504,7 +504,7 @@ pub fn partial_cmp_datum_iter(
     order_types: impl IntoIterator<Item = OrderType>,
 ) -> Option<Ordering> {
     let mut order_types_iter = order_types.into_iter();
-    lhs.into_iter().partial_cmp_by(rhs.into_iter(), |x, y| {
+    lhs.into_iter().partial_cmp_by(rhs, |x, y| {
         let Some(order_type) = order_types_iter.next() else {
             return None;
         };
@@ -524,7 +524,7 @@ pub fn cmp_datum_iter(
     order_types: impl IntoIterator<Item = OrderType>,
 ) -> Ordering {
     let mut order_types_iter = order_types.into_iter();
-    lhs.into_iter().cmp_by(rhs.into_iter(), |x, y| {
+    lhs.into_iter().cmp_by(rhs, |x, y| {
         let order_type = order_types_iter
             .next()
             .expect("number of `OrderType`s is not enough");
@@ -546,12 +546,9 @@ pub fn partial_cmp_rows(
     lhs.iter()
         .zip_eq_debug(rhs.iter())
         .zip_eq_debug(order_types)
-        .fold(Some(Ordering::Equal), |acc, ((l, r), order_type)| {
-            if acc == Some(Ordering::Equal) {
-                partial_cmp_datum(l, r, *order_type)
-            } else {
-                acc
-            }
+        .try_fold(Ordering::Equal, |acc, ((l, r), order_type)| match acc {
+            Ordering::Equal => partial_cmp_datum(l, r, *order_type),
+            acc => Some(acc),
         })
 }
 
@@ -562,8 +559,14 @@ pub fn partial_cmp_rows(
 /// Panics if the length of `lhs`, `rhs` and `order_types` are not equal,
 /// or, if the schemas of `lhs` and `rhs` are not matched.
 pub fn cmp_rows(lhs: impl Row, rhs: impl Row, order_types: &[OrderType]) -> Ordering {
-    partial_cmp_rows(&lhs, &rhs, order_types)
-        .unwrap_or_else(|| panic!("cannot compare {lhs:?} with {rhs:?}"))
+    assert_eq!(lhs.len(), rhs.len());
+    lhs.iter()
+        .zip_eq_debug(rhs.iter())
+        .zip_eq_debug(order_types)
+        .fold(Ordering::Equal, |acc, ((l, r), order_type)| match acc {
+            Ordering::Equal => cmp_datum(l, r, *order_type),
+            acc => acc,
+        })
 }
 
 #[cfg(test)]

@@ -108,7 +108,7 @@ pub async fn generate(
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
-            Ok(skipped) if skipped == 0 => {
+            Ok(0) => {
                 generated_queries += 1;
             }
             _ => {}
@@ -129,7 +129,7 @@ pub async fn generate(
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             }
-            Ok(skipped) if skipped == 0 => {
+            Ok(0) => {
                 generated_queries += 1;
             }
             _ => {}
@@ -385,7 +385,7 @@ async fn test_stream_queries<R: Rng>(
 }
 
 fn get_seed_table_sql(testdata: &str) -> String {
-    let seed_files = vec!["tpch.sql", "nexmark.sql", "alltypes.sql"];
+    let seed_files = ["tpch.sql", "nexmark.sql", "alltypes.sql"];
     seed_files
         .iter()
         .map(|filename| read_file_contents(format!("{}/{}", testdata, filename)).unwrap())
@@ -454,7 +454,7 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
         drop_mview_table(mview, client).await;
     }
 
-    let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql", "drop_alltypes.sql"];
+    let seed_files = ["drop_tpch.sql", "drop_nexmark.sql", "drop_alltypes.sql"];
     let sql = seed_files
         .iter()
         .map(|filename| read_file_contents(format!("{}/{}", testdata, filename)).unwrap())

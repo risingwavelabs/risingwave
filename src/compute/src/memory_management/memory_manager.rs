@@ -55,7 +55,7 @@ impl GlobalMemoryManager {
                 .unwrap();
         tracing::info!("memory control policy: {:?}", &memory_control_policy);
 
-        if auto_dump_heap_profile_config.enabled() {
+        if auto_dump_heap_profile_config.enabled {
             fs::create_dir_all(&auto_dump_heap_profile_config.dir).unwrap();
         }
         fs::create_dir_all(manually_dump_heap_profile_dir).unwrap();

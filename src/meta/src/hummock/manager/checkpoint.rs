@@ -33,17 +33,14 @@ const HUMMOCK_INIT_FLAG_KEY: &[u8] = b"hummock_init_flag";
 
 /// A hummock version checkpoint compacts previous hummock version delta logs, and stores stale
 /// objects from those delta logs.
-impl<S> HummockManager<S>
-where
-    S: MetaStore,
-{
+impl HummockManager {
     /// # Panics
     /// if checkpoint is not found.
     pub(crate) async fn read_checkpoint(&self) -> Result<HummockVersionCheckpoint> {
         use prost::Message;
         let data = match self
             .object_store
-            .read(&self.version_checkpoint_path, None)
+            .read(&self.version_checkpoint_path, ..)
             .await
         {
             Ok(data) => data,

@@ -170,7 +170,7 @@ pub async fn list_compaction_status(context: &CtlContext, verbose: bool) -> anyh
         for a in assignment {
             assignment_lite
                 .entry(a.context_id)
-                .or_insert(vec![])
+                .or_default()
                 .push(a.compact_task.unwrap().task_id);
         }
         for (k, v) in assignment_lite {

@@ -27,6 +27,7 @@ pub mod test_sink;
 pub mod utils;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
@@ -71,8 +72,10 @@ pub struct SinkParam {
     pub sink_id: SinkId,
     pub properties: HashMap<String, String>,
     pub columns: Vec<ColumnDesc>,
-    pub pk_indices: Vec<usize>,
+    pub downstream_pk: Vec<usize>,
     pub sink_type: SinkType,
+    pub db_name: String,
+    pub sink_from_name: String,
 }
 
 impl SinkParam {
@@ -82,7 +85,7 @@ impl SinkParam {
             sink_id: SinkId::from(pb_param.sink_id),
             properties: pb_param.properties,
             columns: table_schema.columns.iter().map(ColumnDesc::from).collect(),
-            pk_indices: table_schema
+            downstream_pk: table_schema
                 .pk_indices
                 .iter()
                 .map(|i| *i as usize)
@@ -90,6 +93,8 @@ impl SinkParam {
             sink_type: SinkType::from_proto(
                 PbSinkType::from_i32(pb_param.sink_type).expect("should be able to convert"),
             ),
+            db_name: pb_param.db_name,
+            sink_from_name: pb_param.sink_from_name,
         }
     }
 
@@ -99,9 +104,11 @@ impl SinkParam {
             properties: self.properties.clone(),
             table_schema: Some(TableSchema {
                 columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
-                pk_indices: self.pk_indices.iter().map(|i| *i as u32).collect(),
+                pk_indices: self.downstream_pk.iter().map(|i| *i as u32).collect(),
             }),
             sink_type: self.sink_type.to_proto().into(),
+            db_name: self.db_name.clone(),
+            sink_from_name: self.sink_from_name.clone(),
         }
     }
 
@@ -122,8 +129,10 @@ impl From<SinkCatalog> for SinkParam {
             sink_id: sink_catalog.id,
             properties: sink_catalog.properties,
             columns,
-            pk_indices: sink_catalog.downstream_pk,
+            downstream_pk: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
+            db_name: sink_catalog.db_name,
+            sink_from_name: sink_catalog.sink_from_name,
         }
     }
 }
@@ -165,10 +174,14 @@ pub trait SinkWriter: Send + 'static {
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata>;
 
     /// Clean up
-    async fn abort(&mut self) -> Result<()>;
+    async fn abort(&mut self) -> Result<()> {
+        Ok(())
+    }
 
     /// Update the vnode bitmap of current sink writer
-    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> Result<()>;
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -231,10 +244,6 @@ impl<W: SinkWriterV1> SinkWriter for SinkWriterV1Adapter<W> {
 
     async fn abort(&mut self) -> Result<()> {
         self.inner.abort().await
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
-        Ok(())
     }
 }
 
@@ -306,15 +315,7 @@ impl SinkWriter for BlackHoleSink {
         Ok(())
     }
 
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         Ok(())
     }
 }
@@ -418,24 +419,14 @@ impl SinkImpl {
     pub fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, param.schema())?),
-            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(
-                *cfg,
-                param.schema(),
-                param.pk_indices,
-                param.sink_type.is_append_only(),
-            )),
-            SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(
-                *cfg,
-                param.schema(),
-                param.pk_indices,
-                param.sink_type.is_append_only(),
-            )),
+            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(*cfg, param)),
+            SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(*cfg, param)),
             SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(cfg, param)),
             SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),
             SinkConfig::ClickHouse(cfg) => SinkImpl::ClickHouse(ClickHouseSink::new(
                 *cfg,
                 param.schema(),
-                param.pk_indices,
+                param.downstream_pk,
                 param.sink_type.is_append_only(),
             )?),
             SinkConfig::Iceberg(cfg) => SinkImpl::Iceberg(IcebergSink::new(cfg, param)?),

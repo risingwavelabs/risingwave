@@ -335,6 +335,9 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
 }
 
 /// Flush the data
+// This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+// TODO: remove `allow` here after the issued is closed.
+#[expect(clippy::needless_pass_by_ref_mut)]
 pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     epoch: EpochPair,
@@ -474,18 +477,14 @@ where
 }
 
 #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-pub(crate) async fn iter_chunks<'a, S, E>(
-    mut iter: S,
-    chunk_size: usize,
-    builder: &'a mut DataChunkBuilder,
-) where
+pub(crate) async fn iter_chunks<'a, S, E>(mut iter: S, builder: &'a mut DataChunkBuilder)
+where
     StreamExecutorError: From<E>,
     S: Stream<Item = Result<OwnedRow, E>> + Unpin + 'a,
 {
-    while let Some(data_chunk) =
-        collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder)
-            .instrument_await("backfill_snapshot_read")
-            .await?
+    while let Some(data_chunk) = collect_data_chunk_with_builder(&mut iter, builder)
+        .instrument_await("backfill_snapshot_read")
+        .await?
     {
         debug_assert!(data_chunk.cardinality() > 0);
         let ops = vec![Op::Insert; data_chunk.capacity()];
@@ -506,7 +505,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     epoch: EpochPair,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     is_finished: bool,
-    backfill_state: &mut BackfillState,
+    backfill_state: &BackfillState,
     committed_progress: &mut HashMap<VirtualNode, Vec<Datum>>,
     temporary_state: &mut [Datum],
 ) -> StreamExecutorResult<()> {
