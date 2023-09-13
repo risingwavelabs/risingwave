@@ -31,7 +31,7 @@ use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_object_store::object::object_metrics::{self, GLOBAL_OBJECT_STORE_METRICS};
+use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
@@ -49,7 +49,7 @@ use risingwave_storage::hummock::{
     HummockMemoryCollector, MemoryLimiter, SstableObjectIdManager, SstableStore,
 };
 use risingwave_storage::monitor::{
-    monitor_cache, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS,
+    monitor_cache, CompactorMetrics, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS,
 };
 use risingwave_storage::opts::StorageOpts;
 use tokio::sync::mpsc;
@@ -68,14 +68,18 @@ const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
 const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
 pub async fn prepare_start_parameters(
     config: RwConfig,
-    object_metrics: Arc<object_metrics::ObjectStoreMetrics>,
     system_params_reader: SystemParamsReader,
 ) -> (
     Arc<SstableStore>,
     Arc<MemoryLimiter>,
     Option<Arc<RwLock<await_tree::Registry<String>>>>,
     Arc<StorageOpts>,
+    Arc<CompactorMetrics>,
 ) {
+    // Boot compactor
+    let object_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
+    let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
+
     let state_store_url = system_params_reader.state_store();
 
     let storage_memory_config = extract_storage_memory_config(&config);
@@ -153,7 +157,13 @@ pub async fn prepare_start_parameters(
     let await_tree_reg: Option<
         Arc<parking_lot::lock_api::RwLock<parking_lot::RawRwLock, await_tree::Registry<_>>>,
     > = await_tree_config.map(|c| Arc::new(RwLock::new(await_tree::Registry::new(c))));
-    (sstable_store, memory_limiter, await_tree_reg, storage_opts)
+    (
+        sstable_store,
+        memory_limiter,
+        await_tree_reg,
+        storage_opts,
+        compactor_metrics,
+    )
 }
 
 /// Fetches and runs compaction tasks.
@@ -185,19 +195,15 @@ pub async fn compactor_serve(
     info!("Assigned compactor id {}", meta_client.worker_id());
     meta_client.activate(&advertise_addr).await.unwrap();
 
-    // Boot compactor
-    let object_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
     let hummock_metrics = Arc::new(GLOBAL_HUMMOCK_METRICS.clone());
-    let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
 
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
         meta_client.clone(),
         hummock_metrics.clone(),
     ));
 
-    let (sstable_store, memory_limiter, await_tree_reg, storage_opts) =
-        prepare_start_parameters(config.clone(), object_metrics, system_params_reader.clone())
-            .await;
+    let (sstable_store, memory_limiter, await_tree_reg, storage_opts, compactor_metrics) =
+        prepare_start_parameters(config.clone(), system_params_reader.clone()).await;
 
     let telemetry_enabled = system_params_reader.telemetry_enabled();
 
@@ -340,12 +346,8 @@ pub async fn shared_compactor_serve(
         .expect("Fail to get system params, the compactor pod cannot be started.");
     let system_params = system_params_response.into_inner().params.unwrap();
 
-    // Boot compactor
-    let object_metrics = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
-    let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
-
-    let (sstable_store, memory_limiter, await_tree_reg, storage_opts) =
-        prepare_start_parameters(config.clone(), object_metrics, system_params.into()).await;
+    let (sstable_store, memory_limiter, await_tree_reg, storage_opts, compactor_metrics) =
+        prepare_start_parameters(config.clone(), system_params.into()).await;
     let (sender, receiver) = mpsc::unbounded_channel();
     let compactor_srv: CompactorServiceImpl = CompactorServiceImpl::new(sender);
 
