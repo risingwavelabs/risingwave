@@ -78,9 +78,6 @@ pub enum Command {
     /// Done Or InProgress, along with the epoch.
     // Recover,
 
-    /// NOTE: This we use this + Add, to add new mview.
-    /// `Plain` command generates a barrier with the mutation it carries.
-    ///
     /// Barriers from all actors marked as `Created` state will be collected.
     /// After the barrier is collected, it does nothing.
     Plain(Option<Mutation>),
@@ -103,6 +100,9 @@ pub enum Command {
     /// drop actors, and then delete the table fragments info from meta store.
     DropStreamingJobs(HashSet<TableId>),
 
+    /// NOTE: This we use this + Add, to add new mview.
+    /// `Plain` command generates a barrier with the mutation it carries.
+    ///
     /// `CreateStreamingJob` command generates a `Add` barrier by given info.
     ///
     /// Barriers from the actors to be created, which is marked as `Inactive` at first, will STILL

@@ -14,10 +14,13 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::marker::Actor;
+use risingwave_common::row::Chain;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -48,7 +51,9 @@ struct Progress {
     /// Creating mv id.
     creating_mv_id: TableId,
 
-    /// Upstream mv count. Keep track of how many times each upstream MV appears.
+    /// Upstream mv count.
+    /// Keep track of how many times each upstream MV
+    /// appears in this stream job.
     upstream_mv_count: HashMap<TableId, usize>,
 
     /// Upstream mvs total key count.
@@ -155,7 +160,7 @@ pub(super) struct TrackingCommand {
 ///
 /// Tracking is done as follows:
 /// Several ActorIds constitute a StreamJob.
-/// A StreamJob is IDed by the Epoch of its initial barrier,
+/// A StreamJob is IDead by the Epoch of its initial barrier,
 /// i.e. CreateMviewEpoch.
 /// We can ID it that way because the initial barrier should ONLY
 /// be used for exactly one StreamJob.
@@ -166,7 +171,7 @@ pub(super) struct TrackingCommand {
 /// to view its progress.
 ///
 /// We track the progress of each ActorId in a StreamJob,
-/// because ALL of their progress consitutes the progress of the StreamJob.
+/// because ALL of their progress constitutes the progress of the StreamJob.
 pub(super) struct CreateMviewProgressTracker {
     // TODO(kwannoel): The real purpose of `CreateMviewEpoch`
     // Is to serve as a unique identifier for a stream job.
@@ -183,38 +188,13 @@ pub(super) struct CreateMviewProgressTracker {
 
 /// FIXME: This is just a mock to simulate backfill state.
 /// We need to get the actual state from the barriers.
-#[derive(Clone, Copy, Debug)]
-pub enum BackfillStatus {
-    Init,
-    ConsumingUpstream,
-    Done,
-}
-
 pub struct BackfillState {
-    status: BackfillStatus,
-    consumed_rows: u64,
-    epoch: CreateMviewEpoch, // TODO: Does not seem necessary..?
+    status: ChainState,
 }
 
 impl BackfillState {
-    pub fn new(status: BackfillStatus, consumed_rows: u64, epoch: CreateMviewEpoch) -> Self {
-        Self {
-            status,
-            consumed_rows,
-            epoch,
-        }
-    }
-
-    pub fn get_status(&self) -> BackfillStatus {
+    pub fn get_status(&self) -> ChainState {
         self.status
-    }
-
-    pub fn get_consumed_rows(&self) -> u64 {
-        self.consumed_rows
-    }
-
-    pub fn get_epoch(&self) -> CreateMviewEpoch {
-        self.epoch
     }
 }
 
@@ -229,18 +209,72 @@ impl CreateMviewProgressTracker {
     /// Empty backfill state -> Can't recover, just start from scratch.
     /// Non-empty backfill state -> Recover from the backfill state.
     ///
-    /// We also need to recover row counts from etcd store,
-    /// that is not persisted by backfill executor.
-    pub fn recover(backfill_progress: BackfillProgress) -> Self {
-        let mut progress_map = Default::default();
-        let mut actor_map = Default::default();
-
+    /// The `actor_map` contains the mapping from actor to its stream job identifier
+    /// (the epoch where it was created).
+    pub fn recover(
+        backfill_progress: BackfillProgress,
+        actor_map: HashMap<ActorId, CreateMviewEpoch>,
+        table_map: HashMap<CreateMviewEpoch, TableId>,
+        upstream_mv_counts: HashMap<CreateMviewEpoch, HashMap<TableId, usize>>,
+        definitions: HashMap<CreateMviewEpoch, String>,
+        version_stats: HummockVersionStats,
+    ) -> Self {
         let progress_per_actor = backfill_progress.inner;
-        for (actor_id, backfill_state) in progress_per_actor {
-            let status = backfill_state.get_status();
-            let consumed_rows = backfill_state.get_consumed_rows();
-            let epoch = backfill_state.get_epoch();
-        }
+        let progress_map = Default::default();
+        let progress_per_stream_job = progress_per_actor
+            .into_iter()
+            .map(|(actor_id, state)| {
+                let epoch = actor_map.get(&actor_id).unwrap();
+                (epoch, (actor_id, state))
+            })
+            .sorted_by(|(epoch1, _), (epoch2, _)| epoch1.cmp(epoch2))
+            .group_by(|(epoch, _)| *epoch)
+            .into_iter()
+            .map(|(epoch, state_per_actor)| {
+                let mut states = HashMap::new();
+                let mut done_count = 0;
+                let creating_mv_id = *table_map.get(&epoch).unwrap();
+                // FIXME: Don't clone here.
+                let upstream_mv_count = upstream_mv_counts.get(&epoch).unwrap().clone();
+                let upstream_total_key_count = upstream_mv_count
+                    .iter()
+                    .map(|(upstream_mv, count)| {
+                        *count as u64
+                            * version_stats
+                                .table_stats
+                                .get(&upstream_mv.table_id)
+                                .map_or(0, |stat| stat.total_key_count as u64)
+                    })
+                    .sum();
+                let mut consumed_rows = 0;
+                let definition = definitions.get(&epoch).unwrap().clone();
+                for (_, (actor_id, state)) in state_per_actor {
+                    let status = state.get_status();
+                    match status {
+                        ChainState::Init => {}
+                        ChainState::ConsumingUpstream(epoch, actor_consumed_rows) => {
+                            consumed_rows += actor_consumed_rows;
+                            // FIXME: Should Done states be in the map?
+                            // If no, then only insert here.
+                            // states.insert(actor_id, ChainState::ConsumingUpstream(epoch, consumed_rows));
+                        }
+                        ChainState::Done => {
+                            done_count += 1;
+                        }
+                    };
+                    // FIXME: Should Done states be in the map?
+                    states.insert(actor_id, state.get_status()).unwrap();
+                }
+                let progress = Progress {
+                    states,
+                    done_count,
+                    creating_mv_id,
+                    upstream_mv_count,
+                    upstream_total_key_count,
+                    consumed_rows,
+                    definition,
+                };
+            });
         Self {
             progress_map,
             actor_map,
