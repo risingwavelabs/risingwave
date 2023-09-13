@@ -18,12 +18,11 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
-use futures::channel::oneshot::Canceled;
 use futures::future::try_join_all;
-use futures::FutureExt;
+use futures::{Future, FutureExt};
 use futures_async_stream::for_await;
 use rdkafka::error::{KafkaError, KafkaResult};
-use rdkafka::message::{OwnedMessage, ToBytes};
+use rdkafka::message::ToBytes;
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
@@ -51,9 +50,6 @@ use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
 };
-
-type FutureResult =
-    std::result::Result<std::result::Result<(i32, i64), (KafkaError, OwnedMessage)>, Canceled>;
 
 pub const KAFKA_SINK: &str = "kafka";
 
@@ -477,7 +473,9 @@ impl KafkaSinkWriter {
         Ok(())
     }
 
-    fn map_future_result(delivery_future_result: FutureResult) -> KafkaResult<()> {
+    fn map_future_result(
+        delivery_future_result: <DeliveryFuture as Future>::Output,
+    ) -> KafkaResult<()> {
         match delivery_future_result {
             // Successfully sent the record
             // Will return the partition and offset of the message (i32, i64)
