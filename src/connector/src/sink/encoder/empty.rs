@@ -31,7 +31,7 @@ impl RowEncoder for EmptyEncoder {
 }
 
 impl SerToString for () {
-    fn ser_to_string(&self) -> Result<String> {
+    fn ser_to_string(self) -> Result<String> {
         Ok("".to_string())
     }
 }

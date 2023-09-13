@@ -45,15 +45,15 @@ pub trait RowEncoder {
 }
 
 pub trait SerToBytes {
-    fn ser_to_bytes(&self) -> Result<Vec<u8>>;
+    fn ser_to_bytes(self) -> Result<Vec<u8>>;
 }
 
 pub trait SerToString {
-    fn ser_to_string(&self) -> Result<String>;
+    fn ser_to_string(self) -> Result<String>;
 }
 
 impl<T: SerToString> SerToBytes for T {
-    fn ser_to_bytes(&self) -> Result<Vec<u8>> {
+    fn ser_to_bytes(self) -> Result<Vec<u8>> {
         self.ser_to_string().map(|s| s.into_bytes())
     }
 }

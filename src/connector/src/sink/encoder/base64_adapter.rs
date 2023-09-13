@@ -38,8 +38,8 @@ impl<E: RowEncoder> RowEncoder for Base64Adapter<E> {
 }
 
 impl SerToString for String {
-    fn ser_to_string(&self) -> Result<String> {
-        Ok(self.clone())
+    fn ser_to_string(self) -> Result<String> {
+        Ok(self)
     }
 }
 

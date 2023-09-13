@@ -60,13 +60,13 @@ impl RowEncoder for JsonEncoder {
 }
 
 impl SerToString for Map<String, Value> {
-    fn ser_to_string(&self) -> Result<String> {
-        serde_json::to_string(self).map_err(|e| SinkError::JsonParse(e.to_string()))
+    fn ser_to_string(self) -> Result<String> {
+        serde_json::to_string(&self).map_err(|e| SinkError::JsonParse(e.to_string()))
     }
 }
 
 impl SerToString for Value {
-    fn ser_to_string(&self) -> Result<String> {
+    fn ser_to_string(self) -> Result<String> {
         Ok(self.to_string())
     }
 }

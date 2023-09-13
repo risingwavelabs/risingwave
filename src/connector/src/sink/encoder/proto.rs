@@ -36,7 +36,7 @@ impl RowEncoder for ProtoEncoder {
 }
 
 impl SerToBytes for DynamicMessage {
-    fn ser_to_bytes(&self) -> Result<Vec<u8>> {
+    fn ser_to_bytes(self) -> Result<Vec<u8>> {
         Ok(self.encode_to_vec())
     }
 }

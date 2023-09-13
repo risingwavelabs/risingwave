@@ -241,15 +241,15 @@ pub trait MessageSink {
     }
 }
 pub trait SerTo<T> {
-    fn ser_to(&self) -> Result<T>;
+    fn ser_to(self) -> Result<T>;
 }
 impl<T: SerToBytes> SerTo<Vec<u8>> for T {
-    fn ser_to(&self) -> Result<Vec<u8>> {
+    fn ser_to(self) -> Result<Vec<u8>> {
         self.ser_to_bytes()
     }
 }
 impl<T: SerToString> SerTo<String> for T {
-    fn ser_to(&self) -> Result<String> {
+    fn ser_to(self) -> Result<String> {
         self.ser_to_string()
     }
 }
