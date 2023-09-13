@@ -1178,7 +1178,7 @@ where
             .await
     }
 
-    /// This function scans rows from the relational table with specific `pk_range` under the same
+    /// This function scans rows from the relational table with specific `prefix` and `pk_sub_range` under the same
     /// `vnode`.
     pub async fn iter_row_with_pk_prefix_sub_range(
         &self,
