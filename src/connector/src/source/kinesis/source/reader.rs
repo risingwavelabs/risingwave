@@ -70,13 +70,6 @@ impl SplitReader for KinesisSplitReader {
                 Some(mode) => match mode.as_str() {
                     "earliest" => KinesisOffset::Earliest,
                     "latest" => KinesisOffset::Latest,
-                    "sequence_number" => {
-                        if let Some(seq) = &properties.seq_offset {
-                            KinesisOffset::SequenceNumber(seq.clone())
-                        } else {
-                            return Err(anyhow!("scan_startup_sequence_number is required"));
-                        }
-                    }
                     "timestamp" => {
                         if let Some(ts) = &properties.timestamp_offset {
                             KinesisOffset::Timestamp(*ts)
@@ -86,7 +79,7 @@ impl SplitReader for KinesisSplitReader {
                     }
                     _ => {
                         return Err(anyhow!(
-                            "invalid scan_startup_mode, accept earliest/latest/sequence_number/timestamp"
+                            "invalid scan_startup_mode, accept earliest/latest/timestamp"
                         ))
                     }
                 },
@@ -94,11 +87,11 @@ impl SplitReader for KinesisSplitReader {
             start_position => start_position.to_owned(),
         };
 
-        if !matches!(start_position, KinesisOffset::SequenceNumber(_))
-            && properties.seq_offset.is_some()
+        if !matches!(start_position, KinesisOffset::Timestamp(_))
+            && properties.timestamp_offset.is_some()
         {
             return Err(
-                anyhow!("scan.startup.mode need to be set to 'sequence_number' if you want to start with a specific sequence number")
+                anyhow!("scan.startup.mode need to be set to 'timestamp' if you want to start with a specific timestamp")
             );
         }
 
@@ -327,11 +320,7 @@ mod tests {
             },
 
             scan_startup_mode: None,
-            seq_offset: Some(
-                // redundant seq number
-                "49629139817504901062972448413535783695568426186596941842".to_string(),
-            ),
-            timestamp_offset: None,
+            timestamp_offset: Some(123456789098765432),
         };
         let client = KinesisSplitReader::new(
             properties,
@@ -364,7 +353,6 @@ mod tests {
             },
 
             scan_startup_mode: None,
-            seq_offset: None,
             timestamp_offset: None,
         };
 
