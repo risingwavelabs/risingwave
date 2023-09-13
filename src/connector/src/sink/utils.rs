@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use base64::engine::general_purpose;
 use base64::Engine as _;
 use chrono::{Datelike, Timelike};
@@ -20,7 +22,7 @@ use risingwave_common::array::stream_chunk::Op;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
+use risingwave_common::types::{DataType, DatumRef, Decimal, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use serde_json::{json, Map, Value};
 use tracing::warn;
@@ -77,7 +79,7 @@ pub async fn gen_debezium_message_stream<'a>(
                 "schema": schema_to_json(schema, db_name, sink_from_name),
                 "payload": {
                     "before": null,
-                    "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
+                    "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli, DateHandlingMode::Num)?,
                     "op": "c",
                     "ts_ms": ts_ms,
                     "source": source_field,
@@ -87,7 +89,7 @@ pub async fn gen_debezium_message_stream<'a>(
                 let value_obj = Some(json!({
                     "schema": schema_to_json(schema, db_name, sink_from_name),
                     "payload": {
-                        "before": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
+                        "before": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli, DateHandlingMode::Num)?,
                         "after": null,
                         "op": "d",
                         "ts_ms": ts_ms,
@@ -109,6 +111,7 @@ pub async fn gen_debezium_message_stream<'a>(
                     row,
                     &schema.fields,
                     TimestampHandlingMode::Milli,
+                    DateHandlingMode::Num,
                 )?);
                 continue;
             }
@@ -118,7 +121,7 @@ pub async fn gen_debezium_message_stream<'a>(
                         "schema": schema_to_json(schema, db_name, sink_from_name),
                         "payload": {
                             "before": before,
-                            "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
+                            "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli, DateHandlingMode::Num)?,
                             "op": "u",
                             "ts_ms": ts_ms,
                             "source": source_field,
@@ -254,8 +257,13 @@ pub(crate) fn pk_to_json(
     for idx in pk_indices {
         let field = &schema[*idx];
         let key = field.name.clone();
-        let value = datum_to_json_object(field, row.datum_at(*idx), TimestampHandlingMode::Milli)
-            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
+        let value = datum_to_json_object(
+            field,
+            row.datum_at(*idx),
+            TimestampHandlingMode::Milli,
+            DateHandlingMode::Num,
+        )
+        .map_err(|e| SinkError::JsonParse(e.to_string()))?;
         mappings.insert(key, value);
     }
     Ok(mappings)
@@ -268,6 +276,7 @@ pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>>
             row,
             &schema.fields,
             TimestampHandlingMode::Milli,
+            DateHandlingMode::Num,
         )?);
         records.push(record.to_string());
     }
@@ -280,17 +289,65 @@ pub enum TimestampHandlingMode {
     Milli,
     String,
 }
+#[derive(Clone, Copy)]
+pub enum DateHandlingMode {
+    Num,
+    String,
+}
 
 pub fn record_to_json(
     row: RowRef<'_>,
     schema: &[Field],
     timestamp_handling_mode: TimestampHandlingMode,
+    date_handling_mode: DateHandlingMode,
 ) -> Result<Map<String, Value>> {
     let mut mappings = Map::with_capacity(schema.len());
     for (field, datum_ref) in schema.iter().zip_eq_fast(row.iter()) {
         let key = field.name.clone();
-        let value = datum_to_json_object(field, datum_ref, timestamp_handling_mode)
-            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
+        let value = datum_to_json_object(
+            field,
+            datum_ref,
+            timestamp_handling_mode,
+            date_handling_mode,
+        )
+        .map_err(|e| SinkError::JsonParse(e.to_string()))?;
+        mappings.insert(key, value);
+    }
+    Ok(mappings)
+}
+
+pub fn doris_record_to_json(
+    row: RowRef<'_>,
+    schema: &[Field],
+    timestamp_handling_mode: TimestampHandlingMode,
+    date_handling_mode: DateHandlingMode,
+    decimal_map: &HashMap<String, (u8, u8)>,
+) -> Result<Map<String, Value>> {
+    let mut mappings = Map::with_capacity(schema.len());
+    for (field, datum_ref) in schema.iter().zip_eq_fast(row.iter()) {
+        let key = field.name.clone();
+        let value = if let Some(ScalarRefImpl::Decimal(mut d)) = datum_ref {
+            if !matches!(d, Decimal::Normalized(_)) {
+                return Err(SinkError::Doris(
+                    "doris can't support decimal Inf, -Inf, Nan".to_string(),
+                ));
+            }
+            let (p, s) = decimal_map.get(&key).unwrap();
+            d.rescale(*s as u32);
+            let d_string = d.to_text();
+            if d_string.len() > *p as usize {
+                return Err(SinkError::Doris(format!("rw Decimal's precision is large than doris max decimal len is {:?}, doris max is {:?}",d_string.len(),p)));
+            }
+            json!(d.to_text())
+        } else {
+            datum_to_json_object(
+                field,
+                datum_ref,
+                timestamp_handling_mode,
+                date_handling_mode,
+            )
+            .map_err(|e| SinkError::JsonParse(e.to_string()))?
+        };
         mappings.insert(key, value);
     }
     Ok(mappings)
@@ -300,6 +357,7 @@ fn datum_to_json_object(
     field: &Field,
     datum: DatumRef<'_>,
     timestamp_handling_mode: TimestampHandlingMode,
+    date_handling_mode: DateHandlingMode,
 ) -> ArrayResult<Value> {
     let scalar_ref = match datum {
         None => return Ok(Value::Null),
@@ -346,9 +404,13 @@ fn datum_to_json_object(
             // todo: just ignore the nanos part to avoid leap second complex
             json!(v.0.num_seconds_from_midnight() as i64 * 1000)
         }
-        (DataType::Date, ScalarRefImpl::Date(v)) => {
-            json!(v.0.num_days_from_ce())
-        }
+        (DataType::Date, ScalarRefImpl::Date(v)) => match date_handling_mode {
+            DateHandlingMode::Num => json!(v.0.num_days_from_ce()),
+            DateHandlingMode::String => {
+                let a = v.0.format("%Y-%m-%d").to_string();
+                json!(a)
+            }
+        },
         (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => match timestamp_handling_mode {
             TimestampHandlingMode::Milli => json!(v.0.timestamp_millis()),
             TimestampHandlingMode::String => json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
@@ -368,8 +430,12 @@ fn datum_to_json_object(
             let mut vec = Vec::with_capacity(elems.len());
             let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
             for sub_datum_ref in elems {
-                let value =
-                    datum_to_json_object(&inner_field, sub_datum_ref, timestamp_handling_mode)?;
+                let value = datum_to_json_object(
+                    &inner_field,
+                    sub_datum_ref,
+                    timestamp_handling_mode,
+                    date_handling_mode,
+                )?;
                 vec.push(value);
             }
             json!(vec)
@@ -380,8 +446,12 @@ fn datum_to_json_object(
                 st.iter()
                     .map(|(name, dt)| Field::with_name(dt.clone(), name)),
             ) {
-                let value =
-                    datum_to_json_object(&sub_field, sub_datum_ref, timestamp_handling_mode)?;
+                let value = datum_to_json_object(
+                    &sub_field,
+                    sub_datum_ref,
+                    timestamp_handling_mode,
+                    date_handling_mode,
+                )?;
                 map.insert(sub_field.name.clone(), value);
             }
             json!(map)
@@ -414,6 +484,7 @@ pub async fn gen_upsert_message_stream<'a>(
                 row,
                 &schema.fields,
                 TimestampHandlingMode::Milli,
+                DateHandlingMode::Num,
             )?)),
             Op::Delete => Some(Value::Null),
             Op::UpdateDelete => {
@@ -424,6 +495,7 @@ pub async fn gen_upsert_message_stream<'a>(
                 row,
                 &schema.fields,
                 TimestampHandlingMode::Milli,
+                DateHandlingMode::Num,
             )?)),
         };
 
@@ -450,6 +522,7 @@ pub async fn gen_append_only_message_stream<'a>(
             row,
             &schema.fields,
             TimestampHandlingMode::Milli,
+            DateHandlingMode::Num,
         )?));
 
         yield (event_key_object, event_object);
@@ -477,6 +550,7 @@ mod tests {
             },
             Some(ScalarImpl::Bool(false).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            DateHandlingMode::Num,
         )
         .unwrap();
         assert_eq!(boolean_value, json!(false));
@@ -488,6 +562,7 @@ mod tests {
             },
             Some(ScalarImpl::Int16(16).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            DateHandlingMode::Num,
         )
         .unwrap();
         assert_eq!(int16_value, json!(16));
@@ -499,6 +574,7 @@ mod tests {
             },
             Some(ScalarImpl::Int64(std::i64::MAX).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            DateHandlingMode::Num,
         )
         .unwrap();
         assert_eq!(
@@ -515,6 +591,7 @@ mod tests {
             },
             Some(ScalarImpl::Timestamptz(tstz_inner).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            DateHandlingMode::Num,
         )
         .unwrap();
         assert_eq!(tstz_value, "2018-01-26 18:30:09.453000");
@@ -529,6 +606,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::Milli,
+            DateHandlingMode::Num,
         )
         .unwrap();
         assert_eq!(ts_value, json!(1000 * 1000));
@@ -543,6 +621,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
+            DateHandlingMode::Num,
         )
         .unwrap();
         assert_eq!(ts_value, json!("1970-01-01 00:16:40.000000".to_string()));
@@ -558,6 +637,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
+            DateHandlingMode::Num,
         )
         .unwrap();
         assert_eq!(time_value, json!(1000 * 1000));
@@ -572,6 +652,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
+            DateHandlingMode::Num,
         )
         .unwrap();
         assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));

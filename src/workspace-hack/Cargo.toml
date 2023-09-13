@@ -90,7 +90,7 @@ ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1", features = ["alloc"] }
+serde_json = { version = "1", features = ["alloc", "preserve_order"] }
 serde_with = { version = "3", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
 subtle = { version = "2" }
@@ -187,7 +187,7 @@ ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1", features = ["alloc"] }
+serde_json = { version = "1", features = ["alloc", "preserve_order"] }
 serde_with = { version = "3", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
 subtle = { version = "2" }

@@ -41,7 +41,7 @@ use tracing::{error, warn};
 
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::iceberg::REMOTE_ICEBERG_SINK;
-use crate::sink::utils::{record_to_json, TimestampHandlingMode};
+use crate::sink::utils::{record_to_json, DateHandlingMode, TimestampHandlingMode};
 use crate::sink::SinkError::Remote;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkCommitCoordinator, SinkError, SinkParam,
@@ -352,6 +352,7 @@ where
                         row_ref,
                         &self.schema.fields,
                         TimestampHandlingMode::String,
+                        DateHandlingMode::Num,
                     )?;
                     let row_op = RowOp {
                         op_type: op.to_protobuf() as i32,

@@ -49,7 +49,8 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 glob = "0.3"
 google-cloud-pubsub = "0.20"
-hyper = { version = "0.14", features = ["client", "tcp", "http1", "stream"] }
+http = "0.2"
+hyper = { version = "0.14", features = ["client", "tcp", "http1", "http2", "stream"] }
 hyper-tls = "0.5"
 icelake = { workspace = true }
 itertools = "0.11"
@@ -87,7 +88,7 @@ risingwave_rpc_client = { workspace = true }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 serde_with = { version = "3", features = ["json"] }
 simd-json = "0.10.6"
 tempfile = "3"

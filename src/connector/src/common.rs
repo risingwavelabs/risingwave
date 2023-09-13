@@ -309,7 +309,6 @@ pub struct ClickHouseCommon {
     pub table: String,
 }
 
-
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl ClickHouseCommon {
@@ -344,9 +343,15 @@ pub struct DorisCommon {
     pub table: String,
 }
 
-impl DorisCommon{
-    pub(crate) fn build_get_client(&self) -> anyhow::Result<DorisGet> {
-        Ok(DorisGet::new(self.url.clone(),self.table.clone(),self.database.clone(),self.user.clone(),self.password.clone()))
+impl DorisCommon {
+    pub(crate) fn build_get_client(&self) -> DorisGet {
+        DorisGet::new(
+            self.url.clone(),
+            self.table.clone(),
+            self.database.clone(),
+            self.user.clone(),
+            self.password.clone(),
+        )
     }
 }
 

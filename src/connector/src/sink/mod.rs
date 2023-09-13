@@ -355,9 +355,9 @@ impl SinkConfig {
             CLICKHOUSE_SINK => Ok(SinkConfig::ClickHouse(Box::new(
                 ClickHouseConfig::from_hashmap(properties)?,
             ))),
-            DORIS_SINK => Ok(SinkConfig::Doris(Box::new(
-                DorisConfig::from_hashmap(properties)?,
-            ))),
+            DORIS_SINK => Ok(SinkConfig::Doris(Box::new(DorisConfig::from_hashmap(
+                properties,
+            )?))),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
             REMOTE_ICEBERG_SINK => Ok(SinkConfig::RemoteIceberg(
                 RemoteIcebergConfig::from_hashmap(properties)?,
@@ -458,10 +458,12 @@ impl SinkImpl {
             }
             #[cfg(any(test, madsim))]
             SinkConfig::Test => SinkImpl::TestSink(build_test_sink(param)?),
-            SinkConfig::Doris(cfg) => SinkImpl::Doris(DorisSink::new(*cfg,
+            SinkConfig::Doris(cfg) => SinkImpl::Doris(DorisSink::new(
+                *cfg,
                 param.schema(),
                 param.pk_indices,
-                param.sink_type.is_append_only())?),
+                param.sink_type.is_append_only(),
+            )?),
         })
     }
 }
