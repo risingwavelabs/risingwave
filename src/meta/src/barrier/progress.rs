@@ -152,7 +152,28 @@ pub(super) struct TrackingCommand {
 
 /// Track the progress of all creating mviews. When creation is done, `notify_finished` will be
 /// called on registered notifiers.
+///
+/// Tracking is done as follows:
+/// Several ActorIds constitute a StreamJob.
+/// A StreamJob is IDed by the Epoch of its initial barrier,
+/// i.e. CreateMviewEpoch.
+/// We can ID it that way because the initial barrier should ONLY
+/// be used for exactly one StreamJob.
+/// We don't allow multiple stream jobs scheduled on the same barrier.
+///
+/// With `actor_map` we can use any `ActorId` to find the ID of the StreamJob,
+/// and with `progress_map` we can use the ID of the StreamJob
+/// to view its progress.
+///
+/// We track the progress of each ActorId in a StreamJob,
+/// because ALL of their progress consitutes the progress of the StreamJob.
 pub(super) struct CreateMviewProgressTracker {
+    // TODO(kwannoel): The real purpose of `CreateMviewEpoch`
+    // Is to serve as a unique identifier for a stream job.
+    // We should create a new type for this purpose
+    // to make that clear.
+    // Additionally if are to allow concurrent mview creation in the
+    // future, CreateMViewEpoch will not be a good candidate for this.
     /// Progress of the create-mview DDL indicated by the epoch.
     progress_map: HashMap<CreateMviewEpoch, (Progress, TrackingCommand)>,
 
