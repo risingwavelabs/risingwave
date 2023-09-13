@@ -123,6 +123,7 @@ risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
 risingwave_expr = { path = "./src/expr" }
+risingwave_expr_macro = { path = "./src/expr/macro" }
 risingwave_frontend = { path = "./src/frontend" }
 risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
 risingwave_hummock_test = { path = "./src/storage/hummock_test" }

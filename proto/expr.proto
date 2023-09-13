@@ -220,6 +220,9 @@ message ExprNode {
     VNODE = 1101;
     // Non-deterministic functions
     PROCTIME = 2023;
+
+    // Adminitration functions
+    COL_DESCRIPTION = 2100;
   }
   Type function_type = 1;
   data.DataType return_type = 3;

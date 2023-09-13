@@ -1127,7 +1127,7 @@ impl Binder {
                 // TODO: really implement them.
                 // https://www.postgresql.org/docs/9.5/functions-info.html#FUNCTIONS-INFO-COMMENT-TABLE
                 // WARN: Hacked in [`Binder::bind_function`]!!!
-                ("col_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
+                ("col_description", raw_call(ExprType::ColDescription)),
                 ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("pg_is_in_recovery", raw_literal(ExprImpl::literal_bool(false))),

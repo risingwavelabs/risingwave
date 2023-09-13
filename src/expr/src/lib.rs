@@ -24,6 +24,8 @@
 #![feature(test)]
 #![feature(arc_unwrap_or_clone)]
 
+extern crate self as risingwave_expr;
+
 pub mod agg;
 mod error;
 pub mod expr;
@@ -34,5 +36,5 @@ pub mod vector_op;
 pub mod window_function;
 
 pub use error::{ExprError, Result};
-use risingwave_common::{bail, ensure};
+pub use risingwave_common::{bail, ensure};
 pub use risingwave_expr_macro::*;
