@@ -47,7 +47,7 @@ public class JDBCSink extends SinkWriterBase {
 
     private boolean updateFlag = false;
 
-    private HashMap<OpType, PreparedStatement> stagingStatements;
+    private final HashMap<OpType, PreparedStatement> stagingStatements = new HashMap<>();
 
     private static final Logger LOG = LoggerFactory.getLogger(JDBCSink.class);
 
@@ -68,7 +68,9 @@ public class JDBCSink extends SinkWriterBase {
             this.conn = DriverManager.getConnection(config.getJdbcUrl());
             this.pkColumnNames =
                     getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
-            this.conn.setAutoCommit(true);
+            // disable auto commit can improve performance
+            this.conn.setAutoCommit(false);
+            // use the lowest isolation level since we don't guarantee exactly-once
             this.conn.setTransactionIsolation(Connection.TRANSACTION_READ_UNCOMMITTED);
 
             LOG.info(
@@ -287,6 +289,14 @@ public class JDBCSink extends SinkWriterBase {
             throw Status.FAILED_PRECONDITION
                     .withDescription(
                             "expected UPDATE_INSERT to complete an UPDATE operation, got `sync`")
+                    .asRuntimeException();
+        }
+        try {
+            conn.commit();
+        } catch (SQLException e) {
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
                     .asRuntimeException();
         }
     }
