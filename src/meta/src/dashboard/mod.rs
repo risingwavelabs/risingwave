@@ -219,9 +219,9 @@ pub(super) mod handlers {
         Ok(result.into())
     }
 
-    pub async fn heap_profile<S: MetaStore>(
+    pub async fn heap_profile(
         Path(worker_id): Path<WorkerId>,
-        Extension(srv): Extension<Service<S>>,
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<HeapProfilingResponse>> {
         let worker_node = srv
             .cluster_manager
@@ -238,9 +238,9 @@ pub(super) mod handlers {
         Ok(result.into())
     }
 
-    pub async fn list_heap_profile<S: MetaStore>(
+    pub async fn list_heap_profile(
         Path(worker_id): Path<WorkerId>,
-        Extension(srv): Extension<Service<S>>,
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<ListHeapProfilingResponse>> {
         let worker_node = srv
             .cluster_manager
@@ -256,9 +256,9 @@ pub(super) mod handlers {
         Ok(result.into())
     }
 
-    pub async fn analyze_heap<S: MetaStore>(
+    pub async fn analyze_heap(
         Path((worker_id, file_path)): Path<(WorkerId, String)>,
-        Extension(srv): Extension<Service<S>>,
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<String>> {
         if srv.ui_path.is_none() {
             bail!("Should provide ui_path");
@@ -335,10 +335,7 @@ impl DashboardService {
                 get(prometheus::list_prometheus_actor_back_pressure),
             )
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
-            .route(
-                "/monitor/dump_heap_profile/:worker_id",
-                get(heap_profile),
-            )
+            .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))
             .route(
                 "/monitor/list_heap_profile/:worker_id",
                 get(list_heap_profile),
