@@ -33,6 +33,8 @@ use url::Url;
 
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
+use crate::source::pulsar::source::reader::PulsarSplitReader;
+use crate::source::SourceProperties;
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
 
@@ -74,6 +76,14 @@ pub struct PulsarProperties {
 
     #[serde(flatten)]
     pub oauth: Option<PulsarOauth>,
+}
+
+impl SourceProperties for PulsarProperties {
+    type Split = PulsarSplit;
+    type SplitEnumerator = PulsarSplitEnumerator;
+    type SplitReader = PulsarSplitReader;
+
+    const SOURCE_NAME: &'static str = PULSAR_CONNECTOR;
 }
 
 impl PulsarProperties {

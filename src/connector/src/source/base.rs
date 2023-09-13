@@ -35,53 +35,51 @@ use super::filesystem::{FsSplit, S3Properties, S3_CONNECTOR};
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
-use super::nats::enumerator::NatsSplitEnumerator;
-use super::nats::source::NatsSplitReader;
 use super::nexmark::source::message::NexmarkMeta;
 use crate::parser::ParserConfig;
 use crate::source::cdc::{
-    CdcProperties, CdcSplitReader, Citus, CitusDebeziumSplitEnumerator, DebeziumCdcSplit,
-    DebeziumSplitEnumerator, Mysql, MysqlDebeziumSplitEnumerator, Postgres,
-    PostgresDebeziumSplitEnumerator, CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR,
-    POSTGRES_CDC_CONNECTOR,
+    CdcProperties, Citus, DebeziumCdcSplit, Mysql, Postgres, CITUS_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
-use crate::source::datagen::{
-    DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
-};
-use crate::source::dummy_connector::DummySplitReader;
-use crate::source::filesystem::{S3FileReader, S3SplitEnumerator};
-use crate::source::google_pubsub::{
-    PubsubProperties, PubsubSplit, PubsubSplitEnumerator, PubsubSplitReader,
-    GOOGLE_PUBSUB_CONNECTOR,
-};
-use crate::source::kafka::enumerator::KafkaSplitEnumerator;
-use crate::source::kafka::source::KafkaSplitReader;
+pub(crate) use crate::source::common::CommonSplitReader;
+use crate::source::datagen::{DatagenProperties, DatagenSplit, DATAGEN_CONNECTOR};
+use crate::source::google_pubsub::{PubsubProperties, PubsubSplit, GOOGLE_PUBSUB_CONNECTOR};
 use crate::source::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
-use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
-use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
 use crate::source::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
 use crate::source::monitor::EnumeratorMetrics;
-use crate::source::nats::split::NatsSplit;
+use crate::source::nats::source::NatsSplit;
 use crate::source::nats::{NatsProperties, NATS_CONNECTOR};
-use crate::source::nexmark::source::reader::NexmarkSplitReader;
-use crate::source::nexmark::{
-    NexmarkProperties, NexmarkSplit, NexmarkSplitEnumerator, NEXMARK_CONNECTOR,
-};
-use crate::source::pulsar::source::reader::PulsarSplitReader;
-use crate::source::pulsar::{
-    PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR,
-};
-use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
+use crate::source::nexmark::{NexmarkProperties, NexmarkSplit, NEXMARK_CONNECTOR};
+use crate::source::pulsar::{PulsarProperties, PulsarSplit, PULSAR_CONNECTOR};
+use crate::{impl_connector_properties, impl_split};
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
+
+pub trait SourceProperties: Clone {
+    const SOURCE_NAME: &'static str;
+    type Split: SplitMetaData + TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>;
+    type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;
+    type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
+}
+
+pub async fn create_split_reader<P: SourceProperties>(
+    prop: P,
+    splits: Vec<SplitImpl>,
+    parser_config: ParserConfig,
+    source_ctx: SourceContextRef,
+    columns: Option<Vec<Column>>,
+) -> Result<P::SplitReader> {
+    let splits = splits.into_iter().map(P::Split::try_from).try_collect()?;
+    P::SplitReader::new(prop, splits, parser_config, source_ctx, columns).await
+}
 
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
 #[async_trait]
 pub trait SplitEnumerator: Sized {
-    type Split: SplitMetaData + Send + Sync;
+    type Split: SplitMetaData + Send;
     type Properties;
 
     async fn new(properties: Self::Properties, context: SourceEnumeratorContextRef)
@@ -276,12 +274,13 @@ impl From<StreamChunk> for StreamChunkWithState {
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
 /// stream of parsed [`StreamChunk`]
 #[async_trait]
-pub trait SplitReader: Sized {
+pub trait SplitReader: Sized + Send {
     type Properties;
+    type Split: SplitMetaData;
 
     async fn new(
         properties: Self::Properties,
-        state: Vec<SplitImpl>,
+        state: Vec<Self::Split>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
@@ -303,7 +302,27 @@ pub enum ConnectorProperties {
     CitusCdc(Box<CdcProperties<Citus>>),
     GooglePubsub(Box<PubsubProperties>),
     Nats(Box<NatsProperties>),
-    Dummy(Box<()>),
+}
+
+#[macro_export]
+macro_rules! dispatch_source_prop {
+    ($impl:expr, $source_prop:ident, $body:tt) => {{
+        use $crate::source::base::ConnectorProperties;
+
+        match $impl {
+            ConnectorProperties::Kafka($source_prop) => $body,
+            ConnectorProperties::Pulsar($source_prop) => $body,
+            ConnectorProperties::Kinesis($source_prop) => $body,
+            ConnectorProperties::Nexmark($source_prop) => $body,
+            ConnectorProperties::Datagen($source_prop) => $body,
+            ConnectorProperties::S3($source_prop) => $body,
+            ConnectorProperties::MysqlCdc($source_prop) => $body,
+            ConnectorProperties::PostgresCdc($source_prop) => $body,
+            ConnectorProperties::CitusCdc($source_prop) => $body,
+            ConnectorProperties::GooglePubsub($source_prop) => $body,
+            ConnectorProperties::Nats($source_prop) => $body,
+        }
+    }};
 }
 
 impl ConnectorProperties {
@@ -345,35 +364,6 @@ impl SplitImpl {
     }
 }
 
-pub enum SplitReaderImpl {
-    S3(Box<S3FileReader>),
-    Dummy(Box<DummySplitReader>),
-    Kinesis(Box<KinesisSplitReader>),
-    Kafka(Box<KafkaSplitReader>),
-    Nexmark(Box<NexmarkSplitReader>),
-    Pulsar(Box<PulsarSplitReader>),
-    Datagen(Box<DatagenSplitReader>),
-    MysqlCdc(Box<CdcSplitReader<Mysql>>),
-    PostgresCdc(Box<CdcSplitReader<Postgres>>),
-    CitusCdc(Box<CdcSplitReader<Citus>>),
-    GooglePubsub(Box<PubsubSplitReader>),
-    Nats(Box<NatsSplitReader>),
-}
-
-pub enum SplitEnumeratorImpl {
-    Kafka(KafkaSplitEnumerator),
-    Pulsar(PulsarSplitEnumerator),
-    Kinesis(KinesisSplitEnumerator),
-    Nexmark(NexmarkSplitEnumerator),
-    Datagen(DatagenSplitEnumerator),
-    MysqlCdc(MysqlDebeziumSplitEnumerator),
-    PostgresCdc(PostgresDebeziumSplitEnumerator),
-    CitusCdc(CitusDebeziumSplitEnumerator),
-    GooglePubsub(PubsubSplitEnumerator),
-    S3(S3SplitEnumerator),
-    Nats(NatsSplitEnumerator),
-}
-
 impl_connector_properties! {
     { Kafka, KAFKA_CONNECTOR },
     { Pulsar, PULSAR_CONNECTOR },
@@ -383,20 +373,6 @@ impl_connector_properties! {
     { S3, S3_CONNECTOR },
     { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR},
     { Nats, NATS_CONNECTOR }
-}
-
-impl_split_enumerator! {
-    { Kafka, KafkaSplitEnumerator },
-    { Pulsar, PulsarSplitEnumerator },
-    { Kinesis, KinesisSplitEnumerator },
-    { Nexmark, NexmarkSplitEnumerator },
-    { Datagen, DatagenSplitEnumerator },
-    { MysqlCdc, DebeziumSplitEnumerator },
-    { PostgresCdc, DebeziumSplitEnumerator },
-    { CitusCdc, DebeziumSplitEnumerator },
-    { GooglePubsub, PubsubSplitEnumerator},
-    { S3, S3SplitEnumerator },
-    { Nats, NatsSplitEnumerator }
 }
 
 impl_split! {
@@ -411,21 +387,6 @@ impl_split! {
     { CitusCdc, CITUS_CDC_CONNECTOR, DebeziumCdcSplit<Citus> },
     { S3, S3_CONNECTOR, FsSplit },
     { Nats, NATS_CONNECTOR, NatsSplit }
-}
-
-impl_split_reader! {
-    { S3, S3FileReader },
-    { Kafka, KafkaSplitReader },
-    { Pulsar, PulsarSplitReader },
-    { Kinesis, KinesisSplitReader },
-    { Nexmark, NexmarkSplitReader },
-    { Datagen, DatagenSplitReader },
-    { MysqlCdc, CdcSplitReader},
-    { PostgresCdc, CdcSplitReader},
-    { CitusCdc, CdcSplitReader },
-    { GooglePubsub, PubsubSplitReader },
-    { Nats, NatsSplitReader },
-    { Dummy, DummySplitReader }
 }
 
 pub type DataType = risingwave_common::types::DataType;
@@ -491,7 +452,7 @@ pub trait SplitMetaData: Sized {
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,
 /// `ConnectorState` cannot be [`None`] and contains one(for mq split readers) or many(for fs
 /// split readers) [`SplitImpl`]. If no split is assigned to source executor, `ConnectorState` is
-/// [`None`] and [`DummySplitReader`] is up instead of other split readers.
+/// [`None`] and the created source stream will be a pending stream.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
 
 #[cfg(test)]
