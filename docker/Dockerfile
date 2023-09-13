@@ -64,6 +64,8 @@ COPY --from=builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 ENV PLAYGROUND_PROFILE docker-playground
 # Set default dashboard UI to local path instead of github proxy
 ENV RW_DASHBOARD_UI_PATH /risingwave/ui
+# Set default connector libs path
+ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "playground" ]
