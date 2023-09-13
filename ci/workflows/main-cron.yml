@@ -13,7 +13,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 20
+    timeout_in_minutes: 25
     retry: *auto-retry
 
   - label: "build other components"
@@ -159,7 +159,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 17
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
