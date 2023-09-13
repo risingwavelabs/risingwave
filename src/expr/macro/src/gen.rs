@@ -61,14 +61,17 @@ impl FunctionAttr {
         let name = self.name.clone();
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
+            if ty == "..." {
+                break;
+            }
             args.push(data_type_name(ty));
         }
+        let variadic = matches!(self.args.last(), Some(t) if t == "...");
         let ret = data_type_name(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::func::FuncSign };
-        let variadic = self.args.len() == 1 && &self.args[0] == "...";
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
@@ -101,8 +104,8 @@ impl FunctionAttr {
         user_fn: &UserFunctionAttr,
         optimize_const: bool,
     ) -> Result<TokenStream2> {
-        let num_args = self.args.len();
-        let variadic = self.args.len() == 1 && &self.args[0] == "...";
+        let variadic = matches!(self.args.last(), Some(t) if t == "...");
+        let num_args = self.args.len() - if variadic { 1 } else { 0 };
         let fn_name = format_ident!("{}", user_fn.name);
         let struct_name = match optimize_const {
             true => format_ident!("{}OptimizeConst", utils::to_camel_case(&self.ident_name())),
@@ -212,60 +215,40 @@ impl FunctionAttr {
             quote! { () }
         };
 
-        // ensure the number of children matches when arguments are fixed
+        // ensure the number of children matches the number of arguments
         let check_children = match variadic {
-            true => quote! {},
+            true => quote! { crate::ensure!(children.len() >= #num_args); },
             false => quote! { crate::ensure!(children.len() == #num_args); },
         };
 
-        // evaluate child expressions and
-        // - build a chunk if arguments are variable
-        // - downcast arrays if arguments are fixed
-        let eval_children = if variadic {
+        // evaluate variadic arguments in `eval`
+        let eval_variadic = variadic.then(|| {
             quote! {
-                let mut columns = Vec::with_capacity(self.children.len());
-                for child in &self.children {
+                let mut columns = Vec::with_capacity(self.children.len() - #num_args);
+                for child in &self.children[#num_args..] {
                     columns.push(child.eval_checked(input).await?);
                 }
-                let chunk = DataChunk::new(columns, input.vis().clone());
+                let variadic_input = DataChunk::new(columns, input.vis().clone());
             }
-        } else {
+        });
+        // evaluate variadic arguments in `eval_row`
+        let eval_row_variadic = variadic.then(|| {
             quote! {
-                #(
-                    let #array_refs = self.children[#children_indices].eval_checked(input).await?;
-                    let #arrays: &#arg_arrays = #array_refs.as_ref().into();
-                )*
-            }
-        };
-        // evaluate child expressions and
-        // - build a row if arguments are variable
-        // - downcast scalars if arguments are fixed
-        let eval_row_children = if variadic {
-            quote! {
-                let mut row = Vec::with_capacity(self.children.len());
-                for child in &self.children {
+                let mut row = Vec::with_capacity(self.children.len() - #num_args);
+                for child in &self.children[#num_args..] {
                     row.push(child.eval_row(input).await?);
                 }
-                let row = OwnedRow::new(row);
+                let variadic_row = OwnedRow::new(row);
             }
-        } else {
-            quote! {
-                #(
-                    let #datums = self.children[#children_indices].eval_row(input).await?;
-                    let #inputs: Option<#arg_types> = #datums.as_ref().map(|s| s.as_scalar_ref_impl().try_into().unwrap());
-                )*
-            }
-        };
+        });
 
-        let generic = if self.ret == "boolean" && user_fn.generic == 3 {
+        let generic = (self.ret == "boolean" && user_fn.generic == 3).then(|| {
             // XXX: for generic compare functions, we need to specify the compatible type
             let compatible_type = types::ref_type(types::min_compatible_type(&self.args))
                 .parse::<TokenStream2>()
                 .unwrap();
             quote! { ::<_, _, #compatible_type> }
-        } else {
-            quote! {}
-        };
+        });
         let prebuilt_arg = match (&self.prebuild, optimize_const) {
             // use the prebuilt argument
             (Some(_), true) => quote! { &self.prebuilt_arg, },
@@ -274,22 +257,18 @@ impl FunctionAttr {
             // no prebuilt argument
             (None, _) => quote! {},
         };
-        let context = match user_fn.context {
-            true => quote! { &self.context, },
-            false => quote! {},
-        };
-        let writer = match user_fn.write {
-            true => quote! { &mut writer, },
-            false => quote! {},
-        };
+        let variadic_args = variadic.then(|| quote! { variadic_row, });
+        let context = user_fn.context.then(|| quote! { &self.context, });
+        let writer = user_fn.write.then(|| quote! { &mut writer, });
         // call the user defined function
         // inputs: [ Option<impl ScalarRef> ]
-        let mut output = match variadic {
-            true => quote! { #fn_name(row, #context #writer) },
-            false => {
-                quote! { #fn_name #generic(#(#non_prebuilt_inputs,)* #prebuilt_arg #context #writer) }
-            }
-        };
+        let mut output = quote! { #fn_name #generic(
+            #(#non_prebuilt_inputs,)*
+            #prebuilt_arg
+            #variadic_args
+            #context
+            #writer
+        ) };
         // handle error if the function returns `Result`
         // wrap a `Some` if the function doesn't return `Option`
         output = match user_fn.return_type_kind {
@@ -300,7 +279,7 @@ impl FunctionAttr {
         };
         // if user function accepts non-option arguments, we assume the function
         // returns null on null input, so we need to unwrap the inputs before calling.
-        if !variadic && !user_fn.arg_option {
+        if !user_fn.arg_option {
             output = quote! {
                 match (#(#inputs,)*) {
                     (#(Some(#inputs),)*) => #output,
@@ -343,25 +322,17 @@ impl FunctionAttr {
         };
         // the main body in `eval`
         let eval = if let Some(batch_fn) = &self.batch_fn {
+            assert!(!variadic, "customized batch function is not supported for variadic functions");
             // user defined batch function
             let fn_name = format_ident!("{}", batch_fn);
             quote! {
                 let c = #fn_name(#(#arrays),*);
                 Ok(Arc::new(c.into()))
             }
-        } else if variadic {
-            quote! {
-                let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
-                for row in chunk.rows_with_holes() {
-                    if let Some(row) = row {
-                        #append_output
-                    } else {
-                        builder.append_null();
-                    }
-                }
-                Ok(Arc::new(builder.finish().into()))
-            }
-        } else if (types::is_primitive(&self.ret) || self.ret == "boolean") && user_fn.is_pure() {
+        } else if (types::is_primitive(&self.ret) || self.ret == "boolean")
+            && user_fn.is_pure()
+            && !variadic
+        {
             // SIMD optimization for primitive types
             match self.args.len() {
                 0 => quote! {
@@ -397,6 +368,9 @@ impl FunctionAttr {
                 0 => quote! { std::iter::repeat(()).take(input.capacity()) },
                 _ => quote! { multizip((#(#arrays.iter(),)*)) },
             };
+            let let_variadic = variadic.then(|| quote! {
+                let variadic_row = variadic_input.row_at_unchecked_vis(i);
+            });
             quote! {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
 
@@ -404,16 +378,18 @@ impl FunctionAttr {
                     Vis::Bitmap(vis) => {
                         // allow using `zip` for performance
                         #[allow(clippy::disallowed_methods)]
-                        for ((#(#inputs,)*), visible) in #array_zip.zip(vis.iter()) {
+                        for (i, ((#(#inputs,)*), visible)) in #array_zip.zip(vis.iter()).enumerate() {
                             if !visible {
                                 builder.append_null();
                                 continue;
                             }
+                            #let_variadic
                             #append_output
                         }
                     }
                     Vis::Compact(_) => {
-                        for (#(#inputs,)*) in #array_zip {
+                        for (i, (#(#inputs,)*)) in #array_zip.enumerate() {
+                            #let_variadic
                             #append_output
                         }
                     }
@@ -456,11 +432,19 @@ impl FunctionAttr {
                         self.context.return_type.clone()
                     }
                     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-                        #eval_children
+                        #(
+                            let #array_refs = self.children[#children_indices].eval_checked(input).await?;
+                            let #arrays: &#arg_arrays = #array_refs.as_ref().into();
+                        )*
+                        #eval_variadic
                         #eval
                     }
                     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-                        #eval_row_children
+                        #(
+                            let #datums = self.children[#children_indices].eval_row(input).await?;
+                            let #inputs: Option<#arg_types> = #datums.as_ref().map(|s| s.as_scalar_ref_impl().try_into().unwrap());
+                        )*
+                        #eval_row_variadic
                         Ok(#row_output)
                     }
                 }

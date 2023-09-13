@@ -24,13 +24,8 @@ use crate::{ExprError, Result};
 
 /// Formats arguments according to a format string.
 // TODO(wrj): prebuild the formatter.
-#[function("format(...) -> varchar")]
-fn format(row: impl Row, writer: &mut impl Write) -> Result<Option<()>> {
-    let format_str = match row.datum_at(0) {
-        Some(format) => format.into_utf8(),
-        // return null if the format is null
-        None => return Ok(None),
-    };
+#[function("format(varchar, ...) -> varchar")]
+fn format(format_str: &str, row: impl Row, writer: &mut impl Write) -> Result<()> {
     let formatter =
         Formatter::from_str(format_str).map_err(|e| ExprError::Parse(e.to_string().into()))?;
 
@@ -63,7 +58,7 @@ fn format(row: impl Row, writer: &mut impl Write) -> Result<Option<()>> {
             }
         }
     }
-    Ok(Some(()))
+    Ok(())
 }
 
 /// The type of format conversion to use to produce the format specifier's output.

@@ -20,15 +20,9 @@ use risingwave_expr_macro::function;
 
 /// Concatenates all but the first argument, with separators. The first argument is used as the
 /// separator string, and should not be NULL. Other NULL arguments are ignored.
-#[function("concat_ws(...) -> varchar")]
-fn concat_ws(row: impl Row, writer: &mut impl Write) -> Option<()> {
-    let sep = match row.datum_at(0) {
-        Some(sep) => sep.into_utf8(),
-        // return null if the separator is null
-        None => return None,
-    };
-
-    let mut string_iter = row.iter().skip(1).flatten();
+#[function("concat_ws(varchar, ...) -> varchar")]
+fn concat_ws(sep: &str, vals: impl Row, writer: &mut impl Write) -> Option<()> {
+    let mut string_iter = vals.iter().flatten();
     if let Some(string) = string_iter.next() {
         string.write(writer).unwrap();
     }
