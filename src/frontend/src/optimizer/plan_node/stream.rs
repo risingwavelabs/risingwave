@@ -364,6 +364,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(ProjectSet, c
 pub struct Project {
     pub core: generic::Project<PlanRef>,
     watermark_derivations: Vec<(usize, usize)>,
+    merge_chunk: bool,
     nondecreasing_exprs: Vec<usize>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core, input);
