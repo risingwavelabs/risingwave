@@ -119,7 +119,10 @@ impl Relation {
                 );
                 correlated_indices
             }
-            Relation::TableFunction(table_function) => table_function
+            Relation::TableFunction {
+                expr: table_function,
+                with_ordinality: _,
+            } => table_function
                 .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
             _ => vec![],
         }

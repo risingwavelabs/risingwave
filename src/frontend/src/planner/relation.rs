@@ -160,13 +160,19 @@ impl Planner {
     ) -> Result<PlanRef> {
         // TODO: maybe we can unify LogicalTableFunction with LogicalValues
         match table_function {
-            ExprImpl::TableFunction(tf) => Ok(LogicalTableFunction::new(*tf, self.ctx()).into()),
+            ExprImpl::TableFunction(tf) => {
+                Ok(LogicalTableFunction::new(*tf, with_ordinality, self.ctx()).into())
+            }
             expr => {
-                let schema = Schema {
-                    // TODO: should be named
-                    fields: vec![Field::unnamed(expr.return_type())],
-                };
-                Ok(LogicalValues::create(vec![vec![expr]], schema, self.ctx()))
+                if with_ordinality {
+                    todo!()
+                } else {
+                    let schema = Schema {
+                        // TODO: should be named
+                        fields: vec![Field::unnamed(expr.return_type())],
+                    };
+                    Ok(LogicalValues::create(vec![vec![expr]], schema, self.ctx()))
+                }
             }
         }
     }

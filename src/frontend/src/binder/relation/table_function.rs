@@ -47,17 +47,17 @@ impl Binder {
         let func_name = &name.0[0].real_value();
         // internal/system table functions
         {
-            if with_ordinality {
-                return Err(ErrorCode::NotImplemented(
-                    format!(
-                        "WITH ORDINALITY for internal/system table function {}",
-                        func_name
-                    ),
-                    None.into(),
-                )
-                .into());
-            }
             if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
+                if with_ordinality {
+                    return Err(ErrorCode::NotImplemented(
+                        format!(
+                            "WITH ORDINALITY for internal/system table function {}",
+                            func_name
+                        ),
+                        None.into(),
+                    )
+                    .into());
+                }
                 return self.bind_internal_table(args, alias);
             }
             if func_name.eq_ignore_ascii_case(PG_GET_KEYWORDS_FUNC_NAME)
@@ -65,6 +65,16 @@ impl Binder {
                     format!("{}.{}", PG_CATALOG_SCHEMA_NAME, PG_GET_KEYWORDS_FUNC_NAME).as_str(),
                 )
             {
+                if with_ordinality {
+                    return Err(ErrorCode::NotImplemented(
+                        format!(
+                            "WITH ORDINALITY for internal/system table function {}",
+                            func_name
+                        ),
+                        None.into(),
+                    )
+                    .into());
+                }
                 return self.bind_relation_by_name_inner(
                     Some(PG_CATALOG_SCHEMA_NAME),
                     PG_KEYWORDS_TABLE_NAME,
@@ -115,12 +125,14 @@ impl Binder {
         self.pop_context()?;
         let func = func?;
 
-        let columns = if let DataType::Struct(s) = func.return_type() {
+        // bool indicates if the field is hidden
+        let mut columns = if let DataType::Struct(s) = func.return_type() {
             // If the table function returns a struct, it will be flattened into multiple columns.
             let schema = Schema::from(&s);
             schema.fields.into_iter().map(|f| (false, f)).collect_vec()
         } else {
-            // If there is an table alias, we should use the alias as the table function's
+            // If there is an table alias (and it doesn't return a struct),
+            // we should use the alias as the table function's
             // column name. If column aliases are also provided, they
             // are handled in bind_table_to_context.
             //
@@ -138,6 +150,9 @@ impl Binder {
             };
             vec![(false, Field::with_name(func.return_type(), col_name))]
         };
+        if with_ordinality {
+            columns.push((false, Field::with_name(DataType::Int64, "ordinality")));
+        }
 
         self.bind_table_to_context(columns, func_name.clone(), alias)?;
 

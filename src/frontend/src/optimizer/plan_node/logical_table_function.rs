@@ -31,17 +31,24 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// `LogicalGenerateSeries` implements Hop Table Function.
+/// `LogicalTableFunction` is a scalar/table function used as a relation (in the `FROM` clause).
+///
+/// If the function returns a struct, it will be flattened into multiple columns.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalTableFunction {
     pub base: PlanBase,
     pub table_function: TableFunction,
+    pub with_ordinality: bool,
 }
 
 impl LogicalTableFunction {
     /// Create a [`LogicalTableFunction`] node. Used internally by optimizer.
-    pub fn new(table_function: TableFunction, ctx: OptimizerContextRef) -> Self {
-        let schema = if let DataType::Struct(s) = table_function.return_type() {
+    pub fn new(
+        table_function: TableFunction,
+        with_ordinality: bool,
+        ctx: OptimizerContextRef,
+    ) -> Self {
+        let mut schema = if let DataType::Struct(s) = table_function.return_type() {
             // If the function returns a struct, it will be flattened into multiple columns.
             Schema::from(&s)
         } else {
@@ -52,11 +59,17 @@ impl LogicalTableFunction {
                 )],
             }
         };
+        if with_ordinality {
+            schema
+                .fields
+                .push(Field::with_name(DataType::Int64, "ordinality"));
+        }
         let functional_dependency = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
         Self {
             base,
             table_function,
+            with_ordinality,
         }
     }
 
@@ -111,6 +124,10 @@ impl PredicatePushdown for LogicalTableFunction {
 
 impl ToBatch for LogicalTableFunction {
     fn to_batch(&self) -> Result<PlanRef> {
+        // TODO: actually this is also unreachable now, as it's always converted to ProjectSet. Maybe we can remove it.
+        if self.with_ordinality {
+            todo!()
+        }
         Ok(BatchTableFunction::new(self.clone()).into())
     }
 }
