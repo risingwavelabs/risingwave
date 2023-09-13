@@ -113,9 +113,7 @@ impl SystemParamsManager {
     }
 
     // Periodically sync params to worker nodes.
-    pub async fn start_params_notifier(
-        system_params_manager: Arc<Self>,
-    ) -> (JoinHandle<()>, Sender<()>) {
+    pub fn start_params_notifier(system_params_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         const NOTIFY_INTERVAL: Duration = Duration::from_millis(5000);
 
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();

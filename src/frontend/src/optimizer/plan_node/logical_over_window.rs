@@ -653,7 +653,7 @@ impl ColPrunable for LogicalOverWindow {
 
         let (req_cols_input_part, req_cols_win_func_part) = {
             let mut in_input = required_cols.to_vec();
-            let in_win_funcs: IndexSet = in_input.drain_filter(|i| *i >= input_len).collect();
+            let in_win_funcs: IndexSet = in_input.extract_if(|i| *i >= input_len).collect();
             (IndexSet::from(in_input), in_win_funcs)
         };
 

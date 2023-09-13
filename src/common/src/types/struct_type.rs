@@ -117,6 +117,16 @@ impl StructType {
             .chain(std::iter::repeat("").take(self.0.field_types.len() - self.0.field_names.len()))
             .zip_eq_debug(self.0.field_types.iter())
     }
+
+    /// Compares the datatype with another, ignoring nested field names and metadata.
+    pub fn equals_datatype(&self, other: &StructType) -> bool {
+        if self.0.field_types.len() != other.0.field_types.len() {
+            return false;
+        }
+        (self.0.field_types.iter())
+            .zip_eq_fast(other.0.field_types.iter())
+            .all(|(a, b)| a.equals_datatype(b))
+    }
 }
 
 impl Display for StructType {

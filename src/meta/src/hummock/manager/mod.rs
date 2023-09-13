@@ -1950,7 +1950,7 @@ impl HummockManager {
     }
 
     #[named]
-    pub async fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+    pub fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         use futures::{FutureExt, StreamExt};
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -2469,7 +2469,7 @@ impl HummockManager {
         }
     }
 
-    pub async fn compaction_event_loop(
+    pub fn compaction_event_loop(
         hummock_manager: Arc<Self>,
         mut compactor_streams_change_rx: UnboundedReceiver<(
             u32,
@@ -2843,7 +2843,7 @@ async fn write_exclusive_cluster_id(
     const CLUSTER_ID_NAME: &str = "0";
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
-    match object_store.read(&cluster_id_full_path, None).await {
+    match object_store.read(&cluster_id_full_path, ..).await {
         Ok(cluster_id) => Err(ObjectError::internal(format!(
             "Data directory is already used by another cluster with id {:?}, path {}.",
             String::from_utf8(cluster_id.to_vec()).unwrap(),

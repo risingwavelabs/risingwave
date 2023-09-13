@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rustdoc::private_intra_doc_links)]
-#![feature(drain_filter)]
+#![expect(
+    refining_impl_trait,
+    reason = "Some of the Row::iter() implementations returns ExactSizeIterator. Is this reasonable?"
+)]
+#![feature(extract_if)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
@@ -26,7 +29,6 @@
 #![feature(map_try_insert)]
 #![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
 #![feature(let_chains)]
 #![feature(return_position_impl_trait_in_trait)]
 #![feature(portable_simd)]
@@ -42,6 +44,7 @@
 #![feature(result_option_inspect)]
 #![feature(negative_impls)]
 #![feature(async_fn_in_trait)]
+#![feature(bound_map)]
 
 #[macro_use]
 pub mod jemalloc;
@@ -73,6 +76,8 @@ pub mod metrics;
 pub mod test_utils;
 pub mod types;
 pub mod vnode_mapping;
+
+pub mod range;
 
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};

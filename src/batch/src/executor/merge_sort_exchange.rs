@@ -329,7 +329,7 @@ mod tests {
 
         let mut stream = executor.execute();
         let res = stream.next().await;
-        assert!(matches!(res, Some(_)));
+        assert!(res.is_some());
         if let Some(res) = res {
             let res = res.unwrap();
             assert_eq!(res.capacity(), 3 * num_sources);

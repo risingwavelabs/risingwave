@@ -22,6 +22,7 @@ pub mod array_range_access;
 pub mod array_remove;
 pub mod array_replace;
 pub mod array_sum;
+pub mod array_sort;
 pub mod ascii;
 pub mod bitwise_op;
 pub mod cardinality;

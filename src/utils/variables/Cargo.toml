@@ -22,3 +22,6 @@ chrono = { version = "0.4", default-features = false, features = [
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
+
+[lints]
+workspace = true

@@ -823,7 +823,7 @@ impl FragmentManager {
                 assert!(actor_id_set.contains(actor_id));
             }
 
-            actors.drain_filter(|actor_id| to_remove.contains(actor_id));
+            actors.retain(|actor_id| !to_remove.contains(actor_id));
             actors.extend_from_slice(to_create);
         }
 
@@ -862,7 +862,7 @@ impl FragmentManager {
         for table_id in to_update_table_fragments {
             // Takes out the reschedules of the fragments in this table.
             let reschedules = reschedules
-                .drain_filter(|fragment_id, _| {
+                .extract_if(|fragment_id, _| {
                     table_fragments
                         .get(&table_id)
                         .unwrap()
@@ -1063,7 +1063,7 @@ impl FragmentManager {
             .map(|table_fragments| table_fragments.worker_actor_ids())
             .reduce(|mut btree_map, next_map| {
                 next_map.into_iter().for_each(|(k, v)| {
-                    btree_map.entry(k).or_insert_with(Vec::new).extend(v);
+                    btree_map.entry(k).or_default().extend(v);
                 });
                 btree_map
             })

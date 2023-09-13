@@ -235,7 +235,7 @@ mod tests {
             vec![None, None, None, None],
         ];
 
-        let expected = vec![Some("a,b,c"), None, Some("b,c"), Some(""), None];
+        let expected = [Some("a,b,c"), None, Some("b,c"), Some(""), None];
 
         for (i, row_input) in row_inputs.iter().enumerate() {
             let datum_vec: Vec<Datum> = row_input.iter().map(|e| e.map(|s| s.into())).collect();

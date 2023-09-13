@@ -601,6 +601,12 @@ fn infer_type_for_special(
 
             Ok(Some(inputs[0].return_type().as_list().clone()))
         }
+        ExprType::ArraySort => {
+            ensure_arity!("array_sort", | inputs | == 1);
+            inputs[0].ensure_array_type()?;
+
+            Ok(Some(inputs[0].return_type()))
+        }
         ExprType::ArrayDims => {
             ensure_arity!("array_dims", | inputs | == 1);
             inputs[0].ensure_array_type()?;
