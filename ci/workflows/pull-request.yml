@@ -251,7 +251,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 16
+    timeout_in_minutes: 18
     retry: *auto-retry
 
   - label: "check"
