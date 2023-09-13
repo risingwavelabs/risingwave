@@ -25,7 +25,7 @@ use risingwave_expr_macro::function;
 /// ----
 /// NULL
 /// ```
-#[function("pg_sleep(float64)")]
+#[function("pg_sleep(float64)", volatile)]
 async fn pg_sleep(second: F64) {
     tokio::time::sleep(Duration::from_secs_f64(second.0)).await;
 }
@@ -38,7 +38,7 @@ async fn pg_sleep(second: F64) {
 /// ----
 /// NULL
 /// ```
-#[function("pg_sleep_for(interval)")]
+#[function("pg_sleep_for(interval)", volatile)]
 async fn pg_sleep_for(interval: Interval) {
     // we only use the microsecond part of the interval
     let usecs = if interval.is_positive() {

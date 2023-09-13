@@ -446,6 +446,7 @@ struct FunctionAttr {
     init_state: Option<String>,
     prebuild: Option<String>,
     type_infer: Option<String>,
+    volatile: bool,
     deprecated: bool,
 }
 

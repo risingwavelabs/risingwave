@@ -75,6 +75,8 @@ impl Parse for FunctionAttr {
                 parsed.prebuild = Some(get_value()?);
             } else if meta.path().is_ident("type_infer") {
                 parsed.type_infer = Some(get_value()?);
+            } else if meta.path().is_ident("volatile") {
+                parsed.volatile = true;
             } else if meta.path().is_ident("deprecated") {
                 parsed.deprecated = true;
             } else {
