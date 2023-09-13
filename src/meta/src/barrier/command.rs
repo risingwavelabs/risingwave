@@ -78,6 +78,7 @@ pub enum Command {
     /// Done Or InProgress, along with the epoch.
     // Recover,
 
+    /// NOTE: This we use this + Add, to add new mview.
     /// `Plain` command generates a barrier with the mutation it carries.
     ///
     /// Barriers from all actors marked as `Created` state will be collected.

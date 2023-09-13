@@ -160,7 +160,72 @@ pub(super) struct CreateMviewProgressTracker {
     actor_map: HashMap<ActorId, CreateMviewEpoch>,
 }
 
+/// FIXME: This is just a mock to simulate backfill state.
+/// We need to get the actual state from the barriers.
+#[derive(Clone, Copy, Debug)]
+pub enum BackfillStatus {
+    Init,
+    ConsumingUpstream,
+    Done,
+}
+
+pub struct BackfillState {
+    status: BackfillStatus,
+    consumed_rows: u64,
+    epoch: CreateMviewEpoch, // TODO: Does not seem necessary..?
+}
+
+impl BackfillState {
+    pub fn new(status: BackfillStatus, consumed_rows: u64, epoch: CreateMviewEpoch) -> Self {
+        Self {
+            status,
+            consumed_rows,
+            epoch,
+        }
+    }
+
+    pub fn get_status(&self) -> BackfillStatus {
+        self.status
+    }
+
+    pub fn get_consumed_rows(&self) -> u64 {
+        self.consumed_rows
+    }
+
+    pub fn get_epoch(&self) -> CreateMviewEpoch {
+        self.epoch
+    }
+}
+
+/// Each Materialized View which scans from upstream MVs has a chain executor.
+/// We should track progress of each MaterializedView which has a stateful executor.
+/// This is built from barriers passing through the backfill executor.
+pub struct BackfillProgress {
+    inner: Vec<(ActorId, BackfillState)>,
+}
+
 impl CreateMviewProgressTracker {
+    /// Empty backfill state -> Can't recover, just start from scratch.
+    /// Non-empty backfill state -> Recover from the backfill state.
+    ///
+    /// We also need to recover row counts from etcd store,
+    /// that is not persisted by backfill executor.
+    pub fn recover(backfill_progress: BackfillProgress) -> Self {
+        let mut progress_map = Default::default();
+        let mut actor_map = Default::default();
+
+        let progress_per_actor = backfill_progress.inner;
+        for (actor_id, backfill_state) in progress_per_actor {
+            let status = backfill_state.get_status();
+            let consumed_rows = backfill_state.get_consumed_rows();
+            let epoch = backfill_state.get_epoch();
+        }
+        Self {
+            progress_map,
+            actor_map,
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             progress_map: Default::default(),
