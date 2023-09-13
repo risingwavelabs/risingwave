@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 create table t (v boolean);
 
 statement ok
@@ -16,10 +19,7 @@ NULL NULL
 statement ok
 insert into t values (true);
 
-statement ok
-flush;
-
-# t: true
+# table values: true
 
 query BB
 select * from mv;
@@ -30,10 +30,7 @@ t t
 statement ok
 insert into t values (false);
 
-statement ok
-flush;
-
-# t: true, false
+# table values: true, false
 
 query BB
 select * from mv;
@@ -44,10 +41,7 @@ f t
 statement ok
 delete from t where v = true;
 
-statement ok
-flush;
-
-# t: false
+# table values: false
 
 query BB
 select * from mv;
@@ -58,10 +52,7 @@ f f
 statement ok
 delete from t;
 
-statement ok
-flush;
-
-# t: empty
+# table values: empty
 
 query BB
 select * from mv;
