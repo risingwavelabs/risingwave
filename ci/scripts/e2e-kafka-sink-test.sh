@@ -56,7 +56,7 @@ fi
 # test upsert kafka sink after update
 echo "testing upsert kafka sink after updating data"
 diff ./e2e_test/sink/kafka/upsert2.result \
-<((./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert --from-beginning --property print.key=true --max-messages 12 | sort) 2> /dev/null)
+<((./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert --from-beginning --property print.key=true --max-messages 10 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
   echo "The output for upsert sink after update is not as expected."
   exit 1
@@ -81,7 +81,7 @@ psql -h localhost -p 4566 -d dev -U root -c "delete from t_kafka where id = 1;" 
 # test upsert kafka sink after delete
 echo "testing upsert kafka sink after deleting data"
 diff ./e2e_test/sink/kafka/upsert3.result \
-<((./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert --from-beginning --property print.key=true --max-messages 13 | sort) 2> /dev/null)
+<((./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert --from-beginning --property print.key=true --max-messages 11 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
   echo "The output for upsert sink after update is not as expected."
   exit 1
