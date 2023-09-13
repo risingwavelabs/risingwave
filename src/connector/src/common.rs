@@ -346,10 +346,16 @@ pub struct NatsCommon {
     pub server_url: String,
     #[serde(rename = "nats.subject")]
     pub subject: String,
+    #[serde(rename = "nats.connect_mode")]
+    pub connect_mode: Option<String>,
     #[serde(rename = "nats.user")]
     pub user: Option<String>,
     #[serde(rename = "nats.password")]
     pub password: Option<String>,
+    #[serde(rename = "nats.jwt")]
+    pub jwt: Option<String>,
+    #[serde(rename = "nats.nkey")]
+    pub nkey: Option<String>,
     #[serde(rename = "nats.max_bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_bytes: Option<i64>,
@@ -370,9 +376,34 @@ pub struct NatsCommon {
 impl NatsCommon {
     pub(crate) async fn build_client(&self) -> anyhow::Result<async_nats::Client> {
         let mut connect_options = async_nats::ConnectOptions::new();
-        if let (Some(v_user), Some(v_password)) = (self.user.as_ref(), self.password.as_ref()) {
-            connect_options = connect_options.user_and_password(v_user.into(), v_password.into());
-        }
+        match self.connect_mode.as_ref().map(|v| v.as_str()) {
+            Some("user_and_password") => {
+                if let (Some(v_user), Some(v_password)) =
+                    (self.user.as_ref(), self.password.as_ref())
+                {
+                    connect_options =
+                        connect_options.user_and_password(v_user.into(), v_password.into())
+                } else {
+                    return Err(anyhow_error!(
+                        "nats connect mode is user_and_password, but user or password is empty"
+                    ));
+                }
+            }
+
+            Some("credential") => {
+                if let (Some(v_nkey), Some(v_jwt)) = (self.nkey.as_ref(), self.jwt.as_ref()) {
+                    connect_options = connect_options
+                        .credentials(&self.create_credential(&v_nkey, &v_jwt).await?)
+                        .expect("failed to parse static creds")
+                } else {
+                    return Err(anyhow_error!(
+                        "nats connect mode is credential, but nkey or jwt is empty"
+                    ));
+                }
+            }
+            _ => {}
+        };
+
         let servers = self.server_url.split(',').collect::<Vec<&str>>();
         let client = connect_options
             .connect(
@@ -451,5 +482,18 @@ impl NatsCommon {
         }
         let stream = jetstream.get_or_create_stream(config).await?;
         Ok(stream)
+    }
+
+    pub(crate) async fn create_credential(&self, seed: &str, jwt: &str) -> anyhow::Result<String> {
+        let creds = format!(
+            "-----BEGIN NATS USER JWT-----\n{}\n------END NATS USER JWT------\n\n\
+                         ************************* IMPORTANT *************************\n\
+                         NKEY Seed printed below can be used to sign and prove identity.\n\
+                         NKEYs are sensitive and should be treated as secrets.\n\n\
+                         -----BEGIN USER NKEY SEED-----\n{}\n------END USER NKEY SEED------\n\n\
+                         *************************************************************",
+            jwt, seed
+        );
+        Ok(creds)
     }
 }
