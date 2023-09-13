@@ -184,6 +184,7 @@ lto = "thin"
 inherits = "release"
 incremental = false
 debug = "line-tables-only"
+split-debuginfo = "off"
 debug-assertions = true
 overflow-checks = true
 
