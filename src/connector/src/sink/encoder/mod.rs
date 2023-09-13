@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::RowRef;
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 
 use crate::sink::Result;
@@ -29,16 +28,20 @@ pub use json::JsonEncoder;
 pub trait RowEncoder {
     type Output: SerTo<Vec<u8>>;
 
-    fn encode(
+    fn encode_cols(
         &self,
-        row: RowRef<'_>,
-        schema: &[Field],
+        row: impl Row,
         col_indices: impl Iterator<Item = usize>,
     ) -> Result<Self::Output>;
+    fn schema(&self) -> &Schema;
+    fn col_indices(&self) -> Option<&[usize]>;
 
-    fn encode_all(&self, row: RowRef<'_>, schema: &[Field]) -> Result<Self::Output> {
-        assert_eq!(row.len(), schema.len());
-        self.encode(row, schema, 0..schema.len())
+    fn encode(&self, row: impl Row) -> Result<Self::Output> {
+        assert_eq!(row.len(), self.schema().len());
+        match self.col_indices() {
+            Some(col_indices) => self.encode_cols(row, col_indices.iter().copied()),
+            None => self.encode_cols(row, 0..self.schema().len()),
+        }
     }
 }
 

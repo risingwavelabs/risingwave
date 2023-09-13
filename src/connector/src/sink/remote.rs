@@ -351,9 +351,9 @@ where
         let payload = match self.payload_format {
             SinkPayloadFormat::Json => {
                 let mut row_ops = vec![];
-                let enc = JsonEncoder::new(TimestampHandlingMode::String);
+                let enc = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::String);
                 for (op, row_ref) in chunk.rows() {
-                    let map = enc.encode_all(row_ref, &self.schema.fields)?;
+                    let map = enc.encode(row_ref)?;
                     let row_op = RowOp {
                         op_type: op.to_protobuf() as i32,
                         line: serde_json::to_string(&map)

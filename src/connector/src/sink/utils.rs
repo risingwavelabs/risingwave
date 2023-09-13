@@ -57,7 +57,8 @@ pub async fn gen_debezium_message_stream<'a>(
 
     let mut update_cache: Option<Map<String, Value>> = None;
 
-    let encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
+    let key_encoder = JsonEncoder::new(schema, Some(pk_indices), TimestampHandlingMode::Milli);
+    let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
 
     for (op, row) in chunk.rows() {
         let event_key_object: Option<Value> = Some(json!({
@@ -67,14 +68,14 @@ pub async fn gen_debezium_message_stream<'a>(
                 "optional": false,
                 "name": concat_debezium_name_field(db_name, sink_from_name, "Key"),
             }),
-            "payload": encoder.encode(row, &schema.fields, pk_indices.iter().copied())?,
+            "payload": key_encoder.encode(row)?,
         }));
         let event_object: Option<Value> = match op {
             Op::Insert => Some(json!({
                 "schema": schema_to_json(schema, db_name, sink_from_name),
                 "payload": {
                     "before": null,
-                    "after": encoder.encode_all(row, &schema.fields)?,
+                    "after": val_encoder.encode(row)?,
                     "op": "c",
                     "ts_ms": ts_ms,
                     "source": source_field,
@@ -84,7 +85,7 @@ pub async fn gen_debezium_message_stream<'a>(
                 let value_obj = Some(json!({
                     "schema": schema_to_json(schema, db_name, sink_from_name),
                     "payload": {
-                        "before": encoder.encode_all(row, &schema.fields)?,
+                        "before": val_encoder.encode(row)?,
                         "after": null,
                         "op": "d",
                         "ts_ms": ts_ms,
@@ -102,7 +103,7 @@ pub async fn gen_debezium_message_stream<'a>(
                 continue;
             }
             Op::UpdateDelete => {
-                update_cache = Some(encoder.encode_all(row, &schema.fields)?);
+                update_cache = Some(val_encoder.encode(row)?);
                 continue;
             }
             Op::UpdateInsert => {
@@ -111,7 +112,7 @@ pub async fn gen_debezium_message_stream<'a>(
                         "schema": schema_to_json(schema, db_name, sink_from_name),
                         "payload": {
                             "before": before,
-                            "after": encoder.encode_all(row, &schema.fields)?,
+                            "after": val_encoder.encode(row)?,
                             "op": "u",
                             "ts_ms": ts_ms,
                             "source": source_field,
@@ -239,10 +240,10 @@ pub(crate) fn field_to_json(field: &Field) -> Value {
 }
 
 pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>> {
-    let encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
+    let encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
     let mut records: Vec<String> = Vec::with_capacity(chunk.capacity());
     for (_, row) in chunk.rows() {
-        let record = Value::Object(encoder.encode_all(row, &schema.fields)?);
+        let record = Value::Object(encoder.encode(row)?);
         records.push(record.to_string());
     }
 
@@ -254,28 +255,22 @@ pub struct UpsertAdapterOpts {}
 
 #[try_stream(ok = (Option<Value>, Option<Value>), error = SinkError)]
 pub async fn gen_upsert_message_stream<'a>(
-    schema: &'a Schema,
-    pk_indices: &'a [usize],
     chunk: StreamChunk,
     _opts: UpsertAdapterOpts,
-    key_encoder: JsonEncoder,
-    val_encoder: JsonEncoder,
+    key_encoder: JsonEncoder<'a>,
+    val_encoder: JsonEncoder<'a>,
 ) {
     for (op, row) in chunk.rows() {
-        let event_key_object = Some(Value::Object(key_encoder.encode(
-            row,
-            &schema.fields,
-            pk_indices.iter().copied(),
-        )?));
+        let event_key_object = Some(Value::Object(key_encoder.encode(row)?));
 
         let event_object = match op {
-            Op::Insert => Some(Value::Object(val_encoder.encode_all(row, &schema.fields)?)),
+            Op::Insert => Some(Value::Object(val_encoder.encode(row)?)),
             Op::Delete => Some(Value::Null),
             Op::UpdateDelete => {
                 // upsert semantic does not require update delete event
                 continue;
             }
-            Op::UpdateInsert => Some(Value::Object(val_encoder.encode_all(row, &schema.fields)?)),
+            Op::UpdateInsert => Some(Value::Object(val_encoder.encode(row)?)),
         };
 
         yield (event_key_object, event_object);
@@ -287,23 +282,17 @@ pub struct AppendOnlyAdapterOpts {}
 
 #[try_stream(ok = (Option<Value>, Option<Value>), error = SinkError)]
 pub async fn gen_append_only_message_stream<'a>(
-    schema: &'a Schema,
-    pk_indices: &'a [usize],
     chunk: StreamChunk,
     _opts: AppendOnlyAdapterOpts,
-    key_encoder: JsonEncoder,
-    val_encoder: JsonEncoder,
+    key_encoder: JsonEncoder<'a>,
+    val_encoder: JsonEncoder<'a>,
 ) {
     for (op, row) in chunk.rows() {
         if op != Op::Insert {
             continue;
         }
-        let event_key_object = Some(Value::Object(key_encoder.encode(
-            row,
-            &schema.fields,
-            pk_indices.iter().copied(),
-        )?));
-        let event_object = Some(Value::Object(val_encoder.encode_all(row, &schema.fields)?));
+        let event_key_object = Some(Value::Object(key_encoder.encode(row)?));
+        let event_object = Some(Value::Object(val_encoder.encode(row)?));
 
         yield (event_key_object, event_object);
     }

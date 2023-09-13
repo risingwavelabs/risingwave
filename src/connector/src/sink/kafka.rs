@@ -547,13 +547,12 @@ impl KafkaSinkWriter {
         // TODO: Remove the clones here, only to satisfy borrow checker at present
         let schema = self.schema.clone();
         let pk_indices = self.pk_indices.clone();
-        let key_encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
-        let val_encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
+        let key_encoder =
+            JsonEncoder::new(&schema, Some(&pk_indices), TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
         // Initialize the upsert_stream
         let upsert_stream = gen_upsert_message_stream(
-            &schema,
-            &pk_indices,
             chunk,
             UpsertAdapterOpts::default(),
             key_encoder,
@@ -573,13 +572,12 @@ impl KafkaSinkWriter {
         // TODO: Remove the clones here, only to satisfy borrow checker at present
         let schema = self.schema.clone();
         let pk_indices = self.pk_indices.clone();
-        let key_encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
-        let val_encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
+        let key_encoder =
+            JsonEncoder::new(&schema, Some(&pk_indices), TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
         // Initialize the append_only_stream
         let append_only_stream = gen_append_only_message_stream(
-            &schema,
-            &pk_indices,
             chunk,
             AppendOnlyAdapterOpts::default(),
             key_encoder,

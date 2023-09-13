@@ -203,11 +203,13 @@ impl KinesisSinkWriter {
     }
 
     async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
-        let key_encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
-        let val_encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
-        let upsert_stream = gen_upsert_message_stream(
+        let key_encoder = JsonEncoder::new(
             &self.schema,
-            &self.pk_indices,
+            Some(&self.pk_indices),
+            TimestampHandlingMode::Milli,
+        );
+        let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
+        let upsert_stream = gen_upsert_message_stream(
             chunk,
             UpsertAdapterOpts::default(),
             key_encoder,
@@ -219,11 +221,13 @@ impl KinesisSinkWriter {
     }
 
     async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
-        let key_encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
-        let val_encoder = JsonEncoder::new(TimestampHandlingMode::Milli);
-        let append_only_stream = gen_append_only_message_stream(
+        let key_encoder = JsonEncoder::new(
             &self.schema,
-            &self.pk_indices,
+            Some(&self.pk_indices),
+            TimestampHandlingMode::Milli,
+        );
+        let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
+        let append_only_stream = gen_append_only_message_stream(
             chunk,
             AppendOnlyAdapterOpts::default(),
             key_encoder,

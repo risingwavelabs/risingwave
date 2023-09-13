@@ -16,38 +16,54 @@ use base64::engine::general_purpose;
 use base64::Engine as _;
 use chrono::{Datelike, Timelike};
 use risingwave_common::array::{ArrayError, ArrayResult};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{json, Map, Value};
 
-use super::{Field, Result, RowEncoder, RowRef, SerTo, TimestampHandlingMode};
+use super::{Result, RowEncoder, SerTo, TimestampHandlingMode};
 use crate::sink::SinkError;
 
-pub struct JsonEncoder {
+pub struct JsonEncoder<'a> {
+    schema: &'a Schema,
+    col_indices: Option<&'a [usize]>,
     timestamp_handling_mode: TimestampHandlingMode,
 }
 
-impl JsonEncoder {
-    pub fn new(timestamp_handling_mode: TimestampHandlingMode) -> Self {
+impl<'a> JsonEncoder<'a> {
+    pub fn new(
+        schema: &'a Schema,
+        col_indices: Option<&'a [usize]>,
+        timestamp_handling_mode: TimestampHandlingMode,
+    ) -> Self {
         Self {
+            schema,
+            col_indices,
             timestamp_handling_mode,
         }
     }
 }
 
-impl RowEncoder for JsonEncoder {
+impl<'a> RowEncoder for JsonEncoder<'a> {
     type Output = Map<String, Value>;
 
-    fn encode(
+    fn schema(&self) -> &Schema {
+        self.schema
+    }
+
+    fn col_indices(&self) -> Option<&[usize]> {
+        self.col_indices
+    }
+
+    fn encode_cols(
         &self,
-        row: RowRef<'_>,
-        schema: &[Field],
+        row: impl Row,
         col_indices: impl Iterator<Item = usize>,
     ) -> Result<Self::Output> {
-        let mut mappings = Map::with_capacity(schema.len());
+        let mut mappings = Map::with_capacity(self.schema.len());
         for idx in col_indices {
-            let field = &schema[idx];
+            let field = &self.schema[idx];
             let key = field.name.clone();
             let value =
                 datum_to_json_object(field, row.datum_at(idx), self.timestamp_handling_mode)
