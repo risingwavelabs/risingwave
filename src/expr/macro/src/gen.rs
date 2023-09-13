@@ -72,7 +72,7 @@ impl FunctionAttr {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
         } else {
-            self.generate_build_scalar_function(user_fn, false)?
+            self.generate_build_scalar_function(user_fn, true)?
         };
         let deprecated = self.deprecated;
         Ok(quote! {
@@ -193,7 +193,7 @@ impl FunctionAttr {
                     let #prebuilt_inputs = match children[#prebuilt_indices].eval_const() {
                         Ok(s) => s,
                         // prebuilt argument is not constant, fallback to general
-                        Err(_) => build_general(return_type, children),
+                        Err(_) => return build_general(return_type, children),
                     };
                     // get reference to the constant value
                     let #prebuilt_inputs = match &#prebuilt_inputs {
@@ -358,7 +358,9 @@ impl FunctionAttr {
         };
 
         Ok(quote! {
-            |return_type, children| {
+            |return_type: DataType, children: Vec<crate::expr::BoxedExpression>|
+                -> crate::Result<crate::expr::BoxedExpression>
+            {
                 use std::sync::Arc;
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
