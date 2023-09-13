@@ -187,10 +187,9 @@ macro_rules! impl_system_params_from_kv {
                         std::str::from_utf8(v.as_ref()).unwrap().to_string()
                     )
                 }).collect::<Vec<_>>();
-                Err(format!("unrecognized system params {:?}", unrecognized_params))
-            } else {
-                Ok(ret)
+                tracing::warn!("unrecognized system params {:?}", unrecognized_params);
             }
+            Ok(ret)
         }
     };
 }
