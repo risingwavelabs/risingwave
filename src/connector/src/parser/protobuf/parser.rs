@@ -252,31 +252,31 @@ pub fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value, type_exp
         Value::Message(dyn_msg) => {
             if let Some(DataType::Jsonb) = type_expected {
                 // The message is of type `Any`
-                let type_url = dyn_msg.get_field_by_name("type_url").expect("Expect type_url in dyn_msg");
-                let Some(&payload) = dyn_msg.get_field_by_name("value").expect("Expect value (payload) in dyn_msg").as_bytes();
-                println!("dyn_msg: {:?}", dyn_msg);
-                println!("type_url: {:?}", type_url);
-                println!("payload: {:?}", payload);
-            }
-            let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
-            // fields is a btree map in descriptor
-            // so it's order is the same as datatype
-            for field_desc in dyn_msg.descriptor().fields() {
-                // missing field
-                if !dyn_msg.has_field(&field_desc)
-                    && field_desc.cardinality() == Cardinality::Required
-                {
-                    let err_msg = format!(
-                        "protobuf parse error.missing required field {:?}",
-                        field_desc
-                    );
-                    return Err(RwError::from(ProtocolError(err_msg)));
+                // FIXME: Now we will just directly return the payload as Utf8
+                let _type_url = dyn_msg.get_field_by_name("type_url").expect("Expect type_url in dyn_msg");
+                let payload = dyn_msg.get_field_by_name("value").expect("Expect value (payload) in dyn_msg");
+                ScalarImpl::Utf8(payload.as_str().unwrap().into())
+            } else {
+                let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
+                // fields is a btree map in descriptor
+                // so it's order is the same as datatype
+                for field_desc in dyn_msg.descriptor().fields() {
+                    // missing field
+                    if !dyn_msg.has_field(&field_desc)
+                        && field_desc.cardinality() == Cardinality::Required
+                    {
+                        let err_msg = format!(
+                            "protobuf parse error.missing required field {:?}",
+                            field_desc
+                        );
+                        return Err(RwError::from(ProtocolError(err_msg)));
+                    }
+                    // use default value if dyn_msg doesn't has this field
+                    let value = dyn_msg.get_field(&field_desc);
+                    rw_values.push(from_protobuf_value(&field_desc, &value, type_expected)?);
                 }
-                // use default value if dyn_msg doesn't has this field
-                let value = dyn_msg.get_field(&field_desc);
-                rw_values.push(from_protobuf_value(&field_desc, &value, type_expected)?);
+                ScalarImpl::Struct(StructValue::new(rw_values))
             }
-            ScalarImpl::Struct(StructValue::new(rw_values))
         }
         Value::List(values) => {
             let rw_values = values
@@ -636,40 +636,40 @@ mod test {
         pb_eq(a, "string_field", S::Utf8(m.string_field.as_str().into()));
         pb_eq(a, "bytes_field", S::Bytea(m.bytes_field.clone().into()));
         pb_eq(a, "enum_field", S::Utf8("OPTION1".into()));
-        // pb_eq(
-        //     a,
-        //     "nested_message_field",
-        //     S::Struct(StructValue::new(vec![
-        //         Some(ScalarImpl::Int32(100)),
-        //         Some(ScalarImpl::Utf8("Nested".into())),
-        //     ])),
-        // );
-        // pb_eq(
-        //     a,
-        //     "repeated_int_field",
-        //     S::List(ListValue::new(
-        //         m.repeated_int_field
-        //             .iter()
-        //             .map(|&x| Some(x.into()))
-        //             .collect(),
-        //     )),
-        // );
-        // pb_eq(
-        //     a,
-        //     "timestamp_field",
-        //     S::Struct(StructValue::new(vec![
-        //         Some(ScalarImpl::Int64(1630927032)),
-        //         Some(ScalarImpl::Int32(500000000)),
-        //     ])),
-        // );
-        // pb_eq(
-        //     a,
-        //     "duration_field",
-        //     S::Struct(StructValue::new(vec![
-        //         Some(ScalarImpl::Int64(60)),
-        //         Some(ScalarImpl::Int32(500000000)),
-        //     ])),
-        // );
+        pb_eq(
+            a,
+            "nested_message_field",
+            S::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Int32(100)),
+                Some(ScalarImpl::Utf8("Nested".into())),
+            ])),
+        );
+        pb_eq(
+            a,
+            "repeated_int_field",
+            S::List(ListValue::new(
+                m.repeated_int_field
+                    .iter()
+                    .map(|&x| Some(x.into()))
+                    .collect(),
+            )),
+        );
+        pb_eq(
+            a,
+            "timestamp_field",
+            S::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Int64(1630927032)),
+                Some(ScalarImpl::Int32(500000000)),
+            ])),
+        );
+        pb_eq(
+            a,
+            "duration_field",
+            S::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Int64(60)),
+                Some(ScalarImpl::Int32(500000000)),
+            ])),
+        );
         pb_eq(
             a,
             "any_field",
@@ -682,18 +682,18 @@ mod test {
                 )),
             ])),
         );
-        // pb_eq(
-        //     a,
-        //     "int32_value_field",
-        //     S::Struct(StructValue::new(vec![Some(ScalarImpl::Int32(42))])),
-        // );
-        // pb_eq(
-        //     a,
-        //     "string_value_field",
-        //     S::Struct(StructValue::new(vec![Some(ScalarImpl::Utf8(
-        //         m.string_value_field.as_ref().unwrap().as_str().into(),
-        //     ))])),
-        // );
+        pb_eq(
+            a,
+            "int32_value_field",
+            S::Struct(StructValue::new(vec![Some(ScalarImpl::Int32(42))])),
+        );
+        pb_eq(
+            a,
+            "string_value_field",
+            S::Struct(StructValue::new(vec![Some(ScalarImpl::Utf8(
+                m.string_value_field.as_ref().unwrap().as_str().into(),
+            ))])),
+        );
         pb_eq(a, "oneof_string", S::Utf8("".into()));
         pb_eq(a, "oneof_int32", S::Int32(123));
         pb_eq(a, "oneof_enum", S::Utf8("DEFAULT".into()));
