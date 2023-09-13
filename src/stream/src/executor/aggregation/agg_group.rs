@@ -222,29 +222,20 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             states.push(state);
         }
 
-        let prev_outputs = match encoded_states {
-            Some(_) => {
-                let mut outputs = Vec::with_capacity(states.len());
-                for ((state, storage), func) in states
-                    .iter_mut()
-                    .zip_eq_fast(storages)
-                    .zip_eq_fast(agg_funcs)
-                {
-                    let output = state.get_output(storage, func, group_key.as_ref()).await?;
-                    outputs.push(output);
-                }
-                Some(OwnedRow::new(outputs))
-            }
-            None => None,
-        };
-
-        Ok(Self {
+        let mut this = Self {
             group_key,
             states,
-            prev_outputs,
+            prev_outputs: None, // will be initialized later
             row_count_index,
             _phantom: PhantomData,
-        })
+        };
+
+        if encoded_states.is_some() {
+            let (_, outputs) = this.get_outputs(storages, agg_funcs).await?;
+            this.prev_outputs = Some(outputs);
+        }
+
+        Ok(this)
     }
 
     /// Create a group from encoded states for EOWC. The previous output is set to `None`.
