@@ -63,11 +63,7 @@ vergen = { version = "8", default-features = false, features = [
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
-    "profiling",
-    "stats",
-    "unprefixed_malloc_on_supported_platforms",
-], rev = "64a2d9" }
+tikv-jemallocator = { workspace = true }
 
 [[bin]]
 name = "risingwave"
