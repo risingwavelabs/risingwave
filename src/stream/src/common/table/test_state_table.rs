@@ -1837,7 +1837,7 @@ async fn test_state_table_watermark_cache_refill() {
 }
 
 #[tokio::test]
-async fn test_state_table_iter_prefix_sub_range() {
+async fn test_state_table_iter_prefix_and_sub_range() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     let test_env = prepare_hummock_test_env().await;
 
@@ -1891,14 +1891,14 @@ async fn test_state_table_iter_prefix_sub_range() {
     state_table.commit(epoch).await.unwrap();
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
-    // let pk_prefix = OwnedRow::empty();
 
-    let pk_range = (
+    let sub_range1 = (
         std::ops::Bound::Included(OwnedRow::new(vec![Some(11_i32.into())])),
         std::ops::Bound::Excluded(OwnedRow::new(vec![Some(33_i32.into())])),
     );
+
     let iter = state_table
-        .xxx(pk_prefix, &pk_range, Default::default())
+        .iter_row_with_pk_prefix_sub_range(pk_prefix, &sub_range1, Default::default())
         .await
         .unwrap();
 
@@ -1917,15 +1917,101 @@ async fn test_state_table_iter_prefix_sub_range() {
 
     let res = iter.next().await.unwrap().unwrap();
 
-    // assert_eq!(
-    //     &OwnedRow::new(vec![
-    //         Some("abc".into()),
-    //         Some("bbb".into()),
-    //         Some("bbbb".into()),
-    //     ]),
-    //     res.as_ref()
-    // );
+    assert_eq!(
+        &OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]),
+        res.as_ref()
+    );
 
-    // let res = iter.next().await;
-    // assert!(res.is_none());
+    let res = iter.next().await;
+    assert!(res.is_none());
+
+    let sub_range2: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+        std::ops::Bound::Excluded(OwnedRow::new(vec![Some(11_i32.into())])),
+        std::ops::Bound::Unbounded,
+    );
+
+    let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
+    let iter = state_table
+        .iter_row_with_pk_prefix_sub_range(pk_prefix, &sub_range2, Default::default())
+        .await
+        .unwrap();
+
+    pin_mut!(iter);
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    assert_eq!(
+        &OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    assert_eq!(
+        &OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(33_i32.into()),
+            Some(333_i32.into()),
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await;
+    assert!(res.is_none());
+
+    let sub_range3: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+        std::ops::Bound::Unbounded,
+        std::ops::Bound::Included(OwnedRow::new(vec![Some(33_i32.into())])),
+    );
+
+    let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
+    let iter = state_table
+        .iter_row_with_pk_prefix_sub_range(pk_prefix, &sub_range3, Default::default())
+        .await
+        .unwrap();
+
+    pin_mut!(iter);
+    let res = iter.next().await.unwrap().unwrap();
+
+    assert_eq!(
+        &OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    assert_eq!(
+        &OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    assert_eq!(
+        &OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(33_i32.into()),
+            Some(333_i32.into()),
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await;
+    assert!(res.is_none());
 }
