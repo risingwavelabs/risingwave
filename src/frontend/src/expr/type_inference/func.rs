@@ -99,10 +99,9 @@ pub fn infer_some_all(
     }
     if !matches!(&element_type, Some(e) if sig.inputs_type[1].matches(e)) {
         let SigDataType::Exact(t) = &sig.inputs_type[1] else {
-            return Err(ErrorCode::BindError(
-                "array/struct on left are not supported yet".into(),
-            )
-            .into());
+            return Err(
+                ErrorCode::BindError("array/struct on left are not supported yet".into()).into(),
+            );
         };
         inputs[1].cast_implicit_mut(DataType::List(Box::new(t.clone())))?;
     }

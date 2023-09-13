@@ -155,7 +155,7 @@ fn array_cat(
 /// {NULL}
 /// ```
 #[function("array_append(anyarray, any) -> anyarray")]
-fn array_append<'a>(left: Option<ListRef<'_>>, right: Option<ScalarRefImpl<'a>>) -> ListValue {
+fn array_append(left: Option<ListRef<'_>>, right: Option<ScalarRefImpl<'_>>) -> ListValue {
     ListValue::new(
         left.iter()
             .flat_map(|list| list.iter())
@@ -192,7 +192,7 @@ fn array_append<'a>(left: Option<ListRef<'_>>, right: Option<ScalarRefImpl<'a>>)
 /// {NULL}
 /// ```
 #[function("array_prepend(any, anyarray) -> anyarray")]
-fn array_prepend<'a>(left: Option<ScalarRefImpl<'a>>, right: Option<ListRef<'_>>) -> ListValue {
+fn array_prepend(left: Option<ScalarRefImpl<'_>>, right: Option<ListRef<'_>>) -> ListValue {
     ListValue::new(
         std::iter::once(left)
             .chain(right.iter().flat_map(|list| list.iter()))

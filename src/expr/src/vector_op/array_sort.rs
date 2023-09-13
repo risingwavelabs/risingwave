@@ -13,19 +13,15 @@
 // limitations under the License.
 
 use risingwave_common::array::*;
-use risingwave_common::types::{Datum, DatumRef, DefaultOrdered, ToOwnedDatum};
+use risingwave_common::types::{DatumRef, DefaultOrdered, ToOwnedDatum};
 use risingwave_expr_macro::function;
 
-#[function("array_sort(list) -> list")]
+#[function("array_sort(anyarray) -> anyarray")]
 pub fn array_sort(list: ListRef<'_>) -> ListValue {
     let mut v = list
         .iter()
         .map(DefaultOrdered)
         .collect::<Vec<DefaultOrdered<DatumRef<'_>>>>();
     v.sort();
-    ListValue::new(
-        v.into_iter()
-            .map(|x| x.0.to_owned_datum())
-            .collect::<Vec<Datum>>(),
-    )
+    ListValue::new(v.into_iter().map(|x| x.0.to_owned_datum()).collect())
 }
