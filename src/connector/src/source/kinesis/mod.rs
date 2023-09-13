@@ -19,6 +19,10 @@ pub mod split;
 use serde::Deserialize;
 
 use crate::common::KinesisCommon;
+use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
+use crate::source::kinesis::source::reader::KinesisSplitReader;
+use crate::source::kinesis::split::KinesisSplit;
+use crate::source::SourceProperties;
 
 pub const KINESIS_CONNECTOR: &str = "kinesis";
 
@@ -35,4 +39,12 @@ pub struct KinesisProperties {
 
     #[serde(flatten)]
     pub common: KinesisCommon,
+}
+
+impl SourceProperties for KinesisProperties {
+    type Split = KinesisSplit;
+    type SplitEnumerator = KinesisSplitEnumerator;
+    type SplitReader = KinesisSplitReader;
+
+    const SOURCE_NAME: &'static str = KINESIS_CONNECTOR;
 }

@@ -13,39 +13,6 @@
 // limitations under the License.
 
 #[macro_export]
-macro_rules! impl_split_enumerator {
-    ($({ $variant_name:ident, $split_enumerator_name:ident} ),*) => {
-        impl SplitEnumeratorImpl {
-
-             pub async fn create(properties: ConnectorProperties, context: SourceEnumeratorContextRef) -> Result<Self> {
-                match properties {
-                    $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(*props, context).await.map(Self::$variant_name), )*
-                    other => Err(anyhow!(
-                        "split enumerator type for config {:?} is not supported",
-                        other
-                    )),
-                }
-             }
-
-             pub async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
-                match self {
-                    $( Self::$variant_name(inner) => inner
-                        .list_splits()
-                        .await
-                        .map(|ss| {
-                            ss.into_iter()
-                                .map(SplitImpl::$variant_name)
-                                .collect_vec()
-                        })
-                        .map_err(|e| risingwave_common::error::ErrorCode::ConnectorError(e.into()).into()),
-                    )*
-                }
-             }
-        }
-    }
-}
-
-#[macro_export]
 macro_rules! impl_split {
     ($({ $variant_name:ident, $connector_name:ident, $split:ty} ),*) => {
         impl From<&SplitImpl> for ConnectorSplit {
@@ -138,36 +105,6 @@ macro_rules! impl_split {
                     Err(anyhow!("connector '{}' is not supported", other))
                     }
                 }
-            }
-        }
-    }
-}
-
-#[macro_export]
-macro_rules! impl_split_reader {
-    ($({ $variant_name:ident, $split_reader_name:ident} ),*) => {
-        impl SplitReaderImpl {
-            pub fn into_stream(self) -> BoxSourceWithStateStream {
-                match self {
-                    $( Self::$variant_name(inner) => inner.into_stream(), )*                 }
-            }
-
-            pub async fn create(
-                config: ConnectorProperties,
-                state: ConnectorState,
-                parser_config: ParserConfig,
-                source_ctx: SourceContextRef,
-                columns: Option<Vec<Column>>,
-            ) -> Result<Self> {
-                if state.is_none() {
-                    return Ok(Self::Dummy(Box::new(DummySplitReader {})));
-                }
-                let splits = state.unwrap();
-                let connector = match config {
-                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(*props, splits, parser_config, source_ctx, columns).await?)), )*
-                };
-
-                Ok(connector)
             }
         }
     }
