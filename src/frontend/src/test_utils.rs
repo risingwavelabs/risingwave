@@ -824,6 +824,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn get_tables(&self, _table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
         Ok(HashMap::new())
     }
+
+    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(u32, u64)>> {
+        unimplemented!()
+    }
+
+    async fn list_hummock_pinned_snapshots(&self) -> RpcResult<Vec<(u32, u64)>> {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]
