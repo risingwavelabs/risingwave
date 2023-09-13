@@ -112,41 +112,10 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
     }
 
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
-        let check_offset_epoch =
-            |latest_offset: &TruncateOffset, item_epoch| -> Result<(), LogStoreError> {
-                match latest_offset {
-                    TruncateOffset::Chunk {
-                        epoch: offset_epoch,
-                        ..
-                    } => {
-                        if item_epoch != *offset_epoch {
-                            return Err(anyhow!(
-                                "new item epoch {} not match current chunk offset epoch {}",
-                                item_epoch,
-                                offset_epoch
-                            )
-                            .into());
-                        }
-                    }
-                    TruncateOffset::Barrier {
-                        epoch: offset_epoch,
-                    } => {
-                        if item_epoch <= *offset_epoch {
-                            return Err(anyhow!(
-                                "new item epoch {} not exceed barrier offset epoch {}",
-                                item_epoch,
-                                offset_epoch
-                            )
-                            .into());
-                        }
-                    }
-                }
-                Ok(())
-            };
         if let Some(state_store_stream) = &mut self.state_store_stream {
             match state_store_stream.try_next().await? {
                 Some((epoch, item)) => {
-                    check_offset_epoch(&self.latest_offset, epoch)?;
+                    self.latest_offset.check_next_item_epoch(epoch)?;
                     let item = match item {
                         KvLogStoreItem::StreamChunk(chunk) => {
                             let chunk_id = self.latest_offset.next_chunk_id();
@@ -168,7 +137,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
 
         // Now the historical state store has been consumed.
         let (item_epoch, item) = self.rx.next_item().await;
-        check_offset_epoch(&self.latest_offset, item_epoch)?;
+        self.latest_offset.check_next_item_epoch(item_epoch)?;
         Ok(match item {
             LogStoreBufferItem::StreamChunk {
                 chunk, chunk_id, ..

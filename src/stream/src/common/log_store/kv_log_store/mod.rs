@@ -38,7 +38,8 @@ type RowOpCodeType = i16;
 
 const FIRST_SEQ_ID: SeqIdType = 0;
 
-/// Readers truncate the offset at the granularity of epoch
+/// Readers truncate the offset at the granularity of seq id.
+/// None `SeqIdType` means that the whole epoch is truncated.
 type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
 pub struct KvLogStoreFactory<S: StateStore> {

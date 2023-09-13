@@ -20,6 +20,7 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::epoch::EpochPair;
@@ -74,6 +75,37 @@ impl TruncateOffset {
         match self {
             TruncateOffset::Chunk { epoch, .. } | TruncateOffset::Barrier { epoch } => *epoch,
         }
+    }
+
+    pub fn check_next_item_epoch(&self, epoch: u64) -> LogStoreResult<()> {
+        match self {
+            TruncateOffset::Chunk {
+                epoch: offset_epoch,
+                ..
+            } => {
+                if epoch != *offset_epoch {
+                    return Err(anyhow!(
+                        "new item epoch {} not match current chunk offset epoch {}",
+                        epoch,
+                        offset_epoch
+                    )
+                    .into());
+                }
+            }
+            TruncateOffset::Barrier {
+                epoch: offset_epoch,
+            } => {
+                if epoch <= *offset_epoch {
+                    return Err(anyhow!(
+                        "new item epoch {} not exceed barrier offset epoch {}",
+                        epoch,
+                        offset_epoch
+                    )
+                    .into());
+                }
+            }
+        }
+        Ok(())
     }
 }
 

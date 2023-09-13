@@ -329,8 +329,8 @@ impl LogStoreBufferReceiver {
                     let flushed = *flushed;
                     let end_seq_id = *end_seq_id;
                     if chunk_offset <= offset {
-                        inner.consumed_queue.pop_back();
                         inner.stream_chunk_count -= 1;
+                        inner.consumed_queue.pop_back();
                         if flushed {
                             latest_offset = Some((epoch, Some(end_seq_id)));
                         }
