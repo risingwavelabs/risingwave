@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::Schema;
 
-use super::{Op, Result, RowRef, SinkFormatter};
+use super::{FormattedRow, Op, Result, RowRef, SinkFormatter};
 use crate::sink::encoder::RowEncoder;
 
 pub struct AppendOnlyFormatter<'a, KE, VE> {
@@ -44,9 +44,9 @@ impl<'a, KE: RowEncoder, VE: RowEncoder> SinkFormatter for AppendOnlyFormatter<'
     type K = Option<KE::Output>;
     type V = Option<VE::Output>;
 
-    fn format_row(&mut self, op: Op, row: RowRef<'_>) -> Result<Option<(Self::K, Self::V)>> {
+    fn format_row(&mut self, op: Op, row: RowRef<'_>) -> Result<FormattedRow<Self::K, Self::V>> {
         if op != Op::Insert {
-            return Ok(None);
+            return Ok(FormattedRow::Skip);
         }
         let event_key_object = Some(self.key_encoder.encode(
             row,
@@ -55,6 +55,6 @@ impl<'a, KE: RowEncoder, VE: RowEncoder> SinkFormatter for AppendOnlyFormatter<'
         )?);
         let event_object = Some(self.val_encoder.encode_all(row, &self.schema.fields)?);
 
-        Ok(Some((event_key_object, event_object)))
+        Ok(FormattedRow::Pair(event_key_object, event_object))
     }
 }

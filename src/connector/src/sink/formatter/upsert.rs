@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::Schema;
 
-use super::{Op, Result, RowRef, SinkFormatter};
+use super::{FormattedRow, Op, Result, RowRef, SinkFormatter};
 use crate::sink::encoder::RowEncoder;
 
 pub struct UpsertFormatter<'a, KE, VE> {
@@ -44,7 +44,7 @@ impl<'a, KE: RowEncoder, VE: RowEncoder> SinkFormatter for UpsertFormatter<'a, K
     type K = Option<KE::Output>;
     type V = Option<VE::Output>;
 
-    fn format_row(&mut self, op: Op, row: RowRef<'_>) -> Result<Option<(Self::K, Self::V)>> {
+    fn format_row(&mut self, op: Op, row: RowRef<'_>) -> Result<FormattedRow<Self::K, Self::V>> {
         let event_key_object = Some(self.key_encoder.encode(
             row,
             &self.schema.fields,
@@ -59,10 +59,10 @@ impl<'a, KE: RowEncoder, VE: RowEncoder> SinkFormatter for UpsertFormatter<'a, K
             Op::Delete => None,
             Op::UpdateDelete => {
                 // upsert semantic does not require update delete event
-                return Ok(None);
+                return Ok(FormattedRow::Skip);
             }
         };
 
-        Ok(Some((event_key_object, event_object)))
+        Ok(FormattedRow::Pair(event_key_object, event_object))
     }
 }

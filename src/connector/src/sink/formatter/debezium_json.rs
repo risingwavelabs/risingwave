@@ -16,7 +16,7 @@ use risingwave_common::catalog::{Field, Schema};
 use serde_json::{json, Map, Value};
 use tracing::warn;
 
-use super::{Op, Result, RowRef, SinkFormatter};
+use super::{FormattedRow, Op, Result, RowRef, SinkFormatter};
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::utils::TimestampHandlingMode;
 
@@ -62,7 +62,7 @@ impl<'a> SinkFormatter for DebeziumJsonFormatter<'a> {
     type K = Option<Value>;
     type V = Option<Value>;
 
-    fn format_row(&mut self, op: Op, row: RowRef<'_>) -> Result<Option<(Self::K, Self::V)>> {
+    fn format_row(&mut self, op: Op, row: RowRef<'_>) -> Result<FormattedRow<Self::K, Self::V>> {
         let event_key_object: Option<Value> = Some(json!({
             "schema": json!({
                 "type": "struct",
@@ -99,19 +99,15 @@ impl<'a> SinkFormatter for DebeziumJsonFormatter<'a> {
                         "source": self.source_field,
                     }
                 }));
-                // yield (event_key_object.clone(), value_obj);
 
                 if self.opts.gen_tombstone {
-                    // Tomestone event
-                    // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-delete-events
-                    // yield (event_key_object, None);
+                    return Ok(FormattedRow::WithTombstone(event_key_object, value_obj));
                 }
-
-                return Ok(None);
+                value_obj
             }
             Op::UpdateDelete => {
                 self.update_cache = Some(self.encoder.encode_all(row, &self.schema.fields)?);
-                return Ok(None);
+                return Ok(FormattedRow::Skip);
             }
             Op::UpdateInsert => {
                 if let Some(before) = self.update_cache.take() {
@@ -130,12 +126,12 @@ impl<'a> SinkFormatter for DebeziumJsonFormatter<'a> {
                         "not found UpdateDelete in prev row, skipping, row index {:?}",
                         row.index()
                     );
-                    return Ok(None);
+                    return Ok(FormattedRow::Skip);
                 }
             }
         };
 
-        Ok(Some((event_key_object, event_object)))
+        Ok(FormattedRow::Pair(event_key_object, event_object))
     }
 }
 

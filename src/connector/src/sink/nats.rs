@@ -26,7 +26,7 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
 use super::encoder::{EmptyEncoder, JsonEncoder, SerToBytes};
-use super::formatter::{AppendOnlyFormatter, SinkFormatter};
+use super::formatter::{AppendOnlyFormatter, FormattedRow, SinkFormatter};
 use super::utils::TimestampHandlingMode;
 use super::{DummySinkCommitCoordinator, SinkWriter, SinkWriterParam};
 use crate::common::NatsCommon;
@@ -135,7 +135,9 @@ impl NatsSinkWriter {
                     &[],
                 );
                 for (op, row) in chunk.rows() {
-                    let Some((_, item)) = f.format_row(op, row)? else {continue};
+                    let FormattedRow::Pair(_, item) = f.format_row(op, row)? else {
+                        continue;
+                    };
                     self.context
                         .publish(
                             self.config.common.subject.clone(),

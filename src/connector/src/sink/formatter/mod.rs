@@ -29,5 +29,13 @@ pub use upsert::UpsertFormatter;
 pub trait SinkFormatter {
     type K;
     type V;
-    fn format_row(&mut self, op: Op, row: RowRef<'_>) -> Result<Option<(Self::K, Self::V)>>;
+    fn format_row(&mut self, op: Op, row: RowRef<'_>) -> Result<FormattedRow<Self::K, Self::V>>;
+}
+
+pub enum FormattedRow<K, V> {
+    Skip,
+    Pair(K, V),
+    // Tomestone event
+    // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-delete-events
+    WithTombstone(K, V),
 }

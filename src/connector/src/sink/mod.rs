@@ -49,7 +49,7 @@ pub use tracing;
 use self::catalog::SinkType;
 use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
 use self::encoder::{SerToBytes, SerToString};
-use self::formatter::SinkFormatter;
+use self::formatter::{FormattedRow, SinkFormatter};
 use self::iceberg::{IcebergSink, ICEBERG_SINK, REMOTE_ICEBERG_SINK};
 use crate::sink::boxed::BoxSink;
 use crate::sink::catalog::{SinkCatalog, SinkId};
@@ -212,7 +212,7 @@ pub trait MessageSink {
     async fn write_one(&self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()>;
 
     async fn write_chunk<
-        K0: SerTo<Self::K> + Send,
+        K0: SerTo<Self::K> + Send + Clone,
         V0: SerTo<Self::V> + Send,
         F: SinkFormatter<K = Option<K0>, V = Option<V0>> + Send,
     >(
@@ -221,12 +221,21 @@ pub trait MessageSink {
         mut formatter: F,
     ) -> Result<()> {
         for (op, row) in chunk.rows() {
-            let Some((event_key_object, event_object)) = formatter.format_row(op, row)? else {continue};
+            let (event_key_object, event_object, tombstone_key) =
+                match formatter.format_row(op, row)? {
+                    FormattedRow::Skip => continue,
+                    FormattedRow::Pair(k, v) => (k, v, None),
+                    FormattedRow::WithTombstone(k, v) => (k.clone(), v, Some(k)),
+                };
             self.write_one(
                 event_key_object.map(|x| x.ser_to()).transpose()?,
                 event_object.map(|x| x.ser_to()).transpose()?,
             )
             .await?;
+            if let Some(event_key_object) = tombstone_key {
+                self.write_one(event_key_object.map(|x| x.ser_to()).transpose()?, None)
+                    .await?;
+            }
         }
         Ok(())
     }

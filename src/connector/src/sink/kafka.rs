@@ -546,7 +546,7 @@ mod test {
 
     use super::*;
     use crate::sink::encoder::{EmptyEncoder, SerToString};
-    use crate::sink::formatter::{schema_to_json, SinkFormatter};
+    use crate::sink::formatter::{schema_to_json, FormattedRow, SinkFormatter};
     use crate::sink::utils::*;
 
     #[test]
@@ -807,10 +807,10 @@ mod test {
         );
         let json_chunk: Vec<_> = chunk
             .rows()
-            .flat_map(|(op, row)| {
-                f.format_row(op, row)
-                    .unwrap()
-                    .map(|(_, v)| v.unwrap().ser_to_string().unwrap())
+            .flat_map(|(op, row)| match f.format_row(op, row).unwrap() {
+                FormattedRow::Skip => None,
+                FormattedRow::Pair(_, v) => Some(v.unwrap().ser_to_string().unwrap()),
+                FormattedRow::WithTombstone(_, _) => unreachable!(),
             })
             .collect();
         let schema_json = schema_to_json(&schema, "test_db", "test_table");
