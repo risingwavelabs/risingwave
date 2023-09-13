@@ -29,3 +29,6 @@ ignored = ["workspace-hack"]
 
 [package.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack"]
+
+[lints]
+workspace = true

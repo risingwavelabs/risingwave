@@ -80,8 +80,7 @@ impl ConnectorSource {
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
     ) -> Result<BoxSourceWithStateStream> {
-        let Some(splits) = state
-        else {
+        let Some(splits) = state else {
             return Ok(pending().boxed());
         };
         let config = self.config.clone();

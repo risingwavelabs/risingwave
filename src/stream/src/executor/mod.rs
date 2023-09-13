@@ -26,7 +26,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, DefaultOrd, DefaultPartialOrd, ScalarImpl};
+use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
@@ -627,11 +627,7 @@ pub struct Watermark {
 
 impl PartialOrd for Watermark {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.col_idx == other.col_idx {
-            self.val.default_partial_cmp(&other.val)
-        } else {
-            None
-        }
+        Some(self.cmp(other))
     }
 }
 

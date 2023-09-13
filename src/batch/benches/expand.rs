@@ -44,7 +44,7 @@ fn bench_expand(c: &mut Criterion) {
                 let chunk_num = SIZE / chunk_size;
                 b.to_async(&rt).iter_batched(
                     || create_expand_executor(vec![vec![0, 1], vec![2]], chunk_size, chunk_num),
-                    |e| execute_executor(e),
+                    execute_executor,
                     BatchSize::SmallInput,
                 );
             },

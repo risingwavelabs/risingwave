@@ -141,7 +141,7 @@ impl Value for Box<Sstable> {
 
     fn read(mut buf: &[u8]) -> Self {
         let id = buf.get_u64();
-        let meta = SstableMeta::decode(&mut buf).unwrap();
+        let meta = SstableMeta::decode(buf).unwrap();
         Box::new(Sstable::new(id, meta))
     }
 }
