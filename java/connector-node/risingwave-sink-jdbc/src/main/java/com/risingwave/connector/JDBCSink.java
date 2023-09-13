@@ -236,17 +236,17 @@ public class JDBCSink extends SinkWriterBase {
 
         // execute staging statement in batch after all rows are prepared,
         // and we need to delete first to prevent accidentally deletion
-        var deleteStmt = stagingStatements.get(OpType.DELETE);
+        var deleteStmt = stagingStatements.remove(OpType.DELETE);
         if (deleteStmt != null) {
             executeStatement(deleteStmt);
         }
 
-        var upsertStmt = stagingStatements.get(OpType.UPSERT);
+        var upsertStmt = stagingStatements.remove(OpType.UPSERT);
         if (upsertStmt != null) {
             executeStatement(upsertStmt);
         }
 
-        var insertStmt = stagingStatements.get(OpType.INSERT);
+        var insertStmt = stagingStatements.remove(OpType.INSERT);
         if (insertStmt != null) {
             executeStatement(insertStmt);
         }
