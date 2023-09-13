@@ -14,21 +14,21 @@
 
 use risingwave_expr_macro::function;
 
-#[function("length(varchar) -> int32")]
-#[function("char_length(varchar) -> int32")]
+#[function("length(varchar) -> int4")]
+#[function("char_length(varchar) -> int4")]
 pub fn char_length(s: &str) -> i32 {
     s.chars().count() as i32
 }
 
-#[function("octet_length(varchar) -> int32")]
-#[function("length(bytea) -> int32")]
-#[function("octet_length(bytea) -> int32")]
+#[function("octet_length(varchar) -> int4")]
+#[function("length(bytea) -> int4")]
+#[function("octet_length(bytea) -> int4")]
 pub fn octet_length(s: impl AsRef<[u8]>) -> i32 {
     s.as_ref().len() as i32
 }
 
-#[function("bit_length(varchar) -> int32")]
-#[function("bit_length(bytea) -> int32")]
+#[function("bit_length(varchar) -> int4")]
+#[function("bit_length(bytea) -> int4")]
 pub fn bit_length(s: impl AsRef<[u8]>) -> i32 {
     octet_length(s) * 8
 }

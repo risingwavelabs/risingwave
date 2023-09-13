@@ -22,7 +22,7 @@ use crate::ExprError;
 /// Returns the length of an array.
 ///
 /// ```sql
-/// array_length (array anyarray) → int64
+/// array_length (array anyarray) → int8
 /// ```
 ///
 /// Examples:
@@ -61,8 +61,8 @@ use crate::ExprError;
 /// query error Cannot implicitly cast
 /// select array_length(null);
 /// ```
-#[function("array_length(list) -> int32")]
-#[function("array_length(list) -> int64", deprecated)]
+#[function("array_length(list) -> int4")]
+#[function("array_length(list) -> int8", deprecated)]
 fn array_length<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T, ExprError> {
     array
         .len()
@@ -129,7 +129,7 @@ fn array_length<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T, ExprError> {
 /// statement error
 /// select array_length(array[null, array[2]], 2);
 /// ```
-#[function("array_length(list, int32) -> int32")]
+#[function("array_length(list, int4) -> int4")]
 fn array_length_of_dim(array: ListRef<'_>, d: i32) -> Result<Option<i32>, ExprError> {
     match d {
         ..=0 => Ok(None),

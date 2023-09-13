@@ -18,7 +18,7 @@ use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
 
-#[function("split_part(varchar, varchar, int32) -> varchar")]
+#[function("split_part(varchar, varchar, int4) -> varchar")]
 pub fn split_part(
     string_expr: &str,
     delimiter_expr: &str,

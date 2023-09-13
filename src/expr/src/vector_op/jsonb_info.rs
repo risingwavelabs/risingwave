@@ -24,7 +24,7 @@ pub fn jsonb_typeof(v: JsonbRef<'_>, writer: &mut impl Write) {
     writer.write_str(v.type_name()).unwrap()
 }
 
-#[function("jsonb_array_length(jsonb) -> int32")]
+#[function("jsonb_array_length(jsonb) -> int4")]
 pub fn jsonb_array_length(v: JsonbRef<'_>) -> Result<i32> {
     v.array_len()
         .map(|n| n as i32)

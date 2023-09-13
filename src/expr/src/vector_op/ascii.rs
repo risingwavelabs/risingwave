@@ -14,7 +14,7 @@
 
 use risingwave_expr_macro::function;
 
-#[function("ascii(varchar) -> int32")]
+#[function("ascii(varchar) -> int4")]
 pub fn ascii(s: &str) -> i32 {
     s.chars().next().map(|x| x as i32).unwrap_or(0)
 }

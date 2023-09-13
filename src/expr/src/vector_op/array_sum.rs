@@ -18,12 +18,12 @@ use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
 
-/// `array_sum(int16`[]) -> int64
-/// `array_sum(int32`[]) -> int64
-#[function("array_sum(list) -> int64")]
-#[function("array_sum(list) -> float32")]
-#[function("array_sum(list) -> float64")]
-/// `array_sum(int64`[]) -> decimal
+/// `array_sum(int2`[]) -> int8
+/// `array_sum(int4`[]) -> int8
+#[function("array_sum(list) -> int8")]
+#[function("array_sum(list) -> float4")]
+#[function("array_sum(list) -> float8")]
+/// `array_sum(int8`[]) -> decimal
 /// `array_sum(decimal`[]) -> decimal
 #[function("array_sum(list) -> decimal")]
 #[function("array_sum(list) -> interval")]

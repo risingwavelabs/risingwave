@@ -55,12 +55,12 @@ use risingwave_expr_macro::function;
 /// select array_replace(array[array[array[0, 1], array[2, 3]], array[array[4, 5], array[6, 7]]], array[4, 5], array[8, 9]);
 /// ```
 #[function("array_replace(list, boolean, boolean) -> list")]
-#[function("array_replace(list, int16, int16) -> list")]
-#[function("array_replace(list, int32, int32) -> list")]
-#[function("array_replace(list, int64, int64) -> list")]
+#[function("array_replace(list, int2, int2) -> list")]
+#[function("array_replace(list, int4, int4) -> list")]
+#[function("array_replace(list, int8, int8) -> list")]
 #[function("array_replace(list, decimal, decimal) -> list")]
-#[function("array_replace(list, float32, float32) -> list")]
-#[function("array_replace(list, float64, float64) -> list")]
+#[function("array_replace(list, float4, float4) -> list")]
+#[function("array_replace(list, float8, float8) -> list")]
 #[function("array_replace(list, varchar, varchar) -> list")]
 #[function("array_replace(list, bytea, bytea) -> list")]
 #[function("array_replace(list, time, time) -> list")]

@@ -20,7 +20,7 @@ use crate::ExprError;
 /// Returns the total number of elements in the array.
 ///
 /// ```sql
-/// cardinality ( array anyarray) → int64
+/// cardinality ( array anyarray) → int8
 /// ```
 ///
 /// Examples:
@@ -59,8 +59,8 @@ use crate::ExprError;
 /// query error Cannot implicitly cast
 /// select cardinality(null);
 /// ```
-#[function("cardinality(list) -> int32")]
-#[function("cardinality(list) -> int64", deprecated)]
+#[function("cardinality(list) -> int4")]
+#[function("cardinality(list) -> int8", deprecated)]
 fn cardinality<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T, ExprError> {
     array
         .flatten()

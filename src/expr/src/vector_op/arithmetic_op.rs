@@ -26,7 +26,7 @@ use rust_decimal::MathematicalOps;
 use crate::{ExprError, Result};
 
 #[function("add(*int, *int) -> auto")]
-#[function("add(*numeric, *numeric) -> auto")]
+#[function("add(decimal, decimal) -> auto")]
 #[function("add(*float, *float) -> auto")]
 #[function("add(interval, interval) -> interval")]
 #[function("add(int256, int256) -> int256")]
@@ -42,7 +42,7 @@ where
 }
 
 #[function("subtract(*int, *int) -> auto")]
-#[function("subtract(*numeric, *numeric) -> auto")]
+#[function("subtract(decimal, decimal) -> auto")]
 #[function("subtract(*float, *float) -> auto")]
 #[function("subtract(interval, interval) -> interval")]
 #[function("subtract(int256, int256) -> int256")]
@@ -58,7 +58,7 @@ where
 }
 
 #[function("multiply(*int, *int) -> auto")]
-#[function("multiply(*numeric, *numeric) -> auto")]
+#[function("multiply(decimal, decimal) -> auto")]
 #[function("multiply(*float, *float) -> auto")]
 #[function("multiply(int256, int256) -> int256")]
 pub fn general_mul<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
@@ -73,10 +73,10 @@ where
 }
 
 #[function("divide(*int, *int) -> auto")]
-#[function("divide(*numeric, *numeric) -> auto")]
+#[function("divide(decimal, decimal) -> auto")]
 #[function("divide(*float, *float) -> auto")]
 #[function("divide(int256, int256) -> int256")]
-#[function("divide(int256, float64) -> float64")]
+#[function("divide(int256, float8) -> float8")]
 #[function("divide(int256, *int) -> int256")]
 pub fn general_div<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
@@ -96,7 +96,7 @@ where
 }
 
 #[function("modulus(*int, *int) -> auto")]
-#[function("modulus(*numeric, *numeric) -> auto")]
+#[function("modulus(decimal, decimal) -> auto")]
 #[function("modulus(int256, int256) -> int256")]
 pub fn general_mod<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
@@ -173,7 +173,7 @@ fn err_pow_negative_fract() -> ExprError {
     }
 }
 
-#[function("pow(float64, float64) -> float64")]
+#[function("pow(float8, float8) -> float8")]
 pub fn pow_f64(l: F64, r: F64) -> Result<F64> {
     if l.is_zero() && r.0 < 0.0 {
         return Err(err_pow_zero_negative());
@@ -223,7 +223,7 @@ pub fn timestamp_timestamp_sub(l: Timestamp, r: Timestamp) -> Result<Interval> {
     Ok(Interval::from_month_day_usec(0, days as i32, usecs))
 }
 
-#[function("subtract(date, date) -> int32")]
+#[function("subtract(date, date) -> int4")]
 pub fn date_date_sub(l: Date, r: Date) -> Result<i32> {
     Ok((l.0 - r.0).num_days() as i32) // this does not overflow or underflow
 }
@@ -255,7 +255,7 @@ pub fn date_interval_sub(l: Date, r: Interval) -> Result<Timestamp> {
     interval_date_add(r.checked_neg().ok_or(ExprError::NumericOutOfRange)?, l)
 }
 
-#[function("add(date, int32) -> date")]
+#[function("add(date, int4) -> date")]
 pub fn date_int_add(l: Date, r: i32) -> Result<Date> {
     let date = l.0;
     let date_wrapper = date
@@ -265,12 +265,12 @@ pub fn date_int_add(l: Date, r: i32) -> Result<Date> {
     date_wrapper.ok_or(ExprError::NumericOutOfRange)
 }
 
-#[function("add(int32, date) -> date")]
+#[function("add(int4, date) -> date")]
 pub fn int_date_add(l: i32, r: Date) -> Result<Date> {
     date_int_add(r, l)
 }
 
-#[function("subtract(date, int32) -> date")]
+#[function("subtract(date, int4) -> date")]
 pub fn date_int_sub(l: Date, r: i32) -> Result<Date> {
     let date = l.0;
     let date_wrapper = date
@@ -342,7 +342,7 @@ pub fn time_interval_add(l: Time, r: Interval) -> Result<Time> {
 }
 
 #[function("divide(interval, *int) -> interval")]
-#[function("divide(interval, *numeric) -> interval")]
+#[function("divide(interval, decimal) -> interval")]
 #[function("divide(interval, *float) -> interval")]
 pub fn interval_float_div<T2>(l: Interval, r: T2) -> Result<Interval>
 where
@@ -351,8 +351,8 @@ where
     l.div_float(r).ok_or(ExprError::NumericOutOfRange)
 }
 
-#[function("multiply(interval, float32) -> interval")]
-#[function("multiply(interval, float64) -> interval")]
+#[function("multiply(interval, float4) -> interval")]
+#[function("multiply(interval, float8) -> interval")]
 #[function("multiply(interval, decimal) -> interval")]
 pub fn interval_float_mul<T2>(l: Interval, r: T2) -> Result<Interval>
 where
@@ -361,8 +361,8 @@ where
     l.mul_float(r).ok_or(ExprError::NumericOutOfRange)
 }
 
-#[function("multiply(float32, interval) -> interval")]
-#[function("multiply(float64, interval) -> interval")]
+#[function("multiply(float4, interval) -> interval")]
+#[function("multiply(float8, interval) -> interval")]
 #[function("multiply(decimal, interval) -> interval")]
 pub fn float_interval_mul<T1>(l: T1, r: Interval) -> Result<Interval>
 where
@@ -371,7 +371,7 @@ where
     r.mul_float(l).ok_or(ExprError::NumericOutOfRange)
 }
 
-#[function("sqrt(float64) -> float64")]
+#[function("sqrt(float8) -> float8")]
 pub fn sqrt_f64(expr: F64) -> Result<F64> {
     if expr < F64::from(0.0) {
         return Err(ExprError::InvalidParam {
@@ -404,12 +404,12 @@ pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
     }
 }
 
-#[function("cbrt(float64) -> float64")]
+#[function("cbrt(float8) -> float8")]
 pub fn cbrt_f64(expr: F64) -> F64 {
     expr.cbrt()
 }
 
-#[function("sign(float64) -> float64")]
+#[function("sign(float8) -> float8")]
 pub fn sign_f64(input: F64) -> F64 {
     match input.0.partial_cmp(&0.) {
         Some(std::cmp::Ordering::Less) => (-1).into(),
@@ -424,12 +424,12 @@ pub fn sign_dec(input: Decimal) -> Decimal {
     input.sign()
 }
 
-#[function("scale(decimal) -> int32")]
+#[function("scale(decimal) -> int4")]
 pub fn decimal_scale(d: Decimal) -> Option<i32> {
     d.scale()
 }
 
-#[function("min_scale(decimal) -> int32")]
+#[function("min_scale(decimal) -> int4")]
 pub fn decimal_min_scale(d: Decimal) -> Option<i32> {
     d.normalize().scale()
 }

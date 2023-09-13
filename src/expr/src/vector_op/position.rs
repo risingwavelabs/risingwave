@@ -45,8 +45,8 @@ use risingwave_expr_macro::function;
 /// ----
 /// 4
 /// ```
-#[function("strpos(varchar, varchar) -> int32", deprecated)]
-#[function("position(varchar, varchar) -> int32")]
+#[function("strpos(varchar, varchar) -> int4", deprecated)]
+#[function("position(varchar, varchar) -> int4")]
 pub fn position(str: &str, sub_str: &str) -> i32 {
     match str.find(sub_str) {
         Some(byte_idx) => (str[..byte_idx].chars().count() + 1) as i32,

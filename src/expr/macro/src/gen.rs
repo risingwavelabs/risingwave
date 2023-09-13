@@ -1005,7 +1005,7 @@ fn data_type(ty: &str) -> TokenStream2 {
 /// Extract multiple output types.
 ///
 /// ```ignore
-/// output_types("int32") -> ["int32"]
+/// output_types("int4") -> ["int4"]
 /// output_types("struct<key varchar, value jsonb>") -> ["varchar", "jsonb"]
 /// ```
 fn output_types(ty: &str) -> Vec<&str> {

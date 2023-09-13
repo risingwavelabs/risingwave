@@ -17,7 +17,7 @@ use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
 
-#[function("round_digit(decimal, int32) -> decimal")]
+#[function("round_digit(decimal, int4) -> decimal")]
 pub fn round_digits(input: Decimal, digits: i32) -> Result<Decimal> {
     if digits < 0 {
         input
@@ -29,7 +29,7 @@ pub fn round_digits(input: Decimal, digits: i32) -> Result<Decimal> {
     }
 }
 
-#[function("ceil(float64) -> float64")]
+#[function("ceil(float8) -> float8")]
 pub fn ceil_f64(input: F64) -> F64 {
     f64::ceil(input.0).into()
 }
@@ -39,7 +39,7 @@ pub fn ceil_decimal(input: Decimal) -> Decimal {
     input.ceil()
 }
 
-#[function("floor(float64) -> float64")]
+#[function("floor(float8) -> float8")]
 pub fn floor_f64(input: F64) -> F64 {
     f64::floor(input.0).into()
 }
@@ -49,7 +49,7 @@ pub fn floor_decimal(input: Decimal) -> Decimal {
     input.floor()
 }
 
-#[function("trunc(float64) -> float64")]
+#[function("trunc(float8) -> float8")]
 pub fn trunc_f64(input: F64) -> F64 {
     f64::trunc(input.0).into()
 }
@@ -60,7 +60,7 @@ pub fn trunc_decimal(input: Decimal) -> Decimal {
 }
 
 // Ties are broken by rounding away from zero
-#[function("round(float64) -> float64")]
+#[function("round(float8) -> float8")]
 pub fn round_f64(input: F64) -> F64 {
     f64::round_ties_even(input.0).into()
 }

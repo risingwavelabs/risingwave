@@ -62,7 +62,7 @@ use crate::Result;
 /// statement ok
 /// drop table t;
 /// ```
-#[build_aggregate("percentile_cont(float64) -> float64")]
+#[build_aggregate("percentile_cont(float8) -> float8")]
 fn build(agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
     let fraction = agg.direct_args[0]
         .literal()

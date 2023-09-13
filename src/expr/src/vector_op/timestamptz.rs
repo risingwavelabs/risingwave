@@ -30,7 +30,7 @@ pub fn time_zone_err(inner_err: String) -> ExprError {
     }
 }
 
-#[function("to_timestamp(float64) -> timestamptz")]
+#[function("to_timestamp(float8) -> timestamptz")]
 pub fn f64_sec_to_timestamptz(elem: F64) -> Result<Timestamptz> {
     // TODO(#4515): handle +/- infinity
     let micros = (elem.0 * 1e6)

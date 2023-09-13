@@ -30,7 +30,7 @@ use risingwave_expr_macro::function;
 /// ----
 /// A
 /// ```
-#[function("chr(int32) -> varchar")]
+#[function("chr(int4) -> varchar")]
 pub fn chr(code: i32, writer: &mut impl Write) {
     if let Some(c) = std::char::from_u32(code as u32) {
         write!(writer, "{}", c).unwrap();
@@ -104,7 +104,7 @@ pub fn initcap(s: &str, writer: &mut impl Write) {
 /// ----
 /// abc
 /// ```
-#[function("lpad(varchar, int32) -> varchar")]
+#[function("lpad(varchar, int4) -> varchar")]
 pub fn lpad(s: &str, length: i32, writer: &mut impl Write) {
     lpad_fill(s, length, " ", writer);
 }
@@ -125,7 +125,7 @@ pub fn lpad(s: &str, length: i32, writer: &mut impl Write) {
 /// ----
 /// hi
 /// ```
-#[function("lpad(varchar, int32, varchar) -> varchar")]
+#[function("lpad(varchar, int4, varchar) -> varchar")]
 pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut impl Write) {
     let s_len = s.chars().count();
     let fill_len = fill.chars().count();
@@ -168,7 +168,7 @@ pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut impl Write) {
 /// ----
 /// abc
 /// ```
-#[function("rpad(varchar, int32) -> varchar")]
+#[function("rpad(varchar, int4) -> varchar")]
 pub fn rpad(s: &str, length: i32, writer: &mut impl Write) {
     rpad_fill(s, length, " ", writer);
 }
@@ -200,7 +200,7 @@ pub fn rpad(s: &str, length: i32, writer: &mut impl Write) {
 /// ----
 /// hi
 /// ```
-#[function("rpad(varchar, int32, varchar) -> varchar")]
+#[function("rpad(varchar, int4, varchar) -> varchar")]
 pub fn rpad_fill(s: &str, length: i32, fill: &str, writer: &mut impl Write) {
     let s_len = s.chars().count();
     let fill_len = fill.chars().count();
@@ -319,12 +319,12 @@ pub fn to_ascii(s: &str, writer: &mut impl Write) {
 /// ----
 /// 8000000000000000
 /// ```
-#[function("to_hex(int32) -> varchar")]
+#[function("to_hex(int4) -> varchar")]
 pub fn to_hex_i32(n: i32, writer: &mut impl Write) {
     write!(writer, "{:x}", n).unwrap();
 }
 
-#[function("to_hex(int64) -> varchar")]
+#[function("to_hex(int8) -> varchar")]
 pub fn to_hex_i64(n: i64, writer: &mut impl Write) {
     write!(writer, "{:x}", n).unwrap();
 }
@@ -413,7 +413,7 @@ pub fn quote_ident(s: &str, writer: &mut impl Write) {
 /// ----
 /// (empty)
 /// ```
-#[function("left(varchar, int32) -> varchar")]
+#[function("left(varchar, int4) -> varchar")]
 pub fn left(s: &str, n: i32, writer: &mut impl Write) {
     let n = if n >= 0 {
         n as usize
@@ -458,7 +458,7 @@ pub fn left(s: &str, n: i32, writer: &mut impl Write) {
 /// ----
 /// (empty)
 /// ```
-#[function("right(varchar, int32) -> varchar")]
+#[function("right(varchar, int4) -> varchar")]
 pub fn right(s: &str, n: i32, writer: &mut impl Write) {
     let skip = if n >= 0 {
         s.chars().count().saturating_sub(n as usize)

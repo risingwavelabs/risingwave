@@ -18,7 +18,7 @@ use risingwave_expr_macro::function;
 
 use crate::Result;
 
-#[function("array_access(list, int32) -> *")]
+#[function("array_access(list, int4) -> *")]
 pub fn array_access<T: Scalar>(list: ListRef<'_>, index: i32) -> Result<Option<T>> {
     // index must be greater than 0 following a one-based numbering convention for arrays
     if index < 1 {
@@ -42,7 +42,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_int32_array_access() {
+    fn test_int4_array_access() {
         let v1 = ListValue::new(vec![
             Some(ScalarImpl::Int32(1)),
             Some(ScalarImpl::Int32(2)),

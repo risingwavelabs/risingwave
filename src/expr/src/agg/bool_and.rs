@@ -94,7 +94,7 @@ fn bool_and_append_only(state: bool, input: bool) -> bool {
 #[derive(Debug, Default, Clone)]
 struct BoolAndUpdatable;
 
-#[aggregate("bool_and(boolean) -> boolean", state = "int64")]
+#[aggregate("bool_and(boolean) -> boolean", state = "int8")]
 impl BoolAndUpdatable {
     // state is the number of false values
 

@@ -15,63 +15,63 @@
 use risingwave_common::types::F64;
 use risingwave_expr_macro::function;
 
-#[function("sin(float64) -> float64")]
+#[function("sin(float8) -> float8")]
 pub fn sin_f64(input: F64) -> F64 {
     f64::sin(input.0).into()
 }
 
-#[function("cos(float64) -> float64")]
+#[function("cos(float8) -> float8")]
 pub fn cos_f64(input: F64) -> F64 {
     f64::cos(input.0).into()
 }
 
-#[function("tan(float64) -> float64")]
+#[function("tan(float8) -> float8")]
 pub fn tan_f64(input: F64) -> F64 {
     f64::tan(input.0).into()
 }
 
-#[function("cot(float64) -> float64")]
+#[function("cot(float8) -> float8")]
 pub fn cot_f64(input: F64) -> F64 {
     let res = 1.0 / f64::tan(input.0);
     res.into()
 }
 
-#[function("asin(float64) -> float64")]
+#[function("asin(float8) -> float8")]
 pub fn asin_f64(input: F64) -> F64 {
     f64::asin(input.0).into()
 }
 
-#[function("acos(float64) -> float64")]
+#[function("acos(float8) -> float8")]
 pub fn acos_f64(input: F64) -> F64 {
     f64::acos(input.0).into()
 }
 
-#[function("atan(float64) -> float64")]
+#[function("atan(float8) -> float8")]
 pub fn atan_f64(input: F64) -> F64 {
     f64::atan(input.0).into()
 }
 
-#[function("atan2(float64, float64) -> float64")]
+#[function("atan2(float8, float8) -> float8")]
 pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
     input_x.0.atan2(input_y.0).into()
 }
 
-#[function("sinh(float64) -> float64")]
+#[function("sinh(float8) -> float8")]
 pub fn sinh_f64(input: F64) -> F64 {
     f64::sinh(input.0).into()
 }
 
-#[function("cosh(float64) -> float64")]
+#[function("cosh(float8) -> float8")]
 pub fn cosh_f64(input: F64) -> F64 {
     f64::cosh(input.0).into()
 }
 
-#[function("tanh(float64) -> float64")]
+#[function("tanh(float8) -> float8")]
 pub fn tanh_f64(input: F64) -> F64 {
     f64::tanh(input.0).into()
 }
 
-#[function("coth(float64) -> float64")]
+#[function("coth(float8) -> float8")]
 pub fn coth_f64(input: F64) -> F64 {
     if input.0 == 0.0 {
         return f64::NAN.into();
@@ -80,17 +80,17 @@ pub fn coth_f64(input: F64) -> F64 {
     (f64::cosh(input.0) / f64::sinh(input.0)).into()
 }
 
-#[function("asinh(float64) -> float64")]
+#[function("asinh(float8) -> float8")]
 pub fn asinh_f64(input: F64) -> F64 {
     f64::asinh(input.0).into()
 }
 
-#[function("acosh(float64) -> float64")]
+#[function("acosh(float8) -> float8")]
 pub fn acosh_f64(input: F64) -> F64 {
     f64::acosh(input.0).into()
 }
 
-#[function("atanh(float64) -> float64")]
+#[function("atanh(float8) -> float8")]
 pub fn atanh_f64(input: F64) -> F64 {
     f64::atanh(input.0).into()
 }
@@ -135,7 +135,7 @@ fn cosd_q1(x: f64) -> f64 {
     }
 }
 
-#[function("cosd(float64) -> float64")]
+#[function("cosd(float8) -> float8")]
 pub fn cosd_f64(input: F64) -> F64 {
     // See PSQL implementation: https://github.com/postgres/postgres/blob/78ec02d612a9b69039ec2610740f738968fe144d/src/backend/utils/adt/float.c
     let arg1 = input.0;
@@ -188,7 +188,7 @@ fn sind_q1(input: f64) -> f64 {
     }
 }
 
-#[function("sind(float64) -> float64")]
+#[function("sind(float8) -> float8")]
 pub fn sind_f64(input: F64) -> F64 {
     // PSQL implementation: https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c#L2444
 
@@ -225,7 +225,7 @@ pub fn sind_f64(input: F64) -> F64 {
     }
 }
 
-#[function("cotd(float64) -> float64")]
+#[function("cotd(float8) -> float8")]
 pub fn cotd_f64(input: F64) -> F64 {
     // PSQL implementation: https://github.com/postgres/postgres/blob/78ec02d612a9b69039ec2610740f738968fe144d/src/backend/utils/adt/float.c#L2378
 
@@ -266,7 +266,7 @@ pub fn cotd_f64(input: F64) -> F64 {
     result.into()
 }
 
-#[function("tand(float64) -> float64")]
+#[function("tand(float8) -> float8")]
 pub fn tand_f64(input: F64) -> F64 {
     // PSQL implementation: https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
     // Returns NaN if input is NaN or infinite. Different from PSQL implementation.
@@ -322,7 +322,7 @@ pub fn asind_q1(x: f64) -> f64 {
     90.0 - (acos_x / ASIN_0_5) * 60.0
 }
 
-#[function("asind(float64) -> float64")]
+#[function("asind(float8) -> float8")]
 pub fn asind_f64(input: F64) -> F64 {
     let arg1 = input.0;
 
@@ -348,12 +348,12 @@ pub fn asind_f64(input: F64) -> F64 {
     result.into()
 }
 
-#[function("degrees(float64) -> float64")]
+#[function("degrees(float8) -> float8")]
 pub fn degrees_f64(input: F64) -> F64 {
     input.0.to_degrees().into()
 }
 
-#[function("radians(float64) -> float64")]
+#[function("radians(float8) -> float8")]
 pub fn radians_f64(input: F64) -> F64 {
     input.0.to_radians().into()
 }

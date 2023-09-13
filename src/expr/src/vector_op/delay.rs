@@ -25,7 +25,7 @@ use risingwave_expr_macro::function;
 /// ----
 /// NULL
 /// ```
-#[function("pg_sleep(float64)", volatile)]
+#[function("pg_sleep(float8)", volatile)]
 async fn pg_sleep(second: F64) {
     tokio::time::sleep(Duration::from_secs_f64(second.0)).await;
 }

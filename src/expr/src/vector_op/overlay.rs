@@ -26,7 +26,7 @@ use crate::{ExprError, Result};
 /// ----
 /// αβ💯δεζ
 /// ```
-#[function("overlay(varchar, varchar, int32) -> varchar")]
+#[function("overlay(varchar, varchar, int4) -> varchar")]
 pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: &mut impl Write) -> Result<()> {
     let sub_len = new_sub_str
         .chars()
@@ -82,7 +82,7 @@ pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: &mut impl Write) 
 /// ----
 /// αβγ①②③αβγδεζ
 /// ```
-#[function("overlay(varchar, varchar, int32, int32) -> varchar")]
+#[function("overlay(varchar, varchar, int4, int4) -> varchar")]
 pub fn overlay_for(
     s: &str,
     new_sub_str: &str,

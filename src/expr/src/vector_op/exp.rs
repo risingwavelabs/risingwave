@@ -25,7 +25,7 @@ fn err_logarithm_input() -> ExprError {
     }
 }
 
-#[function("exp(float64) -> float64")]
+#[function("exp(float8) -> float8")]
 pub fn exp_f64(input: F64) -> Result<F64> {
     // The cases where the exponent value is Inf or NaN can be handled explicitly and without
     // evaluating the `exp` operation.
@@ -53,7 +53,7 @@ pub fn exp_f64(input: F64) -> Result<F64> {
     }
 }
 
-#[function("ln(float64) -> float64")]
+#[function("ln(float8) -> float8")]
 pub fn ln_f64(input: F64) -> Result<F64> {
     if input.0 <= 0.0 {
         return Err(err_logarithm_input());
@@ -61,7 +61,7 @@ pub fn ln_f64(input: F64) -> Result<F64> {
     Ok(input.ln())
 }
 
-#[function("log10(float64) -> float64")]
+#[function("log10(float8) -> float8")]
 pub fn log10_f64(input: F64) -> Result<F64> {
     if input.0 <= 0.0 {
         return Err(err_logarithm_input());

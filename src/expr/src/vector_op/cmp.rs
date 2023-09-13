@@ -20,7 +20,7 @@ use risingwave_expr_macro::function;
 
 #[function("equal(boolean, boolean) -> boolean", batch_fn = "boolarray_eq")]
 #[function("equal(*int, *int) -> boolean")]
-#[function("equal(*numeric, *numeric) -> boolean")]
+#[function("equal(decimal, decimal) -> boolean")]
 #[function("equal(*float, *float) -> boolean")]
 #[function("equal(int256, int256) -> boolean")]
 #[function("equal(serial, serial) -> boolean")]
@@ -48,7 +48,7 @@ where
 
 #[function("not_equal(boolean, boolean) -> boolean", batch_fn = "boolarray_ne")]
 #[function("not_equal(*int, *int) -> boolean")]
-#[function("not_equal(*numeric, *numeric) -> boolean")]
+#[function("not_equal(decimal, decimal) -> boolean")]
 #[function("not_equal(*float, *float) -> boolean")]
 #[function("not_equal(int256, int256) -> boolean")]
 #[function("not_equal(serial, serial) -> boolean")]
@@ -79,7 +79,7 @@ where
     batch_fn = "boolarray_ge"
 )]
 #[function("greater_than_or_equal(*int, *int) -> boolean")]
-#[function("greater_than_or_equal(*numeric, *numeric) -> boolean")]
+#[function("greater_than_or_equal(decimal, decimal) -> boolean")]
 #[function("greater_than_or_equal(*float, *float) -> boolean")]
 #[function("greater_than_or_equal(serial, serial) -> boolean")]
 #[function("greater_than_or_equal(int256, int256) -> boolean")]
@@ -107,7 +107,7 @@ where
 
 #[function("greater_than(boolean, boolean) -> boolean", batch_fn = "boolarray_gt")]
 #[function("greater_than(*int, *int) -> boolean")]
-#[function("greater_than(*numeric, *numeric) -> boolean")]
+#[function("greater_than(decimal, decimal) -> boolean")]
 #[function("greater_than(*float, *float) -> boolean")]
 #[function("greater_than(serial, serial) -> boolean")]
 #[function("greater_than(int256, int256) -> boolean")]
@@ -138,7 +138,7 @@ where
     batch_fn = "boolarray_le"
 )]
 #[function("less_than_or_equal(*int, *int) -> boolean")]
-#[function("less_than_or_equal(*numeric, *numeric) -> boolean")]
+#[function("less_than_or_equal(decimal, decimal) -> boolean")]
 #[function("less_than_or_equal(*float, *float) -> boolean")]
 #[function("less_than_or_equal(serial, serial) -> boolean")]
 #[function("less_than_or_equal(int256, int256) -> boolean")]
@@ -166,7 +166,7 @@ where
 
 #[function("less_than(boolean, boolean) -> boolean", batch_fn = "boolarray_lt")]
 #[function("less_than(*int, *int) -> boolean")]
-#[function("less_than(*numeric, *numeric) -> boolean")]
+#[function("less_than(decimal, decimal) -> boolean")]
 #[function("less_than(*float, *float) -> boolean")]
 #[function("less_than(serial, serial) -> boolean")]
 #[function("less_than(int256, int256) -> boolean")]
@@ -197,7 +197,7 @@ where
     batch_fn = "boolarray_is_distinct_from"
 )]
 #[function("is_distinct_from(*int, *int) -> boolean")]
-#[function("is_distinct_from(*numeric, *numeric) -> boolean")]
+#[function("is_distinct_from(decimal, decimal) -> boolean")]
 #[function("is_distinct_from(*float, *float) -> boolean")]
 #[function("is_distinct_from(serial, serial) -> boolean")]
 #[function("is_distinct_from(int256, int256) -> boolean")]
@@ -228,7 +228,7 @@ where
     batch_fn = "boolarray_is_not_distinct_from"
 )]
 #[function("is_not_distinct_from(*int, *int) -> boolean")]
-#[function("is_not_distinct_from(*numeric, *numeric) -> boolean")]
+#[function("is_not_distinct_from(decimal, decimal) -> boolean")]
 #[function("is_not_distinct_from(*float, *float) -> boolean")]
 #[function("is_not_distinct_from(serial, serial) -> boolean")]
 #[function("is_not_distinct_from(int256, int256) -> boolean")]

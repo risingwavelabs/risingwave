@@ -176,7 +176,7 @@ pub fn extract_from_interval(unit: &str, interval: Interval) -> Result<Decimal> 
     })
 }
 
-#[function("date_part(varchar, date) -> float64")]
+#[function("date_part(varchar, date) -> float8")]
 pub fn date_part_from_date(unit: &str, date: Date) -> Result<F64> {
     // date_part of date manually cast to timestamp
     // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/catalog/system_functions.sql#L123
@@ -185,21 +185,21 @@ pub fn date_part_from_date(unit: &str, date: Date) -> Result<F64> {
         .map_err(|_| ExprError::NumericOutOfRange)
 }
 
-#[function("date_part(varchar, time) -> float64")]
+#[function("date_part(varchar, time) -> float8")]
 pub fn date_part_from_time(unit: &str, time: Time) -> Result<F64> {
     extract_from_time(unit, time)?
         .try_into()
         .map_err(|_| ExprError::NumericOutOfRange)
 }
 
-#[function("date_part(varchar, timestamptz) -> float64")]
+#[function("date_part(varchar, timestamptz) -> float8")]
 pub fn date_part_from_timestamptz(unit: &str, input: Timestamptz) -> Result<F64> {
     extract_from_timestamptz(unit, input)?
         .try_into()
         .map_err(|_| ExprError::NumericOutOfRange)
 }
 
-#[function("date_part(varchar, timestamptz, varchar) -> float64")]
+#[function("date_part(varchar, timestamptz, varchar) -> float8")]
 pub fn date_part_from_timestamptz_at_timezone(
     unit: &str,
     input: Timestamptz,
@@ -210,14 +210,14 @@ pub fn date_part_from_timestamptz_at_timezone(
         .map_err(|_| ExprError::NumericOutOfRange)
 }
 
-#[function("date_part(varchar, timestamp) -> float64")]
+#[function("date_part(varchar, timestamp) -> float8")]
 pub fn date_part_from_timestamp(unit: &str, timestamp: Timestamp) -> Result<F64> {
     extract_from_timestamp(unit, timestamp)?
         .try_into()
         .map_err(|_| ExprError::NumericOutOfRange)
 }
 
-#[function("date_part(varchar, interval) -> float64")]
+#[function("date_part(varchar, interval) -> float8")]
 pub fn date_part_from_interval(unit: &str, interval: Interval) -> Result<F64> {
     extract_from_interval(unit, interval)?
         .try_into()

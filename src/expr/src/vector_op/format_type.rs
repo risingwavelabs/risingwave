@@ -15,7 +15,7 @@
 use risingwave_common::types::DataType;
 use risingwave_expr_macro::function;
 
-#[function("format_type(int32, int32) -> varchar")]
+#[function("format_type(int4, int4) -> varchar")]
 pub fn format_type(oid: Option<i32>, _typemod: Option<i32>) -> Option<Box<str>> {
     // since we don't support type modifier, ignore it.
     oid.map(|i| {

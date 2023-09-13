@@ -58,7 +58,7 @@ use super::*;
 /// ----
 /// 1
 /// ```
-#[function("generate_subscripts(list, int32, boolean) -> setof int32")]
+#[function("generate_subscripts(list, int4, boolean) -> setof int4")]
 fn generate_subscripts_reverse(
     array: ListRef<'_>,
     dim: i32,
@@ -106,7 +106,7 @@ fn generate_subscripts_reverse(
 /// ----
 /// 1
 /// ```
-#[function("generate_subscripts(list, int32) -> setof int32")]
+#[function("generate_subscripts(list, int4) -> setof int4")]
 fn generate_subscripts(array: ListRef<'_>, dim: i32) -> Result<impl Iterator<Item = i32>> {
     Ok(generate_subscripts_iterator(array, dim, false))
 }

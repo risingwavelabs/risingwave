@@ -68,7 +68,7 @@ use crate::Result;
 /// ----
 /// 2
 /// ```
-#[function("array_position(list, *) -> int32")]
+#[function("array_position(list, *) -> int4")]
 fn array_position<'a, T: ScalarRef<'a>>(
     array: Option<ListRef<'_>>,
     element: Option<T>,
@@ -99,7 +99,7 @@ fn array_position<'a, T: ScalarRef<'a>>(
 ///  4    4
 ///  5 NULL
 /// ```
-#[function("array_position(list, *, int32) -> int32")]
+#[function("array_position(list, *, int4) -> int4")]
 fn array_position_start<'a, T: ScalarRef<'a>>(
     array: Option<ListRef<'_>>,
     element: Option<T>,

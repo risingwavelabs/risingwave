@@ -42,13 +42,13 @@ const LOG_COUNT_BITS: u8 = 6;
 const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
 
 /// Count the approximate number of unique non-null values.
-#[build_aggregate("approx_count_distinct(*) -> int64", state = "int64")]
+#[build_aggregate("approx_count_distinct(*) -> int8", state = "int8")]
 fn build_updatable(_agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
     Ok(Box::new(UpdatableApproxCountDistinct))
 }
 
 /// Count the approximate number of unique non-null values.
-#[build_aggregate("approx_count_distinct(*) -> int64", state = "int64[]", append_only)]
+#[build_aggregate("approx_count_distinct(*) -> int8", state = "int8[]", append_only)]
 fn build_append_only(_agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
     Ok(Box::new(AppendOnlyApproxCountDistinct))
 }
@@ -106,7 +106,7 @@ impl AggregateFunction for UpdatableApproxCountDistinct {
     fn decode_state(&self, datum: Datum) -> Result<AggregateState> {
         // FIXME: restore state of updatable registers properly
         let Some(ScalarImpl::Int64(initial_count)) = datum else {
-            return Err(ExprError::InvalidState("expect int64".into()));
+            return Err(ExprError::InvalidState("expect int8".into()));
         };
         Ok(AggregateState::Any(Box::new(UpdatableRegisters {
             initial_count,

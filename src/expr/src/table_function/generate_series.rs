@@ -18,8 +18,8 @@ use risingwave_expr_macro::function;
 
 use super::*;
 
-#[function("generate_series(int32, int32) -> setof int32")]
-#[function("generate_series(int64, int64) -> setof int64")]
+#[function("generate_series(int4, int4) -> setof int4")]
+#[function("generate_series(int8, int8) -> setof int8")]
 #[function("generate_series(decimal, decimal) -> setof decimal")]
 fn generate_series<T>(start: T, stop: T) -> Result<impl Iterator<Item = Result<T>>>
 where
@@ -28,8 +28,8 @@ where
     range_generic::<_, _, true>(start, stop, T::one())
 }
 
-#[function("generate_series(int32, int32, int32) -> setof int32")]
-#[function("generate_series(int64, int64, int64) -> setof int64")]
+#[function("generate_series(int4, int4, int4) -> setof int4")]
+#[function("generate_series(int8, int8, int8) -> setof int8")]
 #[function("generate_series(decimal, decimal, decimal) -> setof decimal")]
 #[function("generate_series(timestamp, timestamp, interval) -> setof timestamp")]
 fn generate_series_step<T, S>(start: T, stop: T, step: S) -> Result<impl Iterator<Item = Result<T>>>
@@ -40,8 +40,8 @@ where
     range_generic::<_, _, true>(start, stop, step)
 }
 
-#[function("range(int32, int32) -> setof int32")]
-#[function("range(int64, int64) -> setof int64")]
+#[function("range(int4, int4) -> setof int4")]
+#[function("range(int8, int8) -> setof int8")]
 #[function("range(decimal, decimal) -> setof decimal")]
 fn range<T>(start: T, stop: T) -> Result<impl Iterator<Item = Result<T>>>
 where
@@ -50,8 +50,8 @@ where
     range_generic::<_, _, false>(start, stop, T::one())
 }
 
-#[function("range(int32, int32, int32) -> setof int32")]
-#[function("range(int64, int64, int64) -> setof int64")]
+#[function("range(int4, int4, int4) -> setof int4")]
+#[function("range(int8, int8, int8) -> setof int8")]
 #[function("range(decimal, decimal, decimal) -> setof decimal")]
 #[function("range(timestamp, timestamp, interval) -> setof timestamp")]
 fn range_step<T, S>(start: T, stop: T, step: S) -> Result<impl Iterator<Item = Result<T>>>

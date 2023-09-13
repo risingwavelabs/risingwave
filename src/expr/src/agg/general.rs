@@ -20,16 +20,16 @@ use risingwave_expr_macro::aggregate;
 
 use crate::{ExprError, Result};
 
-#[aggregate("sum(int16) -> int64")]
-#[aggregate("sum(int32) -> int64")]
-#[aggregate("sum(int64) -> int64")]
-#[aggregate("sum(int64) -> decimal")]
-#[aggregate("sum(float32) -> float32")]
-#[aggregate("sum(float64) -> float64")]
+#[aggregate("sum(int2) -> int8")]
+#[aggregate("sum(int4) -> int8")]
+#[aggregate("sum(int8) -> int8")]
+#[aggregate("sum(int8) -> decimal")]
+#[aggregate("sum(float4) -> float4")]
+#[aggregate("sum(float8) -> float8")]
 #[aggregate("sum(decimal) -> decimal")]
 #[aggregate("sum(interval) -> interval")]
 #[aggregate("sum(int256) -> int256")]
-#[aggregate("sum0(int64) -> int64", init_state = "0i64")]
+#[aggregate("sum0(int8) -> int8", init_state = "0i64")]
 fn sum<S, T>(state: S, input: T, retract: bool) -> Result<S>
 where
     S: Default + From<T> + CheckedAdd<Output = S> + CheckedSub<Output = S>,
@@ -118,7 +118,7 @@ fn last_value<T>(_: T, input: T) -> T {
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("count(*) -> int64", init_state = "0i64")]
+#[aggregate("count(*) -> int8", init_state = "0i64")]
 fn count<T>(state: i64, _: T, retract: bool) -> i64 {
     if retract {
         state - 1
@@ -127,7 +127,7 @@ fn count<T>(state: i64, _: T, retract: bool) -> i64 {
     }
 }
 
-#[aggregate("count() -> int64", init_state = "0i64")]
+#[aggregate("count() -> int8", init_state = "0i64")]
 fn count_star(state: i64, retract: bool) -> i64 {
     if retract {
         state - 1
@@ -162,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn sum_int32() {
+    fn sum_int4() {
         let input = StreamChunk::from_pretty(
             " i
             + 3
@@ -174,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn sum_int64() {
+    fn sum_int8() {
         let input = StreamChunk::from_pretty(
             " I
             + 3
@@ -190,7 +190,7 @@ mod tests {
     }
 
     #[test]
-    fn sum_float64() {
+    fn sum_float8() {
         let input = StreamChunk::from_pretty(
             " F
             + 1.0
@@ -251,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn min_int64() {
+    fn min_int8() {
         let input = StreamChunk::from_pretty(
             " I
             + 1  D
@@ -263,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn min_float32() {
+    fn min_float4() {
         let input = StreamChunk::from_pretty(
             " f
             + 1.0  D
@@ -300,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn max_int64() {
+    fn max_int8() {
         let input = StreamChunk::from_pretty(
             " I
             + 1
@@ -322,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn count_int32() {
+    fn count_int4() {
         let input = StreamChunk::from_pretty(
             " i
             + 1
@@ -391,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn bitxor_int64() {
+    fn bitxor_int8() {
         let input = StreamChunk::from_pretty(
             " I
             + 1

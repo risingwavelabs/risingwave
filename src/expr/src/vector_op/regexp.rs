@@ -160,7 +160,7 @@ fn regexp_match(text: &str, regex: &RegexpContext) -> Option<ListValue> {
 
 #[function(
     // regexp_count(source, pattern)
-    "regexp_count(varchar, varchar) -> int32",
+    "regexp_count(varchar, varchar) -> int4",
     prebuild = "RegexpContext::from_pattern($1)?"
 )]
 fn regexp_count_start0(text: &str, regex: &RegexpContext) -> Result<i32> {
@@ -169,12 +169,12 @@ fn regexp_count_start0(text: &str, regex: &RegexpContext) -> Result<i32> {
 
 #[function(
     // regexp_count(source, pattern, start)
-    "regexp_count(varchar, varchar, int32) -> int32",
+    "regexp_count(varchar, varchar, int4) -> int4",
     prebuild = "RegexpContext::from_pattern($1)?"
 )]
 #[function(
     // regexp_count(source, pattern, start, flags)
-    "regexp_count(varchar, varchar, int32, varchar) -> int32",
+    "regexp_count(varchar, varchar, int4, varchar) -> int4",
     prebuild = "RegexpContext::from_pattern_flags_for_count($1, $3)?"
 )]
 fn regexp_count(text: &str, start: i32, regex: &RegexpContext) -> Result<i32> {
@@ -220,7 +220,7 @@ fn regexp_replace0(text: &str, ctx: &RegexpContext) -> Result<Box<str>> {
 
 #[function(
     // regexp_replace(source, pattern, replacement, start)
-    "regexp_replace(varchar, varchar, varchar, int32) -> varchar",
+    "regexp_replace(varchar, varchar, varchar, int4) -> varchar",
     prebuild = "RegexpContext::from_pattern_replacement($1, $2)?"
 )]
 fn regexp_replace_with_start(text: &str, start: i32, ctx: &RegexpContext) -> Result<Box<str>> {
@@ -229,7 +229,7 @@ fn regexp_replace_with_start(text: &str, start: i32, ctx: &RegexpContext) -> Res
 
 #[function(
     // regexp_replace(source, pattern, replacement, start, N)
-    "regexp_replace(varchar, varchar, varchar, int32, int32) -> varchar",
+    "regexp_replace(varchar, varchar, varchar, int4, int4) -> varchar",
     prebuild = "RegexpContext::from_pattern_replacement($1, $2)?"
 )]
 fn regexp_replace_with_start_n(
@@ -243,7 +243,7 @@ fn regexp_replace_with_start_n(
 
 #[function(
     // regexp_replace(source, pattern, replacement, start, N, flags)
-    "regexp_replace(varchar, varchar, varchar, int32, int32, varchar) -> varchar",
+    "regexp_replace(varchar, varchar, varchar, int4, int4, varchar) -> varchar",
     prebuild = "RegexpContext::from_pattern_replacement_flags($1, $2, $5)?"
 )]
 fn regexp_replace_with_start_n_flags(

@@ -18,7 +18,7 @@ use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
 
-#[function("substr(varchar, int32) -> varchar")]
+#[function("substr(varchar, int4) -> varchar")]
 pub fn substr_start(s: &str, start: i32, writer: &mut impl Write) -> Result<()> {
     let skip = start.saturating_sub(1).max(0) as usize;
 
@@ -30,7 +30,7 @@ pub fn substr_start(s: &str, start: i32, writer: &mut impl Write) -> Result<()> 
     Ok(())
 }
 
-#[function("substr(varchar, int32, int32) -> varchar")]
+#[function("substr(varchar, int4, int4) -> varchar")]
 pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut impl Write) -> Result<()> {
     if count < 0 {
         return Err(ExprError::InvalidParam {

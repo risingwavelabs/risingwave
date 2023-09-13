@@ -208,7 +208,7 @@ const STRICT_MODE: bool = false;
 ///
 /// # Example
 /// ```ignore
-/// #[function("foo(int32) -> int64")]
+/// #[function("foo(int4) -> int8")]
 /// fn foo(a: i32, ctx: &Context) -> i64 {
 ///    assert_eq!(ctx.arg_types[0], DataType::Int32);
 ///    assert_eq!(ctx.return_type, DataType::Int64);

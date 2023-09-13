@@ -22,7 +22,7 @@ pub fn jsonb_object_field<'a>(v: JsonbRef<'a>, p: &str) -> Option<JsonbRef<'a>> 
     v.access_object_field(p)
 }
 
-#[function("jsonb_access_inner(jsonb, int32) -> jsonb")]
+#[function("jsonb_access_inner(jsonb, int4) -> jsonb")]
 pub fn jsonb_array_element(v: JsonbRef<'_>, p: i32) -> Option<JsonbRef<'_>> {
     let idx = if p < 0 {
         let Ok(len) = v.array_len() else {
@@ -49,7 +49,7 @@ pub fn jsonb_object_field_str(v: JsonbRef<'_>, p: &str, writer: &mut impl Write)
     Some(())
 }
 
-#[function("jsonb_access_str(jsonb, int32) -> varchar")]
+#[function("jsonb_access_str(jsonb, int4) -> varchar")]
 pub fn jsonb_array_element_str(v: JsonbRef<'_>, p: i32, writer: &mut impl Write) -> Option<()> {
     let jsonb = jsonb_array_element(v, p)?;
     if jsonb.is_jsonb_null() {

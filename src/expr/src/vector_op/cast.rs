@@ -63,7 +63,7 @@ pub fn str_to_timestamp(elem: &str) -> Result<Timestamp> {
 }
 
 #[function("cast(varchar) -> *int")]
-#[function("cast(varchar) -> *numeric")]
+#[function("cast(varchar) -> decimal")]
 #[function("cast(varchar) -> *float")]
 #[function("cast(varchar) -> int256")]
 #[function("cast(varchar) -> interval")]
@@ -78,9 +78,9 @@ where
         .map_err(|err: <T as FromStr>::Err| ExprError::Parse(err.to_string().into()))
 }
 
-#[function("cast(int16) -> int256")]
-#[function("cast(int32) -> int256")]
-#[function("cast(int64) -> int256")]
+#[function("cast(int2) -> int256")]
+#[function("cast(int4) -> int256")]
+#[function("cast(int8) -> int256")]
 pub fn to_int256<T: TryInto<Int256>>(elem: T) -> Result<Int256> {
     elem.try_into()
         .map_err(|_| ExprError::CastOutOfRange("int256"))
@@ -93,12 +93,12 @@ pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
 
 /// Note that PostgreSQL casts JSON numbers from arbitrary precision `numeric` but we use `f64`.
 /// This is less powerful but still meets RFC 8259 interoperability.
-#[function("cast(jsonb) -> int16")]
-#[function("cast(jsonb) -> int32")]
-#[function("cast(jsonb) -> int64")]
+#[function("cast(jsonb) -> int2")]
+#[function("cast(jsonb) -> int4")]
+#[function("cast(jsonb) -> int8")]
 #[function("cast(jsonb) -> decimal")]
-#[function("cast(jsonb) -> float32")]
-#[function("cast(jsonb) -> float64")]
+#[function("cast(jsonb) -> float4")]
+#[function("cast(jsonb) -> float8")]
 pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
     v.as_number()
         .map_err(|e| ExprError::Parse(e.into()))?
@@ -128,23 +128,23 @@ pub fn interval_to_time(elem: Interval) -> Time {
     Time::from_num_seconds_from_midnight_uncheck(secs, nano)
 }
 
-#[function("cast(int32) -> int16")]
-#[function("cast(int64) -> int16")]
-#[function("cast(int64) -> int32")]
-#[function("cast(float32) -> int16")]
-#[function("cast(float64) -> int16")]
-#[function("cast(float32) -> int32")]
-#[function("cast(float64) -> int32")]
-#[function("cast(float32) -> int64")]
-#[function("cast(float64) -> int64")]
-#[function("cast(float64) -> float32")]
-#[function("cast(decimal) -> int16")]
-#[function("cast(decimal) -> int32")]
-#[function("cast(decimal) -> int64")]
-#[function("cast(decimal) -> float32")]
-#[function("cast(decimal) -> float64")]
-#[function("cast(float32) -> decimal")]
-#[function("cast(float64) -> decimal")]
+#[function("cast(int4) -> int2")]
+#[function("cast(int8) -> int2")]
+#[function("cast(int8) -> int4")]
+#[function("cast(float4) -> int2")]
+#[function("cast(float8) -> int2")]
+#[function("cast(float4) -> int4")]
+#[function("cast(float8) -> int4")]
+#[function("cast(float4) -> int8")]
+#[function("cast(float8) -> int8")]
+#[function("cast(float8) -> float4")]
+#[function("cast(decimal) -> int2")]
+#[function("cast(decimal) -> int4")]
+#[function("cast(decimal) -> int8")]
+#[function("cast(decimal) -> float4")]
+#[function("cast(decimal) -> float8")]
+#[function("cast(float4) -> decimal")]
+#[function("cast(float8) -> decimal")]
 pub fn try_cast<T1, T2>(elem: T1) -> Result<T2>
 where
     T1: TryInto<T2> + std::fmt::Debug + Copy,
@@ -153,24 +153,24 @@ where
         .map_err(|_| ExprError::CastOutOfRange(std::any::type_name::<T2>()))
 }
 
-#[function("cast(boolean) -> int32")]
-#[function("cast(int16) -> int32")]
-#[function("cast(int16) -> int64")]
-#[function("cast(int16) -> float32")]
-#[function("cast(int16) -> float64")]
-#[function("cast(int16) -> decimal")]
-#[function("cast(int32) -> int64")]
-#[function("cast(int32) -> float32")]
-#[function("cast(int32) -> float64")]
-#[function("cast(int32) -> decimal")]
-#[function("cast(int64) -> float32")]
-#[function("cast(int64) -> float64")]
-#[function("cast(int64) -> decimal")]
-#[function("cast(float32) -> float64")]
+#[function("cast(boolean) -> int4")]
+#[function("cast(int2) -> int4")]
+#[function("cast(int2) -> int8")]
+#[function("cast(int2) -> float4")]
+#[function("cast(int2) -> float8")]
+#[function("cast(int2) -> decimal")]
+#[function("cast(int4) -> int8")]
+#[function("cast(int4) -> float4")]
+#[function("cast(int4) -> float8")]
+#[function("cast(int4) -> decimal")]
+#[function("cast(int8) -> float4")]
+#[function("cast(int8) -> float8")]
+#[function("cast(int8) -> decimal")]
+#[function("cast(float4) -> float8")]
 #[function("cast(date) -> timestamp")]
 #[function("cast(time) -> interval")]
 #[function("cast(varchar) -> varchar")]
-#[function("cast(int256) -> float64")]
+#[function("cast(int256) -> float8")]
 pub fn cast<T1, T2>(elem: T1) -> T2
 where
     T1: Into<T2>,
@@ -196,15 +196,15 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
     }
 }
 
-#[function("cast(int32) -> boolean")]
-pub fn int32_to_bool(input: i32) -> Result<bool> {
+#[function("cast(int4) -> boolean")]
+pub fn int4_to_bool(input: i32) -> Result<bool> {
     Ok(input != 0)
 }
 
 // For most of the types, cast them to varchar is similar to return their text format.
 // So we use this function to cast type to varchar.
 #[function("cast(*int) -> varchar")]
-#[function("cast(*numeric) -> varchar")]
+#[function("cast(decimal) -> varchar")]
 #[function("cast(*float) -> varchar")]
 #[function("cast(int256) -> varchar")]
 #[function("cast(time) -> varchar")]
@@ -393,9 +393,9 @@ mod tests {
     #[test]
     fn integer_cast_to_bool() {
         use super::*;
-        assert!(int32_to_bool(32).unwrap());
-        assert!(int32_to_bool(-32).unwrap());
-        assert!(!int32_to_bool(0).unwrap());
+        assert!(int4_to_bool(32).unwrap());
+        assert!(int4_to_bool(-32).unwrap());
+        assert!(!int4_to_bool(0).unwrap());
     }
 
     #[test]
