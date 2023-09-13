@@ -23,7 +23,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::PlanRef;
 
-/// Transform a TableFunction (used in FROM clause) into a ProjectSet so that it can be unnested later if it contains CorrelatedInputRef.
+/// Transform a `TableFunction` (used in FROM clause) into a `ProjectSet` so that it can be unnested later if it contains `CorrelatedInputRef`.
 ///
 /// Before:
 ///
