@@ -585,6 +585,37 @@ impl SstableStore {
             .await
             .map_err(HummockError::file_cache)
     }
+
+    pub async fn fill_data_file_cache(&self, sst: &Sstable) -> HummockResult<()> {
+        let object_id = sst.id;
+
+        if let Some(filter) = self.data_file_cache_refill_filter.as_ref() {
+            filter.insert(object_id);
+        }
+
+        let data = self
+            .store
+            .read(&self.get_sst_data_path(object_id), ..)
+            .await?;
+
+        for block_index in 0..sst.block_count() {
+            let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
+            let bytes = data.slice(range);
+            let block = Block::decode(bytes, uncompressed_capacity)?;
+            let block = Box::new(block);
+
+            let key = SstableBlockIndex {
+                sst_id: object_id,
+                block_idx: block_index as u64,
+            };
+            self.data_file_cache
+                .insert_force(key, block)
+                .await
+                .map_err(HummockError::file_cache)?;
+        }
+
+        Ok(())
+    }
 }
 
 pub type SstableStoreRef = Arc<SstableStore>;

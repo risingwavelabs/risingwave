@@ -271,42 +271,29 @@ impl CacheRefillTask {
                 .iter()
                 .any(|id| filter.contains(id))
         {
-            let blocks = holders
-                .iter()
-                .map(|meta| meta.value().block_count() as u64)
-                .sum();
-            GLOBAL_CACHE_REFILL_METRICS
-                .data_refill_filtered_total
-                .inc_by(blocks);
+            GLOBAL_CACHE_REFILL_METRICS.data_refill_filtered_total.inc();
             return;
         }
 
         let mut tasks = vec![];
         for sst_info in &holders {
-            for block_index in 0..sst_info.value().block_count() {
-                let meta = sst_info.value();
-                let mut stat = StoreLocalStatistic::default();
-                let task = async move {
-                    let permit = context.concurrency.acquire().await.unwrap();
-                    match context
-                        .sstable_store
-                        .may_fill_data_file_cache(meta, block_index, &mut stat)
-                        .await
-                    {
-                        Ok(true) => GLOBAL_CACHE_REFILL_METRICS
-                            .data_refill_duration_admitted
-                            .observe(now.elapsed().as_secs_f64()),
-                        Ok(false) => GLOBAL_CACHE_REFILL_METRICS
-                            .data_refill_duration_rejected
-                            .observe(now.elapsed().as_secs_f64()),
-                        Err(e) => {
-                            tracing::warn!("data cache refill error: {:?}", e);
-                        }
+            let task = async move {
+                let permit = context.concurrency.acquire().await.unwrap();
+                match context
+                    .sstable_store
+                    .fill_data_file_cache(sst_info.value())
+                    .await
+                {
+                    Ok(()) => GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_duration_admitted
+                        .observe(now.elapsed().as_secs_f64()),
+                    Err(e) => {
+                        tracing::warn!("data cache refill error: {:?}", e);
                     }
-                    drop(permit);
-                };
-                tasks.push(task);
-            }
+                }
+                drop(permit);
+            };
+            tasks.push(task);
         }
 
         join_all(tasks).await;
