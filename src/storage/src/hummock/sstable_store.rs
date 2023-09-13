@@ -19,6 +19,7 @@ use std::time::Duration;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
+use futures::future::try_join_all;
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
@@ -598,6 +599,7 @@ impl SstableStore {
             .read(&self.get_sst_data_path(object_id), ..)
             .await?;
 
+        let mut tasks = vec![];
         for block_index in 0..sst.block_count() {
             let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
             let bytes = data.slice(range);
@@ -608,11 +610,18 @@ impl SstableStore {
                 sst_id: object_id,
                 block_idx: block_index as u64,
             };
-            self.data_file_cache
-                .insert_force(key, block)
-                .await
-                .map_err(HummockError::file_cache)?;
+
+            let cache = self.data_file_cache.clone();
+            let task = async move {
+                cache
+                    .insert_force(key, block)
+                    .await
+                    .map_err(HummockError::file_cache)
+            };
+            tasks.push(task);
         }
+
+        try_join_all(tasks).await?;
 
         Ok(())
     }
