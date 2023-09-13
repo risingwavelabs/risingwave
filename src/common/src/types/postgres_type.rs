@@ -37,7 +37,7 @@ macro_rules! for_all_base_types {
             { Int32       |   23 |     1007 | int4        | int4in         |      4 }
             { Float32     |  700 |     1021 | float4      | float4in       |      4 }
             { Float64     |  701 |     1022 | float8      | float8in       |      8 }
-            { Varchar     | 1043 |     1015 | varchar     | varchar_in     |     -1 }
+            { Varchar     | 1043 |     1015 | varchar     | varcharin      |     -1 }
             { Date        | 1082 |     1182 | date        | date_in        |      4 }
             { Time        | 1083 |     1183 | time        | time_in        |      8 }
             { Timestamp   | 1114 |     1115 | timestamp   | timestamp_in   |      8 }

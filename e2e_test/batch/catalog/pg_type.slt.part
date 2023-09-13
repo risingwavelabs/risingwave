@@ -6,10 +6,10 @@ SELECT oid, typname, typelem, typnotnull, typtype, typinput FROM pg_catalog.pg_t
 20	int8	0	f	b int8in
 21	int2	0	f	b int2in
 23	int4	0	f	b int4in
-25	text	0	f	b text_in
+25	text	0	f	b textin
 700	float4	0	f	b float4in
 701	float8	0	f	b float8in
-1043	varchar	0	f	b varchar_in
+1043	varchar	0	f	b varcharin
 1082	date	0	f	b date_in
 1083	time	0	f	b time_in
 1114	timestamp	0	f	b timestamp_in
