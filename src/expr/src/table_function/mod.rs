@@ -27,6 +27,7 @@ use super::{ExprError, Result};
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use crate::sig::FuncSigDebug;
 
+mod empty;
 mod generate_series;
 mod generate_subscripts;
 mod jsonb;
@@ -35,6 +36,7 @@ mod repeat;
 mod unnest;
 mod user_defined;
 
+pub use self::empty::*;
 pub use self::repeat::*;
 use self::user_defined::*;
 
