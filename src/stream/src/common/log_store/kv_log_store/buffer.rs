@@ -85,6 +85,7 @@ impl LogStoreBufferInner {
             Some(chunk)
         } else {
             let chunk_id = self.next_chunk_id;
+            self.next_chunk_id += 1;
             self.stream_chunk_count += 1;
             self.unconsumed_queue.push_front((
                 epoch,
