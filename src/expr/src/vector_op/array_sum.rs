@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Add;
-
 use risingwave_common::array::{ArrayError, ListRef};
 use risingwave_common::types::{CheckedAdd, Decimal, Scalar, ScalarImpl, ScalarRefImpl};
 use risingwave_expr_macro::function;
@@ -47,23 +45,27 @@ where
             1 => {
                 let mut sum = 0;
                 for e in list.iter().flatten() {
-                    sum += match e {
-                        ScalarRefImpl::Int16(v) => v as i64,
-                        ScalarRefImpl::Int32(v) => v as i64,
-                        _ => panic!("Expect ScalarRefImpl::Int16 or ScalarRefImpl::Int32"),
-                    }
+                    sum = sum
+                        .checked_add(match e {
+                            ScalarRefImpl::Int16(v) => v as i64,
+                            ScalarRefImpl::Int32(v) => v as i64,
+                            _ => panic!("Expect ScalarRefImpl::Int16 or ScalarRefImpl::Int32"),
+                        })
+                        .ok_or_else(|| ExprError::NumericOutOfRange)?;
                 }
                 Ok(Some(ScalarImpl::from(sum).try_into()?))
             }
             2 => {
                 let mut sum = Decimal::Normalized(0.into());
                 for e in list.iter().flatten() {
-                    sum = sum.add(match e {
-                        ScalarRefImpl::Int64(v) => Decimal::Normalized(v.into()),
-                        ScalarRefImpl::Decimal(v) => v,
-                        // FIXME: We can't panic here due to the macro expansion
-                        _ => Decimal::Normalized(0.into()),
-                    });
+                    sum = sum
+                        .checked_add(match e {
+                            ScalarRefImpl::Int64(v) => Decimal::Normalized(v.into()),
+                            ScalarRefImpl::Decimal(v) => v,
+                            // FIXME: We can't panic here due to the macro expansion
+                            _ => Decimal::Normalized(0.into()),
+                        })
+                        .ok_or_else(|| ExprError::NumericOutOfRange)?;
                 }
                 Ok(Some(ScalarImpl::from(sum).try_into()?))
             }
