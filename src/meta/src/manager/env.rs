@@ -27,7 +27,7 @@ use crate::manager::{
 use crate::model::ClusterId;
 #[cfg(any(test, feature = "test"))]
 use crate::storage::MemStore;
-use crate::storage::{MetaStoreBoxExt, MetaStoreRef};
+use crate::storage::MetaStoreRef;
 use crate::MetaResult;
 
 /// [`MetaSrvEnv`] is the global environment in Meta service. The instance will be shared by all
@@ -312,6 +312,8 @@ impl MetaSrvEnv {
     }
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
+        use crate::storage::MetaStoreBoxExt;
+
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store = MemStore::default().into_ref();
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
