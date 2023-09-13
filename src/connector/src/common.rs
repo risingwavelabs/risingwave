@@ -348,9 +348,9 @@ pub struct NatsCommon {
     pub subject: String,
     #[serde(rename = "nats.connect_mode")]
     pub connect_mode: Option<String>,
-    #[serde(rename = "nats.user")]
+    #[serde(rename = "username")]
     pub user: Option<String>,
-    #[serde(rename = "nats.password")]
+    #[serde(rename = "password")]
     pub password: Option<String>,
     #[serde(rename = "nats.jwt")]
     pub jwt: Option<String>,
@@ -376,7 +376,7 @@ pub struct NatsCommon {
 impl NatsCommon {
     pub(crate) async fn build_client(&self) -> anyhow::Result<async_nats::Client> {
         let mut connect_options = async_nats::ConnectOptions::new();
-        match self.connect_mode.as_ref().map(|v| v.as_str()) {
+        match self.connect_mode.as_deref() {
             Some("user_and_password") => {
                 if let (Some(v_user), Some(v_password)) =
                     (self.user.as_ref(), self.password.as_ref())
@@ -393,7 +393,7 @@ impl NatsCommon {
             Some("credential") => {
                 if let (Some(v_nkey), Some(v_jwt)) = (self.nkey.as_ref(), self.jwt.as_ref()) {
                     connect_options = connect_options
-                        .credentials(&self.create_credential(&v_nkey, &v_jwt).await?)
+                        .credentials(&self.create_credential(v_nkey, v_jwt)?)
                         .expect("failed to parse static creds")
                 } else {
                     return Err(anyhow_error!(
@@ -484,7 +484,7 @@ impl NatsCommon {
         Ok(stream)
     }
 
-    pub(crate) async fn create_credential(&self, seed: &str, jwt: &str) -> anyhow::Result<String> {
+    pub(crate) fn create_credential(&self, seed: &str, jwt: &str) -> anyhow::Result<String> {
         let creds = format!(
             "-----BEGIN NATS USER JWT-----\n{}\n------END NATS USER JWT------\n\n\
                          ************************* IMPORTANT *************************\n\
