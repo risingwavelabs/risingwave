@@ -1,6 +1,6 @@
 CREATE table demo_test(
-    user_id String,
+    user_id Int32,
     target_id String,
     event_timestamp DateTime64,
-)ENGINE = MergeTree
+)ENGINE = ReplacingMergeTree
 PRIMARY KEY (user_id);

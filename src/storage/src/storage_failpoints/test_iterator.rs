@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::ops::Bound::Unbounded;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use crate::hummock::compactor::{SstableStreamIterator, TaskProgress};
 use crate::hummock::iterator::test_utils::{
     gen_iterator_test_sstable_base, iterator_test_bytes_key_of, iterator_test_key_of,
     iterator_test_user_key_of, iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
@@ -24,7 +27,11 @@ use crate::hummock::iterator::{
     UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::test_utils::default_builder_opt_for_test;
+use crate::hummock::test_utils::{
+    default_builder_opt_for_test, default_writer_opt_for_test, gen_test_sstable_data, put_sst,
+    test_key_of, test_value_of,
+};
+use crate::hummock::value::HummockValue;
 use crate::hummock::{BackwardSstableIterator, SstableIterator};
 use crate::monitor::StoreLocalStatistic;
 
@@ -381,4 +388,73 @@ async fn test_failpoints_backward_user_read_err() {
         .unwrap();
     assert!(!ui.is_valid());
     fail::remove(mem_read_err);
+}
+
+#[tokio::test]
+#[cfg(feature = "failpoints")]
+async fn test_failpoints_compactor_iterator_recreate() {
+    let get_stream_err = "get_stream_err";
+    let stream_read_err = "stream_read_err";
+    let create_stream_err = "create_stream_err";
+    let sstable_store = mock_sstable_store();
+    // when upload data is successful, but upload meta is fail and delete is fail
+    let has_create = Arc::new(AtomicBool::new(false));
+    fail::cfg_callback(get_stream_err, move || {
+        if has_create.load(Ordering::Acquire) {
+            fail::remove(stream_read_err);
+            fail::remove(get_stream_err);
+        } else {
+            has_create.store(true, Ordering::Release);
+            fail::cfg(stream_read_err, "return").unwrap();
+        }
+    })
+    .unwrap();
+    let meet_err = Arc::new(AtomicBool::new(false));
+    let other = meet_err.clone();
+    fail::cfg_callback(create_stream_err, move || {
+        other.store(true, Ordering::Release);
+    })
+    .unwrap();
+
+    let table_id = 0;
+    let kv_iter =
+        (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
+    let (data, meta) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter).await;
+    let info = put_sst(
+        table_id,
+        data.clone(),
+        meta.clone(),
+        sstable_store.clone(),
+        default_writer_opt_for_test(),
+    )
+    .await
+    .unwrap();
+
+    let mut stats = StoreLocalStatistic::default();
+
+    let table = sstable_store.sstable(&info, &mut stats).await.unwrap();
+    let mut sstable_iter = SstableStreamIterator::new(
+        table.value().meta.block_metas.clone(),
+        info,
+        HashSet::from_iter(std::iter::once(0)),
+        0,
+        &stats,
+        Arc::new(TaskProgress::default()),
+        sstable_store,
+        100,
+    );
+    let mut cnt = 0;
+    sstable_iter.seek(None).await.unwrap();
+    while sstable_iter.is_valid() {
+        let key = sstable_iter.key();
+        let value = sstable_iter.value();
+        assert_eq!(key, test_key_of(cnt).to_ref());
+        let expected = test_value_of(cnt);
+        let expected_slice = expected.as_slice();
+        assert_eq!(value.into_user_value().unwrap(), expected_slice);
+        cnt += 1;
+        sstable_iter.next().await.unwrap();
+    }
+    assert_eq!(cnt, TEST_KEYS_COUNT);
+    assert!(meet_err.load(Ordering::Acquire));
 }

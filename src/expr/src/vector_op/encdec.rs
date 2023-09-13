@@ -52,7 +52,7 @@ pub fn encode(data: &[u8], format: &str, writer: &mut dyn Write) -> Result<()> {
         _ => {
             return Err(ExprError::InvalidParam {
                 name: "format",
-                reason: format!("unrecognized encoding: \"{}\"", format),
+                reason: format!("unrecognized encoding: \"{}\"", format).into(),
             });
         }
     }
@@ -71,7 +71,7 @@ pub fn decode(data: &str, format: &str) -> Result<Box<[u8]>> {
             .into()),
         _ => Err(ExprError::InvalidParam {
             name: "format",
-            reason: format!("unrecognized encoding: \"{}\"", format),
+            reason: format!("unrecognized encoding: \"{}\"", format).into(),
         }),
     }
 }
@@ -273,11 +273,7 @@ mod tests {
         let cases = [
             (r#"ABCDE"#.as_bytes(), "base64", r#"QUJDREU="#.as_bytes()),
             (r#"\""#.as_bytes(), "escape", r#"\\""#.as_bytes()),
-            (
-                b"\x00\x40\x41\x42\xff",
-                "escape",
-                r#"\000@AB\377"#.as_bytes(),
-            ),
+            (b"\x00\x40\x41\x42\xff", "escape", r"\000@AB\377".as_bytes()),
             (
                 "aaaaaaaaaabbbbbbbbbbccccccccccddddddddddeeeeeeeeeefffffff".as_bytes(),
                 "base64",

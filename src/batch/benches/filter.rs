@@ -46,7 +46,7 @@ fn bench_filter(c: &mut Criterion) {
                 let chunk_num = TOTAL_SIZE / chunk_size;
                 b.to_async(&rt).iter_batched(
                     || create_filter_executor(chunk_size, chunk_num),
-                    |e| execute_executor(e),
+                    execute_executor,
                     BatchSize::SmallInput,
                 );
             },

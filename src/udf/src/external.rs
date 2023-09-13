@@ -22,6 +22,8 @@ use arrow_schema::Schema;
 use futures_util::{stream, Stream, StreamExt, TryStreamExt};
 use tonic::transport::Channel;
 
+use crate::{Error, Result};
+
 /// Client for external function service based on Arrow Flight.
 #[derive(Debug)]
 pub struct ArrowFlightUdfClient {
@@ -47,24 +49,31 @@ impl ArrowFlightUdfClient {
         let input_num = info.total_records as usize;
         let full_schema = Schema::try_from(info)
             .map_err(|e| FlightError::DecodeError(format!("Error decoding schema: {e}")))?;
+        if input_num > full_schema.fields.len() {
+            return Err(Error::ServiceError(format!(
+                "function {:?} schema info not consistency: input_num: {}, total_fields: {}",
+                id,
+                input_num,
+                full_schema.fields.len()
+            )));
+        }
+
         let (input_fields, return_fields) = full_schema.fields.split_at(input_num);
         let actual_input_types: Vec<_> = input_fields.iter().map(|f| f.data_type()).collect();
         let actual_result_types: Vec<_> = return_fields.iter().map(|f| f.data_type()).collect();
         let expect_input_types: Vec<_> = args.fields.iter().map(|f| f.data_type()).collect();
         let expect_result_types: Vec<_> = returns.fields.iter().map(|f| f.data_type()).collect();
         if !data_types_match(&expect_input_types, &actual_input_types) {
-            return Err(Error::ArgumentMismatch {
-                function_id: id.into(),
-                expected: format!("{:?}", expect_input_types),
-                actual: format!("{:?}", actual_input_types),
-            });
+            return Err(Error::TypeMismatch(format!(
+                "function: {:?}, expect arguments: {:?}, actual: {:?}",
+                id, expect_input_types, actual_input_types
+            )));
         }
         if !data_types_match(&expect_result_types, &actual_result_types) {
-            return Err(Error::ReturnTypeMismatch {
-                function_id: id.into(),
-                expected: format!("{:?}", expect_result_types),
-                actual: format!("{:?}", actual_result_types),
-            });
+            return Err(Error::TypeMismatch(format!(
+                "function: {:?}, expect return: {:?}, actual: {:?}",
+                id, expect_result_types, actual_result_types
+            )));
         }
         Ok(())
     }
@@ -147,38 +156,6 @@ impl ArrowFlightUdfClient {
         panic!("UDF is not supported in simulation yet");
         Ok(stream::empty())
     }
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("failed to connect to UDF service: {0}")]
-    Connect(#[from] tonic::transport::Error),
-    #[error("failed to check UDF: {0}")]
-    Tonic(#[from] tonic::Status),
-    #[error("failed to call UDF: {0}")]
-    Flight(#[from] FlightError),
-    #[error("argument mismatch: function {function_id:?}, expected {expected}, actual {actual}")]
-    ArgumentMismatch {
-        function_id: String,
-        expected: String,
-        actual: String,
-    },
-    #[error(
-        "return type mismatch: function {function_id:?}, expected {expected}, actual {actual}"
-    )]
-    ReturnTypeMismatch {
-        function_id: String,
-        expected: String,
-        actual: String,
-    },
-    #[error("arrow error: {0}")]
-    Arrow(#[from] arrow_schema::ArrowError),
-    #[error("UDF unsupported: {0}")]
-    Unsupported(String),
-    #[error("UDF service returned no data")]
-    NoReturned,
 }
 
 /// Check if two list of data types match, ignoring field names.

@@ -183,7 +183,15 @@ impl DispatchExecutorInner {
                     self.add_dispatchers(new_dispatchers)?;
                 }
             }
-            Mutation::Update { dispatchers, .. } => {
+            Mutation::Update {
+                dispatchers,
+                actor_new_dispatchers: actor_dispatchers,
+                ..
+            } => {
+                if let Some(new_dispatchers) = actor_dispatchers.get(&self.actor_id) {
+                    self.add_dispatchers(new_dispatchers)?;
+                }
+
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
                         self.pre_update_dispatcher(update)?;
@@ -211,10 +219,20 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-            Mutation::Update { dispatchers, .. } => {
+            Mutation::Update {
+                dispatchers,
+                dropped_actors,
+                ..
+            } => {
                 if let Some(updates) = dispatchers.get(&self.actor_id) {
                     for update in updates {
                         self.post_update_dispatcher(update)?;
+                    }
+                }
+
+                if !dropped_actors.contains(&self.actor_id) {
+                    for dispatcher in &mut self.dispatchers {
+                        dispatcher.remove_outputs(dropped_actors);
                     }
                 }
             }
@@ -479,7 +497,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
-            let chunk = chunk.reorder_columns(&self.output_indices);
+            let chunk = chunk.project(&self.output_indices);
             self.outputs[self.cur].send(Message::Chunk(chunk)).await?;
             self.cur += 1;
             self.cur %= self.outputs.len();
@@ -510,12 +528,12 @@ impl Dispatcher for RoundRobinDataDispatcher {
     }
 
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs.extend(outputs.into_iter());
+        self.outputs.extend(outputs);
     }
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|output| actor_ids.contains(&output.actor_id()))
+            .extract_if(|output| actor_ids.contains(&output.actor_id()))
             .count();
         self.cur = self.cur.min(self.outputs.len() - 1);
     }
@@ -571,7 +589,7 @@ impl Dispatcher for HashDataDispatcher {
     define_dispatcher_associated_types!();
 
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs.extend(outputs.into_iter());
+        self.outputs.extend(outputs);
     }
 
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_> {
@@ -606,7 +624,7 @@ impl Dispatcher for HashDataDispatcher {
             // get hash value of every line by its key
             let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys);
 
-            tracing::trace!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty_string(), self.keys, vnodes);
+            tracing::trace!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty(), self.keys, vnodes);
 
             let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
                 .take(num_outputs)
@@ -615,11 +633,14 @@ impl Dispatcher for HashDataDispatcher {
             let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
             // Apply output indices after calculating the vnode.
-            let chunk = chunk.reorder_columns(&self.output_indices);
-            // TODO: refactor with `Vis`.
-            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk = chunk.project(&self.output_indices);
 
-            let mut build_op_vis = |vnode: VirtualNode, op: Op, visible: bool| {
+            for ((vnode, &op), visible) in vnodes
+                .iter()
+                .copied()
+                .zip_eq_fast(chunk.ops())
+                .zip_eq_fast(chunk.vis().iter())
+            {
                 // Build visibility map for every output chunk.
                 for (output, vis_map) in self.outputs.iter().zip_eq_fast(vis_maps.iter_mut()) {
                     vis_map.append(
@@ -629,7 +650,7 @@ impl Dispatcher for HashDataDispatcher {
 
                 if !visible {
                     new_ops.push(op);
-                    return;
+                    continue;
                 }
 
                 // The 'update' message, noted by an `UpdateDelete` and a successive `UpdateInsert`,
@@ -648,28 +669,6 @@ impl Dispatcher for HashDataDispatcher {
                 } else {
                     new_ops.push(op);
                 }
-            };
-
-            match visibility {
-                None => {
-                    vnodes
-                        .iter()
-                        .copied()
-                        .zip_eq_fast(ops)
-                        .for_each(|(vnode, op)| {
-                            build_op_vis(vnode, op, true);
-                        });
-                }
-                Some(visibility) => {
-                    vnodes
-                        .iter()
-                        .copied()
-                        .zip_eq_fast(ops)
-                        .zip_eq_fast(visibility.iter())
-                        .for_each(|((vnode, op), visible)| {
-                            build_op_vis(vnode, op, visible);
-                        });
-                }
             }
 
             let ops = new_ops;
@@ -679,7 +678,7 @@ impl Dispatcher for HashDataDispatcher {
                 let vis_map = vis_map.finish();
                 // columns is not changed in this function
                 let new_stream_chunk =
-                    StreamChunk::new(ops.clone(), columns.clone(), Some(vis_map));
+                    StreamChunk::new(ops.clone(), chunk.columns().into(), Some(vis_map));
                 if new_stream_chunk.cardinality() > 0 {
                     event!(
                         tracing::Level::TRACE,
@@ -697,7 +696,7 @@ impl Dispatcher for HashDataDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|output| actor_ids.contains(&output.actor_id()))
+            .extract_if(|output| actor_ids.contains(&output.actor_id()))
             .count();
     }
 
@@ -745,7 +744,7 @@ impl Dispatcher for BroadcastDispatcher {
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
-            let chunk = chunk.reorder_columns(&self.output_indices);
+            let chunk = chunk.project(&self.output_indices);
             for output in self.outputs.values_mut() {
                 output.send(Message::Chunk(chunk.clone())).await?;
             }
@@ -780,7 +779,7 @@ impl Dispatcher for BroadcastDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|actor_id, _| actor_ids.contains(actor_id))
+            .extract_if(|actor_id, _| actor_ids.contains(actor_id))
             .count();
     }
 
@@ -839,7 +838,7 @@ impl Dispatcher for SimpleDispatcher {
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_> {
         async move {
             // Only barrier is allowed to be dispatched to multiple outputs during migration.
-            for output in self.output.iter_mut() {
+            for output in &mut self.output {
                 output.send(Message::Barrier(barrier.clone())).await?;
             }
             Ok(())
@@ -854,7 +853,7 @@ impl Dispatcher for SimpleDispatcher {
                 .exactly_one()
                 .expect("expect exactly one output");
 
-            let chunk = chunk.reorder_columns(&self.output_indices);
+            let chunk = chunk.project(&self.output_indices);
             output.send(Message::Chunk(chunk)).await
         }
     }
@@ -1102,6 +1101,7 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
+            actor_new_dispatchers: Default::default(),
         });
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1153,6 +1153,7 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
+            actor_new_dispatchers: Default::default(),
         });
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1221,7 +1222,7 @@ mod tests {
             let hash_builder = Crc32FastBuilder;
             let mut hasher = hash_builder.build_hasher();
             let one_row = (0..dimension).map(|_| start.next().unwrap()).collect_vec();
-            for key_idx in key_indices.iter() {
+            for key_idx in key_indices {
                 let val = one_row[*key_idx];
                 let bytes = val.to_le_bytes();
                 hasher.update(&bytes);

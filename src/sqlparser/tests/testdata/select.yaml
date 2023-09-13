@@ -71,9 +71,9 @@
     sql parser error: Expected ), found: minutes at line:1, column:62
     Near "(t, x, interval '10'"
 - input: SELECT 1, FROM t
-  error_msg: 'sql parser error: syntax error at or near "FROM"'
+  error_msg: 'sql parser error: syntax error at or near FROM at line:1, column:15'
 - input: SELECT 1, WHERE true
-  error_msg: 'sql parser error: syntax error at or near "WHERE"'
+  error_msg: 'sql parser error: syntax error at or near WHERE at line:1, column:16'
 - input: SELECT timestamp with time zone '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_sql: SELECT TIMESTAMP WITH TIME ZONE '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(AtTimeZone { timestamp: TypedString { data_type: Timestamp(true), value: "2022-10-01 12:00:00Z" }, time_zone: "US/Pacific" })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
@@ -105,3 +105,30 @@
   formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Function(Function { name: ObjectName([Ident { value: "percentile_cont", quote_style: None }]), args: [Unnamed(Expr(Value(Number("0.3"))))], over: None, distinct: false, order_by: [], filter: None, within_group: Some(OrderByExpr { expr: Identifier(Ident { value: "x", quote_style: None }), asc: Some(false), nulls_first: None }) }))], from: [TableWithJoins { relation: TableFunction { name: ObjectName([Ident { value: "unnest", quote_style: None }]), alias: Some(TableAlias { name: Ident { value: "x", quote_style: None }, columns: [] }), args: [Unnamed(Expr(Array(Array { elem: [Value(Number("1")), Value(Number("2")), Value(Number("4")), Value(Number("5")), Value(Number("10"))], named: true })))] }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
 - input: select percentile_cont(0.3) within group (order by x, y desc) from t
   error_msg: 'sql parser error: only one arg in order by is expected here'
+- input: select 'apple' ~~ 'app%'
+  formatted_sql: SELECT 'apple' LIKE 'app%'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: Like, right: Value(SingleQuotedString("app%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select 'apple' ~~* 'App%'
+  formatted_sql: SELECT 'apple' ILIKE 'App%'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: ILike, right: Value(SingleQuotedString("App%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select 'apple' !~~ 'app%'
+  formatted_sql: SELECT 'apple' NOT LIKE 'app%'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: NotLike, right: Value(SingleQuotedString("app%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select 'apple' !~~* 'app%'
+  formatted_sql: SELECT 'apple' NOT ILIKE 'app%'
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(SingleQuotedString("apple")), op: NotILike, right: Value(SingleQuotedString("app%")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS JSON;
+  formatted_sql: SELECT '123' IS JSON
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: false, item_type: Value, unique_keys: false })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS JSON VALUE WITHOUT UNIQUE KEYS;
+  formatted_sql: SELECT '123' IS JSON
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: false, item_type: Value, unique_keys: false })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS NOT JSON ARRAY WITH UNIQUE KEYS;
+  formatted_sql: SELECT '123' IS NOT JSON ARRAY WITH UNIQUE KEYS
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: true, item_type: Array, unique_keys: true })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS NOT JSON OBJECT WITH UNIQUE;
+  formatted_sql: SELECT '123' IS NOT JSON OBJECT WITH UNIQUE KEYS
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: true, item_type: Object, unique_keys: true })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'
+- input: select '123' IS NOT JSON SCALAR WITHOUT UNIQUE;
+  formatted_sql: SELECT '123' IS NOT JSON SCALAR
+  formatted_ast: 'Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(IsJson { expr: Value(SingleQuotedString("123")), negated: true, item_type: Scalar, unique_keys: false })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })'

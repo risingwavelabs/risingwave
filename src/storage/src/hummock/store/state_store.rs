@@ -19,7 +19,6 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use parking_lot::RwLock;
-use prometheus::IntGauge;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -39,7 +38,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::utils::{
     cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
-    do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
+    do_update_sanity_check, filter_with_delete_range, wait_for_epoch, ENABLE_SANITY_CHECK,
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{MemoryLimiter, SstableIterator};
@@ -86,9 +85,7 @@ pub struct LocalHummockStorage {
 
     write_limiter: WriteLimiterRef,
 
-    mem_table_size: IntGauge,
-
-    mem_table_item_count: IntGauge,
+    version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 }
 
 impl LocalHummockStorage {
@@ -118,6 +115,10 @@ impl LocalHummockStorage {
         self.hummock_version_reader
             .get(table_key, epoch, read_options, read_snapshot)
             .await
+    }
+
+    pub async fn wait_for_epoch(&self, wait_epoch: u64) -> StorageResult<()> {
+        wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
     }
 
     pub async fn iter_inner(
@@ -238,26 +239,14 @@ impl LocalStateStore for LocalHummockStorage {
 
     fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
         match old_val {
-            None => {
-                self.mem_table.insert(key, new_val)?;
-            }
-            Some(old_val) => {
-                self.mem_table.update(key, old_val, new_val)?;
-            }
+            None => self.mem_table.insert(key, new_val)?,
+            Some(old_val) => self.mem_table.update(key, old_val, new_val)?,
         };
-        self.mem_table_size
-            .set(self.mem_table.kv_size.size() as i64);
-        self.mem_table_item_count
-            .set(self.mem_table.buffer.len() as i64);
         Ok(())
     }
 
     fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
         self.mem_table.delete(key, old_val)?;
-        self.mem_table_size
-            .set(self.mem_table.kv_size.size() as i64);
-        self.mem_table_item_count
-            .set(self.mem_table.buffer.len() as i64);
         Ok(())
     }
 
@@ -265,8 +254,6 @@ impl LocalStateStore for LocalHummockStorage {
         &mut self,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
     ) -> StorageResult<usize> {
-        self.mem_table_size.set(0);
-        self.mem_table_item_count.set(0);
         debug_assert!(delete_ranges
             .iter()
             .map(|(key, _)| key)
@@ -342,12 +329,17 @@ impl LocalStateStore for LocalHummockStorage {
         self.mem_table.is_dirty()
     }
 
-    fn init(&mut self, epoch: u64) {
+    async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+        let epoch = options.epoch;
+        if self.is_replicated {
+            self.wait_for_epoch(epoch.prev).await?;
+        }
         assert!(
-            self.epoch.replace(epoch).is_none(),
+            self.epoch.replace(epoch.curr).is_none(),
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
+        Ok(())
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -372,10 +364,6 @@ impl LocalHummockStorage {
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
-        if kv_pairs.is_empty() && delete_ranges.is_empty() {
-            return Ok(0);
-        }
-
         let epoch = write_options.epoch;
         let table_id = write_options.table_id;
 
@@ -390,52 +378,58 @@ impl LocalHummockStorage {
             .with_label_values(&[table_id_label.as_str()])
             .start_timer();
 
-        let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
-        let size = SharedBufferBatch::measure_batch_size(&sorted_items);
-        self.write_limiter.wait_permission(self.table_id).await;
-        let limiter = self.memory_limiter.as_ref();
-        let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
-            tracker
+        let imm_size = if !kv_pairs.is_empty() || !delete_ranges.is_empty() {
+            let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
+            let size = SharedBufferBatch::measure_batch_size(&sorted_items)
+                + SharedBufferBatch::measure_delete_range_size(&delete_ranges);
+            self.write_limiter.wait_permission(self.table_id).await;
+            let limiter = self.memory_limiter.as_ref();
+            let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
+                tracker
+            } else {
+                warn!(
+                    "blocked at requiring memory: {}, current {}",
+                    size,
+                    limiter.get_memory_usage()
+                );
+                self.event_sender
+                    .send(HummockEvent::BufferMayFlush)
+                    .expect("should be able to send");
+                let tracker = limiter
+                    .require_memory(size as u64)
+                    .verbose_instrument_await("hummock_require_memory")
+                    .await;
+                warn!(
+                    "successfully requiring memory: {}, current {}",
+                    size,
+                    limiter.get_memory_usage()
+                );
+                tracker
+            };
+
+            let instance_id = self.instance_guard.instance_id;
+            let imm = SharedBufferBatch::build_shared_buffer_batch(
+                epoch,
+                sorted_items,
+                size,
+                delete_ranges,
+                table_id,
+                Some(instance_id),
+                Some(tracker),
+            );
+            let imm_size = imm.size();
+            self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
+
+            // insert imm to uploader
+            if !self.is_replicated {
+                self.event_sender
+                    .send(HummockEvent::ImmToUploader(imm))
+                    .unwrap();
+            }
+            imm_size
         } else {
-            warn!(
-                "blocked at requiring memory: {}, current {}",
-                size,
-                limiter.get_memory_usage()
-            );
-            self.event_sender
-                .send(HummockEvent::BufferMayFlush)
-                .expect("should be able to send");
-            let tracker = limiter
-                .require_memory(size as u64)
-                .verbose_instrument_await("hummock_require_memory")
-                .await;
-            warn!(
-                "successfully requiring memory: {}, current {}",
-                size,
-                limiter.get_memory_usage()
-            );
-            tracker
+            0
         };
-
-        let instance_id = self.instance_guard.instance_id;
-        let imm = SharedBufferBatch::build_shared_buffer_batch(
-            epoch,
-            sorted_items,
-            size,
-            delete_ranges,
-            table_id,
-            Some(instance_id),
-            Some(tracker),
-        );
-        let imm_size = imm.size();
-        self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
-
-        // insert imm to uploader
-        if !self.is_replicated {
-            self.event_sender
-                .send(HummockEvent::ImmToUploader(imm))
-                .unwrap();
-        }
 
         timer.observe_duration();
 
@@ -457,16 +451,9 @@ impl LocalHummockStorage {
         memory_limiter: Arc<MemoryLimiter>,
         write_limiter: WriteLimiterRef,
         option: NewLocalOptions,
+        version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
-        let mem_table_size = stats.mem_table_memory_size.with_label_values(&[
-            &option.table_id.to_string(),
-            &instance_guard.instance_id.to_string(),
-        ]);
-        let mem_table_item_count = stats.mem_table_item_count.with_label_values(&[
-            &option.table_id.to_string(),
-            &instance_guard.instance_id.to_string(),
-        ]);
         Self {
             mem_table: MemTable::new(option.is_consistent_op),
             epoch: None,
@@ -481,8 +468,7 @@ impl LocalHummockStorage {
             hummock_version_reader,
             stats,
             write_limiter,
-            mem_table_size,
-            mem_table_item_count,
+            version_update_notifier_tx,
         }
     }
 

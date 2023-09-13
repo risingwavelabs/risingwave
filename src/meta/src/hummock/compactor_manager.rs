@@ -18,7 +18,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use fail::fail_point;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::compact::estimate_state_for_compaction;
+use risingwave_hummock_sdk::compact::statistics_compact_task;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
@@ -29,7 +29,6 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
@@ -72,7 +71,13 @@ impl Compactor {
         .into()));
 
         self.sender
-            .send(Ok(SubscribeCompactionEventResponse { event: Some(event) }))
+            .send(Ok(SubscribeCompactionEventResponse {
+                event: Some(event),
+                create_at: SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("Clock may have gone backwards")
+                    .as_millis() as u64,
+            }))
             .map_err(|e| anyhow::anyhow!(e))?;
 
         Ok(())
@@ -85,6 +90,10 @@ impl Compactor {
                     context_id: self.context_id,
                     task_id,
                 })),
+                create_at: SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("Clock may have gone backwards")
+                    .as_millis() as u64,
             }))
             .map_err(|e| anyhow::anyhow!(e))?;
         Ok(())
@@ -115,7 +124,7 @@ pub struct CompactorManagerInner {
 }
 
 impl CompactorManagerInner {
-    pub async fn with_meta<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+    pub async fn with_meta(env: MetaSrvEnv) -> MetaResult<Self> {
         // Retrieve the existing task assignments from metastore.
         let task_assignment = CompactTaskAssignment::list(env.meta_store()).await?;
         let mut manager = Self {
@@ -247,36 +256,31 @@ impl CompactorManagerInner {
             num_pending_write_io,
         } in task_heartbeats.values()
         {
-            let task_duration_too_long = create_time.elapsed().as_secs() > MAX_TASK_DURATION_SEC;
-            if *expire_at < now || task_duration_too_long {
-                // 1. task heartbeat expire
-                // 2. task duration is too long
+            if *expire_at < now {
+                // task heartbeat expire
                 cancellable_tasks.push(task.clone());
-
-                if task_duration_too_long {
-                    let (need_quota, total_file_count, total_key_count) =
-                        estimate_state_for_compaction(task);
-                    tracing::info!(
-                                "CompactionGroupId {} Task {} duration too long create_time {:?} num_ssts_sealed {} num_ssts_uploaded {} num_progress_key {} \
-                                pending_read_io_count {} pending_write_io_count {} need_quota {} total_file_count {} total_key_count {} target_level {} \
-                                base_level {} target_sub_level_id {} task_type {}",
-                                task.compaction_group_id,
-                                task.task_id,
-                                create_time,
-                                num_ssts_sealed,
-                                num_ssts_uploaded,
-                                num_progress_key,
-                                num_pending_read_io,
-                                num_pending_write_io,
-                                need_quota,
-                                total_file_count,
-                                total_key_count,
-                                task.target_level,
-                                task.base_level,
-                                task.target_sub_level_id,
-                                task.task_type,
-                            );
-                }
+            }
+            let task_duration_too_long = create_time.elapsed().as_secs() > MAX_TASK_DURATION_SEC;
+            if task_duration_too_long {
+                let compact_task_statistics = statistics_compact_task(task);
+                tracing::info!(
+                    "CompactionGroupId {} Task {} duration too long create_time {:?} num_ssts_sealed {} num_ssts_uploaded {} num_progress_key {} \
+                        pending_read_io_count {} pending_write_io_count {} target_level {} \
+                        base_level {} target_sub_level_id {} task_type {} compact_task_statistics {:?}",
+                        task.compaction_group_id,
+                        task.task_id,
+                        create_time,
+                        num_ssts_sealed,
+                        num_ssts_uploaded,
+                        num_progress_key,
+                        num_pending_read_io,
+                        num_pending_write_io,
+                        task.target_level,
+                        task.base_level,
+                        task.target_sub_level_id,
+                        task.task_type,
+                        compact_task_statistics
+                );
             }
         }
         cancellable_tasks
@@ -365,7 +369,7 @@ pub struct CompactorManager {
 }
 
 impl CompactorManager {
-    pub async fn with_meta<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+    pub async fn with_meta(env: MetaSrvEnv) -> MetaResult<Self> {
         let inner = CompactorManagerInner::with_meta(env).await?;
 
         Ok(Self {

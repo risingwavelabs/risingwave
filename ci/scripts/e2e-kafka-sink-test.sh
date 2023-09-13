@@ -3,6 +3,10 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-append-only --create > /dev/null 2>&1
+./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert --create > /dev/null 2>&1
+./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-debezium --create > /dev/null 2>&1
+
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/create_sink.slt'
 sleep 2
 

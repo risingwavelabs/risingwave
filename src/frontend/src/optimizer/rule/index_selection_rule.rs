@@ -226,6 +226,7 @@ impl IndexSelectionRule {
             vec![],
             logical_scan.ctx(),
             false,
+            index.index_table.cardinality,
         );
 
         let primary_table_scan = LogicalScan::create(
@@ -235,6 +236,7 @@ impl IndexSelectionRule {
             vec![],
             logical_scan.ctx(),
             false,
+            index.primary_table.cardinality,
         );
 
         let conjunctions = index
@@ -253,7 +255,7 @@ impl IndexSelectionRule {
                         .clone(),
                 )
             })
-            .chain(new_predicate.into_iter())
+            .chain(new_predicate)
             .collect_vec();
         let on = Condition { conjunctions };
         let join: PlanRef = LogicalJoin::new(
@@ -334,6 +336,7 @@ impl IndexSelectionRule {
             vec![],
             logical_scan.ctx(),
             false,
+            logical_scan.table_cardinality(),
         );
 
         let conjunctions = primary_table_desc
@@ -348,7 +351,7 @@ impl IndexSelectionRule {
                     primary_table_desc.columns[y.column_index].data_type.clone(),
                 )
             })
-            .chain(new_predicate.into_iter())
+            .chain(new_predicate)
             .collect_vec();
 
         let on = Condition { conjunctions };
@@ -569,6 +572,7 @@ impl IndexSelectionRule {
                 conjunctions: conjunctions.to_vec(),
             },
             false,
+            logical_scan.table_cardinality(),
         );
 
         result.push(primary_access.into());
@@ -609,6 +613,7 @@ impl IndexSelectionRule {
                 ctx,
                 new_predicate,
                 false,
+                index.index_table.cardinality,
             )
             .into(),
         )

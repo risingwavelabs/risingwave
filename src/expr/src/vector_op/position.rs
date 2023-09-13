@@ -45,7 +45,7 @@ use risingwave_expr_macro::function;
 /// ----
 /// 4
 /// ```
-#[function("strpos(varchar, varchar) -> int32")] // backward compatibility with old proto
+#[function("strpos(varchar, varchar) -> int32", deprecated)]
 #[function("position(varchar, varchar) -> int32")]
 pub fn position(str: &str, sub_str: &str) -> i32 {
     match str.find(sub_str) {

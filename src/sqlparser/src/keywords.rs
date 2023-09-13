@@ -108,6 +108,7 @@ define_keywords!(
     CACHE,
     CALL,
     CALLED,
+    CANCEL,
     CARDINALITY,
     CASCADE,
     CASCADED,
@@ -276,8 +277,11 @@ define_keywords!(
     IS,
     ISNULL,
     ISOLATION,
+    JOBS,
     JOIN,
+    JSON,
     KEY,
+    KEYS,
     LANGUAGE,
     LARGE,
     LAST,
@@ -342,6 +346,7 @@ define_keywords!(
     ON,
     ONLY,
     OPEN,
+    OPERATOR,
     OPTION,
     OR,
     ORDER,
@@ -419,6 +424,7 @@ define_keywords!(
     ROWS,
     ROW_NUMBER,
     SAVEPOINT,
+    SCALAR,
     SCHEMA,
     SCHEMAS,
     SCOPE,
@@ -586,6 +592,7 @@ pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
     Keyword::OUTER,
     Keyword::SET,
     Keyword::RETURNING,
+    Keyword::EMIT,
 ];
 
 /// Can't be used as a column alias, so that `SELECT <expr> alias`

@@ -7,6 +7,7 @@ set -eo pipefail
 
 function stop_cluster() {
   cargo make --allow-private k 1>/dev/null 2>&1 || true
+  cargo make --allow-private wait-processes-exit 1>/dev/null 2>&1 || true
 }
 
 function clean_all_data {

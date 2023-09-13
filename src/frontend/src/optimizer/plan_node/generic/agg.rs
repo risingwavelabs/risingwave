@@ -52,6 +52,7 @@ pub struct Agg<PlanRef> {
     pub group_key: IndexSet,
     pub grouping_sets: Vec<IndexSet>,
     pub input: PlanRef,
+    pub enable_two_phase: bool,
 }
 
 impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
@@ -89,7 +90,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     fn two_phase_agg_enabled(&self) -> bool {
-        self.ctx().session_ctx().config().get_enable_two_phase_agg()
+        self.enable_two_phase
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
@@ -136,26 +137,28 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: IndexSet, input: PlanRef) -> Self {
+        let enable_two_phase = input
+            .ctx()
+            .session_ctx()
+            .config()
+            .get_enable_two_phase_agg();
         Self {
             agg_calls,
             group_key,
             input,
             grouping_sets: vec![],
+            enable_two_phase,
         }
     }
 
-    pub fn new_with_grouping_sets(
-        agg_calls: Vec<PlanAggCall>,
-        group_key: IndexSet,
-        grouping_sets: Vec<IndexSet>,
-        input: PlanRef,
-    ) -> Self {
-        Self {
-            agg_calls,
-            group_key,
-            grouping_sets,
-            input,
-        }
+    pub fn with_grouping_sets(mut self, grouping_sets: Vec<IndexSet>) -> Self {
+        self.grouping_sets = grouping_sets;
+        self
+    }
+
+    pub fn with_enable_two_phase(mut self, enable_two_phase: bool) -> Self {
+        self.enable_two_phase = enable_two_phase;
+        self
     }
 }
 
@@ -215,8 +218,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
 }
 
 pub enum AggCallState {
-    ResultValue,
-    Table(Box<TableState>),
+    Value,
     MaterializedInput(Box<MaterializedInputState>),
 }
 
@@ -224,17 +226,8 @@ impl AggCallState {
     pub fn into_prost(self, state: &mut BuildFragmentGraphState) -> AggCallStatePb {
         AggCallStatePb {
             inner: Some(match self {
-                AggCallState::ResultValue => {
-                    agg_call_state::Inner::ResultValueState(agg_call_state::ResultValueState {})
-                }
-                AggCallState::Table(s) => {
-                    agg_call_state::Inner::TableState(agg_call_state::TableState {
-                        table: Some(
-                            s.table
-                                .with_id(state.gen_table_id_wrapped())
-                                .to_internal_table_prost(),
-                        ),
-                    })
+                AggCallState::Value => {
+                    agg_call_state::Inner::ValueState(agg_call_state::ValueState {})
                 }
                 AggCallState::MaterializedInput(s) => {
                     agg_call_state::Inner::MaterializedInputState(
@@ -260,10 +253,6 @@ impl AggCallState {
             }),
         }
     }
-}
-
-pub struct TableState {
-    pub table: TableCatalog,
 }
 
 pub struct MaterializedInputState {
@@ -410,33 +399,13 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             }
         };
 
-        let gen_table_state = |fields: Vec<Field>| -> TableState {
-            let (mut table_builder, included_upstream_indices, _) =
-                self.create_table_builder(me.ctx(), window_col_idx);
-            let read_prefix_len_hint = table_builder.get_current_pk_len();
-
-            fields.iter().for_each(|field| {
-                table_builder.add_column(field);
-            });
-
-            let mapping =
-                ColIndexMapping::with_included_columns(&included_upstream_indices, in_fields.len());
-            let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
-            if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
-                table_builder.set_vnode_col_idx(tb_vnode_idx);
-            }
-            TableState {
-                table: table_builder.build(tb_dist.unwrap_or_default(), read_prefix_len_hint),
-            }
-        };
-
         self.agg_calls
             .iter()
             .map(|agg_call| match agg_call.agg_kind {
                 agg_kinds::single_value_state_iff_in_append_only!() if in_append_only => {
-                    AggCallState::ResultValue
+                    AggCallState::Value
                 }
-                agg_kinds::single_value_state!() => AggCallState::ResultValue,
+                agg_kinds::single_value_state!() => AggCallState::Value,
                 AggKind::Min
                 | AggKind::Max
                 | AggKind::FirstValue
@@ -490,22 +459,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     };
                     let state = gen_materialized_input_state(sort_keys, include_keys);
                     AggCallState::MaterializedInput(Box::new(state))
-                }
-                AggKind::ApproxCountDistinct => {
-                    // NOTE(rc): This is quite confusing, in that the append-only version has table
-                    // state while updatable version has value state. The latter one may be
-                    // incorrect.
-                    if in_append_only {
-                        let state = gen_table_state(vec![Field {
-                            data_type: DataType::List(Box::new(DataType::Int64)),
-                            name: String::from("registers"),
-                            sub_fields: vec![],
-                            type_name: String::default(),
-                        }]);
-                        AggCallState::Table(Box::new(state))
-                    } else {
-                        AggCallState::ResultValue
-                    }
                 }
                 agg_kinds::rewritten!() => {
                     unreachable!("should have been rewritten")
@@ -601,12 +554,13 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .collect()
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef) {
+    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef, bool) {
         (
             self.agg_calls,
             self.group_key,
             self.grouping_sets,
             self.input,
+            self.enable_two_phase,
         )
     }
 
@@ -638,8 +592,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 
 impl_distill_unit_from_fields!(Agg, stream::StreamPlanRef);
 
-/// Rewritten version of [`AggCall`] which uses `InputRef` instead of `ExprImpl`.
-/// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
+/// Rewritten version of [`crate::expr::AggCall`] which uses `InputRef` instead of `ExprImpl`.
+/// Refer to [`crate::optimizer::plan_node::logical_agg::LogicalAggBuilder::try_rewrite_agg_call`]
+/// for more details.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PlanAggCall {
     /// Kind of aggregation function

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
-
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
@@ -50,10 +48,13 @@ pub enum ExprError {
     DivisionByZero,
 
     #[error("Parse error: {0}")]
-    Parse(Cow<'static, str>),
+    Parse(Box<str>),
 
     #[error("Invalid parameter {name}: {reason}")]
-    InvalidParam { name: &'static str, reason: String },
+    InvalidParam {
+        name: &'static str,
+        reason: Box<str>,
+    },
 
     #[error("Array error: {0}")]
     Array(#[from] ArrayError),
@@ -77,6 +78,8 @@ pub enum ExprError {
     FieldNameNull,
 }
 
+static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
+
 impl From<ExprError> for RwError {
     fn from(s: ExprError) -> Self {
         ErrorCode::ExprError(Box::new(s)).into()
@@ -87,7 +90,7 @@ impl From<regex::Error> for ExprError {
     fn from(re: regex::Error) -> Self {
         Self::InvalidParam {
             name: "pattern",
-            reason: re.to_string(),
+            reason: re.to_string().into(),
         }
     }
 }

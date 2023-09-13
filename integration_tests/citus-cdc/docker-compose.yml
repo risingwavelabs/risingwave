@@ -1,0 +1,118 @@
+---
+version: "3"
+services:
+  compactor-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compactor-0
+  compute-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compute-node-0
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  frontend-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: frontend-node-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  meta-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: meta-node-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+  connector-node:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: connector-node
+  citus-master:
+    container_name: citus-master
+    image: "citusdata/citus:10.2.5"
+    ports: ["6666:5432"]
+    labels: ["com.citusdata.role=Master"]
+    environment: &CITUS_ENV
+      POSTGRES_USER: "myuser"
+      POSTGRES_PASSWORD: "123456"
+      PGUSER: "myuser"
+      PGPASSWORD: "123456"
+      POSTGRES_HOST_AUTH_METHOD: "trust"
+      POSTGRES_DB: "mydb"
+      CITUS_HOST: "citus-master"
+  citus-worker-1:
+    container_name: citus-worker-1
+    ports: ["6667:5432"]
+    image: "citusdata/citus:10.2.5"
+    labels: ["com.citusdata.role=Worker"]
+    depends_on: [citus-manager]
+    environment: *CITUS_ENV
+    command: ["/worker-wait-for-manager.sh", "-c", "wal_level=logical"]
+    volumes:
+      - healthcheck-volume:/healthcheck
+      - ./worker-wait-for-manager.sh:/worker-wait-for-manager.sh
+  citus-worker-2:
+    container_name: citus-worker-2
+    ports: ["6668:5432"]
+    image: "citusdata/citus:10.2.5"
+    labels: ["com.citusdata.role=Worker"]
+    depends_on: [citus-manager]
+    environment: *CITUS_ENV
+    command: ["/worker-wait-for-manager.sh", "-c", "wal_level=logical"]
+    volumes:
+      - healthcheck-volume:/healthcheck
+      - ./worker-wait-for-manager.sh:/worker-wait-for-manager.sh
+  citus-manager:
+    container_name: citus_manager
+    image: "citusdata/membership-manager:0.3.0"
+    volumes:
+      - "${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock"
+      - healthcheck-volume:/healthcheck
+    depends_on: [citus-master]
+    environment: *CITUS_ENV
+  citus-prepare:
+    container_name: citus_prepare
+    image: "citusdata/citus:10.2.5"
+    depends_on:
+      - citus-master
+      - citus-manager
+      - citus-worker-1
+      - citus-worker-2
+    command: "/citus_prepare.sh"
+    volumes:
+      - "./citus_prepare.sql:/citus_prepare.sql"
+      - "./citus_prepare.sh:/citus_prepare.sh"
+    restart: on-failure
+  datagen_tpch:
+    container_name: datagen_tpch
+    image: ghcr.io/risingwavelabs/go-tpc:v0.1
+    depends_on:
+      - citus-master
+      - citus-manager
+      - citus-worker-1
+      - citus-worker-2
+    command: tpch prepare --sf 1 --threads 4 -d postgres -U myuser -p '123456' -H citus-master -D mydb -P 5432 --conn-params sslmode=disable
+    restart: on-failure
+volumes:
+  compute-node-0:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+  healthcheck-volume:
+name: risingwave-compose

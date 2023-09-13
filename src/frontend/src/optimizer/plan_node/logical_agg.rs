@@ -260,7 +260,7 @@ impl LogicalAgg {
 /// build the plan like `LogicalAgg - LogicalProject`.
 /// it is constructed by `group_exprs` and collect and rewrite the expression in selection and
 /// having clause.
-struct LogicalAggBuilder {
+pub struct LogicalAggBuilder {
     /// the builder of the input Project
     input_proj_builder: ProjectBuilder,
     /// the group key column indices in the project's output
@@ -335,6 +335,15 @@ impl LogicalAggBuilder {
                     .collect_vec();
                 gen_group_key_and_grouping_sets(grouping_sets)?
             }
+            GroupBy::Cube(cube) => {
+                // Convert cube to grouping sets.
+                let grouping_sets = cube
+                    .into_iter()
+                    .powerset()
+                    .map(|x| x.into_iter().flatten().collect_vec())
+                    .collect_vec();
+                gen_group_key_and_grouping_sets(grouping_sets)?
+            }
         };
 
         Ok(LogicalAggBuilder {
@@ -352,13 +361,9 @@ impl LogicalAggBuilder {
         let logical_project = LogicalProject::with_core(self.input_proj_builder.build(input));
 
         // This LogicalAgg focuses on calculating the aggregates and grouping.
-        Agg::new_with_grouping_sets(
-            self.agg_calls,
-            self.group_key,
-            self.grouping_sets,
-            logical_project.into(),
-        )
-        .into()
+        Agg::new(self.agg_calls, self.group_key, logical_project.into())
+            .with_grouping_sets(self.grouping_sets)
+            .into()
     }
 
     fn rewrite_with_error(&mut self, expr: ExprImpl) -> Result<ExprImpl> {
@@ -822,7 +827,7 @@ impl LogicalAgg {
         &self.core.grouping_sets
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef) {
+    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef, bool) {
         self.core.decompose()
     }
 
@@ -861,8 +866,9 @@ impl LogicalAgg {
             .map(|set| set.indices().map(|key| input_col_change.map(key)).collect())
             .collect();
 
-        let new_agg =
-            Agg::new_with_grouping_sets(agg_calls, group_key.clone(), grouping_sets, input);
+        let new_agg = Agg::new(agg_calls, group_key.clone(), input)
+            .with_grouping_sets(grouping_sets)
+            .with_enable_two_phase(self.core().enable_two_phase);
 
         // group_key remapping might cause an output column change, since group key actually is a
         // `FixedBitSet`.
@@ -887,13 +893,10 @@ impl PlanTreeNodeUnary for LogicalAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Agg::new_with_grouping_sets(
-            self.agg_calls().to_vec(),
-            self.group_key().clone(),
-            self.grouping_sets().clone(),
-            input,
-        )
-        .into()
+        Agg::new(self.agg_calls().to_vec(), self.group_key().clone(), input)
+            .with_grouping_sets(self.grouping_sets().clone())
+            .with_enable_two_phase(self.core().enable_two_phase)
+            .into()
     }
 
     #[must_use]
@@ -1466,7 +1469,7 @@ mod tests {
             Field::with_name(ty.clone(), "v2"),
             Field::with_name(ty.clone(), "v3"),
         ];
-        let values = LogicalValues::new(
+        let values: LogicalValues = LogicalValues::new(
             vec![],
             Schema {
                 fields: fields.clone(),
@@ -1492,12 +1495,10 @@ mod tests {
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 1);
         assert_eq_input_ref!(&project.exprs()[0], 1);
-        assert_eq!(project.id().0, 5);
 
         let agg_new = project.input();
         let agg_new = agg_new.as_logical_agg().unwrap();
         assert_eq!(agg_new.group_key(), &vec![0].into());
-        assert_eq!(agg_new.id().0, 4);
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();

@@ -15,6 +15,8 @@
 use std::backtrace::Backtrace;
 use std::sync::Arc;
 
+use aws_sdk_ec2::error::DisplayErrorContext;
+use risingwave_common::error::BoxedError;
 use risingwave_connector::sink::SinkError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
@@ -71,6 +73,9 @@ enum MetaErrorInner {
     #[error("Sink error: {0}")]
     Sink(SinkError),
 
+    #[error("AWS SDK error: {}", DisplayErrorContext(&**.0))]
+    Aws(BoxedError),
+
     #[error(transparent)]
     Internal(anyhow::Error),
 }
@@ -97,7 +102,7 @@ impl std::fmt::Debug for MetaError {
 
         write!(f, "{}", self.inner)?;
         writeln!(f)?;
-        if let Some(backtrace) = (&self.inner as &dyn Error).request_ref::<Backtrace>() {
+        if let Some(backtrace) = std::error::request_ref::<Backtrace>(&self.inner as &dyn Error) {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(f, "  backtrace of `MetaError`:\n{}", self.backtrace)?;
@@ -187,7 +192,7 @@ where
     E: std::error::Error + Sync + Send + 'static,
 {
     fn from(e: aws_sdk_ec2::error::SdkError<E>) -> Self {
-        MetaErrorInner::Internal(e.into()).into()
+        MetaErrorInner::Aws(e.into()).into()
     }
 }
 

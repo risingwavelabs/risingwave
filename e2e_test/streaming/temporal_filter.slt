@@ -32,7 +32,7 @@ update t1 set v1 = v1 + interval '1 hour' where v1 = '3031-01-01 20:00:00' or v1
 0001-01-01 22:00:00
 3031-01-01 21:00:00
 
- 
+
 query I
 select * from mv1 order by v1;
 ----

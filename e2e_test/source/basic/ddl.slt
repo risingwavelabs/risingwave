@@ -29,7 +29,7 @@ create source invalid_startup_timestamp (
 ) FORMAT PLAIN ENCODE JSON;
 
 statement error db error: ERROR: QueryError: Invalid input syntax: schema definition is required for ENCODE JSON
-create source invalid_schema_definition 
+create source invalid_schema_definition
 with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
@@ -153,7 +153,7 @@ statement ok
 drop table s
 
 # Test create source with connection
-statement ok 
+statement ok
 CREATE CONNECTION mock WITH (type = 'privatelink', provider = 'mock');
 
 # Reference to non-existant connection

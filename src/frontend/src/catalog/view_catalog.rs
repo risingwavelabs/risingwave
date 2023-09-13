@@ -48,6 +48,11 @@ impl ViewCatalog {
         &self.name
     }
 
+    pub fn with_id(mut self, id: ViewId) -> Self {
+        self.id = id;
+        self
+    }
+
     /// Returns the SQL statement that can be used to create this view.
     pub fn create_sql(&self) -> String {
         format!("CREATE VIEW {} AS {}", self.name, self.sql)

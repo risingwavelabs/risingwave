@@ -16,11 +16,13 @@ use std::hash::Hash;
 
 use educe::Educe;
 use pretty_xmlish::{Pretty, Str, XmlNode};
-use risingwave_common::catalog::{Schema, TableVersionId};
+use risingwave_common::catalog::{Field, Schema, TableVersionId};
+use risingwave_common::types::DataType;
 
-use super::{DistillUnit, GenericPlanRef};
+use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::catalog::TableId;
 use crate::optimizer::plan_node::utils::childless_record;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, Educe)]
@@ -36,12 +38,38 @@ pub struct Delete<PlanRef: Eq + Hash> {
 }
 
 impl<PlanRef: GenericPlanRef> Delete<PlanRef> {
-    pub fn ctx(&self) -> OptimizerContextRef {
-        self.input.ctx()
+    pub fn output_len(&self) -> usize {
+        if self.returning {
+            self.input.schema().len()
+        } else {
+            1
+        }
+    }
+}
+
+impl<PlanRef: GenericPlanRef> GenericPlanNode for Delete<PlanRef> {
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        FunctionalDependencySet::new(self.output_len())
     }
 
-    pub fn schema(&self) -> &Schema {
-        self.input.schema()
+    fn schema(&self) -> Schema {
+        if self.returning {
+            self.input.schema().clone()
+        } else {
+            Schema::new(vec![Field::unnamed(DataType::Int64)])
+        }
+    }
+
+    fn logical_pk(&self) -> Option<Vec<usize>> {
+        if self.returning {
+            Some(self.input.logical_pk().to_vec())
+        } else {
+            Some(vec![])
+        }
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.input.ctx()
     }
 }
 

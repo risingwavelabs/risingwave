@@ -1,5 +1,5 @@
 statement ok
-INSERT INTO partsupp (ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment) VALUES 
+INSERT INTO partsupp (ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment) VALUES
 (1,2,3325,771.64,', even theodolites. regular, final theodolites eat after the carefully pending foxes. furiously regular deposits sleep slyly. carefully bold realms above the ironic dependencies haggle careful'),
 (1,4,8076,993.49,'ven ideas. quickly even packages print. pending multipliers must have to are fluff'),
 (1,6,3956,337.09,'after the fluffily ironic deposits? blithely special dependencies integrate furiously even excuses. blithely silent theodolites could have to haggle pending, express requests; fu'),

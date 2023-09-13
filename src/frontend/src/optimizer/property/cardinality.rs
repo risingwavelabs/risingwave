@@ -15,8 +15,10 @@
 use std::cmp::{max, min, Ordering};
 use std::ops::{Add, Mul, RangeFrom, RangeInclusive, Sub};
 
+use risingwave_pb::plan_common::PbCardinality;
+
 /// The upper bound of the [`Cardinality`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Hi {
     Limited(usize),
     Unlimited,
@@ -55,7 +57,7 @@ impl From<usize> for Hi {
 ///
 /// The default value is `0..`, i.e. the number of rows is unknown.
 // TODO: Make this the property of each plan node.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Cardinality {
     lo: usize,
     hi: Hi,
@@ -63,9 +65,15 @@ pub struct Cardinality {
 
 impl Default for Cardinality {
     fn default() -> Self {
-        Self {
-            lo: 0,
-            hi: Hi::Unlimited,
+        Self::unknown()
+    }
+}
+
+impl std::fmt::Display for Cardinality {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.hi {
+            Hi::Limited(hi) => write!(f, "{}..={}", self.lo, hi),
+            Hi::Unlimited => write!(f, "{}..", self.lo),
         }
     }
 }
@@ -114,6 +122,14 @@ impl From<usize> for Cardinality {
 }
 
 impl Cardinality {
+    /// Creates a new [`Cardinality`] of `0..`, i.e. the number of rows is unknown.
+    pub const fn unknown() -> Self {
+        Self {
+            lo: 0,
+            hi: Hi::Unlimited,
+        }
+    }
+
     /// Creates a new [`Cardinality`] with the given lower and upper bounds.
     pub fn new(lo: usize, hi: impl Into<Hi>) -> Self {
         let hi: Hi = hi.into();
@@ -305,5 +321,18 @@ impl Cardinality {
     /// ```
     pub fn is_at_most(self, count: usize) -> bool {
         self.hi().is_some_and(|hi| hi <= count)
+    }
+}
+
+impl Cardinality {
+    pub fn to_protobuf(self) -> PbCardinality {
+        PbCardinality {
+            lo: self.lo as u64,
+            hi: self.hi().map(|hi| hi as u64),
+        }
+    }
+
+    pub fn from_protobuf(pb: &PbCardinality) -> Self {
+        Self::new(pb.lo as usize, pb.hi.map(|hi| hi as usize))
     }
 }

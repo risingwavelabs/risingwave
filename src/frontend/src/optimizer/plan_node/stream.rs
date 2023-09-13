@@ -364,6 +364,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(ProjectSet, c
 pub struct Project {
     pub core: generic::Project<PlanRef>,
     watermark_derivations: Vec<(usize, usize)>,
+    nondecreasing_exprs: Vec<usize>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core, input);
 
@@ -710,31 +711,27 @@ pub fn to_stream_prost_body(
                 table: Some(me.table.to_internal_table_prost()),
             })
         }
-        Node::ProjectSet(me) => {
-            let me = &me.core;
-            let select_list = me
-                .select_list
-                .iter()
-                .map(ExprImpl::to_project_set_select_item_proto)
-                .collect();
-            PbNodeBody::ProjectSet(ProjectSetNode { select_list })
+        Node::ProjectSet(_) => {
+            unreachable!()
         }
         Node::Project(me) => PbNodeBody::Project(ProjectNode {
             select_list: me.core.exprs.iter().map(|x| x.to_expr_proto()).collect(),
-            watermark_input_key: me
+            watermark_input_cols: me
                 .watermark_derivations
                 .iter()
                 .map(|(x, _)| *x as u32)
                 .collect(),
-            watermark_output_key: me
+            watermark_output_cols: me
                 .watermark_derivations
                 .iter()
                 .map(|(_, y)| *y as u32)
                 .collect(),
+            nondecreasing_exprs: me.nondecreasing_exprs.iter().map(|i| *i as u32).collect(),
         }),
         Node::Sink(me) => PbNodeBody::Sink(SinkNode {
             sink_desc: Some(me.sink_desc.to_proto()),
             table: None, // TODO: Refactor sink to have a generic core.
+            log_store_type: SinkLogStoreType::InMemoryLogStore as i32,
         }),
         Node::Source(me) => {
             let me = &me.core.catalog;

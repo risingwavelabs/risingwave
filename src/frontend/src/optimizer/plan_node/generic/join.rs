@@ -202,11 +202,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
                 get_new_left_fd_set(left_fd_set)
                     .into_dependencies()
                     .into_iter()
-                    .chain(
-                        get_new_right_fd_set(right_fd_set)
-                            .into_dependencies()
-                            .into_iter(),
-                    )
+                    .chain(get_new_right_fd_set(right_fd_set).into_dependencies())
                     .for_each(|fd| fd_set.add_functional_dependency(fd));
                 fd_set
             }
@@ -347,7 +343,10 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
         // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
-        ColIndexMapping::new(self.output_indices.iter().map(|x| Some(*x)).collect())
+        ColIndexMapping::with_target_size(
+            self.output_indices.iter().map(|x| Some(*x)).collect(),
+            self.internal_column_num(),
+        )
     }
 
     pub fn add_which_join_key_to_pk(&self) -> EitherOrBoth<(), ()> {
@@ -404,7 +403,7 @@ pub fn push_down_into_join(
         // Do not push now on to the on, it will be pulled up into a filter instead.
         let on = Condition {
             conjunctions: conjunctions
-                .drain_filter(|expr| expr.count_nows() == 0)
+                .extract_if(|expr| expr.count_nows() == 0)
                 .collect(),
         };
         predicate.conjunctions = conjunctions;

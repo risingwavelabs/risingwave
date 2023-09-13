@@ -225,7 +225,7 @@ impl Eq for HeapElem {}
 
 impl PartialOrd for HeapElem {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.encoded_row.partial_cmp(&other.encoded_row)
+        Some(self.cmp(other))
     }
 }
 
@@ -350,7 +350,7 @@ mod tests {
         let mut stream = top_n_executor.execute();
         let res = stream.next().await;
 
-        assert!(matches!(res, Some(_)));
+        assert!(res.is_some());
         if let Some(res) = res {
             let res = res.unwrap();
             assert_eq!(res.cardinality(), 3);
@@ -361,7 +361,7 @@ mod tests {
         }
 
         let res = stream.next().await;
-        assert!(matches!(res, None));
+        assert!(res.is_none());
     }
 
     #[tokio::test]
@@ -408,6 +408,6 @@ mod tests {
         let mut stream = top_n_executor.execute();
         let res = stream.next().await;
 
-        assert!(matches!(res, None));
+        assert!(res.is_none());
     }
 }

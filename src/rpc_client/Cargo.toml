@@ -17,15 +17,16 @@ normal = ["workspace-hack"]
 anyhow = "1"
 async-trait = "0.1"
 easy-ext = "1"
-either = "1.8.1"
+either = "1.9.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
-itertools = "0.10.5"
-lru = "0.10.0"
+itertools = "0.11.0"
+lru = "0.10.1"
 rand = "0.8"
-risingwave_common = { path = "../common" }
-risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
-risingwave_pb = { path = "../prost" }
+risingwave_common = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
+risingwave_pb = { workspace = true }
+static_assertions = "1"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -40,8 +41,11 @@ tokio-stream = "0.1"
 tonic = { workspace = true }
 tower = "0.4"
 tracing = "0.1"
-url = "2.4.0"
+url = "2.4.1"
 
 [target.'cfg(not(madsim))'.dependencies]
 moka = { version = "0.11", features = ["future"] }
 workspace-hack = { path = "../workspace-hack" }
+
+[lints]
+workspace = true

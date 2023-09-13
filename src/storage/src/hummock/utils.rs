@@ -18,15 +18,17 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
+use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
+use tokio::sync::watch::Sender;
 use tokio::sync::Notify;
 
 use super::{HummockError, HummockResult};
@@ -163,6 +165,7 @@ pub fn prune_nonoverlapping_ssts<'a>(
     ssts[start_table_idx..=end_table_idx].iter()
 }
 
+#[derive(Debug)]
 struct MemoryLimiterInner {
     total_size: AtomicU64,
     notify: Notify,
@@ -173,6 +176,10 @@ impl MemoryLimiterInner {
     fn release_quota(&self, quota: u64) {
         self.total_size.fetch_sub(quota, AtomicOrdering::Release);
         self.notify.notify_waiters();
+    }
+
+    fn add_memory(&self, quota: u64) {
+        self.total_size.fetch_add(quota, AtomicOrdering::SeqCst);
     }
 
     fn try_require_memory(&self, quota: u64) -> bool {
@@ -240,6 +247,7 @@ impl MemoryLimiterInner {
     }
 }
 
+#[derive(Debug)]
 pub struct MemoryLimiter {
     inner: Arc<MemoryLimiterInner>,
 }
@@ -293,6 +301,17 @@ impl MemoryLimiter {
 
     pub fn quota(&self) -> u64 {
         self.inner.quota
+    }
+
+    pub fn must_require_memory(&self, quota: u64) -> MemoryTracker {
+        if !self.inner.try_require_memory(quota) {
+            self.inner.add_memory(quota);
+        }
+
+        MemoryTracker {
+            limiter: self.inner.clone(),
+            quota,
+        }
     }
 }
 
@@ -361,13 +380,10 @@ pub(crate) async fn do_insert_sanity_check(
     table_option: TableOption,
 ) -> StorageResult<()> {
     let read_options = ReadOptions {
-        prefix_hint: None,
         retention_seconds: table_option.retention_seconds,
         table_id,
-        ignore_range_tombstone: false,
-        read_version_from_backup: false,
-        prefetch_options: Default::default(),
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        ..Default::default()
     };
     let stored_value = inner.get(key.clone(), epoch, read_options).await?;
 
@@ -392,13 +408,10 @@ pub(crate) async fn do_delete_sanity_check(
     table_option: TableOption,
 ) -> StorageResult<()> {
     let read_options = ReadOptions {
-        prefix_hint: None,
         retention_seconds: table_option.retention_seconds,
         table_id,
-        ignore_range_tombstone: false,
-        read_version_from_backup: false,
-        prefetch_options: Default::default(),
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        ..Default::default()
     };
     match inner.get(key.clone(), epoch, read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
@@ -433,13 +446,10 @@ pub(crate) async fn do_update_sanity_check(
     table_option: TableOption,
 ) -> StorageResult<()> {
     let read_options = ReadOptions {
-        prefix_hint: None,
-        ignore_range_tombstone: false,
         retention_seconds: table_option.retention_seconds,
         table_id,
-        read_version_from_backup: false,
-        prefetch_options: Default::default(),
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        ..Default::default()
     };
 
     match inner.get(key.clone(), epoch, read_options).await? {
@@ -542,6 +552,48 @@ pub(crate) fn filter_with_delete_range<'a>(
     })
 }
 
+pub(crate) async fn wait_for_epoch(
+    notifier: &Sender<HummockEpoch>,
+    wait_epoch: u64,
+) -> StorageResult<()> {
+    let mut receiver = notifier.subscribe();
+    // avoid unnecessary check in the loop if the value does not change
+    let max_committed_epoch = *receiver.borrow_and_update();
+    if max_committed_epoch >= wait_epoch {
+        return Ok(());
+    }
+    loop {
+        match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
+            Err(elapsed) => {
+                // The reason that we need to retry here is batch scan in
+                // chain/rearrange_chain is waiting for an
+                // uncommitted epoch carried by the CreateMV barrier, which
+                // can take unbounded time to become committed and propagate
+                // to the CN. We should consider removing the retry as well as wait_epoch
+                // for chain/rearrange_chain if we enforce
+                // chain/rearrange_chain to be scheduled on the same
+                // CN with the same distribution as the upstream MV.
+                // See #3845 for more details.
+                tracing::warn!(
+                    "wait_epoch {:?} timeout when waiting for version update elapsed {:?}s",
+                    wait_epoch,
+                    elapsed
+                );
+                continue;
+            }
+            Ok(Err(_)) => {
+                return Err(HummockError::wait_epoch("tx dropped").into());
+            }
+            Ok(Ok(_)) => {
+                let max_committed_epoch = *receiver.borrow();
+                if max_committed_epoch >= wait_epoch {
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::future::{poll_fn, Future};
@@ -551,6 +603,9 @@ mod tests {
 
     use crate::hummock::utils::MemoryLimiter;
 
+    // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+    // TODO: remove `allow` here after the issued is closed.
+    #[expect(clippy::needless_pass_by_ref_mut)]
     async fn assert_pending(future: &mut (impl Future + Unpin)) {
         for _ in 0..10 {
             assert!(poll_fn(|cx| Poll::Ready(future.poll_unpin(cx)))

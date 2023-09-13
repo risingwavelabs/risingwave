@@ -70,6 +70,8 @@ impl StreamSink {
     pub fn create(
         input: PlanRef,
         name: String,
+        db_name: String,
+        sink_from_table_name: String,
         user_distributed_by: RequiredDist,
         user_order_by: Order,
         user_cols: FixedBitSet,
@@ -82,6 +84,8 @@ impl StreamSink {
             input,
             user_distributed_by,
             name,
+            db_name,
+            sink_from_table_name,
             user_order_by,
             columns,
             definition,
@@ -95,6 +99,8 @@ impl StreamSink {
         input: PlanRef,
         user_distributed_by: RequiredDist,
         name: String,
+        db_name: String,
+        sink_from_name: String,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
@@ -108,7 +114,7 @@ impl StreamSink {
             Distribution::Single => RequiredDist::single(),
             _ => {
                 match properties.get("connector") {
-                    Some(s) if s == "iceberg" || s == "deltalake" => {
+                    Some(s) if s == "deltalake" => {
                         // iceberg with multiple parallelism will fail easily with concurrent commit
                         // on metadata
                         // TODO: reset iceberg sink to have multiple parallelism
@@ -142,6 +148,8 @@ impl StreamSink {
         let sink_desc = SinkDesc {
             id: SinkId::placeholder(),
             name,
+            db_name,
+            sink_from_name,
             definition,
             columns,
             plan_pk: pk,
@@ -359,6 +367,11 @@ impl StreamNode for StreamSink {
         PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
+            log_store_type: if self.base.ctx.session_ctx().config().get_sink_decouple() {
+                SinkLogStoreType::KvLogStore as i32
+            } else {
+                SinkLogStoreType::InMemoryLogStore as i32
+            },
         })
     }
 }

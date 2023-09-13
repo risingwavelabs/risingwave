@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::Binder;
-use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -74,7 +75,32 @@ impl Binder {
 
         // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
         let mut err = ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name));
-        for (i, (context, _)) in self.upper_subquery_contexts.iter().rev().enumerate() {
+
+        for (i, lateral_context) in self.lateral_contexts.iter().rev().enumerate() {
+            if lateral_context.is_visible {
+                let context = &lateral_context.context;
+                // input ref from lateral context `depth` starts from 1.
+                let depth = i + 1;
+                match context.get_column_binding_index(&table_name, &column_name) {
+                    Ok(index) => {
+                        let column = &context.columns[index];
+                        return Ok(CorrelatedInputRef::new(
+                            column.index,
+                            column.field.data_type.clone(),
+                            depth,
+                        )
+                        .into());
+                    }
+                    Err(e) => {
+                        err = e;
+                    }
+                }
+            }
+        }
+
+        for (i, (context, lateral_contexts)) in
+            self.upper_subquery_contexts.iter().rev().enumerate()
+        {
             // `depth` starts from 1.
             let depth = i + 1;
             match context.get_column_binding_index(&table_name, &column_name) {
@@ -91,6 +117,39 @@ impl Binder {
                     err = e;
                 }
             }
+
+            for (i, lateral_context) in lateral_contexts.iter().rev().enumerate() {
+                if lateral_context.is_visible {
+                    let context = &lateral_context.context;
+                    // correlated input ref from lateral context `depth` starts from 1.
+                    let depth = i + 1;
+                    match context.get_column_binding_index(&table_name, &column_name) {
+                        Ok(index) => {
+                            let column = &context.columns[index];
+                            return Ok(CorrelatedInputRef::new(
+                                column.index,
+                                column.field.data_type.clone(),
+                                depth,
+                            )
+                            .into());
+                        }
+                        Err(e) => {
+                            err = e;
+                        }
+                    }
+                }
+            }
+        }
+        // `CTID` is a system column in postgres.
+        // https://www.postgresql.org/docs/current/ddl-system-columns.html
+        //
+        // We return an empty string here to support some tools such as DataGrip.
+        //
+        // FIXME: The type of `CTID` should be `tid`.
+        // FIXME: The `CTID` column should be unique, so literal may break something.
+        // FIXME: At least we should add a notice here.
+        if let ErrorCode::ItemNotFound(_) = err && column_name == "ctid" {
+            return Ok(Literal::new(Some("".into()), DataType::Varchar).into())
         }
         Err(err.into())
     }

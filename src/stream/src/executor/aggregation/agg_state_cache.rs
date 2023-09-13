@@ -12,85 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayImpl, Op};
-use risingwave_common::buffer::Bitmap;
+//! Object-safe version of [`StateCache`] for aggregation.
+
+use risingwave_common::array::StreamChunk;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::types::{Datum, DatumRef};
+use risingwave_common::row::Row;
+use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use smallvec::SmallVec;
 
-use super::minput_agg_impl::MInputAggregator;
 use crate::common::cache::{StateCache, StateCacheFiller};
 
 /// Cache key type.
 type CacheKey = MemcmpEncoded;
 
-// TODO(yuchao): May extract common logic here to `struct [Data/Stream]ChunkRef` if there's other
-// usage in the future. https://github.com/risingwavelabs/risingwave/pull/5908#discussion_r1002896176
-pub struct StateCacheInputBatch<'a> {
-    idx: usize,
-    ops: Ops<'a>,
-    visibility: Option<&'a Bitmap>,
-    columns: &'a [&'a ArrayImpl],
-    cache_key_serializer: &'a OrderedRowSerde,
-    arg_col_indices: &'a [usize],
-    order_col_indices: &'a [usize],
-}
-
-impl<'a> StateCacheInputBatch<'a> {
-    pub fn new(
-        ops: Ops<'a>,
-        visibility: Option<&'a Bitmap>,
-        columns: &'a [&'a ArrayImpl],
-        cache_key_serializer: &'a OrderedRowSerde,
-        arg_col_indices: &'a [usize],
-        order_col_indices: &'a [usize],
-    ) -> Self {
-        let first_idx = visibility.map_or(0, |v| v.next_set_bit(0).unwrap_or(ops.len()));
-        Self {
-            idx: first_idx,
-            ops,
-            visibility,
-            columns,
-            cache_key_serializer,
-            arg_col_indices,
-            order_col_indices,
-        }
-    }
-}
-
-impl<'a> Iterator for StateCacheInputBatch<'a> {
-    type Item = (Op, CacheKey, SmallVec<[DatumRef<'a>; 2]>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.idx >= self.ops.len() {
-            None
-        } else {
-            let op = self.ops[self.idx];
-            let key = {
-                let mut key = Vec::new();
-                self.cache_key_serializer.serialize_datums(
-                    self.order_col_indices
-                        .iter()
-                        .map(|col_idx| self.columns[*col_idx].value_at(self.idx)),
-                    &mut key,
-                );
-                key.into()
-            };
-            let value = self
-                .arg_col_indices
-                .iter()
-                .map(|col_idx| self.columns[*col_idx].value_at(self.idx))
-                .collect();
-            self.idx = self.visibility.map_or(self.idx + 1, |v| {
-                v.next_set_bit(self.idx + 1).unwrap_or(self.ops.len())
-            });
-            Some((op, key, value))
-        }
-    }
-}
+#[derive(Debug)]
+pub struct CacheValue(SmallVec<[Datum; 2]>);
 
 /// Trait that defines the interface of state table cache for stateful streaming agg.
 pub trait AggStateCache: EstimateSize {
@@ -98,13 +37,22 @@ pub trait AggStateCache: EstimateSize {
     fn is_synced(&self) -> bool;
 
     /// Apply a batch of updates to the cache.
-    fn apply_batch(&mut self, batch: StateCacheInputBatch<'_>);
+    fn apply_batch(
+        &mut self,
+        chunk: &StreamChunk,
+        cache_key_serializer: &OrderedRowSerde,
+        arg_col_indices: &[usize],
+        order_col_indices: &[usize],
+    );
 
     /// Begin syncing the cache with state table.
     fn begin_syncing(&mut self) -> Box<dyn AggStateCacheFiller + Send + Sync + '_>;
 
-    /// Get the aggregation output.
-    fn get_output(&self) -> Datum;
+    /// Output batches from the cache.
+    fn output_batches(&self, chunk_size: usize) -> Box<dyn Iterator<Item = StreamChunk> + '_>;
+
+    /// Output the first value.
+    fn output_first(&self) -> Datum;
 }
 
 /// Trait that defines agg state cache syncing interface.
@@ -114,90 +62,131 @@ pub trait AggStateCacheFiller {
 
     /// Insert an entry to the cache without checking row count, capacity, key order, etc.
     /// Just insert into the inner cache structure, e.g. `BTreeMap`.
-    fn append(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>);
+    fn append(&mut self, key: CacheKey, value: CacheValue);
 
     /// Mark the cache as synced.
     fn finish(self: Box<Self>);
 }
 
-/// A generic implementation of [`AggStateCache`] that combines a [`StateCache`] and an
-/// [`MInputAggregator`].
+/// A wrapper over generic [`StateCache`] that implements [`AggStateCache`].
 #[derive(EstimateSize)]
-pub struct GenericAggStateCache<C, A>
+pub struct GenericAggStateCache<C>
 where
-    C: StateCache<Key = CacheKey, Value = A::Value>,
-    A: MInputAggregator,
+    C: StateCache<Key = CacheKey, Value = CacheValue>,
 {
     state_cache: C,
-    #[estimate_size(ignore)]
-    aggregator: A,
+    input_types: Vec<DataType>,
 }
 
-impl<C, A> GenericAggStateCache<C, A>
+impl<C> GenericAggStateCache<C>
 where
-    C: StateCache<Key = CacheKey, Value = A::Value>,
-    A: MInputAggregator,
+    C: StateCache<Key = CacheKey, Value = CacheValue>,
 {
-    pub fn new(state_cache: C, aggregator: A) -> Self {
+    pub fn new(state_cache: C, input_types: &[DataType]) -> Self {
         Self {
             state_cache,
-            aggregator,
+            input_types: input_types.to_vec(),
         }
     }
 }
 
-impl<C, A> AggStateCache for GenericAggStateCache<C, A>
+impl<C> AggStateCache for GenericAggStateCache<C>
 where
-    C: StateCache<Key = CacheKey, Value = A::Value>,
+    C: StateCache<Key = CacheKey, Value = CacheValue>,
     for<'a> C::Filler<'a>: Send + Sync,
-    A: MInputAggregator + Send + Sync,
 {
     fn is_synced(&self) -> bool {
         self.state_cache.is_synced()
     }
 
-    fn apply_batch(&mut self, batch: StateCacheInputBatch<'_>) {
-        self.state_cache.apply_batch(
-            batch.map(|(op, key, value)| (op, key, self.aggregator.convert_cache_value(value))),
-        );
+    fn apply_batch(
+        &mut self,
+        chunk: &StreamChunk,
+        cache_key_serializer: &OrderedRowSerde,
+        arg_col_indices: &[usize],
+        order_col_indices: &[usize],
+    ) {
+        let rows = chunk.rows().map(|(op, row)| {
+            let key = {
+                let mut key = Vec::new();
+                cache_key_serializer.serialize_datums(
+                    order_col_indices
+                        .iter()
+                        .map(|col_idx| row.datum_at(*col_idx)),
+                    &mut key,
+                );
+                key.into()
+            };
+            let value = CacheValue(
+                arg_col_indices
+                    .iter()
+                    .map(|col_idx| row.datum_at(*col_idx).to_owned_datum())
+                    .collect(),
+            );
+            (op, key, value)
+        });
+        self.state_cache.apply_batch(rows);
     }
 
     fn begin_syncing(&mut self) -> Box<dyn AggStateCacheFiller + Send + Sync + '_> {
-        Box::new(GenericAggStateCacheFiller::<'_, C, A> {
+        Box::new(GenericAggStateCacheFiller::<'_, C> {
             cache_filler: self.state_cache.begin_syncing(),
-            aggregator: &self.aggregator,
         })
     }
 
-    fn get_output(&self) -> Datum {
-        self.aggregator.aggregate(self.state_cache.values())
+    fn output_batches(&self, chunk_size: usize) -> Box<dyn Iterator<Item = StreamChunk> + '_> {
+        let mut values = self.state_cache.values();
+        Box::new(std::iter::from_fn(move || {
+            // build data chunk from rows
+            let mut builder = DataChunkBuilder::new(self.input_types.clone(), chunk_size);
+            for row in &mut values {
+                if let Some(chunk) = builder.append_one_row(row.0.as_slice()) {
+                    return Some(chunk.into());
+                }
+            }
+            builder.consume_all().map(|chunk| chunk.into())
+        }))
+    }
+
+    fn output_first(&self) -> Datum {
+        let value = self.state_cache.values().next()?;
+        value.0[0].clone()
     }
 }
 
-pub struct GenericAggStateCacheFiller<'filler, C, A>
+pub struct GenericAggStateCacheFiller<'filler, C>
 where
-    C: StateCache<Key = CacheKey, Value = A::Value> + 'filler,
-    A: MInputAggregator,
+    C: StateCache<Key = CacheKey, Value = CacheValue> + 'filler,
 {
     cache_filler: C::Filler<'filler>,
-    aggregator: &'filler A,
 }
 
-impl<'filler, C, A> AggStateCacheFiller for GenericAggStateCacheFiller<'filler, C, A>
+impl<'filler, C> AggStateCacheFiller for GenericAggStateCacheFiller<'filler, C>
 where
-    C: StateCache<Key = CacheKey, Value = A::Value>,
-    A: MInputAggregator,
+    C: StateCache<Key = CacheKey, Value = CacheValue>,
 {
     fn capacity(&self) -> Option<usize> {
         self.cache_filler.capacity()
     }
 
-    fn append(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>) {
-        self.cache_filler
-            .insert_unchecked(key, self.aggregator.convert_cache_value(value));
+    fn append(&mut self, key: CacheKey, value: CacheValue) {
+        self.cache_filler.insert_unchecked(key, value);
     }
 
     fn finish(self: Box<Self>) {
         self.cache_filler.finish()
+    }
+}
+
+impl FromIterator<Datum> for CacheValue {
+    fn from_iter<T: IntoIterator<Item = Datum>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl EstimateSize for CacheValue {
+    fn estimated_heap_size(&self) -> usize {
+        let data_heap_size: usize = self.0.iter().map(|datum| datum.estimated_heap_size()).sum();
+        self.0.len() * std::mem::size_of::<Datum>() + data_heap_size
     }
 }

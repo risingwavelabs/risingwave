@@ -90,6 +90,7 @@ impl fmt::Debug for FuncSign {
             inputs_type: self.inputs_type,
             ret_type: self.ret_type,
             set_returning: true,
+            deprecated: false,
         }
         .fmt(f)
     }

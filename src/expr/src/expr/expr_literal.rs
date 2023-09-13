@@ -188,7 +188,7 @@ mod tests {
         let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
-        let v = Decimal::new(3141, 3);
+        let v = Decimal::from_i128_with_scale(3141, 3);
         let t = TypeName::Decimal;
         let bytes = serialize_datum(Some(v.to_scalar_value()).as_ref());
         let expr = LiteralExpression::try_from(&make_expression(bytes, t)).unwrap();

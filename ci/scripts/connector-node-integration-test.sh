@@ -30,9 +30,9 @@ shift $((OPTIND -1))
 RISINGWAVE_ROOT=${PWD}
 
 echo "--- install java"
-apt install sudo -y
+apt install sudo -y && apt-get update
 
-if [ "$VERSION" = "11" ]; then 
+if [ "$VERSION" = "11" ]; then
   echo "The test imgae default java version is 11, no need to install"
 else
   echo "The test imgae default java version is 11, need to install java 17"
@@ -100,7 +100,7 @@ else
 fi
 
 sink_input_feature=("" "--input_binary_file=./data/sink_input --data_format_use_json=False")
-upsert_sink_input_feature=("--input_file=./data/upsert_sink_input.json" 
+upsert_sink_input_feature=("--input_file=./data/upsert_sink_input.json"
                            "--input_binary_file=./data/upsert_sink_input --data_format_use_json=False")
 type=("Json format" "StreamChunk format")
 

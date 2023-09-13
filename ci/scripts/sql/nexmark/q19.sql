@@ -1,7 +1,7 @@
 -- noinspection SqlNoDataSourceInspectionForFile
 -- noinspection SqlResolveForFile
 CREATE SINK nexmark_q19 AS
-SELECT * 
+SELECT *
 FROM (SELECT *,
              ROW_NUMBER() OVER (
                  PARTITION BY auction

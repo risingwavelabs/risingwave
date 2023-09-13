@@ -36,7 +36,8 @@ pub struct TopN<PlanRef> {
 }
 
 impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
-    /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
+    /// Infers the state table catalog for [`super::super::StreamTopN`] and
+    /// [`super::super::StreamGroupTopN`].
     pub fn infer_internal_table_catalog(
         &self,
         schema: &Schema,
@@ -83,6 +84,22 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
         internal_table_catalog_builder.build(
             self.input.distribution().dist_column_indices().to_vec(),
             read_prefix_len_hint,
+        )
+    }
+
+    /// decompose -> (input, limit, offset, `with_ties`, order, `group_key`)
+    pub fn decompose(self) -> (PlanRef, u64, u64, bool, Order, Vec<usize>) {
+        let (limit, with_ties) = match self.limit_attr {
+            TopNLimit::Simple(limit) => (limit, false),
+            TopNLimit::WithTies(limit) => (limit, true),
+        };
+        (
+            self.input,
+            limit,
+            self.offset,
+            with_ties,
+            self.order,
+            self.group_key,
         )
     }
 }
@@ -159,7 +176,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
         if self.limit_attr.max_one_row() {
             Some(self.group_key.clone())
         } else {
-            Some(self.input.logical_pk().to_vec())
+            let mut pk = self.input.logical_pk().to_vec();
+            for i in &self.group_key {
+                if !pk.contains(i) {
+                    pk.push(*i);
+                }
+            }
+            Some(pk)
         }
     }
 
@@ -172,7 +195,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
     }
 }
 
-/// [`Limit`] is used to specify the number of records to return.
+/// `Limit` is used to specify the number of records to return.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum TopNLimit {
     /// The number of records returned is exactly the same as the number after `LIMIT` in the SQL
@@ -207,7 +230,7 @@ impl TopNLimit {
         }
     }
 
-    /// Whether this [`Limit`] returns at most one record for each value. Only `LIMIT 1` without
+    /// Whether this `Limit` returns at most one record for each value. Only `LIMIT 1` without
     /// `WITH TIES` satisfies this condition.
     pub fn max_one_row(&self) -> bool {
         match self {

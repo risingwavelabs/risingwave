@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_backup::error::{BackupError, BackupResult};
@@ -36,11 +35,11 @@ const VERSION: u32 = 1;
 
 pub struct MetaSnapshotBuilder<S> {
     snapshot: MetaSnapshot,
-    meta_store: Arc<S>,
+    meta_store: S,
 }
 
 impl<S: MetaStore> MetaSnapshotBuilder<S> {
-    pub fn new(meta_store: Arc<S>) -> Self {
+    pub fn new(meta_store: S) -> Self {
         Self {
             snapshot: MetaSnapshot::default(),
             meta_store,
@@ -161,8 +160,6 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
-    use std::sync::Arc;
 
     use assert_matches::assert_matches;
     use itertools::Itertools;
@@ -179,7 +176,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_snapshot_builder() {
-        let meta_store = Arc::new(MemStore::new());
+        let meta_store = MemStore::new();
 
         let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
         let hummock_version = HummockVersion {
@@ -190,7 +187,7 @@ mod tests {
             let v_ = v.clone();
             async move { v_ }
         };
-        hummock_version.insert(meta_store.deref()).await.unwrap();
+        hummock_version.insert(&meta_store).await.unwrap();
         let err = builder
             .build(1, get_ckpt_builder(&hummock_version))
             .await
@@ -205,10 +202,7 @@ mod tests {
             hummock_version_id: hummock_version.id,
             ..Default::default()
         };
-        hummock_version_stats
-            .insert(meta_store.deref())
-            .await
-            .unwrap();
+        hummock_version_stats.insert(&meta_store).await.unwrap();
         let err = builder
             .build(1, get_ckpt_builder(&hummock_version))
             .await
@@ -216,10 +210,7 @@ mod tests {
         let err = assert_matches!(err, BackupError::Other(e) => e);
         assert_eq!("system params not found in meta store", err.to_error_str());
 
-        system_params_for_test()
-            .insert(meta_store.deref())
-            .await
-            .unwrap();
+        system_params_for_test().insert(&meta_store).await.unwrap();
 
         let err = builder
             .build(1, get_ckpt_builder(&hummock_version))
@@ -229,7 +220,7 @@ mod tests {
         assert_eq!("cluster id not found in meta store", err.to_error_str());
 
         ClusterId::new()
-            .put_at_meta_store(meta_store.deref())
+            .put_at_meta_store(&meta_store)
             .await
             .unwrap();
 

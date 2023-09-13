@@ -15,17 +15,19 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableVersionId};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
-use super::{Binder, Relation};
+use super::{Binder, BoundBaseTable};
 use crate::catalog::TableId;
-use crate::expr::{Expr as _, ExprImpl};
+use crate::expr::{Expr as _, ExprImpl, InputRef};
 use crate::user::UserId;
+use crate::TableCatalog;
 
 #[derive(Debug, Clone)]
 pub struct BoundUpdate {
@@ -42,7 +44,7 @@ pub struct BoundUpdate {
     pub owner: UserId,
 
     /// Used for scanning the records to update with the `selection`.
-    pub table: Relation,
+    pub table: BoundBaseTable,
 
     pub selection: Option<ExprImpl>,
 
@@ -60,8 +62,6 @@ pub struct BoundUpdate {
 
 impl RewriteExprsRecursive for BoundUpdate {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
-        self.table.rewrite_exprs_recursive(rewriter);
-
         self.selection =
             std::mem::take(&mut self.selection).map(|expr| rewriter.rewrite_expr(expr));
 
@@ -79,6 +79,23 @@ impl RewriteExprsRecursive for BoundUpdate {
     }
 }
 
+fn get_col_referenced_by_generated_pk(table_catalog: &TableCatalog) -> Result<FixedBitSet> {
+    let column_num = table_catalog.columns().len();
+    let pk_col_id = table_catalog.pk_column_ids();
+    let mut bitset = FixedBitSet::with_capacity(column_num);
+
+    let generated_pk_col_exprs = table_catalog
+        .columns
+        .iter()
+        .filter(|c| pk_col_id.contains(&c.column_id()))
+        .flat_map(|c| c.generated_expr());
+    for expr_node in generated_pk_col_exprs {
+        let expr = ExprImpl::from_expr_proto(expr_node)?;
+        bitset.union_with(&expr.collect_input_refs(column_num));
+    }
+    Ok(bitset)
+}
+
 impl Binder {
     pub(super) fn bind_update(
         &mut self,
@@ -87,31 +104,23 @@ impl Binder {
         selection: Option<Expr>,
         returning_items: Vec<SelectItem>,
     ) -> Result<BoundUpdate> {
-        let (schema_name, table_name) =
-            Self::resolve_schema_qualified_name(&self.db_name, name.clone())?;
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, false)?;
         let default_columns_from_catalog =
             table_catalog.default_columns().collect::<BTreeMap<_, _>>();
-
-        // TODO(yuhao): update a table with generated columns
-        if table_catalog.has_generated_column() {
-            return Err(ErrorCode::BindError(
-                "Update a table with generated columns is not supported.".to_string(),
-            )
-            .into());
+        if !returning_items.is_empty() && table_catalog.has_generated_column() {
+            return Err(RwError::from(ErrorCode::BindError(
+                "`RETURNING` clause is not supported for tables with generated columns".to_string(),
+            )));
         }
 
-        let pk_indices = table_catalog
-            .pk()
-            .iter()
-            .map(|column_order| column_order.column_index)
-            .collect_vec();
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
+        let cols_refed_by_generated_pk = get_col_referenced_by_generated_pk(table_catalog)?;
 
-        let table = self.bind_relation_by_name(name, None, false)?;
+        let table = self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let selection = selection.map(|expr| self.bind_expr(expr)).transpose()?;
 
@@ -151,13 +160,32 @@ impl Binder {
                 let id_expr = self.bind_expr(Expr::Identifier(id.clone()))?;
                 let id_index = if let Some(id_input_ref) = id_expr.clone().as_input_ref() {
                     let id_index = id_input_ref.index;
-                    for &pk in &pk_indices {
-                        if id_index == pk {
-                            return Err(ErrorCode::BindError(
-                                "update modifying the PK column is banned".to_owned(),
-                            )
-                            .into());
-                        }
+                    if table
+                        .table_catalog
+                        .pk()
+                        .iter()
+                        .any(|k| k.column_index == id_index)
+                    {
+                        return Err(ErrorCode::BindError(
+                            "update modifying the PK column is unsupported".to_owned(),
+                        )
+                        .into());
+                    }
+                    if table
+                        .table_catalog
+                        .generated_col_idxes()
+                        .contains(&id_index)
+                    {
+                        return Err(ErrorCode::BindError(
+                            "update modifying the generated column is unsupported".to_owned(),
+                        )
+                        .into());
+                    }
+                    if cols_refed_by_generated_pk.contains(id_index) {
+                        return Err(ErrorCode::BindError(
+                            "update modifying the column referenced by generated columns that are part of the primary key is not allowed".to_owned(),
+                        )
+                        .into());
                     }
                     id_index
                 } else {
@@ -188,9 +216,14 @@ impl Binder {
             }
         }
 
-        let all_columns = Self::iter_bound_columns(self.context.columns.iter()).0;
-        let exprs = all_columns
-            .into_iter()
+        let exprs = table
+            .table_catalog
+            .columns()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| {
+                (!c.is_generated()).then_some(InputRef::new(i, c.data_type().clone()).into())
+            })
             .map(|c| assignment_exprs.remove(&c).unwrap_or(c))
             .collect_vec();
 

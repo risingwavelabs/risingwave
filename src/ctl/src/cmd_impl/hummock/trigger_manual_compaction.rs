@@ -21,10 +21,11 @@ pub async fn trigger_manual_compaction(
     compaction_group_id: u64,
     table_id: u32,
     level: u32,
+    sst_ids: Vec<u64>,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let result = meta_client
-        .trigger_manual_compaction(compaction_group_id, table_id, level)
+        .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids)
         .await;
     println!("{:#?}", result);
     Ok(())

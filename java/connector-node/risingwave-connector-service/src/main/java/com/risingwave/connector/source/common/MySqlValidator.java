@@ -22,6 +22,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 
 public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
@@ -146,12 +147,16 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
             // All columns defined must exist in upstream database
             for (var e : tableSchema.getColumnTypes().entrySet()) {
-                var pgDataType = schema.get(e.getKey().toLowerCase());
-                if (pgDataType == null) {
+                // skip validate internal columns
+                if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
+                    continue;
+                }
+                var dataType = schema.get(e.getKey().toLowerCase());
+                if (dataType == null) {
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");
                 }
-                if (!isDataTypeCompatible(pgDataType, e.getValue())) {
+                if (!isDataTypeCompatible(dataType, e.getValue())) {
                     throw ValidatorUtils.invalidArgument(
                             "Incompatible data type of column " + e.getKey());
                 }
@@ -165,30 +170,28 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
     private void validatePrivileges() throws SQLException {
         String[] privilegesRequired = {
-            "SELECT",
-            "RELOAD",
-            "SHOW DATABASES",
-            "REPLICATION SLAVE",
-            "REPLICATION CLIENT",
-            "LOCK TABLES"
+            "SELECT", "RELOAD", "SHOW DATABASES", "REPLICATION SLAVE", "REPLICATION CLIENT",
         };
+
+        var hashSet = new HashSet<>(List.of(privilegesRequired));
         try (var stmt = jdbcConnection.createStatement()) {
             var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));
             while (res.next()) {
-                String grants = res.getString(1).toUpperCase();
+                String granted = res.getString(1).toUpperCase();
                 // all privileges granted, check passed
-                if (grants.contains("ALL")) {
+                if (granted.contains("ALL")) {
                     break;
                 }
-                // check whether each privilege is granted
-                for (String privilege : privilegesRequired) {
-                    if (!grants.contains(privilege)) {
-                        throw ValidatorUtils.invalidArgument(
-                                String.format(
-                                        "MySQL user does not have privilege %s, which is needed for debezium connector",
-                                        privilege));
-                    }
+
+                // remove granted privilege from the set
+                hashSet.removeIf(granted::contains);
+                if (hashSet.isEmpty()) {
+                    break;
                 }
+            }
+            if (!hashSet.isEmpty()) {
+                throw ValidatorUtils.invalidArgument(
+                        "MySQL user doesn't have enough privileges: " + hashSet);
             }
         }
     }
@@ -227,6 +230,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
             case "varchar":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "timestamp":
+                return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
             default:
                 return true; // true for other uncovered types
         }

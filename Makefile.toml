@@ -46,8 +46,10 @@ end
 
 if ${is_all_in_one_enabled}
   set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd_all"
+  set_env RISEDEV_CTL_RUN_CMD "-- risectl"
 else
   set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd"
+  set_env RISEDEV_CTL_RUN_CMD "--bin risectl --"
 end
 
 if ${is_hdfs_backend}
@@ -251,10 +253,12 @@ rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
 rm -f "${PREFIX_BIN}/frontend"
 rm -f "${PREFIX_BIN}/compactor"
+rm -f "${PREFIX_BIN}/risectl"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/frontend" "${PREFIX_BIN}/frontend"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compactor" "${PREFIX_BIN}/compactor"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risectl" "${PREFIX_BIN}/risectl"
 '''
 
 [tasks.link-all-in-one-binaries]
@@ -274,6 +278,33 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/compactor"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/risectl"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/playground"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/standalone"
+'''
+
+[tasks.codesign-binaries]
+private = true
+category = "RiseDev - Build"
+description = "Codesign all binaries to support coredump"
+# If core dump is enabled by RiseDev and we're on an Apple Silicon platform,
+# codesign the binary before running.
+# https://developer.apple.com/forums/thread/694233?answerId=695943022#695943022
+condition = { env_set = [
+  "ENABLE_COREDUMP",
+], env = { "SYSTEM" = "darwin-arm64" } }
+script = '''
+#!/usr/bin/env bash
+set -e
+
+binaries=()
+
+if [[ "$ENABLE_ALL_IN_ONE" == "true" ]]; then
+  binaries=("risingwave")
+else
+  binaries=("meta-node" "compute-node" "frontend" "compactor")
+fi
+
+echo -n "${binaries[*]}" | parallel -d ' ' \
+  "codesign -s - -f --entitlements scripts/coredump/coredump.entitlements \"target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/{}\""
 '''
 
 [tasks.link-user-bin]
@@ -302,6 +333,7 @@ dependencies = [
   "link-standalone-binaries",
   "link-all-in-one-binaries",
   "link-user-bin",
+  "codesign-binaries",
 ]
 
 [tasks.b]
@@ -473,43 +505,102 @@ dependencies = [
   "download-redis",
 ]
 
+[tasks.pre-start-playground]
+category = "RiseDev - Prepare"
+description = "Preparation steps for playground"
+dependencies = ["build-connector-node"]
+
+[tasks.check-risedev-env-file]
+private = true
+category = "RiseDev - Prepare"
+description = "Check if risedev-env file exists"
+script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+RC_ENV_FILE="${PREFIX_CONFIG}/risedev-env"
+
+if [ ! -f "${RC_ENV_FILE}" ]; then
+  echo "risedev-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0) or $(tput setaf 4)\`./risedev p\`$(tput sgr0)?"
+  exit 1
+fi
+'''
+
+[tasks.psql]
+category = "RiseDev - Start/Stop"
+description = "Run local psql client with default connection parameters. You can pass extra arguments to psql."
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+script = '''
+#!/usr/bin/env bash
+psql -h $RW_FRONTEND_LISTEN_ADDRESS -p $RW_FRONTEND_PORT -U root -d dev "$@"
+'''
+
+[tasks.ctl]
+category = "RiseDev - Start/Stop"
+description = "Start RiseCtl"
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+script = '''
+#!/usr/bin/env bash
+cargo run -p ${RISEDEV_CARGO_BUILD_CRATE} --profile "${RISINGWAVE_BUILD_PROFILE}" ${RISEDEV_CTL_RUN_CMD} "$@"
+test $? -eq 0 || exit 1
+'''
+
 [tasks.p]
 alias = "playground"
 
 [tasks.playground]
 category = "RiseDev - Start/Stop"
 description = "🌟 Start a lite RisingWave playground using risingwave all-in-one binary"
-dependencies = ["build-connector-node"]
+dependencies = ["pre-start-playground"]
 script = '''
 #!/usr/bin/env bash
 
 set -ex
 
-RUST_BACKTRACE=1 \
-cargo run --bin risingwave \
+if [[ $ENABLE_COREDUMP == "true" ]]; then
+  ulimit -c unlimited
+fi
+
+cargo run -p risingwave_cmd_all \
           --profile "${RISINGWAVE_BUILD_PROFILE}" \
           ${RISINGWAVE_FEATURE_FLAGS} \
           -- playground
 '''
 
-[tasks.ctl]
+[tasks.standalone]
 category = "RiseDev - Start/Stop"
-description = "Start RiseCtl"
+description = "🌟 Start a RisingWave standalone instance"
+dependencies = ["build"]
 script = '''
 #!/usr/bin/env bash
 
-RC_ENV_FILE="${PREFIX_CONFIG}/risectl-env"
+set -euo pipefail
 
-if [ ! -f "${RC_ENV_FILE}" ]; then
-  echo "risectl-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
-  exit 1
+if [[ $ENABLE_COREDUMP == "true" ]]; then
+  ulimit -c unlimited
 fi
 
-source "${RC_ENV_FILE}"
-
-cargo run --bin risectl --profile "${RISINGWAVE_BUILD_PROFILE}" -- "$@"
-test $? -eq 0 || exit 1
+cargo run -p risingwave_cmd_all \
+          --profile "${RISINGWAVE_BUILD_PROFILE}" \
+          ${RISINGWAVE_FEATURE_FLAGS} \
+          -- standalone $@
 '''
+
+# TODO(kwannoel): Support `tasks.standalone-dev` as well.
+# Then we can reuse risedev to start peripheral services, e.g. compactor, etcd, kafka, etc...
+[tasks.standalone-demo-dev]
+category = "RiseDev - Start/Stop"
+description = "🌟 Start a RisingWave standalone demo."
+dependencies = ["build"]
+script = "./src/cmd_all/scripts/standalone-demo-dev.sh"
+
+[tasks.standalone-demo-full]
+category = "RiseDev - Start/Stop"
+description = "🌟 Start a RisingWave standalone demo."
+dependencies = ["build"]
+script = "./src/cmd_all/scripts/standalone-demo-full.sh"
 
 [tasks.d]
 alias = "dev"
@@ -517,8 +608,18 @@ alias = "dev"
 [tasks.dev]
 category = "RiseDev - Start/Stop"
 dependencies = ["pre-start-dev"]
-script = "RUST_BACKTRACE=1 target/${BUILD_MODE_DIR}/risedev-dev ${@}"
 description = "🌟 Start a full RisingWave dev cluster using risedev-dev"
+script = '''
+#!/usr/bin/env bash
+
+set -ex
+
+if [[ $ENABLE_COREDUMP == "true" ]]; then
+  ulimit -c unlimited
+fi
+
+target/${BUILD_MODE_DIR}/risedev-dev ${@}
+'''
 
 [tasks.kill-risedev]
 category = "RiseDev - Start/Stop"
@@ -526,7 +627,53 @@ description = "Kill RisingWave dev cluster"
 script = '''
 #!/usr/bin/env bash
 
-tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+set -euo pipefail
+
+wait_kafka_exit() {
+  # Follow kafka-server-stop.sh
+  while [[ -n "$(ps ax | grep ' kafka\.Kafka ' | grep java | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for kafka to exit"
+    sleep 1
+  done
+}
+
+wait_zookeeper_exit() {
+  # Follow zookeeper-server-stop.sh
+  while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for zookeeper to exit"
+    sleep 1
+  done
+}
+
+kill_kafka() {
+  ${PREFIX_BIN}/kafka/bin/kafka-server-stop.sh
+  wait_kafka_exit
+}
+
+kill_zookeeper() {
+  ${PREFIX_BIN}/kafka/bin/zookeeper-server-stop.sh
+  wait_zookeeper_exit
+}
+
+# Kill other components
+tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
+| grep -v 'kafka' \
+| grep -v 'zookeeper' \
+| awk '{ print $2 }' \
+| xargs -I {} tmux send-keys -t {} C-c C-d
+
+if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
+then
+  echo "kill kafka"
+  kill_kafka
+
+  echo "kill zookeeper"
+  kill_zookeeper
+
+  # Kill their tmux sessions
+  tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+fi
+
 tmux kill-session -t risedev
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
@@ -601,6 +748,10 @@ echo
 echo "check: $(tput setaf 4)protoc >= 3.12.0$(tput sgr0)"
 protoc --version || echo "$(tput setaf 3)protoc$(tput sgr0) not found."
 echo
+
+echo "check: $(tput setaf 4)parallel >= 2022XXXX$(tput sgr0)"
+parallel --version || echo "$(tput setaf 3)parallel$(tput sgr0) not found."
+echo
 """
 description = "Install (or upgrade) required tools to do pre-CI check and run e2e tests"
 
@@ -618,7 +769,7 @@ script = """
 set -e
 
 export CARGO_TARGET_DIR=target/coverage
-cargo llvm-cov nextest --html
+cargo llvm-cov nextest --html --workspace --exclude risingwave_simulation
 """
 description = "Run unit tests and report coverage"
 
@@ -629,7 +780,7 @@ script = """
 #!/usr/bin/env bash
 set -e
 
-cargo nextest run "$@"
+cargo nextest run --workspace --exclude risingwave_simulation "$@"
 """
 description = "🌟 Run unit tests"
 
@@ -659,7 +810,7 @@ TARGET_PATH="${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}"
 
 echo "Building connector node..."
 cd "${JAVA_DIR}"
-"${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
+"${MAVEN_PATH}" --batch-mode --update-snapshots package -Dmaven.test.skip
 
 rm -rf ${PREFIX_BIN}/connector-node
 mkdir -p "${PREFIX_BIN}/connector-node"
@@ -961,6 +1112,16 @@ echo "Running $(tput setaf 4)cargo udeps$(tput sgr0) checks"
 cargo udeps --workspace --all-targets ${RISINGWAVE_FEATURE_FLAGS} --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
 """
 
+[tasks.check-trailing-spaces]
+private = true
+category = "RiseDev - Check"
+description = "Check trailing spaces and attempt to fix"
+script = """
+#!/usr/bin/env bash
+
+# This can trim trailing spaces in all git-managed text files, including .md, .toml, .sh, etc.
+scripts/check/check-trailing-spaces.sh --fix
+"""
 
 [tasks.check]
 category = "RiseDev - Check"
@@ -969,6 +1130,7 @@ dependencies = [
   "check-hakari",
   "check-dep-sort",
   "check-fmt",
+  "check-trailing-spaces",
   "check-typos",
   "check-clippy",
   "check-java",
@@ -991,6 +1153,7 @@ dependencies = [
   "check-hakari",
   "check-dep-sort",
   "check-fmt",
+  "check-trailing-spaces",
   "check-typos",
   "check-clippy-fix",
   "check-java-fix",
@@ -1047,14 +1210,35 @@ description = "Clean data and start a full RisingWave dev cluster using risedev-
 
 [tasks.ci-kill]
 category = "RiseDev - CI"
-dependencies = ["k", "l", "check-logs"]
+dependencies = ["k", "l", "check-logs", "wait-processes-exit"]
 description = "Kill cluster, dump logs and check logs"
+
+[tasks.wait-processes-exit]
+private = true
+category = "Misc"
+description = "Wait for RisingWave processes to exit"
+script = """
+wait_for_process() {
+    process_name="$1"
+
+    while pgrep -x "$process_name" > /dev/null; do
+        echo "Process $process_name is still running... Wait for 1 sec"
+        sleep 1
+    done
+}
+
+wait_for_process meta-node
+wait_for_process compute-node
+wait_for_process frontend
+wait_for_process compactor
+echo "All processes has exited."
+"""
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.15.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.15.3", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
-] }
+], install_command = "binstall" }
 command = "sqllogictest"
 args = ["${@}"]
 description = "🌟 Run SQLLogicTest"
@@ -1088,7 +1272,7 @@ description = "Extract SQL examples written in SQLLogicTest syntax from Rust doc
 script = '''
 #!/usr/bin/env bash
 set -e
-cargo run --bin risedev-docslt -- "$@"
+cargo run -p risedev --bin risedev-docslt -- "$@"
 '''
 
 [tasks.compose]
@@ -1099,7 +1283,7 @@ script = '''
 set -e
 rm -rf ${PREFIX_DOCKER}/*
 mkdir -p "${PREFIX_DOCKER}"
-cargo run --bin risedev-compose -- -d "${PREFIX_DOCKER}" "$@"
+cargo run -p risedev --bin risedev-compose -- -d "${PREFIX_DOCKER}" "$@"
 echo docker-compose file generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0)
 '''
 
@@ -1111,7 +1295,7 @@ script = '''
 set -e
 rm -rf "${PREFIX_DOCKER}"/*
 mkdir -p "${PREFIX_DOCKER}"
-cargo run --bin risedev-compose -- -d "${PREFIX_DOCKER}" --deploy "$@"
+cargo run -p risedev --bin risedev-compose -- -d "${PREFIX_DOCKER}" --deploy "$@"
 echo docker-compose file and deploy.sh generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0)
 echo If you are ready, run $(tput setaf 4)./risedev apply-compose-deploy$(tput sgr0) to do the deployment.
 '''
@@ -1150,5 +1334,10 @@ cat << EOF > src/config/example.toml
 # This file is generated by ./risedev generate-example-config
 # Check detailed comments in src/common/src/config.rs
 EOF
-cargo run --bin example-config >> src/config/example.toml
+cargo run -p risingwave_common --bin example-config >> src/config/example.toml
 '''
+
+[tasks.backwards-compat-test]
+category = "RiseDev - Backwards Compatibility Test"
+description = "Run backwards compatibility test"
+script = "./backwards-compat-tests/scripts/run_local.sh"

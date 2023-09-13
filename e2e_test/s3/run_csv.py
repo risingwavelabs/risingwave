@@ -18,7 +18,7 @@ def do_test(config, N, n, prefix):
 
     # Open a cursor to execute SQL statements
     cur = conn.cursor()
-    cur.execute(f'''CREATE TABLE s3_test_csv_without_headers( 
+    cur.execute(f'''CREATE TABLE s3_test_csv_without_headers(
         a int,
         b int,
         c int,
@@ -32,7 +32,7 @@ def do_test(config, N, n, prefix):
         s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
     ) FORMAT PLAIN ENCODE CSV (delimiter = ',', without_header = true);''')
 
-    cur.execute(f'''CREATE TABLE s3_test_csv_with_headers( 
+    cur.execute(f'''CREATE TABLE s3_test_csv_with_headers(
         a int,
         b int,
         c int,

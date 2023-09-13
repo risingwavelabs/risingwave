@@ -41,7 +41,7 @@ def section_actor_info(panels):
         panels.table_info(
             "Materialized View Info",
             "Mapping from materialized view table id to it's internal table ids",
-            [panels.table_target(f"{metric('materialized_info')}")],
+            [panels.table_target(f"group({metric('table_info')}) by (materialized_view_id, table_id, table_name, table_type)")],
             excluded_cols
         ),
     ]
@@ -213,6 +213,16 @@ def section_overview(panels):
             ],
             ["last"],
         ),
+        panels.timeseries_count(
+            "Active Sessions",
+            "Number of active sessions in frontend nodes",
+            [
+                panels.target(
+                    f"{metric('frontend_active_sessions')}",
+                    "",
+                ),
+            ]
+        ),
     ]
 
 
@@ -295,6 +305,10 @@ def section_memory(outer_panels):
                         panels.target(
                             f"sum({metric('uploading_memory_size')}) by (job,instance)",
                             "storage write buffer - {{job}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"sum({metric('stream_memory_usage')} * on(table_id, actor_id) group_left(materialized_view_id) table_info) by (materialized_view_id)",
+                            "materialized_view {{materialized_view_id}}",
                         ),
                     ],
                 ),
@@ -387,7 +401,7 @@ def section_memory(outer_panels):
                             f"(sum(rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_temporal_join_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Stream temporal join cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-                        
+
                         panels.target(
                             f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "materialize executor cache miss ratio - table {{table_id}} - actor {{actor_id}}  {{instance}}",
@@ -605,6 +619,10 @@ def section_storage(outer_panels):
 
 def section_streaming(outer_panels):
     panels = outer_panels.sub_panel()
+    mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
+    table_type_filter = "table_type=~\"MATERIALIZED_VIEW\""
+    mv_throughput_query = f'sum(rate({metric("stream_executor_row_count", filter=mv_filter)}[$__rate_interval]) * on(actor_id) group_left(materialized_view_id, table_name) (group({metric("table_info", filter=table_type_filter)}) by (actor_id, materialized_view_id, table_name))) by (materialized_view_id, table_name)'
+
     return [
         outer_panels.row_collapsed(
             "Streaming",
@@ -626,6 +644,16 @@ def section_streaming(outer_panels):
                         panels.target(
                             f"(sum by (source_id)(rate({metric('partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
                             "source={{source_id}}",
+                        )
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Materialized View Throughput(rows/s)",
+                    "The figure shows the number of rows written into each materialized executor actor per second.",
+                    [
+                        panels.target(
+                            mv_throughput_query,
+                            "materialized view {{table_name}} table_id {{materialized_view_id}}",
                         )
                     ],
                 ),

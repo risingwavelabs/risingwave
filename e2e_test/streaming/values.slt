@@ -1,8 +1,8 @@
 statement ok
-create materialized view mvb as values (233, 'risingwave'), (233, 'risingwave');
+SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-flush;
+create materialized view mvb as values (233, 'risingwave'), (233, 'risingwave');
 
 query IR
 select * from mvb;
@@ -17,8 +17,8 @@ statement ok
 insert into t values (1, 'China'), (0, 'United States');
 
 statement ok
-create materialized view mv as 
-with dict(abbr, real) as (values ('cn', 'China'), ('us', 'United States')) 
+create materialized view mv as
+with dict(abbr, real) as (values ('cn', 'China'), ('us', 'United States'))
 select * from t join dict on t.c = dict.real;
 
 query IRRR
@@ -39,16 +39,38 @@ drop table t;
 statement ok
 create materialized view mv as select * from abs(-1);
 
-# TODO: support this
-statement error not yet implemented: LogicalTableFunction::logical_rewrite_for_stream
-create materialized view mv2 as select * from range(1,2);
+statement ok
+drop materialized view mv;
 
 statement ok
-flush;
+create materialized view mv2 as select * from range(1,2);
 
-query IR
+query I
+select * from mv2;
+----
+1
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+create materialized view mv as select min(1), string_agg('abc', ',');
+
+query IT
 select * from mv;
 ----
+1 abc
+
+statement ok
+drop materialized view mv;
+
+statement ok
+create materialized view mv as select lag(x) over (partition by 0::int) from (values (1), (2)) as t(x);
+
+query I
+select * from mv;
+----
+NULL
 1
 
 statement ok

@@ -27,7 +27,7 @@ use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, MetaConfig, NO_OVERRIDE,
+    extract_storage_memory_config, load_config, MetaConfig, NoOverride,
 };
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -36,7 +36,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{CachePolicy, HummockStorage, TieredCacheMetricsBuilder};
+use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics,
@@ -141,10 +141,7 @@ pub async fn start_meta_node(listen_addr: String, state_store: String, config_pa
         "--config-path",
         &config_path,
     ]);
-    let config = load_config(
-        &meta_opts.config_path,
-        Some(meta_opts.override_opts.clone()),
-    );
+    let config = load_config(&meta_opts.config_path, &meta_opts);
     // We set a large checkpoint frequency to prevent the embedded meta node
     // to commit new epochs to avoid bumping the hummock version during version log replay.
     assert_eq!(
@@ -322,7 +319,7 @@ async fn start_replay(
     );
 
     let mut metric = CompactionTestMetrics::new();
-    let config = load_config(&opts.config_path_for_meta, NO_OVERRIDE);
+    let config = load_config(&opts.config_path_for_meta, NoOverride);
     tracing::info!(
         "Starting replay with config {:?} and opts {:?}",
         config,
@@ -413,7 +410,7 @@ async fn start_replay(
             replayed_epochs.pop();
             let mut epochs = vec![max_committed_epoch];
             epochs.extend(
-                pin_old_snapshots(&meta_client, &mut replayed_epochs, 1)
+                pin_old_snapshots(&meta_client, &replayed_epochs, 1)
                     .await
                     .into_iter(),
             );
@@ -524,7 +521,7 @@ async fn start_replay(
 
 async fn pin_old_snapshots(
     meta_client: &MetaClient,
-    replayed_epochs: &mut [HummockEpoch],
+    replayed_epochs: &[HummockEpoch],
     num: usize,
 ) -> Vec<HummockEpoch> {
     let mut old_epochs = vec![];
@@ -628,19 +625,15 @@ async fn open_hummock_iters(
         ))),
     );
 
-    for &epoch in snapshots.iter() {
+    for &epoch in snapshots {
         let iter = hummock
             .iter(
                 range.clone(),
                 epoch,
                 ReadOptions {
-                    prefix_hint: None,
                     table_id: TableId { table_id },
-                    retention_seconds: None,
-                    ignore_range_tombstone: false,
-                    read_version_from_backup: false,
-                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await?;
@@ -718,7 +711,6 @@ pub async fn create_hummock_store_with_metrics(
         )),
         metrics.state_store_metrics.clone(),
         metrics.object_store_metrics.clone(),
-        TieredCacheMetricsBuilder::unused(),
         metrics.storage_metrics.clone(),
         metrics.compactor_metrics.clone(),
     )

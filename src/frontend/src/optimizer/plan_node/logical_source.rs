@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, Schema};
+use risingwave_common::catalog::{ColumnCatalog, Schema, KAFKA_TIMESTAMP_COLUMN_NAME};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -40,12 +40,6 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
-
-/// For kafka source, we attach a hidden column [`KAFKA_TIMESTAMP_COLUMN_NAME`] to it, so that we
-/// can limit the timestamp range when querying it directly with batch query. The column type is
-/// [`DataType::Timestamptz`]. For more details, please refer to
-/// [this rfc](https://github.com/risingwavelabs/rfcs/pull/20).
-pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 
 /// `LogicalSource` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -126,7 +120,7 @@ impl LogicalSource {
                     mapping[idx] = None;
                 }
             }
-            ColIndexMapping::new(mapping)
+            ColIndexMapping::with_target_size(mapping, columns.len())
         };
 
         let mut rewriter = IndexRewriter::new(col_mapping);

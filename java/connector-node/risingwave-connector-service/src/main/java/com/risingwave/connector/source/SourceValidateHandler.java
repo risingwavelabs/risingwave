@@ -105,10 +105,18 @@ public class SourceValidateHandler {
                 ensurePropNotNull(props, DbzConnectorConfig.DB_SERVERS);
                 var workerServers =
                         StringUtils.split(props.get(DbzConnectorConfig.DB_SERVERS), ',');
-                for (String workerHost : workerServers) {
+                // props extracted from grpc request, clone it to modify
+                Map<String, String> mutableProps = new HashMap<>(props);
+                for (String workerAddr : workerServers) {
+                    String[] hostPort = StringUtils.split(workerAddr, ':');
+                    if (hostPort.length != 2) {
+                        throw ValidatorUtils.invalidArgument(
+                                String.format("invalid database.servers"));
+                    }
                     // set HOST for each worker server
-                    props.put(DbzConnectorConfig.HOST, workerHost);
-                    try (var workerValidator = new PostgresValidator(props, tableSchema)) {
+                    mutableProps.put(DbzConnectorConfig.HOST, hostPort[0]);
+                    mutableProps.put(DbzConnectorConfig.PORT, hostPort[1]);
+                    try (var workerValidator = new PostgresValidator(mutableProps, tableSchema)) {
                         workerValidator.validateDbConfig();
                         workerValidator.validateUserPrivilege();
                     }

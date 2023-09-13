@@ -23,7 +23,7 @@ use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::catalog::CatalogError;
+use crate::catalog::{check_valid_column_name, CatalogError};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
@@ -107,6 +107,9 @@ pub fn gen_create_mv_plan(
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
+        for name in &col_names {
+            check_valid_column_name(name)?;
+        }
         plan_root.set_out_names(col_names)?;
     }
     let materialize =

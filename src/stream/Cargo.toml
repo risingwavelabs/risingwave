@@ -27,9 +27,10 @@ either = "1"
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+governor = { version = "0.6", default-features = false, features = ["std", "dashmap", "jitter"] }
 hytra = "0.1.2"
 iter-chunks = "0.1"
-itertools = "0.10"
+itertools = "0.11"
 local_stats_alloc = { path = "../utils/local_stats_alloc" }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 maplit = "1.0.2"
@@ -37,19 +38,20 @@ memcomparable = "0.2"
 multimap = "0.8"
 num-traits = "0.2"
 parking_lot = "0.12"
+parse-display = "0.8"
 pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
 rand = "0.8"
-risingwave_common = { path = "../common" }
-risingwave_connector = { path = "../connector" }
-risingwave_expr = { path = "../expr" }
-risingwave_frontend = { path = "../frontend" }
-risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
-risingwave_pb = { path = "../prost" }
-risingwave_rpc_client = { path = "../rpc_client" }
-risingwave_source = { path = "../source" }
-risingwave_storage = { path = "../storage" }
+risingwave_common = { workspace = true }
+risingwave_connector = { workspace = true }
+risingwave_expr = { workspace = true }
+risingwave_frontend = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
+risingwave_source = { workspace = true }
+risingwave_storage = { workspace = true }
 serde_json = "1"
 smallvec = "1"
 spin = "0.9"
@@ -64,7 +66,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tokio-metrics = "0.1.0"
+tokio-metrics = "0.3.0"
 tokio-stream = "0.1"
 tonic = { workspace = true }
 tracing = "0.1"
@@ -89,3 +91,10 @@ tracing-test = "0.2"
 [[bench]]
 name = "stream_hash_agg"
 harness = false
+
+[[bench]]
+name = "bench_state_table"
+harness = false
+
+[lints]
+workspace = true

@@ -21,24 +21,25 @@ use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::format::{Formatter, FormatterNode, SpecifierType};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::agg::{agg_kinds, AggKind};
 use risingwave_expr::function::window::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
-    Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameExclusion,
+    self, Function, FunctionArg, FunctionArgExpr, Ident, WindowFrameBound, WindowFrameExclusion,
     WindowFrameUnits, WindowSpec,
 };
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, Now, OrderBy, Subquery, SubqueryKind,
-    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
+    AggCall, Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, Literal, Now, OrderBy,
+    Subquery, SubqueryKind, TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -90,6 +91,21 @@ impl Binder {
                 .into());
         }
 
+        // FIXME: This is a hack to support [Bytebase queries](https://github.com/TennyZhuang/bytebase/blob/4a26f7c62b80e86e58ad2f77063138dc2f420623/backend/plugin/db/pg/sync.go#L549).
+        // Bytebase widely used the pattern like `obj_description(format('%s.%s',
+        // quote_ident(idx.schemaname), quote_ident(idx.indexname))::regclass) AS comment` to
+        // retrieve object comment, however we don't support casting a non-literal expression to
+        // regclass. We just hack the `obj_description` and `col_description` here, to disable it to
+        // bind its arguments.
+        if function_name == "obj_description" || function_name == "col_description" {
+            return Ok(ExprImpl::literal_varchar("".to_string()));
+        }
+
+        if function_name == "array_transform" {
+            // For type inference, we need to bind the array type first.
+            return self.bind_array_transform(f);
+        }
+
         let inputs = f
             .args
             .into_iter()
@@ -124,9 +140,10 @@ impl Binder {
 
         // user defined function
         // TODO: resolve schema name
-        if let Some(func) = self.first_valid_schema()?.get_function_by_name_args(
-            &function_name,
-            &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
+        if let Ok(schema) = self.first_valid_schema() &&
+            let Some(func) = schema.get_function_by_name_args(
+                &function_name,
+                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
         ) {
             use crate::catalog::function_catalog::FunctionKind::*;
             match &func.kind {
@@ -140,6 +157,81 @@ impl Binder {
         }
 
         self.bind_builtin_scalar_function(function_name.as_str(), inputs)
+    }
+
+    fn bind_array_transform(&mut self, f: Function) -> Result<ExprImpl> {
+        let [array, lambda] = <[FunctionArg; 2]>::try_from(f.args).map_err(|args| -> RwError {
+            ErrorCode::BindError(format!(
+                "`array_transform` expect two inputs `array` and `lambda`, but {} were given",
+                args.len()
+            ))
+            .into()
+        })?;
+
+        let bound_array = self.bind_function_arg(array)?;
+        let [bound_array] = <[ExprImpl; 1]>::try_from(bound_array).map_err(|bound_array| -> RwError {
+            ErrorCode::BindError(format!("The `array` argument for `array_transform` should be bound to one argument, but {} were got", bound_array.len()))
+                .into()
+        })?;
+
+        let inner_ty = match bound_array.return_type() {
+            DataType::List(ty) => *ty,
+            real_type => {
+                return Err(ErrorCode::BindError(format!(
+                "The `array` argument for `array_transform` should be an array, but {} were got",
+                real_type
+            ))
+                .into())
+            }
+        };
+
+        let ast::FunctionArgExpr::Expr(ast::Expr::LambdaFunction {
+            args: lambda_args,
+            body: lambda_body,
+        }) = lambda.get_expr()
+        else {
+            return Err(ErrorCode::BindError(
+                "The `lambda` argument for `array_transform` should be a lambda function"
+                    .to_string(),
+            )
+            .into());
+        };
+
+        let [lambda_arg] = <[Ident; 1]>::try_from(lambda_args).map_err(|args| -> RwError {
+            ErrorCode::BindError(format!(
+                "The `lambda` argument for `array_transform` should be a lambda function with one argument, but {} were given",
+                args.len()
+            ))
+            .into()
+        })?;
+
+        let bound_lambda = self.bind_unary_lambda_function(inner_ty, lambda_arg, *lambda_body)?;
+
+        let lambda_ret_type = bound_lambda.return_type();
+        let transform_ret_type = DataType::List(Box::new(lambda_ret_type));
+
+        Ok(ExprImpl::FunctionCallWithLambda(Box::new(
+            FunctionCallWithLambda::new_unchecked(
+                ExprType::ArrayTransform,
+                vec![bound_array],
+                bound_lambda,
+                transform_ret_type,
+            ),
+        )))
+    }
+
+    fn bind_unary_lambda_function(
+        &mut self,
+        input_ty: DataType,
+        arg: Ident,
+        body: ast::Expr,
+    ) -> Result<ExprImpl> {
+        let lambda_args = HashMap::from([(arg.real_value(), (0usize, input_ty))]);
+        let orig_lambda_args = self.context.lambda_args.replace(lambda_args);
+        let body = self.bind_expr_inner(body)?;
+        self.context.lambda_args = orig_lambda_args;
+
+        Ok(body)
     }
 
     pub(super) fn bind_agg(&mut self, f: Function, kind: AggKind) -> Result<ExprImpl> {
@@ -576,7 +668,12 @@ impl Binder {
                     "boolne",
                     rewrite(ExprType::NotEqual, Binder::rewrite_two_bool_inputs),
                 ),
-                ("coalesce", raw_call(ExprType::Coalesce)),
+                ("coalesce", rewrite(ExprType::Coalesce, |inputs| {
+                    if inputs.iter().any(ExprImpl::has_table_function) {
+                        return Err(ErrorCode::BindError("table functions are not allowed in COALESCE".into()).into());
+                    }
+                    Ok(inputs)
+                })),
                 (
                     "nullif",
                     rewrite(ExprType::Case, Binder::rewrite_nullif_to_case_when),
@@ -626,6 +723,9 @@ impl Binder {
                 ("sqrt", raw_call(ExprType::Sqrt)),
                 ("cbrt", raw_call(ExprType::Cbrt)),
                 ("sign", raw_call(ExprType::Sign)),
+                ("scale", raw_call(ExprType::Scale)),
+                ("min_scale", raw_call(ExprType::MinScale)),
+                ("trim_scale", raw_call(ExprType::TrimScale)),
 
                 (
                     "to_timestamp",
@@ -636,6 +736,7 @@ impl Binder {
                 ),
                 ("date_trunc", raw_call(ExprType::DateTrunc)),
                 ("date_part", raw_call(ExprType::DatePart)),
+                ("to_date", raw_call(ExprType::CharToDate)),
                 // string
                 ("substr", raw_call(ExprType::Substr)),
                 ("length", raw_call(ExprType::Length)),
@@ -654,6 +755,7 @@ impl Binder {
                     rewrite(ExprType::ConcatWs, Binder::rewrite_concat_to_concat_ws),
                 ),
                 ("concat_ws", raw_call(ExprType::ConcatWs)),
+                ("format", rewrite(ExprType::ConcatWs, Binder::rewrite_format_to_concat_ws)),
                 ("translate", raw_call(ExprType::Translate)),
                 ("split_part", raw_call(ExprType::SplitPart)),
                 ("char_length", raw_call(ExprType::CharLength)),
@@ -663,6 +765,8 @@ impl Binder {
                 ("octet_length", raw_call(ExprType::OctetLength)),
                 ("bit_length", raw_call(ExprType::BitLength)),
                 ("regexp_match", raw_call(ExprType::RegexpMatch)),
+                ("regexp_replace", raw_call(ExprType::RegexpReplace)),
+                ("regexp_count", raw_call(ExprType::RegexpCount)),
                 ("chr", raw_call(ExprType::Chr)),
                 ("starts_with", raw_call(ExprType::StartsWith)),
                 ("initcap", raw_call(ExprType::Initcap)),
@@ -690,10 +794,13 @@ impl Binder {
                 ("array_prepend", raw_call(ExprType::ArrayPrepend)),
                 ("array_to_string", raw_call(ExprType::ArrayToString)),
                 ("array_distinct", raw_call(ExprType::ArrayDistinct)),
+                ("array_min", raw_call(ExprType::ArrayMin)),
+                ("array_sort", raw_call(ExprType::ArraySort)),
                 ("array_length", raw_call(ExprType::ArrayLength)),
                 ("cardinality", raw_call(ExprType::Cardinality)),
                 ("array_remove", raw_call(ExprType::ArrayRemove)),
                 ("array_replace", raw_call(ExprType::ArrayReplace)),
+                ("array_max", raw_call(ExprType::ArrayMax)),
                 ("array_position", raw_call(ExprType::ArrayPosition)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
@@ -835,6 +942,62 @@ impl Binder {
                         ))))
                     }
                 ))),
+                ("pg_relation_size", dispatch_by_len(vec![
+                    (1, raw(|binder, inputs|{
+                        let table_name = &inputs[0];
+                        let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
+                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                            BoundQuery {
+                                body: BoundSetExpr::Select(Box::new(bound_query)),
+                                order: vec![],
+                                limit: None,
+                                offset: None,
+                                with_ties: false,
+                                extra_order_exprs: vec![],
+                            },
+                            SubqueryKind::Scalar,
+                        ))))
+                    })),
+                    (2, raw(|binder, inputs|{
+                        let table_name = &inputs[0];
+                        match inputs[1].as_literal() {
+                            Some(literal) if literal.return_type() == DataType::Varchar => {
+                                match literal
+                                     .get_data()
+                                     .as_ref()
+                                     .expect("ExprImpl value is a Literal but cannot get ref to data")
+                                     .as_utf8()
+                                     .as_ref() {
+                                        "main" => {
+                                            let bound_query = binder.bind_get_table_size_select("pg_relation_size", table_name)?;
+                                            Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                                                BoundQuery {
+                                                    body: BoundSetExpr::Select(Box::new(bound_query)),
+                                                    order: vec![],
+                                                    limit: None,
+                                                    offset: None,
+                                                    with_ties: false,
+                                                    extra_order_exprs: vec![],
+                                                },
+                                                SubqueryKind::Scalar,
+                                            ))))
+                                        },
+                                        // These options are invalid in RW so we return 0 value as the result
+                                        "fsm"|"vm"|"init" => {
+                                            Ok(ExprImpl::literal_int(0))
+                                        },
+                                        _ => Err(ErrorCode::InvalidInputSyntax(
+                                            "invalid fork name. Valid fork names are \"main\", \"fsm\", \"vm\", and \"init\"".into()).into())
+                                    }
+                            },
+                            _ => Err(ErrorCode::ExprError(
+                                "The 2nd argument of `pg_relation_size` must be string literal.".into(),
+                            )
+                            .into())
+                        }
+                    })),
+                    ]
+                )),
                 ("pg_table_size", guard_by_len(1, raw(|binder, inputs|{
                         let input = &inputs[0];
                         let bound_query = binder.bind_get_table_size_select("pg_table_size", input)?;
@@ -937,6 +1100,8 @@ impl Binder {
                 }))),
                 ("format_type", raw_call(ExprType::FormatType)),
                 ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_type_is_visible", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_get_constraintdef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_backend_pid", raw(|binder, _inputs| {
@@ -953,16 +1118,24 @@ impl Binder {
                         Ok(ExprImpl::literal_bool(false))
                 }))),
                 ("pg_tablespace_location", guard_by_len(1, raw_literal(ExprImpl::literal_null(DataType::Varchar)))),
+                ("pg_postmaster_start_time", guard_by_len(0, raw(|_binder, _inputs|{
+                    let server_start_time = risingwave_variables::get_server_start_time();
+                    let datum = server_start_time.map(Timestamptz::from).map(ScalarImpl::from);
+                    let literal = Literal::new(datum, DataType::Timestamptz);
+                    Ok(literal.into())
+                }))),
                 // TODO: really implement them.
                 // https://www.postgresql.org/docs/9.5/functions-info.html#FUNCTIONS-INFO-COMMENT-TABLE
+                // WARN: Hacked in [`Binder::bind_function`]!!!
                 ("col_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
+                ("pg_is_in_recovery", raw_literal(ExprImpl::literal_bool(false))),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 8.3-RisingWave-{} ({})",
+                    "PostgreSQL 9.5-RisingWave-{} ({})",
                     RW_VERSION,
                     GIT_SHA
                 )))),
@@ -1015,7 +1188,7 @@ impl Binder {
     fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
         if inputs.is_empty() {
             Err(ErrorCode::BindError(
-                "Function `Concat` takes at least 1 arguments (0 given)".to_string(),
+                "Function `concat` takes at least 1 arguments (0 given)".to_string(),
             )
             .into())
         } else {
@@ -1026,11 +1199,83 @@ impl Binder {
         }
     }
 
+    fn rewrite_format_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
+        let Some((format_expr, args)) = inputs.split_first() else {
+            return Err(ErrorCode::BindError(
+                "Function `format` takes at least 1 arguments (0 given)".to_string(),
+            )
+            .into());
+        };
+        let ExprImpl::Literal(expr_literal) = format_expr else {
+            return Err(ErrorCode::BindError(
+                "Function `format` takes a literal string as the first argument".to_string(),
+            )
+            .into());
+        };
+        let Some(ScalarImpl::Utf8(format_str)) = expr_literal.get_data() else {
+            return Err(ErrorCode::BindError(
+                "Function `format` takes a literal string as the first argument".to_string(),
+            )
+            .into());
+        };
+        let formatter = Formatter::parse(format_str)
+            .map_err(|err| -> RwError { ErrorCode::BindError(err.to_string()).into() })?;
+
+        let specifier_count = formatter
+            .nodes()
+            .iter()
+            .filter(|f_node| matches!(f_node, FormatterNode::Specifier(_)))
+            .count();
+        if specifier_count != args.len() {
+            return Err(ErrorCode::BindError(format!(
+                "Function `format` required {} arguments based on the `formatstr`, but {} found.",
+                specifier_count,
+                args.len()
+            ))
+            .into());
+        }
+
+        // iter the args.
+        let mut j = 0;
+        let new_args = [Ok(ExprImpl::literal_varchar("".to_string()))]
+            .into_iter()
+            .chain(formatter.nodes().iter().map(move |f_node| -> Result<_> {
+                let new_arg = match f_node {
+                    FormatterNode::Specifier(sp) => {
+                        // We've checked the count.
+                        let arg = &args[j];
+                        j += 1;
+                        match sp.ty {
+                            SpecifierType::SimpleString => arg.clone(),
+                            SpecifierType::SqlIdentifier => {
+                                FunctionCall::new(ExprType::QuoteIdent, vec![arg.clone()])?.into()
+                            }
+                            SpecifierType::SqlLiteral => {
+                                return Err::<_, RwError>(
+                                    ErrorCode::BindError(
+                                        "unsupported specifier type 'L'".to_string(),
+                                    )
+                                    .into(),
+                                )
+                            }
+                        }
+                    }
+                    FormatterNode::Literal(literal) => ExprImpl::literal_varchar(literal.clone()),
+                };
+                Ok(new_arg)
+            }))
+            .try_collect()?;
+        Ok(new_args)
+    }
+
     /// Make sure inputs only have 2 value and rewrite the arguments.
     /// Nullif(expr1,expr2) -> Case(Equal(expr1 = expr2),null,expr1).
     fn rewrite_nullif_to_case_when(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
         if inputs.len() != 2 {
-            Err(ErrorCode::BindError("Nullif function must contain 2 arguments".to_string()).into())
+            Err(
+                ErrorCode::BindError("Function `nullif` must contain 2 arguments".to_string())
+                    .into(),
+            )
         } else {
             let inputs = vec![
                 FunctionCall::new(ExprType::Equal, inputs.clone())?.into(),
@@ -1133,18 +1378,19 @@ impl Binder {
     fn ensure_table_function_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values | Clause::GeneratedColumn => {
+                Clause::JoinOn
+                | Clause::Where
+                | Clause::Having
+                | Clause::Filter
+                | Clause::Values
+                | Clause::GeneratedColumn => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "table functions are not allowed in {}",
                         clause
                     ))
                     .into());
                 }
-                Clause::JoinOn
-                | Clause::GroupBy
-                | Clause::Having
-                | Clause::Filter
-                | Clause::From => {}
+                Clause::GroupBy | Clause::From => {}
             }
         }
         Ok(())

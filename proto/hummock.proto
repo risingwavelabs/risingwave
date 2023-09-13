@@ -294,6 +294,7 @@ message CompactTask {
     MANUAL = 3;
     SHARED_BUFFER = 4;
     TTL = 5;
+    TOMBSTONE = 6;
   }
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
@@ -373,11 +374,6 @@ message CompactTaskProgress {
   uint64 num_pending_write_io = 6;
 }
 
-// The measurement of the workload on a compactor to determine whether it is idle.
-message CompactorWorkload {
-  uint32 cpu = 1;
-}
-
 message SubscribeCompactionEventRequest {
   // Register provides the context_id of the corresponding Compactor.
   message Register {
@@ -413,6 +409,8 @@ message SubscribeCompactionEventRequest {
     // Periodically, HeartBeat carries the progress of all tasks on the Compactor, and the meta will cancel the task when it expires.
     HeartBeat heart_beat = 4;
   }
+
+  uint64 create_at = 7;
 }
 
 message SubscribeCompactionEventResponse {
@@ -429,6 +427,8 @@ message SubscribeCompactionEventResponse {
 
     PullTaskAck pull_task_ack = 6;
   }
+
+  uint64 create_at = 7;
 }
 
 message ValidationTask {
@@ -474,7 +474,12 @@ message TriggerManualCompactionResponse {
 }
 
 message ReportFullScanTaskRequest {
+  // Object ids that satisfying conditions specified by FullScanTask.
   repeated uint64 object_ids = 1;
+  // Total count of objects before filtered by conditions specified by FullScanTask.
+  uint64 total_object_count = 2;
+  // Total size of objects before filtered by conditions specified by FullScanTask.
+  uint64 total_object_size = 3;
 }
 
 message ReportFullScanTaskResponse {
@@ -681,6 +686,7 @@ message CompactionConfig {
 
   // for tier compaction pick overlapping level
   uint32 level0_overlapping_sub_level_compact_level_count = 18;
+  uint32 tombstone_reclaim_ratio = 19;
 }
 
 message TableStats {

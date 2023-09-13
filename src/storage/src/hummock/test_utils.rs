@@ -27,8 +27,8 @@ use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
-    create_monotonic_events, CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta,
-    SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
+    create_monotonic_events, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
+    DEFAULT_RESTART_INTERVAL,
 };
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
@@ -127,7 +127,7 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
         block_capacity: 4096,      // 4KB
         restart_interval: DEFAULT_RESTART_INTERVAL,
         bloom_false_positive: 0.1,
-        compression_algorithm: CompressionAlgorithm::None,
+        ..Default::default()
     }
 }
 
@@ -219,6 +219,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
         F::create(opts.bloom_false_positive, opts.capacity / 16),
         opts,
         Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+        None,
     );
 
     let mut last_key = FullKey::<B>::default();

@@ -18,10 +18,9 @@ use anyhow::anyhow;
 use risingwave_common::cast::{str_to_date, str_to_timestamp};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::try_match_expand;
 use risingwave_common::types::{Datum, Decimal, ScalarImpl, Timestamptz};
 
-use super::{ByteStreamSourceParser, EncodingProperties};
+use super::{ByteStreamSourceParser, CsvProperties};
 use crate::only_parse_payload;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
@@ -31,21 +30,6 @@ macro_rules! to_rust_type {
         $v.parse::<$t>()
             .map_err(|_| anyhow!("failed parse {} from {}", stringify!($t), $v))?
     };
-}
-#[derive(Debug, Clone)]
-pub struct CsvParserConfig {
-    pub delimiter: u8,
-    pub has_header: bool,
-}
-
-impl CsvParserConfig {
-    pub fn new(encoding_properties: EncodingProperties) -> Result<Self> {
-        let csv_config = try_match_expand!(encoding_properties, EncodingProperties::Csv)?;
-        Ok(Self {
-            delimiter: csv_config.delimiter,
-            has_header: csv_config.has_header,
-        })
-    }
 }
 
 /// Parser for CSV format
@@ -60,13 +44,13 @@ pub struct CsvParser {
 impl CsvParser {
     pub fn new(
         rw_columns: Vec<SourceColumnDesc>,
-        parser_config: CsvParserConfig,
+        csv_props: CsvProperties,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {
-        let CsvParserConfig {
+        let CsvProperties {
             delimiter,
             has_header,
-        } = parser_config;
+        } = csv_props;
 
         Ok(Self {
             rw_columns,
@@ -203,7 +187,7 @@ mod tests {
         ];
         let mut parser = CsvParser::new(
             Vec::new(),
-            CsvParserConfig {
+            CsvProperties {
                 delimiter: b',',
                 has_header: false,
             },
@@ -310,7 +294,7 @@ mod tests {
         ];
         let mut parser = CsvParser::new(
             Vec::new(),
-            CsvParserConfig {
+            CsvProperties {
                 delimiter: b',',
                 has_header: true,
             },

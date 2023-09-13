@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -30,7 +30,7 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
-use super::DatabaseId;
+use super::{DatabaseId, TableId};
 use crate::user::UserId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
@@ -81,10 +81,13 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn replace_table(
         &self,
+        source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
     ) -> Result<()>;
+
+    async fn alter_source_column(&self, source: PbSource) -> Result<()>;
 
     async fn create_index(
         &self,
@@ -108,21 +111,26 @@ pub trait CatalogWriter: Send + Sync {
         connection: create_connection_request::Payload,
     ) -> Result<()>;
 
-    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()>;
+    async fn drop_table(
+        &self,
+        source_id: Option<u32>,
+        table_id: TableId,
+        cascade: bool,
+    ) -> Result<()>;
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
+    async fn drop_materialized_view(&self, table_id: TableId, cascade: bool) -> Result<()>;
 
-    async fn drop_view(&self, view_id: u32) -> Result<()>;
+    async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<()>;
 
-    async fn drop_source(&self, source_id: u32) -> Result<()>;
+    async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()>;
 
-    async fn drop_sink(&self, sink_id: u32) -> Result<()>;
+    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()>;
 
     async fn drop_database(&self, database_id: u32) -> Result<()>;
 
     async fn drop_schema(&self, schema_id: u32) -> Result<()>;
 
-    async fn drop_index(&self, index_id: IndexId) -> Result<()>;
+    async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()>;
 
     async fn drop_function(&self, function_id: FunctionId) -> Result<()>;
 
@@ -215,15 +223,21 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn alter_source_column(&self, source: PbSource) -> Result<()> {
+        let version = self.meta_client.alter_source_column(source).await?;
+        self.wait_version(version).await
+    }
+
     async fn replace_table(
         &self,
+        source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .replace_table(table, graph, mapping)
+            .replace_table(source, table, graph, mapping)
             .await?;
         self.wait_version(version).await
     }
@@ -264,33 +278,44 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
-        let version = self.meta_client.drop_table(source_id, table_id).await?;
+    async fn drop_table(
+        &self,
+        source_id: Option<u32>,
+        table_id: TableId,
+        cascade: bool,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .drop_table(source_id, table_id, cascade)
+            .await?;
         self.wait_version(version).await
     }
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
-        let version = self.meta_client.drop_materialized_view(table_id).await?;
+    async fn drop_materialized_view(&self, table_id: TableId, cascade: bool) -> Result<()> {
+        let version = self
+            .meta_client
+            .drop_materialized_view(table_id, cascade)
+            .await?;
         self.wait_version(version).await
     }
 
-    async fn drop_view(&self, view_id: u32) -> Result<()> {
-        let version = self.meta_client.drop_view(view_id).await?;
+    async fn drop_view(&self, view_id: u32, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_view(view_id, cascade).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_source(&self, source_id: u32) -> Result<()> {
-        let version = self.meta_client.drop_source(source_id).await?;
+    async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_source(source_id, cascade).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_sink(&self, sink_id: u32) -> Result<()> {
-        let version = self.meta_client.drop_sink(sink_id).await?;
+    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_sink(sink_id, cascade).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_index(&self, index_id: IndexId) -> Result<()> {
-        let version = self.meta_client.drop_index(index_id).await?;
+    async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_index(index_id, cascade).await?;
         self.wait_version(version).await
     }
 

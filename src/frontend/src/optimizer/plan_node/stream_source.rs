@@ -36,20 +36,12 @@ pub struct StreamSource {
 
 impl StreamSource {
     pub fn new(logical: generic::Source) -> Self {
-        let mut watermark_columns = FixedBitSet::with_capacity(logical.column_catalog.len());
-        if let Some(catalog) = &logical.catalog {
-            catalog
-                .watermark_descs
-                .iter()
-                .for_each(|desc| watermark_columns.insert(desc.watermark_idx as usize))
-        }
-
         let base = PlanBase::new_stream_with_logical(
             &logical,
             Distribution::SomeShard,
             logical.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
-            watermark_columns,
+            FixedBitSet::with_capacity(logical.column_catalog.len()),
         );
         Self { base, logical }
     }

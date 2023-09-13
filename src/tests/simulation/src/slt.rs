@@ -24,11 +24,7 @@ use crate::cluster::{Cluster, KillOpts};
 use crate::utils::TimedExt;
 
 fn is_create_table_as(sql: &str) -> bool {
-    let parts: Vec<String> = sql
-        .trim_start()
-        .split_whitespace()
-        .map(|s| s.to_lowercase())
-        .collect();
+    let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
 
     parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
 }
@@ -253,6 +249,9 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
             .expect("failed to get schema path");
     let proto_full_path = std::fs::canonicalize("src/connector/src/test_data/complex-schema")
         .expect("failed to get schema path");
+    let json_schema_full_path =
+        std::fs::canonicalize("src/connector/src/test_data/complex-schema.json")
+            .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")
         .replace(
@@ -266,6 +265,10 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
         .replace(
             "/risingwave/proto-complex-schema",
             proto_full_path.to_str().unwrap(),
+        )
+        .replace(
+            "/risingwave/json-complex-schema",
+            json_schema_full_path.to_str().unwrap(),
         );
     let file = tempfile::NamedTempFile::new().expect("failed to create temp file");
     std::fs::write(file.path(), content).expect("failed to write file");

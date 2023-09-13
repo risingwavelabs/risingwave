@@ -37,17 +37,15 @@ impl StreamValues {
     /// `StreamValues` should enforce `Distribution::Single`
     pub fn new(logical: LogicalValues) -> Self {
         let ctx = logical.ctx();
-        let mut watermark_columns = FixedBitSet::with_capacity(logical.schema().len());
-        (0..(logical.schema().len() - 1)).for_each(|i| watermark_columns.set(i, true));
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             logical.logical_pk().to_vec(),
             logical.functional_dependency().clone(),
             Distribution::Single,
+            true,
             false,
-            false,
-            watermark_columns,
+            FixedBitSet::with_capacity(logical.schema().len()),
         );
         Self { base, logical }
     }

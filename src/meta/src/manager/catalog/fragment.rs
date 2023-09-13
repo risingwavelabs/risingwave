@@ -17,11 +17,11 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
-use risingwave_common::{bail, try_match_expand};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -41,7 +41,7 @@ use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
     ValTransaction,
 };
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::Transaction;
 use crate::stream::{SplitAssignment, TableRevision};
 use crate::MetaResult;
 
@@ -103,8 +103,8 @@ impl FragmentManagerCore {
 }
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
-pub struct FragmentManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct FragmentManager {
+    env: MetaSrvEnv,
 
     core: RwLock<FragmentManagerCore>,
 }
@@ -117,18 +117,11 @@ pub struct ActorInfos {
     pub barrier_inject_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 }
 
-pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
+pub type FragmentManagerRef = Arc<FragmentManager>;
 
-impl<S: MetaStore> FragmentManager<S>
-where
-    S: MetaStore,
-{
-    pub async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
-        let table_fragments = try_match_expand!(
-            TableFragments::list(env.meta_store()).await,
-            Ok,
-            "TableFragments::list fail"
-        )?;
+impl FragmentManager {
+    pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
+        let table_fragments = TableFragments::list(env.meta_store()).await?;
 
         let table_fragments = table_fragments
             .into_iter()
@@ -150,6 +143,21 @@ where
         self.core.read().await
     }
 
+    pub async fn list_dirty_table_fragments(
+        &self,
+        check_dirty: impl Fn(&TableFragments) -> bool,
+    ) -> Vec<TableFragments> {
+        self.core
+            .read()
+            .await
+            .table_fragments
+            .values()
+            .filter(|tf| check_dirty(tf))
+            .cloned()
+            .collect_vec()
+    }
+
+    // FIXME: `list_table_fragments` would be too heavy for large cluster.
     pub async fn list_table_fragments(&self) -> Vec<TableFragments> {
         let map = &self.core.read().await.table_fragments;
         map.values().cloned().collect()
@@ -326,10 +334,14 @@ where
     /// of this table, and updates the downstream Merge to have the new upstream fragments.
     pub async fn post_replace_table(
         &self,
-        table_id: TableId,
-        dummy_table_id: TableId,
+        old_table_fragments: &TableFragments,
+        new_table_fragments: &TableFragments,
         merge_updates: &[MergeUpdate],
+        dispatchers: &HashMap<ActorId, Vec<Dispatcher>>,
     ) -> MetaResult<()> {
+        let table_id = old_table_fragments.table_id();
+        let dummy_table_id = new_table_fragments.table_id();
+
         let mut guard = self.core.write().await;
         let current_revision = guard.table_revision;
         let map = &mut guard.table_fragments;
@@ -362,7 +374,7 @@ where
             .map(|update| (update.actor_id, update))
             .collect();
 
-        let to_update_table_ids = table_fragments
+        let to_update_merge_table_ids = table_fragments
             .tree_ref()
             .iter()
             .filter(|(_, v)| {
@@ -373,7 +385,7 @@ where
             .map(|(k, _)| *k)
             .collect::<Vec<_>>();
 
-        for table_id in to_update_table_ids {
+        for table_id in to_update_merge_table_ids {
             let mut table_fragment = table_fragments
                 .get_mut(table_id)
                 .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
@@ -401,6 +413,51 @@ where
         }
 
         assert!(merge_updates.is_empty());
+
+        let dropped_actor_ids = old_table_fragments
+            .actor_ids()
+            .into_iter()
+            .collect::<HashSet<_>>();
+
+        let mut dispatchers = dispatchers.to_owned();
+
+        let to_update_dispatcher_table_ids = table_fragments
+            .tree_ref()
+            .iter()
+            .filter(|(_, v)| {
+                v.actor_ids()
+                    .iter()
+                    .any(|&actor_id| dispatchers.contains_key(&actor_id))
+            })
+            .map(|(k, _)| *k)
+            .collect::<Vec<_>>();
+
+        for table_id in to_update_dispatcher_table_ids {
+            let mut table_fragment = table_fragments
+                .get_mut(table_id)
+                .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
+
+            for actor in table_fragment
+                .fragments
+                .values_mut()
+                .flat_map(|f| &mut f.actors)
+            {
+                for dispatcher in &mut actor.dispatcher {
+                    dispatcher
+                        .downstream_actor_id
+                        .retain(|actor_id| !dropped_actor_ids.contains(actor_id))
+                }
+                actor
+                    .dispatcher
+                    .retain(|d| !d.downstream_actor_id.is_empty());
+
+                if let Some(new_dispatchers) = dispatchers.remove(&actor.actor_id) {
+                    actor.dispatcher.extend(new_dispatchers);
+                }
+            }
+        }
+
+        assert!(dispatchers.is_empty());
 
         // Commit changes and notify about the changes.
         let mut trx = Transaction::default();
@@ -546,37 +603,63 @@ where
         }
     }
 
+    async fn migrate_fragment_actors_inner(
+        &self,
+        migration_plan: &MigrationPlan,
+        table_id: TableId,
+    ) -> MetaResult<()> {
+        let core = &mut *self.core.write().await;
+        let current_revision = &mut core.table_revision;
+        let map = &mut core.table_fragments;
+        let mut table_trx = BTreeMapTransaction::new(map);
+        let mut table_fragment = table_trx
+            .get_mut(table_id)
+            .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
+
+        for status in table_fragment.actor_status.values_mut() {
+            if let Some(pu) = &status.parallel_unit && migration_plan.parallel_unit_plan.contains_key(&pu.id) {
+                status.parallel_unit = Some(migration_plan.parallel_unit_plan[&pu.id].clone());
+            }
+        }
+        table_fragment.update_vnode_mapping(&migration_plan.parallel_unit_plan);
+        let table_fragment = table_fragment.clone();
+        let next_revision = current_revision.next();
+
+        let mut trx = Transaction::default();
+        next_revision.store(&mut trx);
+        commit_meta_with_trx!(self, trx, table_trx)?;
+        *current_revision = next_revision;
+
+        self.notify_fragment_mapping(&table_fragment, Operation::Update)
+            .await;
+
+        Ok(())
+    }
+
     /// Used in [`crate::barrier::GlobalBarrierManager`]
     /// migrate actors and update fragments one by one according to the migration plan.
     pub async fn migrate_fragment_actors(&self, migration_plan: &MigrationPlan) -> MetaResult<()> {
-        let table_fragments = self.list_table_fragments().await;
-        for mut table_fragment in table_fragments {
-            let mut updated = false;
-            for status in table_fragment.actor_status.values_mut() {
-                if let Some(pu) = &status.parallel_unit && migration_plan.parallel_unit_plan.contains_key(&pu.id) {
-                    updated = true;
-                    status.parallel_unit = Some(migration_plan.parallel_unit_plan[&pu.id].clone());
+        let to_migrate_table_fragments = self
+            .core
+            .read()
+            .await
+            .table_fragments
+            .values()
+            .filter(|tf| {
+                for status in tf.actor_status.values() {
+                    if let Some(pu) = &status.parallel_unit &&
+                    migration_plan.parallel_unit_plan.contains_key(&pu.id) {
+                        return true;
+                    }
                 }
-            }
-            if updated {
-                table_fragment.update_vnode_mapping(&migration_plan.parallel_unit_plan);
-                let mut guard = self.core.write().await;
-                let current_revision = guard.table_revision;
-                let map = &mut guard.table_fragments;
-                if map.contains_key(&table_fragment.table_id()) {
-                    let mut table_trx = BTreeMapTransaction::new(map);
-                    table_trx.insert(table_fragment.table_id(), table_fragment.clone());
+                false
+            })
+            .map(|tf| tf.table_id())
+            .collect_vec();
 
-                    let next_revision = current_revision.next();
-                    let mut trx = Transaction::default();
-                    next_revision.store(&mut trx);
-                    commit_meta_with_trx!(self, trx, table_trx)?;
-                    guard.table_revision = next_revision;
-
-                    self.notify_fragment_mapping(&table_fragment, Operation::Update)
-                        .await;
-                }
-            }
+        for table_id in to_migrate_table_fragments {
+            self.migrate_fragment_actors_inner(migration_plan, table_id)
+                .await?;
         }
 
         Ok(())
@@ -740,7 +823,7 @@ where
                 assert!(actor_id_set.contains(actor_id));
             }
 
-            actors.drain_filter(|actor_id| to_remove.contains(actor_id));
+            actors.retain(|actor_id| !to_remove.contains(actor_id));
             actors.extend_from_slice(to_create);
         }
 
@@ -779,7 +862,7 @@ where
         for table_id in to_update_table_fragments {
             // Takes out the reschedules of the fragments in this table.
             let reschedules = reschedules
-                .drain_filter(|fragment_id, _| {
+                .extract_if(|fragment_id, _| {
                     table_fragments
                         .get(&table_id)
                         .unwrap()
@@ -980,7 +1063,7 @@ where
             .map(|table_fragments| table_fragments.worker_actor_ids())
             .reduce(|mut btree_map, next_map| {
                 next_map.into_iter().for_each(|(k, v)| {
-                    btree_map.entry(k).or_insert_with(Vec::new).extend(v);
+                    btree_map.entry(k).or_default().extend(v);
                 });
                 btree_map
             })

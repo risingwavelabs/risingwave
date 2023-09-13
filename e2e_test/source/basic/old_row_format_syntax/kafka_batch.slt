@@ -49,8 +49,8 @@ create source s6 (v1 int, v2 varchar) with (
 statement ok
 CREATE SOURCE s7(
     id int,
-    code string, 
-    timestamp bigint, 
+    code string,
+    timestamp bigint,
     xfas struct<device_model_id int, device_make_id int, ip string>[],
     contacts struct<emails string[], phones string[]>)
 WITH (
@@ -105,7 +105,7 @@ t
 t
 
 query B
-select _rw_kafka_timestamp < now() from s1 
+select _rw_kafka_timestamp < now() from s1
 ----
 t
 t
@@ -191,8 +191,8 @@ select count(*) from s8
 ----
 0
 
-query I 
-select * from s9 order by id 
+query I
+select * from s9 order by id
 ----
 \x6b6b
 \x776561776566776566

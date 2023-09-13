@@ -18,12 +18,12 @@ mod server;
 mod telemetry;
 
 use clap::Parser;
-use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
+use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
 
 use crate::server::compactor_serve;
 
 /// Command-line arguments for compactor-node.
-#[derive(Parser, Clone, Debug)]
+#[derive(Parser, Clone, Debug, OverrideConfig)]
 #[command(
     version,
     about = "The stateless worker node that compacts data for the storage engine"
@@ -65,22 +65,10 @@ pub struct CompactorOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    #[clap(long, env = "RW_MAX_COMPACTOR_TASK_MULTIPLIER", default_value = "2.0")]
-    pub max_compactor_task_multiplier: f32,
-
-    #[clap(flatten)]
-    override_config: OverrideConfigOpts,
-}
-
-/// Command-line arguments for compactor-node that overrides the config file.
-#[derive(Parser, Clone, Debug, OverrideConfig)]
-struct OverrideConfigOpts {
     /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
     #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
-    pub metrics_level: Option<u32>,
+    pub metrics_level: Option<MetricLevel>,
 
     /// Enable async stack tracing through `await-tree` for risectl.
     #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]

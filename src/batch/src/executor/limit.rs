@@ -17,6 +17,7 @@ use std::cmp::min;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -112,7 +113,7 @@ impl LimitExecutor {
                 skipped += l;
             }
             yield data_chunk
-                .with_visibility(new_vis.into_iter().collect())
+                .with_visibility(new_vis.into_iter().collect::<Bitmap>())
                 .compact();
         }
     }
@@ -302,7 +303,8 @@ mod tests {
             .unwrap()
             .into_iter()
             .for_each(|x| {
-                mock_executor.add(x.with_visibility((x.column_at(1).as_bool()).iter().collect()))
+                mock_executor
+                    .add(x.with_visibility((x.column_at(1).as_bool()).iter().collect::<Bitmap>()))
             });
 
         let limit_executor = Box::new(LimitExecutor {

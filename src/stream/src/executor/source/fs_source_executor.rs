@@ -112,12 +112,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
             None,
             self.actor_ctx.error_suppressor.clone(),
         );
-        let stream_reader = source_desc
+        source_desc
             .source
             .stream_reader(state, column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)?;
-        Ok(stream_reader.into_stream())
+            .map_err(StreamExecutorError::connector_error)
     }
 
     async fn apply_split_change<const BIASED: bool>(
@@ -265,11 +264,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
-                StreamExecutorError::from(anyhow!(
+                anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
                     self.actor_ctx.id,
                     self.stream_source_core.source_id
-                ))
+                )
             })?;
 
         let source_desc_builder: SourceDescBuilder =
@@ -279,9 +278,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .build_fs_source_desc()
             .map_err(StreamExecutorError::connector_error)?;
 
-        // If the first barrier is configuration change, then the source executor must be newly
-        // created, and we should start with the paused state.
-        let start_with_paused = barrier.is_update();
+        // If the first barrier requires us to pause on startup, pause the stream.
+        let start_with_paused = barrier.is_pause_on_startup();
 
         let mut boot_state = Vec::default();
         if let Some(mutation) = barrier.mutation.as_deref() {
@@ -315,12 +313,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .filter(|split| !all_completed.contains(&split.id()))
             .collect_vec();
 
-        self.stream_source_core.stream_source_splits = boot_state
-            .clone()
-            .into_iter()
-            .map(|split| (split.id(), split))
-            .collect();
-
         // restore the newest split info
         for ele in &mut boot_state {
             if let Some(recover_state) = self
@@ -333,6 +325,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
             }
         }
 
+        // init in-memory split states with persisted state if any
+        self.stream_source_core.init_split_state(boot_state.clone());
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::info!(actor_id = self.actor_ctx.id, state = ?recover_state, "start with state");
 
@@ -435,11 +429,14 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             .iter()
                             .flat_map(|(id, offset)| {
                                 let origin_split =
-                                    self.stream_source_core.stream_source_splits.get(id);
+                                    self.stream_source_core.stream_source_splits.get_mut(id);
 
-                                origin_split.map(|split| (id.clone(), split.update(offset.clone())))
+                                origin_split.map(|split| {
+                                    split.update_in_place(offset.clone())?;
+                                    Ok::<_, anyhow::Error>((id.clone(), split.clone()))
+                                })
                             })
-                            .collect_vec();
+                            .try_collect()?;
 
                         self.stream_source_core.state_cache.extend(state);
                     }

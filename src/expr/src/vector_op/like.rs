@@ -14,7 +14,7 @@
 
 use risingwave_expr_macro::function;
 
-fn like_impl<const ESCAPE: u8>(s: &str, p: &str) -> bool {
+fn like_impl<const ESCAPE: u8, const CASE_INSENSITIVE: bool>(s: &str, p: &str) -> bool {
     let (mut px, mut sx) = (0, 0);
     let (mut next_px, mut next_sx) = (0, 0);
     let (pbytes, sbytes) = (p.as_bytes(), s.as_bytes());
@@ -36,11 +36,17 @@ fn like_impl<const ESCAPE: u8>(s: &str, p: &str) -> bool {
                     continue;
                 }
                 mut pc => {
-                    if pc == ESCAPE && px + 1 < pbytes.len() {
+                    if ((!CASE_INSENSITIVE && pc == ESCAPE)
+                        || (CASE_INSENSITIVE && pc.eq_ignore_ascii_case(&ESCAPE)))
+                        && px + 1 < pbytes.len()
+                    {
                         px += 1;
                         pc = pbytes[px];
                     }
-                    if sx < sbytes.len() && sbytes[sx] == pc {
+                    if sx < sbytes.len()
+                        && ((!CASE_INSENSITIVE && sbytes[sx] == pc)
+                            || (CASE_INSENSITIVE && sbytes[sx].eq_ignore_ascii_case(&pc)))
+                    {
                         px += 1;
                         sx += 1;
                         continue;
@@ -60,43 +66,65 @@ fn like_impl<const ESCAPE: u8>(s: &str, p: &str) -> bool {
 
 #[function("like(varchar, varchar) -> boolean")]
 pub fn like_default(s: &str, p: &str) -> bool {
-    like_impl::<b'\\'>(s, p)
+    like_impl::<b'\\', false>(s, p)
+}
+
+#[function("i_like(varchar, varchar) -> boolean")]
+pub fn i_like_default(s: &str, p: &str) -> bool {
+    like_impl::<b'\\', true>(s, p)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::like_default;
+    use super::{i_like_default, like_default};
 
-    static CASES: &[(&str, &str, bool)] = &[
-        (r#"ABCDE"#, r#"%abcde%"#, false),
-        (r#"Like, expression"#, r#"Like, expression"#, true),
-        (r#"Like, expression"#, r#"Like, %"#, true),
-        (r#"Like, expression"#, r#"%, expression"#, true),
-        (r#"like"#, r#"li%ke"#, true),
-        (r#"like"#, r#"l%ik%e"#, true),
-        (r#"like"#, r#"%like%"#, true),
-        (r#"like"#, r#"l%i%k%e%"#, true),
-        (r#"like"#, r#"_%_e"#, true),
-        (r#"like"#, r#"l%__"#, true),
-        (r#"like"#, r#"_%_%_%_"#, true),
-        (r#"abctest"#, r#"__test"#, false),
-        (r#"abctest"#, r#"%_test"#, true),
-        (r#"aaaaabbb"#, r#"a%a%a%a%a%a%b"#, false),
-        (r#"blush thistle blue yellow saddle"#, r#"%yellow%"#, true),
-        (r#"ABC_123"#, r#"ABC_123"#, true),
-        (r#"ABCD123"#, r#"ABC_123"#, true),
-        (r#"ABC_123"#, r#"ABC\_123"#, true),
-        (r#"ABCD123"#, r#"ABC\_123"#, false),
-        (r#"ABC\123"#, r#"ABC_123"#, true),
-        (r#"ABC\123"#, r#"ABC\\123"#, true),
-        (r#"ABC\123"#, r#"ABC\123"#, false),
+    static CASES: &[(&str, &str, bool, bool)] = &[
+        (r#"ABCDE"#, r#"%abcde%"#, false, false),
+        (r#"Like, expression"#, r#"Like, expression"#, false, true),
+        (r#"Like, expression"#, r#"Like, %"#, false, true),
+        (r#"Like, expression"#, r#"%, expression"#, false, true),
+        (r#"like"#, r#"li%ke"#, false, true),
+        (r#"like"#, r#"l%ik%e"#, false, true),
+        (r#"like"#, r#"%like%"#, false, true),
+        (r#"like"#, r#"l%i%k%e%"#, false, true),
+        (r#"like"#, r#"_%_e"#, false, true),
+        (r#"like"#, r#"l%__"#, false, true),
+        (r#"like"#, r#"_%_%_%_"#, false, true),
+        (r#"abctest"#, r#"__test"#, false, false),
+        (r#"abctest"#, r#"%_test"#, false, true),
+        (r#"aaaaabbb"#, r#"a%a%a%a%a%a%b"#, false, false),
+        (
+            r#"blush thistle blue yellow saddle"#,
+            r#"%yellow%"#,
+            false,
+            true,
+        ),
+        (r#"ABC_123"#, r#"ABC_123"#, false, true),
+        (r#"ABCD123"#, r#"ABC_123"#, false, true),
+        (r#"ABC_123"#, r"ABC\_123", false, true),
+        (r#"ABCD123"#, r"ABC\_123", false, false),
+        (r"ABC\123", r#"ABC_123"#, false, true),
+        (r"ABC\123", r"ABC\\123", false, true),
+        (r"ABC\123", r"ABC\123", false, false),
+        ("apple", r#"App%"#, true, true),
+        ("banana", r#"B%nana"#, true, true),
+        ("apple", r#"B%nana"#, true, false),
+        ("grape", "Gr_P_", true, true),
     ];
 
     #[test]
     fn test_like() {
-        for (target, pattern, expected) in CASES {
-            let output = like_default(target, pattern);
-            assert_eq!(output, *expected, "target={}, pattern={}", target, pattern);
+        for (target, pattern, case_insensitive, expected) in CASES {
+            let output = if *case_insensitive {
+                i_like_default(target, pattern)
+            } else {
+                like_default(target, pattern)
+            };
+            assert_eq!(
+                output, *expected,
+                "target={}, pattern={}, case_insensitive={}",
+                target, pattern, case_insensitive
+            );
         }
     }
 }

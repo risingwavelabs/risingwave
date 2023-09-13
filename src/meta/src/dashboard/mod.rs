@@ -35,22 +35,22 @@ use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
 
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
-use crate::storage::MetaStore;
+use crate::storage::MetaStoreRef;
 
 #[derive(Clone)]
-pub struct DashboardService<S: MetaStore> {
+pub struct DashboardService {
     pub dashboard_addr: SocketAddr,
     pub prometheus_endpoint: Option<String>,
     pub prometheus_client: Option<prometheus_http_query::Client>,
-    pub cluster_manager: ClusterManagerRef<S>,
-    pub fragment_manager: FragmentManagerRef<S>,
+    pub cluster_manager: ClusterManagerRef,
+    pub fragment_manager: FragmentManagerRef,
     pub compute_clients: ComputeClientPool,
 
     // TODO: replace with catalog manager.
-    pub meta_store: Arc<S>,
+    pub meta_store: MetaStoreRef,
 }
 
-pub type Service<S> = Arc<DashboardService<S>>;
+pub type Service = Arc<DashboardService>;
 
 pub(super) mod handlers {
     use anyhow::Context;
@@ -61,17 +61,15 @@ pub(super) mod handlers {
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
     use risingwave_pb::monitor_service::StackTraceResponse;
-    use risingwave_pb::stream_plan::StreamActor;
     use serde_json::json;
 
     use super::*;
     use crate::manager::WorkerId;
     use crate::model::TableFragments;
+    use crate::storage::MetaStoreRef;
 
     pub struct DashboardError(anyhow::Error);
     pub type Result<T> = std::result::Result<T, DashboardError>;
-    type TableId = i32;
-    type TableActors = (TableId, Vec<StreamActor>);
 
     pub fn err(err: impl Into<anyhow::Error>) -> DashboardError {
         DashboardError(err.into())
@@ -89,9 +87,9 @@ pub(super) mod handlers {
         }
     }
 
-    pub async fn list_clusters<S: MetaStore>(
+    pub async fn list_clusters(
         Path(ty): Path<i32>,
-        Extension(srv): Extension<Service<S>>,
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<WorkerNode>>> {
         use risingwave_pb::common::WorkerType;
         let mut result = srv
@@ -107,8 +105,8 @@ pub(super) mod handlers {
         Ok(result.into())
     }
 
-    async fn list_table_catalogs_inner<S: MetaStore>(
-        meta_store: &S,
+    async fn list_table_catalogs_inner(
+        meta_store: &MetaStoreRef,
         table_type: TableType,
     ) -> Result<Json<Vec<Table>>> {
         use crate::model::MetadataModel;
@@ -123,87 +121,65 @@ pub(super) mod handlers {
         Ok(Json(results))
     }
 
-    pub async fn list_materialized_views<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
+    pub async fn list_materialized_views(
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&*srv.meta_store, TableType::MaterializedView).await
+        list_table_catalogs_inner(&srv.meta_store, TableType::MaterializedView).await
     }
 
-    pub async fn list_tables<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&*srv.meta_store, TableType::Table).await
+    pub async fn list_tables(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
+        list_table_catalogs_inner(&srv.meta_store, TableType::Table).await
     }
 
-    pub async fn list_indexes<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&*srv.meta_store, TableType::Index).await
+    pub async fn list_indexes(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
+        list_table_catalogs_inner(&srv.meta_store, TableType::Index).await
     }
 
-    pub async fn list_internal_tables<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
+    pub async fn list_internal_tables(
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&*srv.meta_store, TableType::Internal).await
+        list_table_catalogs_inner(&srv.meta_store, TableType::Internal).await
     }
 
-    pub async fn list_sources<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<Source>>> {
+    pub async fn list_sources(Extension(srv): Extension<Service>) -> Result<Json<Vec<Source>>> {
         use crate::model::MetadataModel;
 
-        let sources = Source::list(&*srv.meta_store).await.map_err(err)?;
+        let sources = Source::list(&srv.meta_store).await.map_err(err)?;
         Ok(Json(sources))
     }
 
-    pub async fn list_sinks<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<Sink>>> {
+    pub async fn list_sinks(Extension(srv): Extension<Service>) -> Result<Json<Vec<Sink>>> {
         use crate::model::MetadataModel;
 
-        let sinks = Sink::list(&*srv.meta_store).await.map_err(err)?;
+        let sinks = Sink::list(&srv.meta_store).await.map_err(err)?;
         Ok(Json(sinks))
     }
 
-    pub async fn list_actors<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
+    pub async fn list_actors(
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<ActorLocation>>> {
-        let node_actors = srv.fragment_manager.all_node_actors(true).await;
+        let mut node_actors = srv.fragment_manager.all_node_actors(true).await;
         let nodes = srv
             .cluster_manager
             .list_active_streaming_compute_nodes()
             .await;
         let actors = nodes
-            .iter()
+            .into_iter()
             .map(|node| ActorLocation {
                 node: Some(node.clone()),
-                actors: node_actors.get(&node.id).cloned().unwrap_or_default(),
+                actors: node_actors.remove(&node.id).unwrap_or_default(),
             })
             .collect::<Vec<_>>();
 
         Ok(Json(actors))
     }
 
-    pub async fn list_table_fragments<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<TableActors>>> {
-        let table_fragments = srv
-            .fragment_manager
-            .list_table_fragments()
-            .await
-            .iter()
-            .map(|f| (f.table_id().table_id() as i32, f.actors()))
-            .collect::<Vec<_>>();
-
-        Ok(Json(table_fragments))
-    }
-
-    pub async fn list_fragments<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
+    pub async fn list_fragments(
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<PbTableFragments>>> {
         use crate::model::MetadataModel;
 
-        let table_fragments = TableFragments::list(&*srv.meta_store)
+        let table_fragments = TableFragments::list(&srv.meta_store)
             .await
             .map_err(err)?
             .into_iter()
@@ -212,9 +188,9 @@ pub(super) mod handlers {
         Ok(Json(table_fragments))
     }
 
-    pub async fn dump_await_tree<S: MetaStore>(
+    pub async fn dump_await_tree(
         Path(worker_id): Path<WorkerId>,
-        Extension(srv): Extension<Service<S>>,
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
         let worker_node = srv
             .cluster_manager
@@ -232,10 +208,7 @@ pub(super) mod handlers {
     }
 }
 
-impl<S> DashboardService<S>
-where
-    S: MetaStore,
-{
+impl DashboardService {
     pub async fn serve(self, ui_path: Option<String>) -> Result<()> {
         use handlers::*;
         let srv = Arc::new(self);
@@ -245,21 +218,21 @@ where
             .allow_methods(vec![Method::GET]);
 
         let api_router = Router::new()
-            .route("/clusters/:ty", get(list_clusters::<S>))
-            .route("/actors", get(list_actors::<S>))
-            .route("/fragments", get(list_table_fragments::<S>))
-            .route("/fragments2", get(list_fragments::<S>))
-            .route("/materialized_views", get(list_materialized_views::<S>))
-            .route("/tables", get(list_tables::<S>))
-            .route("/indexes", get(list_indexes::<S>))
-            .route("/internal_tables", get(list_internal_tables::<S>))
-            .route("/sources", get(list_sources::<S>))
-            .route("/sinks", get(list_sinks::<S>))
+            .route("/clusters/:ty", get(list_clusters))
+            .route("/actors", get(list_actors))
+            .route("/fragments2", get(list_fragments))
+            .route("/materialized_views", get(list_materialized_views))
+            .route("/tables", get(list_tables))
+            .route("/indexes", get(list_indexes))
+            .route("/internal_tables", get(list_internal_tables))
+            .route("/sources", get(list_sources))
+            .route("/sinks", get(list_sinks))
+            .route("/metrics/cluster", get(prometheus::list_prometheus_cluster))
             .route(
-                "/metrics/cluster",
-                get(prometheus::list_prometheus_cluster::<S>),
+                "/metrics/actor/back_pressures",
+                get(prometheus::list_prometheus_actor_back_pressure),
             )
-            .route("/monitor/await_tree/:worker_id", get(dump_await_tree::<S>))
+            .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))
@@ -270,14 +243,12 @@ where
         let app = if let Some(ui_path) = ui_path {
             let static_file_router = Router::new().nest_service(
                 "/",
-                get_service(ServeDir::new(ui_path)).handle_error(
-                    |error: std::io::Error| async move {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Unhandled internal error: {}", error),
-                        )
-                    },
-                ),
+                get_service(ServeDir::new(ui_path)).handle_error(|e| async move {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Unhandled internal error: {e}",),
+                    )
+                }),
             );
             Router::new()
                 .fallback_service(static_file_router)

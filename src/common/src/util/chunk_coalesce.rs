@@ -16,7 +16,7 @@ use std::iter::FusedIterator;
 use std::mem::swap;
 
 use super::iter_util::ZipEqDebug;
-use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, DataChunk};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk};
 use crate::row::Row;
 use crate::types::{DataType, ToDatumRef};
 
@@ -157,15 +157,18 @@ impl DataChunkBuilder {
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
     #[must_use]
     pub fn append_one_row(&mut self, row: impl Row) -> Option<DataChunk> {
-        assert!(self.buffered_count < self.batch_size);
-        self.ensure_builders();
-
-        self.do_append_one_row_from_datums(row.iter());
+        self.append_one_row_no_finish(row);
         if self.buffered_count == self.batch_size {
             Some(self.build_data_chunk())
         } else {
             None
         }
+    }
+
+    fn append_one_row_no_finish(&mut self, row: impl Row) {
+        assert!(self.buffered_count < self.batch_size);
+        self.ensure_builders();
+        self.do_append_one_row_from_datums(row.iter());
     }
 
     /// Append one row from the given two arrays.
@@ -203,19 +206,15 @@ impl DataChunkBuilder {
     }
 
     fn build_data_chunk(&mut self) -> DataChunk {
-        let mut new_array_builders = vec![];
-        swap(&mut new_array_builders, &mut self.array_builders);
+        let mut finished_array_builders = vec![];
+        swap(&mut finished_array_builders, &mut self.array_builders);
         let cardinality = self.buffered_count;
         self.buffered_count = 0;
 
-        let columns = new_array_builders.into_iter().fold(
-            Vec::with_capacity(self.data_types.len()),
-            |mut vec, array_builder| -> Vec<ArrayRef> {
-                let column = array_builder.finish().into();
-                vec.push(column);
-                vec
-            },
-        );
+        let columns: Vec<_> = finished_array_builders
+            .into_iter()
+            .map(|builder| builder.finish().into())
+            .collect();
         DataChunk::new(columns, cardinality)
     }
 
@@ -229,6 +228,17 @@ impl DataChunkBuilder {
 
     pub fn data_types(&self) -> Vec<DataType> {
         self.data_types.clone()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffered_count == 0
+    }
+
+    pub fn clear(&mut self) {
+        if !self.is_empty() {
+            self.array_builders.clear()
+        }
+        self.buffered_count = 0;
     }
 }
 

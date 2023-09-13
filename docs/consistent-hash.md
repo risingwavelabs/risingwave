@@ -42,22 +42,22 @@ To minimize data movement when scaling occurs, we should be careful when we modi
 
 ### Streaming
 
-We know that a fragment has several actors as its different parallelisms, and that upstream actors will send data to downstream actors via [dispatcher](./streaming-overview.md#actors). The figure below illustrates how actors distribute data based on consistent hash by example. 
+We know that a fragment has several actors as its different parallelisms, and that upstream actors will send data to downstream actors via [dispatcher](./streaming-overview.md#actors). The figure below illustrates how actors distribute data based on consistent hash by example.
 
 ![actor data distribution](./images/consistent-hash/actor-data.svg)
 
-In the figure, we can see that one upstream actor dispatches data to three downstream actors. The downstream actors are scheduled on the parallel units mentioned in previous example respectively. 
+In the figure, we can see that one upstream actor dispatches data to three downstream actors. The downstream actors are scheduled on the parallel units mentioned in previous example respectively.
 
 Based on our consistent hash design, the dispatcher is informed of the latest vnode mapping by meta node. It then decides how to send data by following steps:
 1. Compute vnode of the data via the hash function $H$. Let the vnode be $v_k$.
-2. Look up vnode mapping and find out parallel unit $p_n$ that vnode $v_k$ maps to. 
+2. Look up vnode mapping and find out parallel unit $p_n$ that vnode $v_k$ maps to.
 3. Send data to the downstream actor that is scheduled on parallel unit $p_n$ (remember that one actor will be scheduled on exactly one parallel unit).
 
-In this way, all actors' data (i.e. actors' states) will be distributed according to the vnode mapping constructed by meta. 
+In this way, all actors' data (i.e. actors' states) will be distributed according to the vnode mapping constructed by meta.
 
 When scaling occurs, actors will be re-scheduled accordingly. By modifying the vnode mapping in meta and make streaming act on the new vnode mapping, we could minimize data movement from following aspects:
 
-- The data of existing actors will not be displaced too much. 
+- The data of existing actors will not be displaced too much.
 - The block cache of a compute node will not be invalidated too much.
 
 ### Batch
@@ -70,15 +70,15 @@ This is better than range partition in that this approach of partition is more s
 
 ### Storage
 
-If we look into the read-write pattern of streaming actors, we'll find that in most cases, actors only need to read the data written by itself (i.e. actor's internal states). Namely, read data with the same vnodes as it previously writes. 
+If we look into the read-write pattern of streaming actors, we'll find that in most cases, actors only need to read the data written by itself (i.e. actor's internal states). Namely, read data with the same vnodes as it previously writes.
 
-Therefore, an instinctive way to place data in storage is to **group data by vnodes**. In this way, when actors perform read operation, they could touch as few SST blocks as possible and thus trigger less I/O. 
+Therefore, an instinctive way to place data in storage is to **group data by vnodes**. In this way, when actors perform read operation, they could touch as few SST blocks as possible and thus trigger less I/O.
 
 We know that [Hummock](./state-store-overview.md#overview), our LSM-Tree-based storage engine, sorts key-value pairs by the order of the key. Hence, in order to group data by vnode on the basis of Hummock, we **encode vnode into the storage key**. The storage key will look like
 ```
 table_id | vnode | ...
 ```
-where `table_id` denotes the [state table](relational_table/storing-state-using-relational-table.md#relational-table-layer), and `vnode` is computed via $H$ on key of the data. 
+where `table_id` denotes the [state table](relational_table/storing-state-using-relational-table.md#relational-table-layer), and `vnode` is computed via $H$ on key of the data.
 
 To illustrate this, let's revisit the [previous example](#streaming). Executors of an operator will share the same logical state table, just as is shown in the figure below:
 

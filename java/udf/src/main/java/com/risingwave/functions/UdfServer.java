@@ -55,18 +55,30 @@ public class UdfServer implements AutoCloseable {
         this.producer.addFunction(name, udf);
     }
 
-    /** Start the server. */
+    /**
+     * Start the server.
+     *
+     * @throws IOException if the server fails to start
+     */
     public void start() throws IOException {
         this.server.start();
         logger.info("listening on " + this.server.getLocation().toSocketAddress());
     }
 
-    /** Get the port the server is listening on. */
+    /**
+     * Get the port the server is listening on.
+     *
+     * @return the port number
+     */
     public int getPort() {
         return this.server.getPort();
     }
 
-    /** Wait for the server to terminate. */
+    /**
+     * Wait for the server to terminate.
+     *
+     * @throws InterruptedException if the thread is interrupted while waiting
+     */
     public void awaitTermination() throws InterruptedException {
         this.server.awaitTermination();
     }

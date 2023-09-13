@@ -25,6 +25,7 @@ pub async fn handle_drop_source(
     handler_args: HandlerArgs,
     name: ObjectName,
     if_exists: bool,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -62,7 +63,7 @@ pub async fn handle_drop_source(
     session.check_privilege_for_drop_alter(schema_name, &*source)?;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_source(source.id).await?;
+    catalog_writer.drop_source(source.id, cascade).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))
 }

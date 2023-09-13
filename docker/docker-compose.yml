@@ -2,7 +2,7 @@
 version: "3"
 services:
   compactor-0:
-    image: "ghcr.io/risingwavelabs/risingwave:v1.0.0"
+    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.2.0}"
     command:
       - compactor-node
       - "--listen-addr"
@@ -12,7 +12,7 @@ services:
       - "--prometheus-listener-addr"
       - "0.0.0.0:1260"
       - "--metrics-level"
-      - "1"
+      - "info"
       - "--meta-address"
       - "http://meta-node-0:5690"
       - "--config-path"
@@ -23,7 +23,7 @@ services:
     ports: []
     depends_on:
       - meta-node-0
-      - minio-0
+      # - minio-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:
@@ -39,7 +39,7 @@ services:
       timeout: 5s
       retries: 5
   compute-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:v1.0.0"
+    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.0.0}"
     command:
       - compute-node
       - "--listen-addr"
@@ -49,7 +49,7 @@ services:
       - "--prometheus-listener-addr"
       - "0.0.0.0:1222"
       - "--metrics-level"
-      - "1"
+      - "info"
       - "--meta-address"
       - "http://meta-node-0:5690"
       - "--connector-rpc-endpoint"
@@ -62,7 +62,7 @@ services:
     ports: []
     depends_on:
       - meta-node-0
-      - minio-0
+      # - minio-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:
@@ -126,7 +126,7 @@ services:
       timeout: 5s
       retries: 5
   frontend-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:v1.0.0"
+    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.0.0}"
     command:
       - frontend-node
       - "--listen-addr"
@@ -140,7 +140,7 @@ services:
       - "--prometheus-listener-addr"
       - "0.0.0.0:2222"
       - "--metrics-level"
-      - "1"
+      - "info"
     expose:
       - "4566"
     ports:
@@ -185,7 +185,7 @@ services:
       timeout: 5s
       retries: 5
   meta-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:v1.0.0"
+    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.0.0}"
     command:
       - meta-node
       - "--listen-addr"
@@ -301,7 +301,7 @@ services:
       timeout: 5s
       retries: 5
   connector-node:
-    image: ghcr.io/risingwavelabs/risingwave:v1.0.0
+    image: ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.0.0}
     entrypoint: "/risingwave/bin/connector-node/start-service.sh"
     ports:
       - 50051

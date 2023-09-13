@@ -1,0 +1,22 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(x int[], y int[], k int primary key);
+
+statement ok
+insert into t values (Array[1,2,3,4,5], Array[11,12,13,14,15], 1);
+
+query II
+select *, (select sum(i) from (select unnest(x) i) Q ) as sum_x, (select sum(i) from (select unnest(y) i) Q ) as sum_y from t;
+----
+{1,2,3,4,5} {11,12,13,14,15} 1 15 65
+
+query II
+select *, (select sum(i) from unnest(x) i ) as sum_x, (select sum(i) from unnest(y) i) as sum_y from t;
+----
+{1,2,3,4,5} {11,12,13,14,15} 1 15 65
+
+
+statement ok
+drop table t;

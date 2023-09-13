@@ -67,6 +67,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         config.set("bootstrap.servers", &broker_address);
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         common_props.set_security_properties(&mut config);
+        properties.set_client(&mut config);
         let mut scan_start_offset = match properties
             .scan_startup_mode
             .as_ref()
@@ -88,7 +89,8 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
-        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map)?;
+        // don't need kafka metrics from enumerator
+        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map, None, None)?;
         let client: BaseConsumer<PrivateLinkConsumerContext> =
             config.create_with_context(client_ctx).await?;
 
@@ -99,7 +101,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             client,
             start_offset: scan_start_offset,
             stop_offset: KafkaEnumeratorOffset::None,
-            sync_call_timeout: properties.sync_call_timeout,
+            sync_call_timeout: properties.common.sync_call_timeout,
         })
     }
 

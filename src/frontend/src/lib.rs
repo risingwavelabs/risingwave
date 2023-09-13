@@ -13,13 +13,12 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![allow(rustdoc::private_intra_doc_links)]
 #![feature(map_try_insert)]
 #![feature(negative_impls)]
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(trait_alias)]
-#![feature(drain_filter)]
+#![feature(extract_if)]
 #![feature(if_let_guard)]
 #![feature(let_chains)]
 #![feature(assert_matches)]
@@ -52,7 +51,7 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
-use risingwave_common::config::OverrideConfig;
+use risingwave_common::config::{MetricLevel, OverrideConfig};
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
@@ -74,7 +73,7 @@ use pgwire::pg_server::pg_serve;
 use session::SessionManagerImpl;
 
 /// Command-line arguments for frontend-node.
-#[derive(Parser, Clone, Debug)]
+#[derive(Parser, Clone, Debug, OverrideConfig)]
 #[command(
     version,
     about = "The stateless proxy that parses SQL queries and performs planning and optimizations of query jobs"
@@ -124,19 +123,12 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    #[clap(flatten)]
-    override_opts: OverrideConfigOpts,
-}
-
-/// Command-line arguments for frontend-node that overrides the config file.
-#[derive(Parser, Clone, Debug, OverrideConfig)]
-struct OverrideConfigOpts {
     /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
+    /// 0 = disable metrics
+    /// >0 = enable metrics
     #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
-    pub metrics_level: Option<u32>,
+    pub metrics_level: Option<MetricLevel>,
 
     #[clap(long, env = "RW_ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]

@@ -19,7 +19,7 @@ mod block;
 
 use std::collections::BTreeSet;
 use std::fmt::{Debug, Formatter};
-use std::ops::{BitXor, Bound};
+use std::ops::{BitXor, Bound, Range};
 
 pub use block::*;
 mod block_iterator;
@@ -28,12 +28,11 @@ mod bloom;
 mod xor_filter;
 pub use bloom::BloomFilterBuilder;
 use xor_filter::XorFilterReader;
-pub use xor_filter::{Xor16FilterBuilder, Xor8FilterBuilder};
+pub use xor_filter::{BlockedXor16FilterBuilder, Xor16FilterBuilder, Xor8FilterBuilder};
 pub mod builder;
 pub use builder::*;
 pub mod writer;
 use risingwave_common::catalog::TableId;
-use risingwave_object_store::object::BlockLocation;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
@@ -41,7 +40,9 @@ use bytes::{Buf, BufMut};
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, PointRange, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{
+    FullKey, KeyPayloadType, PointRange, TableKey, UserKey, UserKeyRangeRef,
+};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -244,7 +245,7 @@ impl Debug for Sstable {
 impl Sstable {
     pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
-        let filter_reader = XorFilterReader::new(filter_data);
+        let filter_reader = XorFilterReader::new(&filter_data, &meta.block_metas);
 
         Self {
             id,
@@ -258,14 +259,12 @@ impl Sstable {
         !self.filter_reader.is_empty()
     }
 
-    pub fn calculate_block_info(&self, block_index: usize) -> (BlockLocation, usize) {
+    pub fn calculate_block_info(&self, block_index: usize) -> (Range<usize>, usize) {
         let block_meta = &self.meta.block_metas[block_index];
-        let block_loc = BlockLocation {
-            offset: block_meta.offset as usize,
-            size: block_meta.len as usize,
-        };
+        let range =
+            block_meta.offset as usize..block_meta.offset as usize + block_meta.len as usize;
         let uncompressed_capacity = block_meta.uncompressed_size as usize;
-        (block_loc, uncompressed_capacity)
+        (range, uncompressed_capacity)
     }
 
     #[inline(always)]
@@ -283,8 +282,8 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn may_match_hash(&self, hash: u64) -> bool {
-        self.filter_reader.may_match(hash)
+    pub fn may_match_hash(&self, user_key_range: &UserKeyRangeRef<'_>, hash: u64) -> bool {
+        self.filter_reader.may_match(user_key_range, hash)
     }
 
     pub fn block_count(&self) -> usize {
@@ -409,7 +408,7 @@ impl SstableMeta {
 
     pub fn encode_to(&self, buf: &mut Vec<u8>) {
         let start_offset = buf.len();
-        buf.put_u32_le(self.block_metas.len() as u32);
+        buf.put_u32_le(utils::checked_into_u32(self.block_metas.len()));
         for block_meta in &self.block_metas {
             block_meta.encode(buf);
         }
@@ -418,7 +417,9 @@ impl SstableMeta {
         buf.put_u32_le(self.key_count);
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
-        buf.put_u32_le(self.monotonic_tombstone_events.len() as u32);
+        buf.put_u32_le(utils::checked_into_u32(
+            self.monotonic_tombstone_events.len(),
+        ));
         for monotonic_tombstone_event in &self.monotonic_tombstone_events {
             monotonic_tombstone_event.encode(buf);
         }
@@ -429,7 +430,7 @@ impl SstableMeta {
         buf.put_u32_le(MAGIC);
     }
 
-    pub fn decode(buf: &mut &[u8]) -> HummockResult<Self> {
+    pub fn decode(buf: &[u8]) -> HummockResult<Self> {
         let mut cursor = buf.len();
 
         cursor -= 4;
@@ -557,7 +558,7 @@ mod tests {
         let sz = meta.encoded_size();
         let buf = meta.encode_to_bytes();
         assert_eq!(sz, buf.len());
-        let decoded_meta = SstableMeta::decode(&mut &buf[..]).unwrap();
+        let decoded_meta = SstableMeta::decode(&buf[..]).unwrap();
         assert_eq!(decoded_meta, meta);
     }
 }

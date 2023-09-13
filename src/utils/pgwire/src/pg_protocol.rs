@@ -26,6 +26,7 @@ use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
+use risingwave_common::error::RwError;
 use risingwave_common::types::DataType;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_sqlparser::ast::Statement;
@@ -86,6 +87,10 @@ where
     // Used for ssl connection.
     // If None, not expected to build ssl connection (panic).
     tls_context: Option<SslContext>,
+
+    // Used in extended query protocol. When encounter error in extended query, we need to ignore
+    // the following message util sync message.
+    ignore_util_sync: bool,
 }
 
 const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
@@ -169,6 +174,7 @@ where
             unnamed_portal: Default::default(),
             portal_store: Default::default(),
             statement_portal_dependency: Default::default(),
+            ignore_util_sync: false,
         }
     }
 
@@ -249,6 +255,15 @@ where
     }
 
     async fn do_process_inner(&mut self, msg: FeMessage) -> PsqlResult<()> {
+        // Ignore util sync message.
+        if self.ignore_util_sync {
+            if let FeMessage::Sync = msg {
+            } else {
+                tracing::trace!("ignore message {:?} until sync.", msg);
+                return Ok(());
+            }
+        }
+
         match msg {
             FeMessage::Ssl => self.process_ssl_msg().await?,
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
@@ -256,13 +271,46 @@ where
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
-            FeMessage::Parse(m) => self.process_parse_msg(m)?,
-            FeMessage::Bind(m) => self.process_bind_msg(m)?,
-            FeMessage::Execute(m) => self.process_execute_msg(m).await?,
-            FeMessage::Describe(m) => self.process_describe_msg(m)?,
-            FeMessage::Sync => self.ready_for_query()?,
-            FeMessage::Close(m) => self.process_close_msg(m)?,
-            FeMessage::Flush => self.stream.flush().await?,
+            FeMessage::Parse(m) => {
+                if let Err(err) = self.process_parse_msg(m) {
+                    self.ignore_util_sync = true;
+                    return Err(err);
+                }
+            }
+            FeMessage::Bind(m) => {
+                if let Err(err) = self.process_bind_msg(m) {
+                    self.ignore_util_sync = true;
+                    return Err(err);
+                }
+            }
+            FeMessage::Execute(m) => {
+                if let Err(err) = self.process_execute_msg(m).await {
+                    self.ignore_util_sync = true;
+                    return Err(err);
+                }
+            }
+            FeMessage::Describe(m) => {
+                if let Err(err) = self.process_describe_msg(m) {
+                    self.ignore_util_sync = true;
+                    return Err(err);
+                }
+            }
+            FeMessage::Sync => {
+                self.ignore_util_sync = false;
+                self.ready_for_query()?
+            }
+            FeMessage::Close(m) => {
+                if let Err(err) = self.process_close_msg(m) {
+                    self.ignore_util_sync = true;
+                    return Err(err);
+                }
+            }
+            FeMessage::Flush => {
+                if let Err(err) = self.stream.flush().await {
+                    self.ignore_util_sync = true;
+                    return Err(err.into());
+                }
+            }
         }
         self.stream.flush().await?;
         Ok(())
@@ -449,7 +497,7 @@ where
             self.stream
                 .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
         }
-        let mut res = res.map_err(|err| PsqlError::QueryError(err))?;
+        let mut res = res.map_err(PsqlError::QueryError)?;
 
         for notice in res.notices() {
             self.stream
@@ -470,7 +518,7 @@ where
             let mut rows_cnt = 0;
 
             while let Some(row_set) = res.values_stream().next().await {
-                let row_set = row_set.map_err(|err| PsqlError::QueryError(err))?;
+                let row_set = row_set.map_err(PsqlError::QueryError)?;
                 for row in row_set {
                     self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
                     rows_cnt += 1;
@@ -554,11 +602,19 @@ where
             stmts.into_iter().next()
         };
 
-        let param_types = type_ids
+        let param_types: Vec<Option<DataType>> = type_ids
             .iter()
-            .map(|&id| DataType::from_oid(id))
+            .map(|&id| {
+                // 0 means unspecified type
+                // ref: https://www.postgresql.org/docs/15/protocol-message-formats.html#:~:text=Placing%20a%20zero%20here%20is%20equivalent%20to%20leaving%20the%20type%20unspecified.
+                if id == 0 {
+                    Ok(None)
+                } else {
+                    Ok(Some(DataType::from_oid(id)?))
+                }
+            })
             .try_collect()
-            .map_err(|err| PsqlError::ParseError(err.into()))?;
+            .map_err(|err: RwError| PsqlError::ParseError(err.into()))?;
 
         let prepare_statement = session
             .parse(stmt, param_types)
@@ -573,7 +629,7 @@ where
 
         self.statement_portal_dependency
             .entry(statement_name)
-            .or_insert_with(Vec::new)
+            .or_default()
             .clear();
 
         self.stream.write_no_flush(&BeMessage::ParseComplete)?;
@@ -730,7 +786,7 @@ where
             for portal_name in self
                 .statement_portal_dependency
                 .remove(&name)
-                .unwrap_or(vec![])
+                .unwrap_or_default()
             {
                 self.remove_portal(&portal_name);
             }
@@ -815,7 +871,7 @@ pub struct PgStream<S> {
 ///  * `integer_datetimes`
 ///  * `standard_conforming_string`
 ///
-/// See: https://www.postgresql.org/docs/9.2/static/protocol-flow.html#PROTOCOL-ASYNC.
+/// See: <https://www.postgresql.org/docs/9.2/static/protocol-flow.html#PROTOCOL-ASYNC>.
 #[derive(Debug, Default, Clone)]
 pub struct ParameterStatus {
     pub application_name: Option<String>,
@@ -841,7 +897,7 @@ where
             BeParameterStatusMessage::StandardConformingString("on"),
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ServerVersion("8.3.0"),
+            BeParameterStatusMessage::ServerVersion("9.5.0"),
         ))?;
         if let Some(application_name) = &status.application_name {
             self.write_no_flush(&BeMessage::ParameterStatus(

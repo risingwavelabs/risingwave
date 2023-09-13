@@ -24,7 +24,7 @@ use fs_err::OpenOptions;
 use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
-    compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
+    generate_risedev_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
     ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
     FrontendService, GrafanaService, KafkaService, MetaNodeService, MinioService, OpendalConfig,
     PrometheusService, PubsubService, RedisService, ServiceConfig, Task, TempoService,
@@ -424,14 +424,9 @@ fn main() -> Result<()> {
             println!("-------------------------------");
             println!();
 
-            let risectl_env = match compute_risectl_env(&services) {
-                Ok(x) => x,
-                Err(_) => "".into(),
-            };
-
             fs_err::write(
-                Path::new(&env::var("PREFIX_CONFIG")?).join("risectl-env"),
-                risectl_env,
+                Path::new(&env::var("PREFIX_CONFIG")?).join("risedev-env"),
+                generate_risedev_env(&services),
             )?;
 
             println!("All services started successfully.");
@@ -463,7 +458,7 @@ fn main() -> Result<()> {
                 err.root_cause().to_string().trim(),
             );
             println!(
-                "* Use `{}` to enable new compoenents, if they are missing.",
+                "* Use `{}` to enable new components, if they are missing.",
                 style("./risedev configure").blue().bold(),
             );
             println!(

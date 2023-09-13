@@ -41,6 +41,22 @@
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
     See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+- name: With Simple Agg upstream materialized view on inner side
+  before:
+  - create_tables
+  sql: |
+    create materialized view max_v2 as select max(v2) max from t2;
+    select v1 from t1, max_v2 where v1 > max;
+  optimized_logical_plan_for_stream: |-
+    LogicalJoin { type: Inner, on: (t1.v1 > max_v2.max), output: [t1.v1] }
+    ├─LogicalScan { table: t1, columns: [t1.v1] }
+    └─LogicalScan { table: max_v2, columns: [max_v2.max], cardinality: 0..=1 }
+  stream_plan: |-
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
+    └─StreamDynamicFilter { predicate: (t1.v1 > max_v2.max), output: [t1.v1, t1._row_id] }
+      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamTableScan { table: max_v2, columns: [max_v2.max], pk: [], dist: Single }
 - name: |
     Output indices of Dynamic Filter
     TODO: currently implemented by adding a Project, https://github.com/risingwavelabs/risingwave/issues/3419

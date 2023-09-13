@@ -68,7 +68,7 @@ impl BigStreamChunk {
                     Op::Delete
                 }
             })
-            .collect();
+            .collect_vec();
 
         let visibility = (0..capacity)
             .map(|i| {

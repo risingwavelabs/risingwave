@@ -12,22 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::vec;
-
-use risingwave_common::catalog::{Field, Schema, TableVersionId};
+use risingwave_common::catalog::TableVersionId;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchDelete, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchDelete, ColPrunable, ExprRewritable, LogicalProject,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// [`LogicalDelete`] iterates on input relation and delete the data from specified table.
@@ -41,13 +37,7 @@ pub struct LogicalDelete {
 
 impl From<generic::Delete<PlanRef>> for LogicalDelete {
     fn from(core: generic::Delete<PlanRef>) -> Self {
-        let schema = if core.returning {
-            core.schema().clone()
-        } else {
-            Schema::new(vec![Field::unnamed(DataType::Int64)])
-        };
-        let fd_set = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(core.ctx(), schema, vec![], fd_set);
+        let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 }
@@ -83,11 +73,19 @@ impl_plan_tree_node_for_unary! { LogicalDelete }
 impl_distill_by_unit!(LogicalDelete, core, "LogicalDelete");
 
 impl ColPrunable for LogicalDelete {
-    fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let input = &self.core.input;
-        let required_cols: Vec<_> = (0..input.schema().len()).collect();
-        self.clone_with_input(input.prune_col(&required_cols, ctx))
-            .into()
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let pruned_input = {
+            let input = &self.core.input;
+            let required_cols: Vec<_> = (0..input.schema().len()).collect();
+            input.prune_col(&required_cols, ctx)
+        };
+
+        // No pruning.
+        LogicalProject::with_out_col_idx(
+            self.clone_with_input(pruned_input).into(),
+            required_cols.iter().copied(),
+        )
+        .into()
     }
 }
 

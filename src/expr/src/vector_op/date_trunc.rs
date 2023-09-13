@@ -87,6 +87,6 @@ pub fn date_trunc_interval(field: &str, interval: Interval) -> Result<Interval> 
 fn invalid_field_error(field: &str) -> ExprError {
     ExprError::InvalidParam {
         name: "field",
-        reason: format!("invalid field {field:?}. must be one of: microseconds, milliseconds, second, minute, hour, day, week, month, quarter, year, decade, century, millennium"),
+        reason: format!("invalid field {field:?}. must be one of: microseconds, milliseconds, second, minute, hour, day, week, month, quarter, year, decade, century, millennium").into(),
     }
 }

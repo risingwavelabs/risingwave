@@ -26,21 +26,22 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
 use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
 use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
+use risingwave_pb::meta::SystemParams;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -262,6 +263,7 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn replace_table(
         &self,
+        _source: Option<PbSource>,
         table: PbTable,
         _graph: StreamFragmentGraph,
         _mapping: ColIndexMapping,
@@ -313,7 +315,19 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
+    async fn drop_table(
+        &self,
+        source_id: Option<u32>,
+        table_id: TableId,
+        cascade: bool,
+    ) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         if let Some(source_id) = source_id {
             self.drop_table_or_source_id(source_id);
         }
@@ -323,7 +337,7 @@ impl CatalogWriter for MockCatalogWriter {
                 .read()
                 .get_all_indexes_related_to_object(database_id, schema_id, table_id);
         for index in indexes {
-            self.drop_index(index.id).await?;
+            self.drop_index(index.id, cascade).await?;
         }
         self.catalog
             .write()
@@ -336,18 +350,25 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_view(&self, _view_id: u32) -> Result<()> {
+    async fn drop_view(&self, _view_id: u32, _cascade: bool) -> Result<()> {
         unreachable!()
     }
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
+    async fn drop_materialized_view(&self, table_id: TableId, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
         let indexes =
             self.catalog
                 .read()
                 .get_all_indexes_related_to_object(database_id, schema_id, table_id);
         for index in indexes {
-            self.drop_index(index.id).await?;
+            self.drop_index(index.id, cascade).await?;
         }
         self.catalog
             .write()
@@ -355,7 +376,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_source(&self, source_id: u32) -> Result<()> {
+    async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
         self.catalog
             .write()
@@ -363,7 +391,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_sink(&self, sink_id: u32) -> Result<()> {
+    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         let (database_id, schema_id) = self.drop_table_or_sink_id(sink_id);
         self.catalog
             .write()
@@ -371,7 +406,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_index(&self, index_id: IndexId) -> Result<()> {
+    async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         let &schema_id = self
             .table_id_to_schema_id
             .read()
@@ -421,6 +463,11 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .alter_table_name_by_id(&table_id.into(), table_name);
+        Ok(())
+    }
+
+    async fn alter_source_column(&self, source: PbSource) -> Result<()> {
+        self.catalog.write().update_source(&source);
         Ok(())
     }
 
@@ -723,8 +770,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
-    async fn cancel_creating_jobs(&self, _infos: Vec<CreatingJobInfo>) -> RpcResult<()> {
-        Ok(())
+    async fn cancel_creating_jobs(&self, _infos: PbJobs) -> RpcResult<Vec<u32>> {
+        Ok(vec![])
     }
 
     async fn list_table_fragments(
@@ -772,6 +819,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
         Ok(vec![])
+    }
+
+    async fn get_tables(&self, _table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
+        Ok(HashMap::new())
     }
 }
 

@@ -33,8 +33,8 @@ use crate::expr::Expr;
 impl Binder {
     /// Binds a table function AST, which is a function call in a relation position.
     ///
-    /// Besides [`TableFunction`] expr, it can also be other things like window table functions, or
-    /// scalar functions.
+    /// Besides [`crate::expr::TableFunction`] expr, it can also be other things like window table
+    /// functions, or scalar functions.
     ///
     /// `with_ordinality` is only supported for the `TableFunction` case now.
     pub(super) fn bind_table_function(
@@ -99,6 +99,7 @@ impl Binder {
             )));
         };
 
+        self.push_context();
         let mut clause = Some(Clause::From);
         std::mem::swap(&mut self.context.clause, &mut clause);
         let func = self.bind_function(Function {
@@ -109,8 +110,10 @@ impl Binder {
             order_by: vec![],
             filter: None,
             within_group: None,
-        })?;
+        });
         self.context.clause = clause;
+        self.pop_context()?;
+        let func = func?;
 
         let columns = if let DataType::Struct(s) = func.return_type() {
             // If the table function returns a struct, it will be flattened into multiple columns.

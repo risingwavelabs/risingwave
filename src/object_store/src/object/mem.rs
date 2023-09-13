@@ -12,23 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Cursor;
+use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
+use std::task::{Context, Poll};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use fail::fail_point;
-use futures::future::try_join_all;
+use futures::Stream;
 use itertools::Itertools;
+use risingwave_common::range::RangeBoundsExt;
 use thiserror::Error;
 use tokio::io::AsyncRead;
 use tokio::sync::Mutex;
 
 use super::{
-    BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
-    StreamingUploader,
+    BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectRangeBounds, ObjectResult,
+    ObjectStore, StreamingUploader,
 };
+use crate::object::ObjectMetadataIter;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -126,23 +130,11 @@ impl ObjectStore for InMemObjectStore {
         }))
     }
 
-    async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
+    async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         fail_point!("mem_read_err", |_| Err(ObjectError::internal(
             "mem read error"
         )));
-        if let Some(loc) = block {
-            self.get_object(path, |obj| find_block(obj, loc)).await?
-        } else {
-            self.get_object(path, |obj| Ok(obj.clone())).await?
-        }
-    }
-
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
-        let futures = block_locs
-            .iter()
-            .map(|block_loc| self.read(path, Some(*block_loc)))
-            .collect_vec();
-        try_join_all(futures).await
+        self.get_object(path, range).await
     }
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
@@ -156,23 +148,10 @@ impl ObjectStore for InMemObjectStore {
         fail_point!("mem_streaming_read_err", |_| Err(ObjectError::internal(
             "mem streaming read error"
         )));
-
-        let bytes = if let Some(pos) = start_pos {
-            self.get_object(path, |obj| {
-                find_block(
-                    obj,
-                    BlockLocation {
-                        offset: pos,
-                        size: obj.len() - pos,
-                    },
-                )
-            })
-            .await?
-        } else {
-            self.get_object(path, |obj| Ok(obj.clone())).await?
-        };
-
-        Ok(Box::new(Cursor::new(bytes?)))
+        let bytes = self
+            .get_object(path, start_pos.unwrap_or_default()..)
+            .await?;
+        Ok(Box::new(Cursor::new(bytes)))
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -205,8 +184,8 @@ impl ObjectStore for InMemObjectStore {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
-        Ok(self
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+        let list_result = self
             .objects
             .lock()
             .await
@@ -218,7 +197,8 @@ impl ObjectStore for InMemObjectStore {
                 None
             })
             .sorted_by(|a, b| Ord::cmp(&a.key, &b.key))
-            .collect_vec())
+            .collect_vec();
+        Ok(Box::pin(InMemObjectIter::new(list_result)))
     }
 
     fn store_media_type(&self) -> &'static str {
@@ -249,25 +229,19 @@ impl InMemObjectStore {
         *SHARED.lock() = InMemObjectStore::new();
     }
 
-    async fn get_object<R, F>(&self, path: &str, f: F) -> ObjectResult<R>
-    where
-        F: Fn(&Bytes) -> R,
-    {
-        self.objects
-            .lock()
-            .await
+    async fn get_object(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
+        let objects = self.objects.lock().await;
+
+        let obj = objects
             .get(path)
             .map(|(_, obj)| obj)
-            .ok_or_else(|| Error::not_found(format!("no object at path '{}'", path)).into())
-            .map(f)
-    }
-}
+            .ok_or_else(|| Error::not_found(format!("no object at path '{}'", path)))?;
 
-fn find_block(obj: &Bytes, block: BlockLocation) -> ObjectResult<Bytes> {
-    if block.offset + block.size > obj.len() {
-        Err(Error::other("bad block offset and size").into())
-    } else {
-        Ok(obj.slice(block.offset..(block.offset + block.size)))
+        if let Some(end) = range.end() && end > obj.len() {
+            return Err(Error::other("bad block offset and size").into());
+        }
+
+        Ok(obj.slice(range))
     }
 }
 
@@ -282,9 +256,33 @@ fn get_obj_meta(path: &str, obj: &Bytes) -> ObjectResult<ObjectMetadata> {
     })
 }
 
+struct InMemObjectIter {
+    list_result: VecDeque<ObjectMetadata>,
+}
+
+impl InMemObjectIter {
+    fn new(list_result: Vec<ObjectMetadata>) -> Self {
+        Self {
+            list_result: list_result.into(),
+        }
+    }
+}
+
+impl Stream for InMemObjectIter {
+    type Item = ObjectResult<ObjectMetadata>;
+
+    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(i) = self.list_result.pop_front() {
+            return Poll::Ready(Some(Ok(i)));
+        }
+        Poll::Ready(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use futures::StreamExt;
     use itertools::enumerate;
 
     use super::*;
@@ -297,29 +295,19 @@ mod tests {
         s3.upload("/abc", block).await.unwrap();
 
         // No such object.
-        let err = s3
-            .read("/ab", Some(BlockLocation { offset: 0, size: 3 }))
-            .await
-            .unwrap_err();
+        let err = s3.read("/ab", 0..3).await.unwrap_err();
         assert!(err.is_object_not_found_error());
 
-        let bytes = s3
-            .read("/abc", Some(BlockLocation { offset: 4, size: 2 }))
-            .await
-            .unwrap();
+        let bytes = s3.read("/abc", 4..6).await.unwrap();
         assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_string());
 
         // Overflow.
-        s3.read("/abc", Some(BlockLocation { offset: 4, size: 4 }))
-            .await
-            .unwrap_err();
+        s3.read("/abc", 4..8).await.unwrap_err();
 
         s3.delete("/abc").await.unwrap();
 
         // No such object.
-        s3.read("/abc", Some(BlockLocation { offset: 0, size: 3 }))
-            .await
-            .unwrap_err();
+        s3.read("/abc", 0..3).await.unwrap_err();
     }
 
     #[tokio::test]
@@ -336,14 +324,11 @@ mod tests {
         uploader.finish().await.unwrap();
 
         // Read whole object.
-        let read_obj = store.read("/abc", None).await.unwrap();
+        let read_obj = store.read("/abc", ..).await.unwrap();
         assert!(read_obj.eq(&obj));
 
         // Read part of the object.
-        let read_obj = store
-            .read("/abc", Some(BlockLocation { offset: 4, size: 2 }))
-            .await
-            .unwrap();
+        let read_obj = store.read("/abc", 4..6).await.unwrap();
         assert_eq!(
             String::from_utf8(read_obj.to_vec()).unwrap(),
             "56".to_string()
@@ -364,40 +349,47 @@ mod tests {
         assert_eq!(metadata.total_size, 6);
     }
 
+    async fn list_all(prefix: &str, store: &InMemObjectStore) -> Vec<ObjectMetadata> {
+        let mut iter = store.list(prefix).await.unwrap();
+        let mut result = vec![];
+        while let Some(r) = iter.next().await {
+            result.push(r.unwrap());
+        }
+        result
+    }
+
     #[tokio::test]
     async fn test_list() {
         let payload = Bytes::from("123456");
         let store = InMemObjectStore::new();
-        assert!(store.list("").await.unwrap().is_empty());
+        assert!(list_all("", &store).await.is_empty());
 
         let paths = vec!["001/002/test.obj", "001/003/test.obj"];
         for (i, path) in enumerate(paths.clone()) {
-            assert_eq!(store.list("").await.unwrap().len(), i);
+            assert_eq!(list_all("", &store).await.len(), i);
             store.upload(path, payload.clone()).await.unwrap();
-            assert_eq!(store.list("").await.unwrap().len(), i + 1);
+            assert_eq!(list_all("", &store).await.len(), i + 1);
         }
 
-        let list_path = store
-            .list("")
+        let list_path = list_all("", &store)
             .await
-            .unwrap()
             .iter()
             .map(|p| p.key.clone())
             .collect_vec();
         assert_eq!(list_path, paths);
 
         for i in 0..=5 {
-            assert_eq!(store.list(&paths[0][0..=i]).await.unwrap().len(), 2);
+            assert_eq!(list_all(&paths[0][0..=i], &store).await.len(), 2);
         }
         for i in 6..=paths[0].len() - 1 {
-            assert_eq!(store.list(&paths[0][0..=i]).await.unwrap().len(), 1);
+            assert_eq!(list_all(&paths[0][0..=i], &store).await.len(), 1)
         }
-        assert!(store.list("003").await.unwrap().is_empty());
+        assert!(list_all("003", &store).await.is_empty());
 
         for (i, path) in enumerate(paths.clone()) {
-            assert_eq!(store.list("").await.unwrap().len(), paths.len() - i);
+            assert_eq!(list_all("", &store).await.len(), paths.len() - i);
             store.delete(path).await.unwrap();
-            assert_eq!(store.list("").await.unwrap().len(), paths.len() - i - 1);
+            assert_eq!(list_all("", &store).await.len(), paths.len() - i - 1);
         }
     }
 
@@ -410,7 +402,7 @@ mod tests {
         store.upload("/abc", block1).await.unwrap();
         store.upload("/klm", block2).await.unwrap();
 
-        assert_eq!(store.list("").await.unwrap().len(), 2);
+        assert_eq!(list_all("", &store).await.len(), 2);
 
         let str_list = [
             String::from("/abc"),
@@ -420,6 +412,6 @@ mod tests {
 
         store.delete_objects(&str_list).await.unwrap();
 
-        assert_eq!(store.list("").await.unwrap().len(), 0);
+        assert_eq!(list_all("", &store).await.len(), 0);
     }
 }

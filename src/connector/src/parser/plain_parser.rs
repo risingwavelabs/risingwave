@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::unified::util::apply_row_accessor_on_stream_chunk_writer;
 use super::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParserProperties,
-    SourceStreamChunkRowWriter, WriteGuard,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
+    SourceStreamChunkRowWriter, SpecificParserConfig, WriteGuard,
 };
+use crate::only_parse_payload;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -31,14 +32,14 @@ pub struct PlainParser {
 
 impl PlainParser {
     pub async fn new(
-        props: ParserProperties,
+        props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {
         let payload_builder = match props.encoding_config {
             EncodingProperties::Protobuf(_)
             | EncodingProperties::Avro(_)
-            | EncodingProperties::Bytes => {
+            | EncodingProperties::Bytes(_) => {
                 AccessBuilderImpl::new_default(props.encoding_config, EncodingType::Value).await?
             }
             _ => {
@@ -56,13 +57,10 @@ impl PlainParser {
 
     pub async fn parse_inner(
         &mut self,
-        payload: Option<Vec<u8>>,
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let accessor = self
-            .payload_builder
-            .generate_accessor(payload.unwrap())
-            .await?;
+        let accessor = self.payload_builder.generate_accessor(payload).await?;
 
         apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer)
     }
@@ -83,6 +81,6 @@ impl ByteStreamSourceParser for PlainParser {
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        only_parse_payload!(self, payload, writer)
     }
 }

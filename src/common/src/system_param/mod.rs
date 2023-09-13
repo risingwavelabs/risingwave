@@ -17,7 +17,7 @@
 //!
 //! To add a new system parameter:
 //! - Add a new field to [`PbSystemParams`] in `meta.proto`.
-//! - Add a new entry to [`for_all_undeprecated_params`] in this file.
+//! - Add a new entry to `for_all_undeprecated_params` in this file.
 //! - Add a new method to [`reader::SystemParamsReader`].
 
 pub mod local_manager;
@@ -33,40 +33,29 @@ pub type SystemParamsError = String;
 
 type Result<T> = core::result::Result<T, SystemParamsError>;
 
-/// Only includes undeprecated params.
+/// Define all system parameters here.
+///
 /// Macro input is { field identifier, type, default value, is mutable }
 ///
 /// Note:
 /// - Having `None` as default value means the parameter must be initialized.
 #[macro_export]
-macro_rules! for_all_undeprecated_params {
-    ($macro:ident
-        // Hack: match trailing fields to implement `for_all_params`
-        $(, { $field:ident, $type:ty, $default:expr, $is_mutable:expr })*) => {
+macro_rules! for_all_params {
+    ($macro:ident) => {
         $macro! {
             { barrier_interval_ms, u32, Some(1000_u32), true },
             { checkpoint_frequency, u64, Some(1_u64), true },
             { sstable_size_mb, u32, Some(256_u32), false },
+            { parallel_compact_size_mb, u32, Some(512_u32), false },
             { block_size_kb, u32, Some(64_u32), false },
             { bloom_false_positive, f64, Some(0.001_f64), false },
             { state_store, String, None, false },
             { data_directory, String, None, false },
             { backup_storage_url, String, Some("memory".to_string()), false },
             { backup_storage_directory, String, Some("backup".to_string()), false },
-            { telemetry_enabled, bool, Some(true), true },
-            $({ $field, $type, $default },)*
+            { max_concurrent_creating_streaming_jobs, u32, Some(1_u32), true },
+            { pause_on_next_bootstrap, bool, Some(false), true },
         }
-    };
-}
-
-/// Includes all params.
-/// Macro input is same as `for_all_undeprecated_params`.
-macro_rules! for_all_params {
-    ($macro:ident) => {
-        for_all_undeprecated_params!(
-            $macro /* Define future deprecated params here, such as
-                    * ,{ backup_storage_directory, String, "backup".to_string() } */
-        );
     };
 }
 
@@ -104,7 +93,7 @@ macro_rules! def_default {
     };
 }
 
-for_all_undeprecated_params!(def_default);
+for_all_params!(def_default);
 
 macro_rules! impl_check_missing_fields {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
@@ -178,10 +167,15 @@ macro_rules! impl_system_params_from_kv {
             });
             derive_missing_fields(&mut ret);
             if !kvs.is_empty() {
-                Err(format!("unrecognized system params {:?}", kvs))
-            } else {
-                Ok(ret)
+                let unrecognized_params = kvs.into_iter().map(|(k, v)| {
+                    (
+                        std::str::from_utf8(k.as_ref()).unwrap().to_string(),
+                        std::str::from_utf8(v.as_ref()).unwrap().to_string()
+                    )
+                }).collect::<Vec<_>>();
+                tracing::warn!("unrecognized system params {:?}", unrecognized_params);
             }
+            Ok(ret)
         }
     };
 }
@@ -259,7 +253,7 @@ macro_rules! impl_set_system_param {
                         let v = if let Some(v) = value {
                             v.parse().map_err(|_| format!("cannot parse parameter value"))?
                         } else {
-                            $default.ok_or(format!("{} does not have a default value", key))?
+                            $default.ok_or_else(|| format!("{} does not have a default value", key))?
                         };
                         OverrideValidateOnSet::$field(&v)?;
                         params.$field = Some(v);
@@ -309,12 +303,12 @@ macro_rules! impl_system_params_for_test {
 
 for_all_params!(impl_system_params_from_kv);
 for_all_params!(impl_is_mutable);
-for_all_undeprecated_params!(impl_derive_missing_fields);
-for_all_undeprecated_params!(impl_check_missing_fields);
-for_all_undeprecated_params!(impl_system_params_to_kv);
-for_all_undeprecated_params!(impl_set_system_param);
-for_all_undeprecated_params!(impl_default_validation_on_set);
-for_all_undeprecated_params!(impl_system_params_for_test);
+for_all_params!(impl_derive_missing_fields);
+for_all_params!(impl_check_missing_fields);
+for_all_params!(impl_system_params_to_kv);
+for_all_params!(impl_set_system_param);
+for_all_params!(impl_default_validation_on_set);
+for_all_params!(impl_system_params_for_test);
 
 struct OverrideValidateOnSet;
 impl ValidateOnSet for OverrideValidateOnSet {
@@ -337,7 +331,7 @@ impl ValidateOnSet for OverrideValidateOnSet {
     }
 }
 
-for_all_undeprecated_params!(impl_default_from_other_params);
+for_all_params!(impl_default_from_other_params);
 
 struct OverrideFromParams;
 impl FromParams for OverrideFromParams {}
@@ -353,21 +347,24 @@ mod tests {
             (BARRIER_INTERVAL_MS_KEY, "1"),
             (CHECKPOINT_FREQUENCY_KEY, "1"),
             (SSTABLE_SIZE_MB_KEY, "1"),
+            (PARALLEL_COMPACT_SIZE_MB_KEY, "2"),
             (BLOCK_SIZE_KB_KEY, "1"),
             (BLOOM_FALSE_POSITIVE_KEY, "1"),
             (STATE_STORE_KEY, "a"),
             (DATA_DIRECTORY_KEY, "a"),
             (BACKUP_STORAGE_URL_KEY, "a"),
             (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
-            (TELEMETRY_ENABLED_KEY, "false"),
+            (MAX_CONCURRENT_CREATING_STREAMING_JOBS_KEY, "1"),
+            (PAUSE_ON_NEXT_BOOTSTRAP_KEY, "false"),
+            ("a_deprecated_param", "foo"),
         ];
 
         // To kv - missing field.
         let p = PbSystemParams::default();
         assert!(system_params_to_kv(&p).is_err());
 
-        // From kv - unrecognized field.
-        assert!(system_params_from_kv(vec![("?", "?")]).is_err());
+        // From kv - unrecognized field should be ignored
+        assert!(system_params_from_kv(vec![("?", "?")]).is_ok());
 
         // Deser & ser.
         let p = system_params_from_kv(kvs).unwrap();

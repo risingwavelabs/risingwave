@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use bytes::{BufMut, Bytes, BytesMut};
-use risingwave_common::error::Result;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -35,18 +34,11 @@ pub fn serialize_pk_with_vnode(
     buffer.freeze()
 }
 
-// NOTE: Only for debug purpose now
 pub fn deserialize_pk_with_vnode(
     key: &[u8],
     deserializer: &OrderedRowSerde,
-) -> Result<(VirtualNode, OwnedRow)> {
+) -> memcomparable::Result<(VirtualNode, OwnedRow)> {
     let vnode = VirtualNode::from_be_bytes(key[0..VirtualNode::SIZE].try_into().unwrap());
     let pk = deserializer.deserialize(&key[VirtualNode::SIZE..])?;
     Ok((vnode, pk))
-}
-
-pub fn parse_raw_key_to_vnode_and_key(raw_key: &[u8]) -> (VirtualNode, &[u8]) {
-    let (vnode_bytes, key_bytes) = raw_key.split_at(VirtualNode::SIZE);
-    let vnode = VirtualNode::from_be_bytes(vnode_bytes.try_into().unwrap());
-    (vnode, key_bytes)
 }

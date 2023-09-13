@@ -217,9 +217,8 @@ pub struct TempoConfig {
     pub id: String,
 
     pub listen_address: String,
+    pub address: String,
     pub port: u16,
-
-    pub otlp_address: String,
     pub otlp_port: u16,
 }
 
@@ -244,7 +243,6 @@ pub struct OpendalConfig {
     pub engine: String,
     pub namenode: String,
     pub bucket: String,
-    pub root: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -47,6 +47,7 @@ http://ecotrust-canada.github.io/markdown-toc/
 - [Add new dependencies](#add-new-dependencies)
 - [Submit PRs](#submit-prs)
 - [Profiling](#benchmarking-and-profiling)
+- [Understanding RisingWave Macros](#understanding-risingwave-macros)
 
 ## Read the design docs
 
@@ -61,6 +62,8 @@ You can also read the [crate level documentation](https://risingwavelabs.github.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 - The `docs` folder contains the design docs. If you want to learn about how RisingWave is designed and implemented, check out the design docs here.
 - The `dashboard` folder contains RisingWave dashboard v2.
+
+The [src/README.md](../src/README.md) file contains more details about Design Patterns in RisingWave.
 
 ## Set up the development environment
 
@@ -173,8 +176,8 @@ You may also add multiple compute nodes in the cluster. The `ci-3cn-1fe` config 
 
 ### Configure system variables
 
-You can check `src/common/src/config.rs` to see all the configurable variables. 
-If additional variables are needed, 
+You can check `src/common/src/config.rs` to see all the configurable variables.
+If additional variables are needed,
 include them in the correct sections (such as `[server]` or `[storage]`) in `src/config/risingwave.toml`.
 
 
@@ -202,9 +205,9 @@ Then, connect to the playground instance via:
 psql -h localhost -p 4566 -d dev -U root
 ```
 
-## Debug playground using vscode 
+## Debug playground using vscode
 
-To step through risingwave locally with a debugger you can use the `launch.json` and the `tasks.json` provided in `vscode_suggestions`. After adding these files to your local `.vscode` folder you can debug and set breakpoints by launching `Launch 'risingwave p' debug`. 
+To step through risingwave locally with a debugger you can use the `launch.json` and the `tasks.json` provided in `vscode_suggestions`. After adding these files to your local `.vscode` folder you can debug and set breakpoints by launching `Launch 'risingwave p' debug`.
 
 ## Develop the dashboard
 
@@ -269,7 +272,10 @@ The Rust components use `tokio-tracing` to handle both logging and tracing. The 
 * Third-party libraries: warn
 * Other libraries: debug
 
-If you need to adjust log levels, change the logging filters in `src/utils/runtime/src/lib.rs`.
+If you need to override the default log levels, launch RisingWave with the environment variable `RUST_LOG` set as described [here](https://docs.rs/tracing-subscriber/0.3/tracing_subscriber/filter/struct.EnvFilter.html).
+
+There're also some logs designated for debugging purposes with target names starting with `events::`.
+For example, by setting `RUST_LOG=events::stream::message::chunk=trace`, all chunk messages will be logged as it passes through the executors in the streaming engine. Search in the codebase to find more of them.
 
 
 ## Test your code changes
@@ -303,8 +309,8 @@ If you want to see the coverage report, run this command:
 ```
 
 Some unit tests will not work if the `/tmp` directory is on a TmpFS file system: these unit tests will fail with this
-error message: `Attempting to create cache file on a TmpFS file system. TmpFS cannot be used because it does not support Direct IO.`. 
-If this happens you can override the use of `/tmp` by setting the  environment variable `RISINGWAVE_TEST_DIR` to a 
+error message: `Attempting to create cache file on a TmpFS file system. TmpFS cannot be used because it does not support Direct IO.`.
+If this happens you can override the use of `/tmp` by setting the  environment variable `RISINGWAVE_TEST_DIR` to a
 directory that is on a non-TmpFS filesystem, the unit tests will then place temporary files under your specified path.
 
 ### Planner tests
@@ -340,7 +346,7 @@ Then to run the end-to-end tests, you can use one of the following commands acco
 
 > **Note**
 >
-> Use `-j 1` to create a separate database for each test case, which can ensure that previous test case failure won’t affect other tests due to table cleanups.
+> Use `-j 1` to create a separate database for each test case, which can ensure that previous test case failure won't affect other tests due to table cleanups.
 
 Alternatively, you can also run some specific tests:
 
@@ -436,7 +442,7 @@ MADSIM_TEST_NUM=100 ./risedev sslt --release -- './e2e_test/path/to/directory/**
 ./risedev sslt -- --kill-meta --etcd-timeout-rate=0.01 './e2e_test/path/to/directory/**/*.slt'
 
 # see more usages
-./risedev sslt -- --help  
+./risedev sslt -- --help
 ```
 
 Deterministic test is included in CI as well. See [CI script](../ci/scripts/deterministic-e2e-test.sh) for details.
@@ -447,6 +453,36 @@ To run these tests:
 ```shell
 ./risedev sit-test
 ```
+
+Sometimes in CI you may see a backtrace, followed by an error message with a `MADSIM_TEST_SEED`:
+```shell
+ 161: madsim::sim::task::Executor::block_on
+             at /risingwave/.cargo/registry/src/index.crates.io-6f17d22bba15001f/madsim-0.2.22/src/sim/task/mod.rs:238:13
+ 162: madsim::sim::runtime::Runtime::block_on
+             at /risingwave/.cargo/registry/src/index.crates.io-6f17d22bba15001f/madsim-0.2.22/src/sim/runtime/mod.rs:126:9
+ 163: madsim::sim::runtime::builder::Builder::run::{{closure}}::{{closure}}::{{closure}}
+             at /risingwave/.cargo/registry/src/index.crates.io-6f17d22bba15001f/madsim-0.2.22/src/sim/runtime/builder.rs:128:35
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+context: node=6 "compute-1", task=2237 (spawned at /risingwave/src/stream/src/task/stream_manager.rs:689:34)
+note: run with `MADSIM_TEST_SEED=2` environment variable to reproduce this error
+```
+
+You may use that to reproduce it in your local environment. For example:
+```shell
+MADSIM_TEST_SEED=4 ./risedev sit-test test_backfill_with_upstream_and_snapshot_read
+```
+
+### Backwards Compatibility tests
+
+This tests backwards compatibility between the earliest minor version
+and latest minor version of Risingwave (e.g. 1.0.0 vs 1.1.0).
+
+You can run it locally with:
+```bash
+./risedev backwards-compat-test
+```
+
+In CI, you can make sure the PR runs it by adding the label `ci/run-backwards-compat-tests`.
 
 ## Miscellaneous checks
 

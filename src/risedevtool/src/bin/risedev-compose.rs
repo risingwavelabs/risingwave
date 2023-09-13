@@ -22,7 +22,7 @@ use console::style;
 use fs_err::{self, File};
 use itertools::Itertools;
 use risedev::{
-    compose_deploy, compute_risectl_env, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile,
+    compose_deploy, generate_risedev_env, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile,
     ComposeService, ComposeVolume, ConfigExpander, DockerImageConfig, ServiceConfig,
     RISEDEV_CONFIG_FILE,
 };
@@ -193,7 +193,7 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::Tempo(_) => return Err(anyhow!("not supported")),
+            ServiceConfig::Tempo(c) => (c.address.clone(), c.compose(&compose_config)?),
             ServiceConfig::Kafka(_) => {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
@@ -277,8 +277,9 @@ fn main() -> Result<()> {
             )?;
         }
 
-        let env = compute_risectl_env(&services)?;
-        writeln!(log_buffer, "-- risectl --\n{}\n", style(env).green())?;
+        if let Some(env) = Some(generate_risedev_env(&services)).filter(|x| !x.is_empty()) {
+            writeln!(log_buffer, "-- risedev-env --\n{}\n", style(env).green())?;
+        }
 
         compose_deploy(
             Path::new(&opts.directory),

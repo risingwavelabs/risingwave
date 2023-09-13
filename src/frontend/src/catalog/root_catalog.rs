@@ -27,13 +27,14 @@ use risingwave_pb::hummock::HummockVersionStats;
 
 use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
-use super::system_catalog::get_sys_catalogs_in_schema;
 use super::view_catalog::ViewCatalog;
 use super::{CatalogError, CatalogResult, ConnectionId, SinkId, SourceId, ViewId};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::system_catalog::SystemCatalog;
+use crate::catalog::system_catalog::{
+    get_sys_tables_in_schema, get_sys_views_in_schema, SystemTableCatalog,
+};
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
 
@@ -139,13 +140,22 @@ impl Catalog {
             .unwrap()
             .create_schema(proto);
 
-        if let Some(sys_tables) = get_sys_catalogs_in_schema(proto.name.as_str()) {
+        if let Some(sys_tables) = get_sys_tables_in_schema(proto.name.as_str()) {
             sys_tables.into_iter().for_each(|sys_table| {
                 self.get_database_mut(proto.database_id)
                     .unwrap()
                     .get_schema_mut(proto.id)
                     .unwrap()
                     .create_sys_table(sys_table);
+            });
+        }
+        if let Some(sys_views) = get_sys_views_in_schema(proto.name.as_str()) {
+            sys_views.into_iter().for_each(|sys_view| {
+                self.get_database_mut(proto.database_id)
+                    .unwrap()
+                    .get_schema_mut(proto.id)
+                    .unwrap()
+                    .create_sys_view(sys_view);
             });
         }
     }
@@ -393,6 +403,17 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("schema_id", schema_id.to_string()))
     }
 
+    pub fn get_source_by_id(
+        &self,
+        db_id: &DatabaseId,
+        schema_id: &SchemaId,
+        source_id: &SourceId,
+    ) -> CatalogResult<&Arc<SourceCatalog>> {
+        self.get_schema_by_id(db_id, schema_id)?
+            .get_source_by_id(source_id)
+            .ok_or_else(|| CatalogError::NotFound("source_id", source_id.to_string()))
+    }
+
     /// Refer to [`SearchPath`].
     pub fn first_valid_schema(
         &self,
@@ -491,7 +512,7 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         table_name: &str,
-    ) -> CatalogResult<&SystemCatalog> {
+    ) -> CatalogResult<&Arc<SystemTableCatalog>> {
         self.get_schema_by_name(db_name, schema_name)
             .unwrap()
             .get_system_table_by_name(table_name)

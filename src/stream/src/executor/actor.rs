@@ -217,7 +217,7 @@ where
 /// Drop the stream in a blocking task to avoid interfering with other actors.
 ///
 /// Logically the actor is dropped after we send the barrier with `Drop` mutation to the
-/// downstream，thus making the `drop`'s progress asynchronous. However, there might be a
+/// downstream, thus making the `drop`'s progress asynchronous. However, there might be a
 /// considerable amount of data in the executors' in-memory cache, dropping these structures might
 /// be a CPU-intensive task. This may lead to the runtime being unable to schedule other actors if
 /// the `drop` is called on the current thread.

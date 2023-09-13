@@ -93,7 +93,7 @@ pub fn overlay_for(
     if start <= 0 {
         return Err(ExprError::InvalidParam {
             name: "start",
-            reason: format!("{start} is not positive"),
+            reason: format!("{start} is not positive").into(),
         });
     }
 

@@ -62,7 +62,7 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
                     .collect_vec();
 
                 println!(
-                    "\t\tActor #{} ({}): [{}]",
+                    "\t\tActor #{:<3} ({}): [{}]",
                     actor.actor_id,
                     splits.len(),
                     splits.join(",")

@@ -15,8 +15,10 @@
 pub mod batch_table;
 pub mod merge_sort;
 
+use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
 
+use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
@@ -24,7 +26,9 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_hummock_sdk::key::TableKey;
 
 use crate::error::StorageResult;
 
@@ -85,17 +89,15 @@ pub trait TableIter: Send {
     async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
 }
 
-/// Collects data chunks from stream of rows.
 pub async fn collect_data_chunk<E, S>(
     stream: &mut S,
     schema: &Schema,
     chunk_size: Option<usize>,
 ) -> Result<Option<DataChunk>, E>
 where
-    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
+    S: Stream<Item = Result<KeyedRow<Bytes>, E>> + Unpin,
 {
     let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
-
     let mut row_count = 0;
     for _ in 0..chunk_size.unwrap_or(usize::MAX) {
         match stream.next().await.transpose()? {
@@ -123,6 +125,27 @@ where
     } else {
         Ok(Some(chunk))
     }
+}
+
+/// Collects data chunks from stream of rows.
+pub async fn collect_data_chunk_with_builder<E, S>(
+    stream: &mut S,
+    builder: &mut DataChunkBuilder,
+) -> Result<Option<DataChunk>, E>
+where
+    S: Stream<Item = Result<OwnedRow, E>> + Unpin,
+{
+    // TODO(kwannoel): If necessary, we can optimize it in the future.
+    // This can be done by moving the check if builder is full from `append_one_row` to here,
+    while let Some(row) = stream.next().await.transpose()? {
+        let result = builder.append_one_row(row);
+        if let Some(chunk) = result {
+            return Ok(Some(chunk));
+        }
+    }
+
+    let chunk = builder.consume_all();
+    Ok(chunk)
 }
 
 pub fn get_second<T, U, E>(arg: Result<(T, U), E>) -> Result<U, E> {
@@ -181,4 +204,38 @@ fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
         "vnode {} should not be accessed by this table",
         vnode
     );
+}
+
+pub struct KeyedRow<T: AsRef<[u8]>> {
+    vnode_prefixed_key: TableKey<T>,
+    row: OwnedRow,
+}
+
+impl<T: AsRef<[u8]>> KeyedRow<T> {
+    pub fn new(table_key: TableKey<T>, row: OwnedRow) -> Self {
+        Self {
+            vnode_prefixed_key: table_key,
+            row,
+        }
+    }
+
+    pub fn into_owned_row(self) -> OwnedRow {
+        self.row
+    }
+
+    pub fn vnode(&self) -> VirtualNode {
+        self.vnode_prefixed_key.vnode_part()
+    }
+
+    pub fn key(&self) -> &[u8] {
+        self.vnode_prefixed_key.key_part()
+    }
+}
+
+impl<T: AsRef<[u8]>> Deref for KeyedRow<T> {
+    type Target = OwnedRow;
+
+    fn deref(&self) -> &Self::Target {
+        &self.row
+    }
 }

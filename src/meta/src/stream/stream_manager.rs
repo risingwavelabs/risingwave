@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use futures::future::{try_join_all, BoxFuture};
+use futures::future::{join_all, try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::Table;
@@ -25,7 +25,7 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
 };
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -34,11 +34,10 @@ use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, TableFragments};
-use crate::storage::MetaStore;
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
-pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
+pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
 
 /// [`CreateStreamingJobContext`] carries one-time infos for creating a streaming job.
 ///
@@ -78,7 +77,8 @@ impl CreateStreamingJobContext {
 
 pub enum CreatingState {
     Failed { reason: MetaError },
-    Canceling,
+    // sender is used to notify the canceling result.
+    Canceling { finish_tx: oneshot::Sender<()> },
     Created,
 }
 
@@ -112,20 +112,22 @@ impl CreatingStreamingJobInfo {
         jobs.remove(&job_id);
     }
 
-    async fn cancel_jobs(&self, job_ids: Vec<TableId>) {
+    async fn cancel_jobs(&self, job_ids: Vec<TableId>) -> HashMap<TableId, oneshot::Receiver<()>> {
         let mut jobs = self.streaming_jobs.lock().await;
+        let mut receivers = HashMap::new();
         for job_id in job_ids {
             if let Some(job) = jobs.get_mut(&job_id)
                 && let Some(shutdown_tx) = job.shutdown_tx.take()
             {
-                let _ = shutdown_tx
-                    .send(CreatingState::Canceling)
-                    .await
-                    .inspect_err(|_| {
-                        tracing::warn!("failed to send canceling state");
-                    });
+                let (tx, rx) = oneshot::channel();
+                if shutdown_tx.send(CreatingState::Canceling{finish_tx: tx}).await.is_ok() {
+                    receivers.insert(job_id, rx);
+                } else {
+                    tracing::warn!("failed to send canceling state");
+                }
             }
         }
+        receivers
     }
 }
 
@@ -141,6 +143,9 @@ pub struct ReplaceTableContext {
     /// The updates to be applied to the downstream chain actors. Used for schema change.
     pub merge_updates: Vec<MergeUpdate>,
 
+    /// New dispatchers to add from upstream actors to downstream actors.
+    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+
     /// The locations of the actors to build in the new table to replace.
     pub building_locations: Locations,
 
@@ -153,40 +158,37 @@ pub struct ReplaceTableContext {
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
-pub struct GlobalStreamManager<S: MetaStore> {
-    pub(crate) env: MetaSrvEnv<S>,
+pub struct GlobalStreamManager {
+    pub(crate) env: MetaSrvEnv,
 
     /// Manages definition and status of fragments and actors
-    pub(super) fragment_manager: FragmentManagerRef<S>,
+    pub(super) fragment_manager: FragmentManagerRef,
 
     /// Broadcasts and collect barriers
-    pub(crate) barrier_scheduler: BarrierScheduler<S>,
+    pub(crate) barrier_scheduler: BarrierScheduler,
 
     /// Maintains information of the cluster
-    pub(crate) cluster_manager: ClusterManagerRef<S>,
+    pub(crate) cluster_manager: ClusterManagerRef,
 
     /// Maintains streaming sources from external system like kafka
-    pub(crate) source_manager: SourceManagerRef<S>,
+    pub(crate) source_manager: SourceManagerRef,
 
     /// Creating streaming job info.
     creating_job_info: CreatingStreamingJobInfoRef,
 
-    hummock_manager: HummockManagerRef<S>,
+    hummock_manager: HummockManagerRef,
 
     pub(crate) reschedule_lock: RwLock<()>,
 }
 
-impl<S> GlobalStreamManager<S>
-where
-    S: MetaStore,
-{
+impl GlobalStreamManager {
     pub fn new(
-        env: MetaSrvEnv<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        barrier_scheduler: BarrierScheduler<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        source_manager: SourceManagerRef<S>,
-        hummock_manager: HummockManagerRef<S>,
+        env: MetaSrvEnv,
+        fragment_manager: FragmentManagerRef,
+        barrier_scheduler: BarrierScheduler,
+        cluster_manager: ClusterManagerRef,
+        source_manager: SourceManagerRef,
+        hummock_manager: HummockManagerRef,
     ) -> MetaResult<Self> {
         Ok(Self {
             env,
@@ -255,7 +257,7 @@ where
                     CreatingState::Failed { reason } => {
                         return Err(reason);
                     }
-                    CreatingState::Canceling => {
+                    CreatingState::Canceling { finish_tx } => {
                         if let Ok(table_fragments) = self
                             .fragment_manager
                             .select_table_fragments_by_table_id(&table_id)
@@ -301,7 +303,6 @@ where
                                         table_id,
                                     )))
                                     .await?;
-                                return Err(MetaError::cancelled("create".into()));
                             }
                             if !table_fragments.is_created() {
                                 tracing::debug!(
@@ -310,8 +311,11 @@ where
                                 self.barrier_scheduler
                                     .run_command(Command::CancelStreamingJob(table_fragments))
                                     .await?;
-                                return Err(MetaError::cancelled("create".into()));
                             }
+                            let _ = finish_tx.send(()).inspect_err(|_| {
+                                tracing::warn!("failed to notify cancelled: {table_id}")
+                            });
+                            return Err(MetaError::cancelled("create".into()));
                         }
                     }
                     CreatingState::Created => return Ok(()),
@@ -463,6 +467,7 @@ where
         ReplaceTableContext {
             old_table_fragments,
             merge_updates,
+            dispatchers,
             building_locations,
             existing_locations,
             table_properties: _,
@@ -478,12 +483,19 @@ where
 
         let dummy_table_id = table_fragments.table_id();
 
+        let init_split_assignment = self
+            .source_manager
+            .pre_allocate_splits(&dummy_table_id)
+            .await?;
+
         if let Err(err) = self
             .barrier_scheduler
-            .run_command_with_paused(Command::ReplaceTable {
+            .run_config_change_command_with_pause(Command::ReplaceTable {
                 old_table_fragments,
                 new_table_fragments: table_fragments,
                 merge_updates,
+                dispatchers,
+                init_split_assignment,
             })
             .await
         {
@@ -500,12 +512,14 @@ where
     /// be ignored because the recovery process will take over it in cleaning part. Check
     /// [`Command::DropStreamingJobs`] for details.
     pub async fn drop_streaming_jobs(&self, streaming_job_ids: Vec<TableId>) {
-        let _ = self
-            .drop_streaming_jobs_impl(streaming_job_ids)
-            .await
-            .inspect_err(|err| {
-                tracing::error!(error = ?err, "Failed to drop streaming jobs");
-            });
+        if !streaming_job_ids.is_empty() {
+            let _ = self
+                .drop_streaming_jobs_impl(streaming_job_ids)
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(error = ?err, "Failed to drop streaming jobs");
+                });
+        }
     }
 
     pub async fn drop_streaming_jobs_impl(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
@@ -538,9 +552,25 @@ where
         Ok(())
     }
 
-    pub async fn cancel_streaming_jobs(&self, table_ids: Vec<TableId>) {
+    /// Cancel streaming jobs and return the canceled table ids.
+    pub async fn cancel_streaming_jobs(&self, table_ids: Vec<TableId>) -> Vec<TableId> {
+        if table_ids.is_empty() {
+            return vec![];
+        }
+
         let _reschedule_job_lock = self.reschedule_lock.read().await;
-        self.creating_job_info.cancel_jobs(table_ids).await;
+        let receivers = self.creating_job_info.cancel_jobs(table_ids).await;
+
+        let futures = receivers.into_iter().map(|(id, receiver)| async move {
+            if receiver.await.is_ok() {
+                tracing::info!("canceled streaming job {id}");
+                Some(id)
+            } else {
+                tracing::warn!("failed to cancel streaming job {id}");
+                None
+            }
+        });
+        join_all(futures).await.into_iter().flatten().collect_vec()
     }
 }
 
@@ -576,13 +606,14 @@ mod tests {
     use super::*;
     use crate::barrier::GlobalBarrierManager;
     use crate::hummock::{CompactorManager, HummockManager};
+    use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
-        StreamingClusterInfo,
+        RelationIdEnum, StreamingClusterInfo,
     };
     use crate::model::{ActorId, FragmentId};
+    use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
-    use crate::storage::MemStore;
     use crate::stream::SourceManager;
     use crate::MetaOpts;
 
@@ -653,6 +684,10 @@ mod tests {
             &self,
             _request: Request<ForceStopActorsRequest>,
         ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
+            self.inner.actor_streams.lock().unwrap().clear();
+            self.inner.actor_ids.lock().unwrap().clear();
+            self.inner.actor_infos.lock().unwrap().clear();
+
             Ok(Response::new(ForceStopActorsResponse::default()))
         }
 
@@ -674,14 +709,14 @@ mod tests {
             &self,
             _request: Request<WaitEpochCommitRequest>,
         ) -> std::result::Result<Response<WaitEpochCommitResponse>, Status> {
-            unimplemented!()
+            Ok(Response::new(WaitEpochCommitResponse::default()))
         }
     }
 
     struct MockServices {
-        global_stream_manager: GlobalStreamManagerRef<MemStore>,
-        catalog_manager: CatalogManagerRef<MemStore>,
-        fragment_manager: FragmentManagerRef<MemStore>,
+        global_stream_manager: GlobalStreamManagerRef,
+        catalog_manager: CatalogManagerRef,
+        fragment_manager: FragmentManagerRef,
         state: Arc<FakeFragmentState>,
         join_handle_shutdown_txs: Vec<(JoinHandle<()>, Sender<()>)>,
     }
@@ -713,7 +748,7 @@ mod tests {
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(enable_recovery))).await;
             let system_params = env.system_params_manager().get_params().await;
-            let meta_metrics = Arc::new(MetaMetrics::new());
+            let meta_metrics = Arc::new(MetaMetrics::default());
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
             let host = HostAddress {
@@ -771,6 +806,8 @@ mod tests {
                 .await?,
             );
 
+            let (sink_manager, _) = SinkCoordinatorManager::start_worker(None);
+
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 scheduled_barriers,
                 env.clone(),
@@ -779,6 +816,7 @@ mod tests {
                 fragment_manager.clone(),
                 hummock_manager.clone(),
                 source_manager.clone(),
+                sink_manager,
                 meta_metrics.clone(),
             ));
 
@@ -791,7 +829,15 @@ mod tests {
                 hummock_manager,
             )?;
 
-            let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
+            let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager);
+
+            // Wait until the bootstrap recovery is done.
+            loop {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                if barrier_scheduler.flush(false).await.is_ok() {
+                    break;
+                }
+            }
 
             Ok(Self {
                 global_stream_manager: Arc::new(stream_manager),
@@ -856,7 +902,7 @@ mod tests {
                 .create_streaming_job(table_fragments, ctx)
                 .await?;
             self.catalog_manager
-                .finish_create_table_procedure(vec![], &table)
+                .finish_create_table_procedure(vec![], table)
                 .await?;
             Ok(())
         }
@@ -864,7 +910,11 @@ mod tests {
         async fn drop_materialized_views(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
             for table_id in &table_ids {
                 self.catalog_manager
-                    .drop_table(table_id.table_id, vec![], self.fragment_manager.clone())
+                    .drop_relation(
+                        RelationIdEnum::Table(table_id.table_id),
+                        self.fragment_manager.clone(),
+                        DropMode::Restrict,
+                    )
                     .await?;
             }
             self.global_stream_manager
@@ -1022,6 +1072,7 @@ mod tests {
         assert_eq!(table_fragments.actor_ids(), (0..=3).collect_vec());
 
         // test drop materialized_view
+        tokio::time::sleep(Duration::from_secs(2)).await;
         services
             .drop_materialized_views(vec![table_id])
             .await

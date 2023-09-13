@@ -82,7 +82,7 @@
       o_all_local INT,
       PRIMARY KEY(o_w_id, o_d_id, o_id)
     );
-    
+
     create table order_line (
       ol_o_id INT,
       ol_d_id INT,

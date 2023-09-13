@@ -138,7 +138,7 @@ impl MergeExecutor {
                 }
                 Message::Barrier(barrier) => {
                     tracing::trace!(
-                        target: "events::barrier::path",
+                        target: "events::stream::barrier::path",
                         actor_id = actor_id,
                         "receiver receives barrier from path: {:?}",
                         barrier.passed_actors
@@ -646,6 +646,7 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
+            actor_new_dispatchers: Default::default(),
         });
         send!([untouched, old], Message::Barrier(b1.clone()));
         assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream new.
@@ -757,9 +758,9 @@ mod tests {
 
         assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
             let (ops, columns, visibility) = chunk.into_inner();
-            assert_eq!(ops.len() as u64, 0);
-            assert_eq!(columns.len() as u64, 0);
-            assert_eq!(visibility, None);
+            assert!(ops.is_empty());
+            assert!(columns.is_empty());
+            assert!(visibility.is_empty());
         });
         assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
             assert_eq!(barrier_epoch.curr, 12345);

@@ -21,20 +21,16 @@ use tonic::{Request, Response, Status};
 
 use crate::manager::FragmentManagerRef;
 use crate::serving::ServingVnodeMappingRef;
-use crate::storage::MetaStore;
 
-pub struct ServingServiceImpl<S: MetaStore> {
+pub struct ServingServiceImpl {
     serving_vnode_mapping: ServingVnodeMappingRef,
-    fragment_manager: FragmentManagerRef<S>,
+    fragment_manager: FragmentManagerRef,
 }
 
-impl<S> ServingServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl ServingServiceImpl {
     pub fn new(
         serving_vnode_mapping: ServingVnodeMappingRef,
-        fragment_manager: FragmentManagerRef<S>,
+        fragment_manager: FragmentManagerRef,
     ) -> Self {
         Self {
             serving_vnode_mapping,
@@ -44,10 +40,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> ServingService for ServingServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl ServingService for ServingServiceImpl {
     async fn get_serving_vnode_mappings(
         &self,
         _request: Request<GetServingVnodeMappingsRequest>,

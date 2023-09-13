@@ -34,7 +34,7 @@ statement ok
 insert into tweet values ('#1 #2 abaaba'), ('ss #1 ggg #risingwave');
 
 statement ok
-create materialized view mv as 
+create materialized view mv as
     with tags as (select unnest(regexp_matches(text, '#\w+', 'g')) as tag, text from tweet)
     select tag, count(*) as cnt from tags group by tag;
 

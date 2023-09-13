@@ -32,12 +32,12 @@ use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker, INVALID_EXPIRE_AT};
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::{MetaStore, MetaStoreRef, Transaction};
 use crate::{MetaError, MetaResult};
 
 pub type WorkerId = u32;
 pub type WorkerLocations = HashMap<WorkerId, WorkerNode>;
-pub type ClusterManagerRef<S> = Arc<ClusterManager<S>>;
+pub type ClusterManagerRef = Arc<ClusterManager>;
 
 #[derive(Clone, Debug)]
 pub struct WorkerKey(pub HostAddress);
@@ -61,19 +61,16 @@ impl Hash for WorkerKey {
 pub const META_NODE_ID: u32 = 0;
 
 /// [`ClusterManager`] manager cluster/worker meta data in [`MetaStore`].
-pub struct ClusterManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct ClusterManager {
+    env: MetaSrvEnv,
 
     max_heartbeat_interval: Duration,
 
     core: RwLock<ClusterManagerCore>,
 }
 
-impl<S> ClusterManager<S>
-where
-    S: MetaStore,
-{
-    pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> MetaResult<Self> {
+impl ClusterManager {
+    pub async fn new(env: MetaSrvEnv, max_heartbeat_interval: Duration) -> MetaResult<Self> {
         let core = ClusterManagerCore::new(env.meta_store_ref()).await?;
 
         Ok(Self {
@@ -113,59 +110,61 @@ where
                     .worker_node
                     .property
                     .as_ref()
-                    .unwrap()
-                    .is_unschedulable;
+                    .map(|p| p.is_unschedulable)
+                    .unwrap_or_default();
             }
 
-            worker.update_ttl(self.max_heartbeat_interval);
             let current_parallelism = worker.worker_node.parallel_units.len();
             if current_parallelism == worker_node_parallelism
                 && worker.worker_node.property == property
             {
+                worker.update_ttl(self.max_heartbeat_interval);
                 return Ok(worker.to_protobuf());
             }
+
+            let mut new_worker = worker.clone();
             match current_parallelism.cmp(&worker_node_parallelism) {
                 Ordering::Less => {
                     tracing::info!(
                         "worker {} parallelism updated from {} to {}",
-                        worker.worker_node.id,
+                        new_worker.worker_node.id,
                         current_parallelism,
                         worker_node_parallelism
                     );
                     let parallel_units = self
                         .generate_cn_parallel_units(
                             worker_node_parallelism - current_parallelism,
-                            worker.worker_id(),
+                            new_worker.worker_id(),
                         )
                         .await?;
-                    worker.worker_node.parallel_units.extend(parallel_units);
+                    new_worker.worker_node.parallel_units.extend(parallel_units);
                 }
                 Ordering::Greater => {
-                    // Simply reject the request if the worker registered with a smaller
-                    // parallelism.
-                    return Err(MetaError::invalid_worker(
-                        worker.worker_id(),
-                        format!(
-                            "parallelism is less than current, current is {}, but received {}",
-                            current_parallelism, worker_node_parallelism
-                        ),
-                    ));
+                    // Warn and keep the original parallelism if the worker registered with a
+                    // smaller parallelism.
+                    tracing::warn!(
+                        "worker {} parallelism is less than current, current is {}, but received {}",
+                        new_worker.worker_id(),
+                        current_parallelism,
+                        worker_node_parallelism
+                    );
                 }
                 Ordering::Equal => {}
             }
-            if property != worker.worker_node.property {
+            if property != new_worker.worker_node.property {
                 tracing::info!(
                     "worker {} property updated from {:?} to {:?}",
-                    worker.worker_node.id,
-                    worker.worker_node.property,
+                    new_worker.worker_node.id,
+                    new_worker.worker_node.property,
                     property
                 );
 
-                worker.worker_node.property = property;
+                new_worker.worker_node.property = property;
             }
 
-            worker.insert(self.env.meta_store()).await?;
-            // FIXME: should update cache after txn success.
+            new_worker.update_ttl(self.max_heartbeat_interval);
+            new_worker.insert(self.env.meta_store()).await?;
+            *worker = new_worker;
             return Ok(worker.to_protobuf());
         }
 
@@ -330,8 +329,8 @@ where
         ))
     }
 
-    pub async fn start_heartbeat_checker(
-        cluster_manager: ClusterManagerRef<S>,
+    pub fn start_heartbeat_checker(
+        cluster_manager: ClusterManagerRef,
         check_interval: Duration,
     ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -508,9 +507,6 @@ pub struct ClusterManagerCore {
     /// Record for workers in the cluster.
     workers: HashMap<WorkerKey, Worker>,
 
-    /// Record for parallel units.
-    parallel_units: Vec<ParallelUnit>,
-
     /// Record for tracking available machine ids, one is available.
     available_transactional_ids: VecDeque<u32>,
 }
@@ -519,13 +515,8 @@ impl ClusterManagerCore {
     pub const MAX_WORKER_REUSABLE_ID_BITS: usize = 10;
     pub const MAX_WORKER_REUSABLE_ID_COUNT: usize = 1 << Self::MAX_WORKER_REUSABLE_ID_BITS;
 
-    async fn new<S>(meta_store: Arc<S>) -> MetaResult<Self>
-    where
-        S: MetaStore,
-    {
-        let mut workers = Worker::list(&*meta_store).await?;
-        let mut worker_map = HashMap::new();
-        let mut parallel_units = Vec::new();
+    async fn new(meta_store: MetaStoreRef) -> MetaResult<Self> {
+        let mut workers = Worker::list(&meta_store).await?;
 
         let used_transactional_ids: HashSet<_> = workers
             .iter()
@@ -577,14 +568,11 @@ impl ClusterManagerCore {
             var_txn.commit();
         }
 
-        workers.into_iter().for_each(|w| {
-            worker_map.insert(WorkerKey(w.key().unwrap()), w.clone());
-            parallel_units.extend(w.worker_node.parallel_units);
-        });
-
         Ok(Self {
-            workers: worker_map,
-            parallel_units,
+            workers: workers
+                .into_iter()
+                .map(|w| (WorkerKey(w.key().unwrap()), w))
+                .collect(),
             available_transactional_ids,
         })
     }
@@ -616,9 +604,6 @@ impl ClusterManagerCore {
                 .retain(|id| *id != transactional_id);
         }
 
-        self.parallel_units
-            .extend(worker.worker_node.parallel_units.clone());
-
         self.workers
             .insert(WorkerKey(worker.key().unwrap()), worker);
     }
@@ -629,13 +614,6 @@ impl ClusterManagerCore {
     }
 
     fn delete_worker_node(&mut self, worker: Worker) {
-        worker
-            .worker_node
-            .parallel_units
-            .iter()
-            .for_each(|parallel_unit| {
-                self.parallel_units.retain(|p| p.id != parallel_unit.id);
-            });
         self.workers.remove(&WorkerKey(worker.key().unwrap()));
 
         if let Some(transactional_id) = worker.worker_node.transactional_id {
@@ -677,16 +655,9 @@ impl ClusterManagerCore {
     }
 
     fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
-        let active_workers: HashSet<_> = self
-            .list_streaming_worker_node(Some(State::Running))
+        self.list_streaming_worker_node(Some(State::Running))
             .into_iter()
-            .map(|w| w.id)
-            .collect();
-
-        self.parallel_units
-            .iter()
-            .filter(|p| active_workers.contains(&p.worker_node_id))
-            .cloned()
+            .flat_map(|w| w.parallel_units)
             .collect()
     }
 
@@ -695,7 +666,7 @@ impl ClusterManagerCore {
         let mut streaming_worker_node = self.list_streaming_worker_node(Some(State::Running));
 
         let unschedulable_worker_node = streaming_worker_node
-            .drain_filter(|worker| {
+            .extract_if(|worker| {
                 worker
                     .property
                     .as_ref()
@@ -708,11 +679,9 @@ impl ClusterManagerCore {
             .map(|w| (w.id, w))
             .collect();
 
-        let active_parallel_units = self
-            .parallel_units
-            .iter()
-            .filter(|p| active_workers.contains_key(&p.worker_node_id))
-            .map(|p| (p.id, p.clone()))
+        let active_parallel_units = active_workers
+            .values()
+            .flat_map(|worker| worker.parallel_units.iter().map(|p| (p.id, p.clone())))
             .collect();
 
         let unschedulable_parallel_units = unschedulable_worker_node
@@ -754,7 +723,6 @@ impl ClusterManagerCore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::MemStore;
 
     #[tokio::test]
     async fn test_cluster_manager() -> MetaResult<()> {
@@ -808,6 +776,48 @@ mod tests {
 
         let parallel_count = fake_parallelism * worker_count;
         assert_cluster_manager(&cluster_manager, parallel_count).await;
+
+        // re-register existing worker node with larger parallelism.
+        let fake_host_address = HostAddress {
+            host: "localhost".to_string(),
+            port: 5000,
+        };
+        let worker_node = cluster_manager
+            .add_worker_node(
+                WorkerType::ComputeNode,
+                fake_host_address,
+                AddNodeProperty {
+                    worker_node_parallelism: (fake_parallelism + 4) as u64,
+                    is_streaming: true,
+                    is_serving: true,
+                    is_unschedulable: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
+        assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
+
+        // re-register existing worker node with smaller parallelism.
+        let fake_host_address = HostAddress {
+            host: "localhost".to_string(),
+            port: 5000,
+        };
+        let worker_node = cluster_manager
+            .add_worker_node(
+                WorkerType::ComputeNode,
+                fake_host_address,
+                AddNodeProperty {
+                    worker_node_parallelism: (fake_parallelism - 2) as u64,
+                    is_streaming: true,
+                    is_serving: true,
+                    is_unschedulable: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(worker_node.parallel_units.len(), fake_parallelism + 4);
+        assert_cluster_manager(&cluster_manager, parallel_count + 4).await;
 
         let worker_to_delete_count = 4usize;
         for i in 0..worker_to_delete_count {
@@ -872,10 +882,7 @@ mod tests {
         Ok(())
     }
 
-    async fn assert_cluster_manager(
-        cluster_manager: &ClusterManager<MemStore>,
-        parallel_count: usize,
-    ) {
+    async fn assert_cluster_manager(cluster_manager: &ClusterManager, parallel_count: usize) {
         let parallel_units = cluster_manager.list_active_streaming_parallel_units().await;
         assert_eq!(parallel_units.len(), parallel_count);
     }
@@ -942,7 +949,7 @@ mod tests {
         );
 
         let (join_handle, shutdown_sender) =
-            ClusterManager::start_heartbeat_checker(cluster_manager.clone(), check_interval).await;
+            ClusterManager::start_heartbeat_checker(cluster_manager.clone(), check_interval);
         tokio::time::sleep(ttl * 2 + check_interval).await;
 
         // One live node left.

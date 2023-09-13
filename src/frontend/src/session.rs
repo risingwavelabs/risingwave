@@ -24,7 +24,7 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
-use pgwire::types::Format;
+use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
@@ -32,20 +32,20 @@ use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::{load_config, BatchConfig, MetaConfig};
+use risingwave_common::config::{load_config, BatchConfig, MetaConfig, MetricLevel};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::{ConfigMap, ConfigReporter, VisibilityMode};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
-use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
@@ -73,12 +73,13 @@ use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::util::to_pg_field;
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
-use crate::monitor::FrontendMetrics;
+use crate::monitor::{FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{
     DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
+    GLOBAL_DISTRIBUTED_QUERY_METRICS,
 };
 use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::user_authentication::md5_hash_with_salt;
@@ -126,6 +127,7 @@ pub struct FrontendEnv {
     compute_runtime: Arc<BackgroundShutdownRuntime>,
 }
 
+/// Session map identified by `(process_id, secret_key)`
 type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 impl FrontendEnv {
@@ -174,7 +176,7 @@ impl FrontendEnv {
     }
 
     pub async fn init(opts: FrontendOpts) -> Result<(Self, Vec<JoinHandle<()>>, Vec<Sender<()>>)> {
-        let config = load_config(&opts.config_path, Some(opts.override_opts));
+        let config = load_config(&opts.config_path, &opts);
         info!("Starting frontend node");
         info!("> config: {:?}", config);
         info!(
@@ -228,9 +230,6 @@ impl FrontendEnv {
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
-        let registry = prometheus::Registry::new();
-        monitor_process(&registry).unwrap();
-
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
@@ -240,7 +239,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
-            Arc::new(DistributedQueryMetrics::new(registry.clone())),
+            Arc::new(GLOBAL_DISTRIBUTED_QUERY_METRICS.clone()),
             batch_config.distributed_query_limit,
         );
 
@@ -251,8 +250,6 @@ impl FrontendEnv {
             meta_client.clone(),
             user_info_updated_rx,
         ));
-
-        let telemetry_enabled = system_params_reader.telemetry_enabled();
 
         let system_params_manager =
             Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
@@ -275,18 +272,17 @@ impl FrontendEnv {
 
         let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
 
-        let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
-        let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
+        let frontend_metrics = Arc::new(GLOBAL_FRONTEND_METRICS.clone());
+        let source_metrics = Arc::new(GLOBAL_SOURCE_METRICS.clone());
 
-        if config.server.metrics_level > 0 {
-            MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
+        if config.server.metrics_level > MetricLevel::Disabled {
+            MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
         }
 
         let health_srv = HealthServiceImpl::new();
         let host = opts.health_check_listener_addr.clone();
 
         let telemetry_manager = TelemetryManager::new(
-            system_params_manager.watch_params(),
             Arc::new(meta_client.clone()),
             Arc::new(FrontendTelemetryCreator::new()),
         );
@@ -294,14 +290,9 @@ impl FrontendEnv {
         // if the toml config file or env variable disables telemetry, do not watch system params
         // change because if any of configs disable telemetry, we should never start it
         if config.server.telemetry_enabled && telemetry_env_enabled() {
-            if telemetry_enabled {
-                telemetry_manager.start_telemetry_reporting().await;
-            }
-            let (telemetry_join_handle, telemetry_shutdown_sender) =
-                telemetry_manager.watch_params_change();
-
-            join_handles.push(telemetry_join_handle);
-            shutdown_senders.push(telemetry_shutdown_sender);
+            let (join_handle, shutdown_sender) = telemetry_manager.start().await;
+            join_handles.push(join_handle);
+            shutdown_senders.push(shutdown_sender);
         } else {
             tracing::info!("Telemetry didn't start due to config");
         }
@@ -667,10 +658,12 @@ impl SessionImpl {
         let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
         let connection = schema
             .get_connection_by_name(connection_name)
-            .ok_or(RwError::from(ErrorCode::ItemNotFound(format!(
-                "connection {} not found",
-                connection_name
-            ))))?;
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::ItemNotFound(format!(
+                    "connection {} not found",
+                    connection_name
+                )))
+            })?;
         Ok(connection.clone())
     }
 
@@ -906,13 +899,27 @@ impl SessionManagerImpl {
     }
 
     fn insert_session(&self, session: Arc<SessionImpl>) {
-        let mut write_guard = self.env.sessions_map.lock();
-        write_guard.insert(session.id(), session);
+        let active_sessions = {
+            let mut write_guard = self.env.sessions_map.lock();
+            write_guard.insert(session.id(), session);
+            write_guard.len()
+        };
+        self.env
+            .frontend_metrics
+            .active_sessions
+            .set(active_sessions as i64);
     }
 
     fn delete_session(&self, session_id: &SessionId) {
-        let mut write_guard = self.env.sessions_map.lock();
-        write_guard.remove(session_id);
+        let active_sessions = {
+            let mut write_guard = self.env.sessions_map.lock();
+            write_guard.remove(session_id);
+            write_guard.len()
+        };
+        self.env
+            .frontend_metrics
+            .active_sessions
+            .set(active_sessions as i64);
     }
 }
 
@@ -962,7 +969,7 @@ impl Session for SessionImpl {
     fn parse(
         self: Arc<Self>,
         statement: Option<Statement>,
-        params_types: Vec<DataType>,
+        params_types: Vec<Option<DataType>>,
     ) -> std::result::Result<PrepareStatement, BoxedError> {
         Ok(if let Some(statement) = statement {
             handle_parse(self, statement, params_types)?
@@ -974,7 +981,7 @@ impl Session for SessionImpl {
     fn bind(
         self: Arc<Self>,
         prepare_statement: PrepareStatement,
-        params: Vec<Bytes>,
+        params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
     ) -> std::result::Result<Portal, BoxedError> {
@@ -1034,7 +1041,16 @@ impl Session for SessionImpl {
     ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
         match portal {
             Portal::Empty => Ok(vec![]),
-            Portal::Portal(portal) => Ok(infer(Some(portal.bound_result.bound), portal.statement)?),
+            Portal::Portal(portal) => {
+                let mut columns = infer(Some(portal.bound_result.bound), portal.statement)?;
+                let formats = FormatIterator::new(&portal.result_formats, columns.len())?;
+                columns.iter_mut().zip_eq_fast(formats).for_each(|(c, f)| {
+                    if f == Format::Binary {
+                        c.set_to_binary()
+                    }
+                });
+                Ok(columns)
+            }
             Portal::PureStatement(statement) => Ok(infer(None, statement)?),
         }
     }
@@ -1071,7 +1087,10 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             .iter()
             .map(to_pg_field)
             .collect()),
-        Statement::ShowObjects(show_object) => match show_object {
+        Statement::ShowObjects {
+            object: show_object,
+            ..
+        } => match show_object {
             ShowObject::Columns { table: _ } => Ok(vec![
                 PgFieldDescriptor::new(
                     "Name".to_owned(),

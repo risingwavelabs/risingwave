@@ -20,19 +20,22 @@ use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
+use itertools::Itertools;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::types::Datum;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::select_all;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::utils::{
     compute_bounds, construct_initial_finished_state, get_progress_per_vnode, iter_chunks,
-    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state_per_vnode,
-    update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
+    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, owned_row_iter,
+    persist_state_per_vnode, update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -41,7 +44,7 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-/// Similar to [`BackfillExecutor`].
+/// Similar to [`super::no_shuffle_backfill::BackfillExecutor`].
 /// Main differences:
 /// - [`ArrangementBackfillExecutor`] can reside on a different CN, so it can be scaled
 ///   independently.
@@ -119,6 +122,7 @@ where
         let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
         let mut upstream_table = self.upstream_table;
+        let vnodes = upstream_table.vnodes().clone();
 
         let schema = Arc::new(self.upstream.schema().clone());
 
@@ -126,7 +130,7 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
-        self.state_table.init_epoch(first_barrier.epoch);
+        self.state_table.init_epoch(first_barrier.epoch).await?;
 
         let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
 
@@ -140,6 +144,12 @@ where
         let mut backfill_state: BackfillState = progress_per_vnode.into();
         let mut committed_progress = HashMap::new();
 
+        let mut builders = upstream_table
+            .vnodes()
+            .iter_vnodes()
+            .map(|_| DataChunkBuilder::new(schema.data_types(), self.chunk_size))
+            .collect_vec();
+
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
         // finished state to state store first.
@@ -150,10 +160,9 @@ where
                 false
             } else {
                 let snapshot = Self::snapshot_read_per_vnode(
-                    schema.clone(),
                     &upstream_table,
                     backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
-                    self.chunk_size,
+                    &mut builders,
                 );
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
@@ -232,10 +241,9 @@ where
                     let left_upstream = upstream.by_ref().map(Either::Left);
 
                     let right_snapshot = pin!(Self::snapshot_read_per_vnode(
-                        schema.clone(),
                         &upstream_table,
                         backfill_state.clone(), // FIXME: temporary workaround, how to avoid it?
-                        self.chunk_size,
+                        &mut builders,
                     )
                     .map(Either::Right),);
 
@@ -327,6 +335,41 @@ where
                     Some(barrier) => barrier,
                     None => bail!("BUG: current_backfill loop exited without a barrier"),
                 };
+                // TODO: Process existing buffered snapshots.
+
+                // Process barrier:
+                // - consume snapshot rows left in builder.
+                // - consume upstream buffer chunk
+                // - switch snapshot
+
+                // consume snapshot rows left in builder.
+                // NOTE(kwannoel): `zip_eq_debug` does not work here,
+                // we encounter "higher-ranked lifetime error".
+                for (vnode, chunk) in vnodes.iter_vnodes().zip_eq(builders.iter_mut().map(|b| {
+                    b.consume_all().map(|chunk| {
+                        let ops = vec![Op::Insert; chunk.capacity()];
+                        StreamChunk::from_parts(ops, chunk)
+                    })
+                })) {
+                    if let Some(chunk) = chunk {
+                        // Raise the current position.
+                        // As snapshot read streams are ordered by pk, so we can
+                        // just use the last row to update `current_pos`.
+                        update_pos_by_vnode(
+                            vnode,
+                            &chunk,
+                            &pk_in_output_indices,
+                            &mut backfill_state,
+                        );
+
+                        let chunk_cardinality = chunk.cardinality() as u64;
+                        cur_barrier_snapshot_processed_rows += chunk_cardinality;
+                        total_snapshot_processed_rows += chunk_cardinality;
+                        yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+                    }
+                }
+
+                // consume upstream buffer chunk
                 let upstream_chunk_buffer_is_empty = upstream_chunk_buffer.is_empty();
                 for chunk in upstream_chunk_buffer.drain(..) {
                     cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
@@ -385,13 +428,15 @@ where
                     barrier.epoch,
                     &mut self.state_table,
                     false,
-                    &mut backfill_state,
+                    &backfill_state,
                     &mut committed_progress,
                     &mut temporary_state,
                 )
                 .await?;
 
                 yield Message::Barrier(barrier);
+
+                // We will switch snapshot at the start of the next iteration of the backfill loop.
             }
         }
 
@@ -423,7 +468,7 @@ where
                         barrier.epoch,
                         &mut self.state_table,
                         false,
-                        &mut backfill_state,
+                        &backfill_state,
                         &mut committed_progress,
                         &mut temporary_state,
                     ).await?;
@@ -457,30 +502,36 @@ where
     /// 3. Change it into a chunk iterator with `iter_chunks`.
     /// This means it should fetch a row from each iterator to form a chunk.
     ///
+    /// We will return chunks based on the `BackfillProgressPerVnode`.
+    /// 1. Completed(vnode): Current iterator is complete, in that case we need to handle it
+    ///    in arrangement backfill. We should not buffer updates for this vnode,
+    ///    and we should forward all messages.
+    /// 2. InProgress(CHUNK): Current iterator is not complete, in that case we
+    ///    need to buffer updates for this vnode.
+    /// 3. Finished: All iterators finished.
+    ///
     /// NOTE(kwannoel): We interleave at chunk per vnode level rather than rows.
     /// This is so that we can compute `current_pos` once per chunk, since they correspond to 1
     /// vnode.
     ///
-    /// TODO(kwannoel): Support partially complete snapshot reads.
-    /// That will require the following changes:
-    /// Instead of returning stream chunk and vnode, we need to dispatch 3 diff messages:
-    /// 1. COMPLETE_VNODE(vnode): Current iterator is complete, in that case we need to handle it
-    ///    in arrangement backfill. We should not buffer updates for this vnode, and forward
-    ///    all messages.
-    /// 2. MESSAGE(CHUNK): Current iterator is not complete, in that case we
-    ///    need to buffer updates for this vnode.
-    /// 3. FINISHED: All iterators finished.
-    ///
-    /// For now we only support the case where all iterators are complete.
+    /// NOTE(kwannoel):
+    /// The rows from upstream snapshot read will be buffered inside the `builder`.
+    /// If snapshot is dropped before its rows are consumed,
+    /// remaining data in `builder` must be flushed manually.
+    /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be
+    /// present, Then when we flush we contain duplicate rows.
     #[try_stream(ok = Option<(VirtualNode, StreamChunk)>, error = StreamExecutorError)]
-    async fn snapshot_read_per_vnode(
-        schema: Arc<Schema>,
-        upstream_table: &ReplicatedStateTable<S>,
+    async fn snapshot_read_per_vnode<'a>(
+        upstream_table: &'a ReplicatedStateTable<S>,
         backfill_state: BackfillState,
-        chunk_size: usize,
+        builders: &'a mut [DataChunkBuilder],
     ) {
         let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
-        for vnode in upstream_table.vnodes().iter_vnodes() {
+        for (vnode, builder) in upstream_table
+            .vnodes()
+            .iter_vnodes()
+            .zip_eq_debug(builders.iter_mut())
+        {
             let backfill_progress = backfill_state.get_progress(&vnode)?;
             let current_pos = match backfill_progress {
                 BackfillProgressPerVnode::Completed => {
@@ -489,17 +540,21 @@ where
                 BackfillProgressPerVnode::NotStarted => None,
                 BackfillProgressPerVnode::InProgress(current_pos) => Some(current_pos.clone()),
             };
+
             let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos.clone());
             if range_bounds.is_none() {
                 continue;
             }
             let range_bounds = range_bounds.unwrap();
+
             let vnode_row_iter = upstream_table
-                .iter_with_pk_range(&range_bounds, vnode, Default::default())
+                .iter_row_with_pk_range(&range_bounds, vnode, Default::default())
                 .await?;
+
             // TODO: Is there some way to avoid double-pin here?
-            let vnode_row_iter = Box::pin(vnode_row_iter);
-            let vnode_chunk_iter = iter_chunks(vnode_row_iter, &schema, chunk_size)
+            let vnode_row_iter = Box::pin(owned_row_iter(vnode_row_iter));
+
+            let vnode_chunk_iter = iter_chunks(vnode_row_iter, builder)
                 .map_ok(move |chunk_opt| chunk_opt.map(|chunk| (vnode, chunk)));
             // TODO: Is there some way to avoid double-pin
             streams.push(Box::pin(vnode_chunk_iter));

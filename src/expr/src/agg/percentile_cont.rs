@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Range;
+
 use risingwave_common::array::*;
-use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
-use super::Aggregator;
+use super::{AggStateDyn, AggregateFunction, AggregateState};
 use crate::agg::AggCall;
 use crate::Result;
 
@@ -61,72 +63,75 @@ use crate::Result;
 /// drop table t;
 /// ```
 #[build_aggregate("percentile_cont(float64) -> float64")]
-fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
-    let fraction: Option<f64> = agg.direct_args[0]
+fn build(agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
+    let fraction = agg.direct_args[0]
         .literal()
         .map(|x| (*x.as_float64()).into());
-    Ok(Box::new(PercentileCont::new(fraction)))
+    Ok(Box::new(PercentileCont { fraction }))
 }
 
-#[derive(Clone, EstimateSize)]
 pub struct PercentileCont {
-    fractions: Option<f64>,
-    data: Vec<f64>,
+    fraction: Option<f64>,
 }
+
+type State = Vec<f64>;
+
+impl AggStateDyn for State {}
 
 impl PercentileCont {
-    pub fn new(fractions: Option<f64>) -> Self {
-        Self {
-            fractions,
-            data: vec![],
-        }
-    }
-
-    fn add_datum(&mut self, datum_ref: DatumRef<'_>) {
+    fn add_datum(&self, state: &mut State, datum_ref: DatumRef<'_>) {
         if let Some(datum) = datum_ref.to_owned_datum() {
-            self.data.push((*datum.as_float64()).into());
+            state.push((*datum.as_float64()).into());
         }
     }
 }
 
 #[async_trait::async_trait]
-impl Aggregator for PercentileCont {
+impl AggregateFunction for PercentileCont {
     fn return_type(&self) -> DataType {
         DataType::Float64
     }
 
-    async fn update_multi(
-        &mut self,
-        input: &DataChunk,
-        start_row_id: usize,
-        end_row_id: usize,
-    ) -> Result<()> {
-        let array = input.column_at(0);
-        for row_id in start_row_id..end_row_id {
-            self.add_datum(array.value_at(row_id));
+    fn create_state(&self) -> AggregateState {
+        AggregateState::Any(Box::<State>::default())
+    }
+
+    async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {
+        let state = state.downcast_mut();
+        for (_, row) in input.rows() {
+            self.add_datum(state, row.datum_at(0));
         }
         Ok(())
     }
 
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        if let Some(fractions) = self.fractions && !self.data.is_empty() {
-            let rn = fractions * (self.data.len() - 1) as f64;
+    async fn update_range(
+        &self,
+        state: &mut AggregateState,
+        input: &StreamChunk,
+        range: Range<usize>,
+    ) -> Result<()> {
+        let state = state.downcast_mut();
+        for (_, row) in input.rows_in(range) {
+            self.add_datum(state, row.datum_at(0));
+        }
+        Ok(())
+    }
+
+    async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
+        let state = state.downcast_ref::<State>();
+        Ok(if let Some(fraction) = self.fraction && !state.is_empty() {
+            let rn = fraction * (state.len() - 1) as f64;
             let crn = f64::ceil(rn);
             let frn = f64::floor(rn);
             let result = if crn == frn {
-                self.data[crn as usize]
+                state[crn as usize]
             } else {
-                (crn - rn) * self.data[frn as usize]
-                    + (rn - frn) * self.data[crn as usize]
+                (crn - rn) * state[frn as usize]
+                    + (rn - frn) * state[crn as usize]
             };
-            builder.append(Some(ScalarImpl::Float64(result.into())));
+            Some(result.into())
         } else {
-            builder.append(Datum::None);
-        }
-        Ok(())
-    }
-
-    fn estimated_size(&self) -> usize {
-        EstimateSize::estimated_size(self)
+            None
+        })
     }
 }

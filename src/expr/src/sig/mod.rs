@@ -28,16 +28,18 @@ pub(crate) struct FuncSigDebug<'a, T> {
     pub inputs_type: &'a [DataTypeName],
     pub ret_type: DataTypeName,
     pub set_returning: bool,
+    pub deprecated: bool,
 }
 
 impl<'a, T: std::fmt::Display> std::fmt::Debug for FuncSigDebug<'a, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = format!(
-            "{}({:?}) -> {}{:?}",
+            "{}({:?}) -> {}{:?}{}",
             self.func,
             self.inputs_type.iter().format(", "),
             if self.set_returning { "setof " } else { "" },
-            self.ret_type
+            self.ret_type,
+            if self.deprecated { " [deprecated]" } else { "" },
         )
         .to_ascii_lowercase();
 

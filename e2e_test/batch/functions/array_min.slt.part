@@ -1,0 +1,93 @@
+query I
+select array_min(array[1, 2, 3]);
+----
+1
+
+query I
+select array_min(array[2, 3, 5, 2, 4]);
+----
+2
+
+query I
+select array_min(array[114514, 123456]);
+----
+114514
+
+query I
+select array_min(array['a', 'b', 'c', 'a']);
+----
+a
+
+query I
+select array_min(array['e💩a', 'f🤔️e', 'c🥵c', 'g🥳g', 'e💩e']);
+----
+c🥵c
+
+query I
+select array_min(array['901😅🤔😅️109', '114🥵514', '3🤣🥳3', '5🥵💩💩🥵5']);
+----
+114🥵514
+
+query error invalid digit found in string
+select array_min(array['a', 'b', 'c', 114514]);
+
+query error invalid digit found in string
+select array_min(array[114514, 'a', 'b', 'c']);
+
+# i32::MIN & i32::MIN - 1 & i32::MAX
+query I
+select array_min(array[-2147483648, 2147483647, -2147483649]);
+----
+-2147483649
+
+# i64::MIN & i64::MIN - 1 & i64::MAX
+query I
+select array_min(array[-9223372036854775808, 9223372036854775807, -9223372036854775809]);
+----
+-9223372036854775809
+
+query I
+select array_min(array['a', '', 'c']);
+----
+(empty)
+
+query I
+select array_min(array[3.14, 1.14, 1.14514]);
+----
+1.14
+
+query I
+select array_min(array[3.1415926, 191.14, 114514, 1313.1414]);
+----
+3.1415926
+
+query I
+select array_min(array[1e-4, 1.14514e5, 1.14514e-5]);
+----
+0.0000114514
+
+query I
+select array_min(array[date'2002-10-30', date'2023-09-06', date'2017-06-18']);
+----
+2002-10-30
+
+query I
+select array_min(
+    array[
+        '2002-10-30 00:00:00'::timestamp,
+        '2023-09-06 13:10:00'::timestamp,
+        '2017-06-18 12:00:00'::timestamp
+    ]
+);
+----
+2002-10-30 00:00:00
+
+query I
+select array_min(array['\xDE'::bytea, '\xDF'::bytea, '\xDC'::bytea]);
+----
+\xdc
+
+query I
+select array_min(array[NULL, 'a', 'b']);
+----
+a

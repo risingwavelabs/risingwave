@@ -24,20 +24,16 @@ use risingwave_pb::user::{
 use tonic::{Request, Response, Status};
 
 use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv};
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
-pub struct UserServiceImpl<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct UserServiceImpl {
+    env: MetaSrvEnv,
 
-    catalog_manager: CatalogManagerRef<S>,
+    catalog_manager: CatalogManagerRef,
 }
 
-impl<S> UserServiceImpl<S>
-where
-    S: MetaStore,
-{
-    pub fn new(env: MetaSrvEnv<S>, catalog_manager: CatalogManagerRef<S>) -> Self {
+impl UserServiceImpl {
+    pub fn new(env: MetaSrvEnv, catalog_manager: CatalogManagerRef) -> Self {
         Self {
             env,
             catalog_manager,
@@ -54,7 +50,23 @@ where
         let mut expanded_privileges = Vec::new();
         for privilege in privileges {
             if let Some(Object::AllTablesSchemaId(schema_id)) = &privilege.object {
-                let tables = self.catalog_manager.list_table_ids(*schema_id).await;
+                let tables = self
+                    .catalog_manager
+                    .list_readonly_table_ids(*schema_id)
+                    .await;
+                for table_id in tables {
+                    let mut privilege = privilege.clone();
+                    privilege.object = Some(Object::TableId(table_id));
+                    if let Some(true) = with_grant_option {
+                        privilege
+                            .action_with_opts
+                            .iter_mut()
+                            .for_each(|p| p.with_grant_option = true);
+                    }
+                    expanded_privileges.push(privilege);
+                }
+            } else if let Some(Object::AllDmlTablesSchemaId(schema_id)) = &privilege.object {
+                let tables = self.catalog_manager.list_dml_table_ids(*schema_id).await;
                 for table_id in tables {
                     let mut privilege = privilege.clone();
                     privilege.object = Some(Object::TableId(table_id));
@@ -94,7 +106,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S: MetaStore> UserService for UserServiceImpl<S> {
+impl UserService for UserServiceImpl {
     #[cfg_attr(coverage, no_coverage)]
     async fn create_user(
         &self,

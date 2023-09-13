@@ -75,19 +75,15 @@ impl ObjectStoreMetaSnapshotStorage {
 
     async fn get_manifest(&self) -> BackupResult<Option<MetaSnapshotManifest>> {
         let manifest_path = self.get_manifest_path();
-        let manifest = match self
-            .store
-            .list(&manifest_path)
-            .await?
-            .into_iter()
-            .find(|m| m.key == manifest_path)
-        {
-            None => {
-                return Ok(None);
+        let bytes = match self.store.read(&manifest_path, ..).await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                if e.is_object_not_found_error() {
+                    return Ok(None);
+                }
+                return Err(e.into());
             }
-            Some(manifest) => manifest,
         };
-        let bytes = self.store.read(&manifest.key, None).await?;
         let manifest: MetaSnapshotManifest =
             serde_json::from_slice(&bytes).map_err(|e| BackupError::Encoding(e.into()))?;
         Ok(Some(manifest))
@@ -133,7 +129,7 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
 
     async fn get(&self, id: MetaSnapshotId) -> BackupResult<MetaSnapshot> {
         let path = self.get_snapshot_path(id);
-        let data = self.store.read(&path, None).await?;
+        let data = self.store.read(&path, ..).await?;
         MetaSnapshot::decode(&data)
     }
 

@@ -30,8 +30,8 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 /// See also [`ProjectSetSelectItem`](risingwave_pb::expr::ProjectSetSelectItem) for examples.
 ///
 /// To have a pk, it has a hidden column `projected_row_id` at the beginning. The implementation of
-/// `LogicalProjectSet` is highly similar to [`LogicalProject`], except for the additional hidden
-/// column.
+/// `LogicalProjectSet` is highly similar to [`super::super::LogicalProject`], except for the
+/// additional hidden column.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProjectSet<PlanRef> {
     pub select_list: Vec<ExprImpl>,
@@ -49,6 +49,10 @@ impl<PlanRef> ProjectSet<PlanRef> {
 
     pub(crate) fn output_len(&self) -> usize {
         self.select_list.len() + 1
+    }
+
+    pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
+        (self.select_list, self.input)
     }
 }
 

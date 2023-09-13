@@ -85,7 +85,7 @@ pub struct FeBindMessage {
     pub param_format_codes: Vec<i16>,
     pub result_format_codes: Vec<i16>,
 
-    pub params: Vec<Bytes>,
+    pub params: Vec<Option<Bytes>>,
     pub portal_name: Bytes,
     pub statement_name: Bytes,
 }
@@ -177,7 +177,11 @@ impl FeBindMessage {
         let params = (0..len)
             .map(|_| {
                 let val_len = buf.get_i32();
-                buf.copy_to_bytes(val_len as usize)
+                if val_len == -1 {
+                    None
+                } else {
+                    Some(buf.copy_to_bytes(val_len as usize))
+                }
             })
             .collect();
 
@@ -540,7 +544,7 @@ impl<'a> BeMessage<'a> {
                 buf.put_u8(b'T');
                 write_body(buf, |buf| {
                     buf.put_i16(row_descs.len() as i16); // # of fields
-                    for pg_field in row_descs.iter() {
+                    for pg_field in *row_descs {
                         write_cstr(buf, pg_field.get_name().as_bytes())?;
                         buf.put_i32(pg_field.get_table_oid()); // table oid
                         buf.put_i16(pg_field.get_col_attr_num()); // attnum
@@ -594,7 +598,7 @@ impl<'a> BeMessage<'a> {
                 buf.put_u8(b't');
                 write_body(buf, |buf| {
                     buf.put_i16(para_descs.len() as i16);
-                    for oid in para_descs.iter() {
+                    for oid in *para_descs {
                         buf.put_i32(*oid);
                     }
                     Ok(())

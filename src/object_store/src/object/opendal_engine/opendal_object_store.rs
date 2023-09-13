@@ -12,18 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::pin::Pin;
+use std::task::{ready, Context, Poll};
+
 use bytes::Bytes;
 use fail::fail_point;
-use futures::future::try_join_all;
-use futures::StreamExt;
-use itertools::Itertools;
+use futures::future::BoxFuture;
+use futures::{FutureExt, Stream, StreamExt};
 use opendal::services::Memory;
-use opendal::{Metakey, Operator, Writer};
+use opendal::{Entry, Error, Lister, Metakey, Operator, Writer};
+use risingwave_common::range::RangeBoundsExt;
 use tokio::io::AsyncRead;
 
 use crate::object::{
-    BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
-    StreamingUploader,
+    BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
+    ObjectResult, ObjectStore, StreamingUploader,
 };
 
 /// Opendal object storage.
@@ -77,28 +80,24 @@ impl ObjectStore for OpendalObjectStore {
         ))
     }
 
-    async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        match block {
-            Some(block) => {
-                let range = block.offset as u64..(block.offset + block.size) as u64;
-                let res = Bytes::from(self.op.range_read(path, range).await?);
+    async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
+        let data = if range.is_full() {
+            self.op.read(path).await?
+        } else {
+            self.op.range_read(path, range.map(|v| *v as u64)).await?
+        };
 
-                if block.size != res.len() {
-                    Err(ObjectError::internal("bad block offset and size"))
-                } else {
-                    Ok(res)
-                }
-            }
-            None => Ok(Bytes::from(self.op.read(path).await?)),
+        if let Some(len) = range.len() && len != data.len() {
+            return Err(ObjectError::internal(format!(
+                "mismatched size: expected {}, found {} when reading {} at {:?}",
+                len,
+                data.len(),
+                path,
+                range,
+            )));
         }
-    }
 
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
-        let futures = block_locs
-            .iter()
-            .map(|block_loc| self.read(path, Some(*block_loc)))
-            .collect_vec();
-        try_join_all(futures).await
+        Ok(Bytes::from(data))
     }
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
@@ -149,33 +148,9 @@ impl ObjectStore for OpendalObjectStore {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
-        let mut object_lister = self.op.scan(prefix).await?;
-        let mut metadata_list = vec![];
-        while let Some(obj) = object_lister.next().await {
-            let object = obj?;
-
-            let key = object.path().to_string();
-
-            let om = self
-                .op
-                .metadata(&object, Metakey::LastModified | Metakey::ContentLength)
-                .await?;
-
-            let last_modified = match om.last_modified() {
-                Some(t) => t.timestamp() as f64,
-                None => 0_f64,
-            };
-
-            let total_size = om.content_length() as usize;
-            let metadata = ObjectMetadata {
-                key,
-                last_modified,
-                total_size,
-            };
-            metadata_list.push(metadata);
-        }
-        Ok(metadata_list)
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+        let lister = self.op.scan(prefix).await?;
+        Ok(Box::pin(OpenDalObjectIter::new(lister, self.op.clone())))
     }
 
     fn store_media_type(&self) -> &'static str {
@@ -214,7 +189,10 @@ impl StreamingUploader for OpenDalStreamingUploader {
     async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
         match self.writer.close().await {
             Ok(_) => (),
-            Err(_) => self.writer.abort().await?,
+            Err(err) => {
+                self.writer.abort().await?;
+                return Err(err.into());
+            }
         };
 
         Ok(())
@@ -225,19 +203,113 @@ impl StreamingUploader for OpenDalStreamingUploader {
     }
 }
 
+struct OpenDalObjectIter {
+    lister: Option<Lister>,
+    op: Option<Operator>,
+    #[allow(clippy::type_complexity)]
+    next_future: Option<BoxFuture<'static, (Option<Result<Entry, Error>>, Lister)>>,
+    #[allow(clippy::type_complexity)]
+    metadata_future: Option<BoxFuture<'static, (Result<ObjectMetadata, Error>, Operator)>>,
+}
+
+impl OpenDalObjectIter {
+    fn new(lister: Lister, op: Operator) -> Self {
+        Self {
+            lister: Some(lister),
+            op: Some(op),
+            next_future: None,
+            metadata_future: None,
+        }
+    }
+}
+
+impl Stream for OpenDalObjectIter {
+    type Item = ObjectResult<ObjectMetadata>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(metadata_future) = self.metadata_future.as_mut() {
+            let (result, op) = ready!(metadata_future.poll_unpin(cx));
+            self.op = Some(op);
+            return match result {
+                Ok(m) => {
+                    self.metadata_future = None;
+                    Poll::Ready(Some(Ok(m)))
+                }
+                Err(e) => {
+                    self.metadata_future = None;
+                    Poll::Ready(Some(Err(e.into())))
+                }
+            };
+        }
+        if let Some(next_future) = self.next_future.as_mut() {
+            let (option, lister) = ready!(next_future.poll_unpin(cx));
+            self.lister = Some(lister);
+            return match option {
+                None => {
+                    self.next_future = None;
+                    Poll::Ready(None)
+                }
+                Some(result) => {
+                    self.next_future = None;
+                    match result {
+                        Ok(object) => {
+                            let op = self.op.take().expect("op should not be None");
+                            let f = async move {
+                                let key = object.path().to_string();
+                                // FIXME: How does opendal metadata cache work?
+                                // Will below line result in one IO per object?
+                                let om = match op
+                                    .metadata(
+                                        &object,
+                                        Metakey::LastModified | Metakey::ContentLength,
+                                    )
+                                    .await
+                                {
+                                    Ok(om) => om,
+                                    Err(e) => return (Err(e), op),
+                                };
+                                let last_modified = match om.last_modified() {
+                                    Some(t) => t.timestamp() as f64,
+                                    None => 0_f64,
+                                };
+                                let total_size = om.content_length() as usize;
+                                let metadata = ObjectMetadata {
+                                    key,
+                                    last_modified,
+                                    total_size,
+                                };
+                                (Ok(metadata), op)
+                            };
+                            self.metadata_future = Some(Box::pin(f));
+                            self.poll_next(cx)
+                        }
+                        Err(e) => Poll::Ready(Some(Err(e.into()))),
+                    }
+                }
+            };
+        }
+        let mut lister = self.lister.take().expect("list should not be None");
+        let f = async move { (lister.next().await, lister) };
+        self.next_future = Some(Box::pin(f));
+        self.poll_next(cx)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
 
     use super::*;
 
-    fn gen_test_payload() -> Vec<u8> {
-        let mut ret = Vec::new();
-        for i in 0..100000 {
-            ret.extend(format!("{:05}", i).as_bytes());
+    async fn list_all(prefix: &str, store: &OpendalObjectStore) -> Vec<ObjectMetadata> {
+        let mut iter = store.list(prefix).await.unwrap();
+        let mut result = vec![];
+        while let Some(r) = iter.next().await {
+            result.push(r.unwrap());
         }
-        ret
+        result
     }
+
     #[tokio::test]
     async fn test_memory_upload() {
         let block = Bytes::from("123456");
@@ -245,36 +317,18 @@ mod tests {
         store.upload("/abc", block).await.unwrap();
 
         // No such object.
-        store
-            .read("/ab", Some(BlockLocation { offset: 0, size: 3 }))
-            .await
-            .unwrap_err();
+        store.read("/ab", 0..3).await.unwrap_err();
 
-        let bytes = store
-            .read("/abc", Some(BlockLocation { offset: 4, size: 2 }))
-            .await
-            .unwrap();
+        let bytes = store.read("/abc", 4..6).await.unwrap();
         assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_string());
 
         // Overflow.
-        store
-            .read(
-                "/abc",
-                Some(BlockLocation {
-                    offset: 4,
-                    size: 40,
-                }),
-            )
-            .await
-            .unwrap_err();
+        store.read("/abc", 4..44).await.unwrap_err();
 
         store.delete("/abc").await.unwrap();
 
         // No such object.
-        store
-            .read("/abc", Some(BlockLocation { offset: 0, size: 3 }))
-            .await
-            .unwrap_err();
+        store.read("/abc", 0..3).await.unwrap_err();
     }
 
     #[tokio::test]
@@ -300,46 +354,15 @@ mod tests {
         store.upload("prefix/abc", block1).await.unwrap();
         store.upload("prefix/xyz", block2).await.unwrap();
 
-        assert_eq!(store.list("").await.unwrap().len(), 3);
-        assert_eq!(store.list("prefix/").await.unwrap().len(), 2);
+        assert_eq!(list_all("", &store).await.len(), 3);
+        assert_eq!(list_all("prefix/", &store).await.len(), 2);
         let str_list = [String::from("prefix/abc"), String::from("prefix/xyz")];
 
         store.delete_objects(&str_list).await.unwrap();
 
-        assert!(store.read("prefix/abc/", None).await.is_err());
-        assert!(store.read("prefix/xyz/", None).await.is_err());
-        assert_eq!(store.list("").await.unwrap().len(), 1);
-        assert_eq!(store.list("prefix/").await.unwrap().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_memory_read_multi_block() {
-        let store = OpendalObjectStore::new_memory_engine().unwrap();
-        let payload = gen_test_payload();
-        store
-            .upload("test.obj", Bytes::from(payload.clone()))
-            .await
-            .unwrap();
-        let metadata = store.metadata("test.obj").await.unwrap();
-        assert_eq!(payload.len(), metadata.total_size);
-        let test_loc = vec![(0, 1000), (10000, 1000), (20000, 1000)];
-        let read_data = store
-            .readv(
-                "test.obj",
-                &test_loc
-                    .iter()
-                    .map(|(offset, size)| BlockLocation {
-                        offset: *offset,
-                        size: *size,
-                    })
-                    .collect_vec(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(test_loc.len(), read_data.len());
-        for (i, (offset, size)) in test_loc.iter().enumerate() {
-            assert_eq!(&payload[*offset..(*offset + *size)], &read_data[i][..]);
-        }
-        store.delete("test.obj").await.unwrap();
+        assert!(store.read("prefix/abc/", ..).await.is_err());
+        assert!(store.read("prefix/xyz/", ..).await.is_err());
+        assert_eq!(list_all("", &store).await.len(), 1);
+        assert_eq!(list_all("prefix/", &store).await.len(), 0);
     }
 }

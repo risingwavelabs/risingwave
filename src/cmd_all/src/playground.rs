@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::env;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
@@ -24,28 +25,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::signal;
 
-pub enum RisingWaveService {
-    Compute(Vec<OsString>),
-    Meta(Vec<OsString>),
-    Frontend(Vec<OsString>),
-    Compactor(Vec<OsString>),
-    ConnectorNode(Vec<OsString>),
-}
-
-impl RisingWaveService {
-    /// Extend additional arguments to the service.
-    fn extend_args(&mut self, args: &[&str]) {
-        match self {
-            RisingWaveService::Compute(args0)
-            | RisingWaveService::Meta(args0)
-            | RisingWaveService::Frontend(args0)
-            | RisingWaveService::Compactor(args0)
-            | RisingWaveService::ConnectorNode(args0) => {
-                args0.extend(args.iter().map(|s| s.into()))
-            }
-        }
-    }
-}
+use crate::common::{osstrs as common_osstrs, RisingWaveService};
 
 const IDLE_EXIT_SECONDS: u64 = 1800;
 
@@ -62,6 +42,10 @@ max_heartbeat_interval_secs = 600",
     .expect("failed to write config file");
     file.into_temp_path()
 });
+
+fn osstrs<const N: usize>(s: [&str; N]) -> Vec<OsString> {
+    common_osstrs(s)
+}
 
 fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
     let mut services = match profile {
@@ -121,39 +105,37 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
             ])),
             RisingWaveService::Frontend(osstrs([])),
         ],
-        "online-docker-playground" | "docker-playground" => {
-            vec![
-                RisingWaveService::Meta(osstrs([
-                    "--listen-addr",
-                    "0.0.0.0:5690",
-                    "--advertise-addr",
-                    "127.0.0.1:5690",
-                    "--dashboard-host",
-                    "0.0.0.0:5691",
-                    "--state-store",
-                    "hummock+memory",
-                    "--data-directory",
-                    "hummock_001",
-                    "--connector-rpc-endpoint",
-                    "127.0.0.1:50051",
-                ])),
-                RisingWaveService::Compute(osstrs([
-                    "--listen-addr",
-                    "0.0.0.0:5688",
-                    "--advertise-addr",
-                    "127.0.0.1:5688",
-                    "--connector-rpc-endpoint",
-                    "127.0.0.1:50051",
-                ])),
-                RisingWaveService::Frontend(osstrs([
-                    "--listen-addr",
-                    "0.0.0.0:4566",
-                    "--advertise-addr",
-                    "127.0.0.1:4566",
-                ])),
-                RisingWaveService::ConnectorNode(osstrs([])),
-            ]
-        }
+        "online-docker-playground" | "docker-playground" => vec![
+            RisingWaveService::Meta(osstrs([
+                "--listen-addr",
+                "0.0.0.0:5690",
+                "--advertise-addr",
+                "127.0.0.1:5690",
+                "--dashboard-host",
+                "0.0.0.0:5691",
+                "--state-store",
+                "hummock+memory",
+                "--data-directory",
+                "hummock_001",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
+            ])),
+            RisingWaveService::Compute(osstrs([
+                "--listen-addr",
+                "0.0.0.0:5688",
+                "--advertise-addr",
+                "127.0.0.1:5688",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
+            ])),
+            RisingWaveService::Frontend(osstrs([
+                "--listen-addr",
+                "0.0.0.0:4566",
+                "--advertise-addr",
+                "127.0.0.1:4566",
+            ])),
+            RisingWaveService::ConnectorNode(osstrs([])),
+        ],
         _ => {
             tracing::warn!("Unknown playground profile. All components will be started using the default command line options.");
             return get_services("playground");
@@ -169,10 +151,6 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
         })
     }
     (services, idle_exit)
-}
-
-fn osstrs<const N: usize>(s: [&str; N]) -> Vec<OsString> {
-    s.iter().map(OsString::from).collect()
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -215,9 +193,8 @@ pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
                 opts.insert(0, "compute-node".into());
                 tracing::info!("starting compute-node thread with cli args: {:?}", opts);
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from(opts);
-                let _compute_handle = tokio::spawn(async move {
-                    risingwave_compute::start(opts, prometheus::Registry::new()).await
-                });
+                let _compute_handle =
+                    tokio::spawn(async move { risingwave_compute::start(opts).await });
             }
             RisingWaveService::Frontend(mut opts) => {
                 opts.insert(0, "frontend-node".into());
@@ -290,15 +267,32 @@ pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
     } else {
         eprintln!();
     }
-    eprintln!(
-        "* Use {} instead if you want to start a full cluster.",
-        console::style("./risedev d").blue().bold()
-    );
+    let psql_cmd = if let Ok("1") = env::var("RISEDEV").as_deref() {
+        // Started with `./risedev playground`.
+        eprintln!(
+            "* Use {} instead if you want to start a full cluster.",
+            console::style("./risedev d").blue().bold()
+        );
+
+        // This is a specialization of `generate_risedev_env` in
+        // `src/risedevtool/src/risedev_env.rs`.
+        let risedev_env = r#"
+            RW_META_ADDR="http://0.0.0.0:5690"
+            RW_FRONTEND_LISTEN_ADDRESS="0.0.0.0"
+            RW_FRONTEND_PORT="4566"
+        "#;
+        std::fs::write(
+            Path::new(&env::var("PREFIX_CONFIG")?).join("risedev-env"),
+            risedev_env,
+        )?;
+
+        "./risedev psql"
+    } else {
+        "psql -h localhost -p 4566 -d dev -U root"
+    };
     eprintln!(
         "* Run {} in a different terminal to start Postgres interactive shell.",
-        console::style(format_args!("psql -h localhost -p 4566 -d dev -U root"))
-            .blue()
-            .bold()
+        console::style(psql_cmd).blue().bold()
     );
     eprintln!("-------------------------------");
 

@@ -16,34 +16,31 @@ statement ok
 set streaming_parallelism = 0;
 
 statement ok
-create materialized view mv1
-emit on window close
-as
+create materialized view mv1 as
 select
     tm, foo, bar,
     lag(foo, 2) over (partition by bar order by tm),
     max(foo) over (partition by bar order by tm rows between 1 preceding and 1 following),
     sum(foo) over (partition by bar order by tm rows 2 preceding exclude current row)
-from t;
+from t
+emit on window close;
 
 statement ok
-create materialized view mv2
-emit on window close
-as
+create materialized view mv2 as
 select
     tm, foo, bar,
     lead(foo, 1) over (partition by bar order by tm) as l1,
     lead(foo, 3) over (partition by bar order by tm) as l2
-from t;
+from t
+emit on window close;
 
 statement ok
-create materialized view mv3
-emit on window close
-as
+create materialized view mv3 as
 select
     *,
     row_number() over (partition by bar order by tm) as rn
-from t;
+from t
+emit on window close;
 
 statement ok
 insert into t values

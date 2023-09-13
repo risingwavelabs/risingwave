@@ -13,22 +13,24 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{
-    FilterKeyExtractorManager, FilterKeyExtractorManagerRef, RemoteTableAccessor,
+    FilterKeyExtractorManager, RemoteTableAccessor, RpcFilterKeyExtractorManager,
 };
 use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    HummockStorage, MemoryLimiter, SstableObjectIdManagerRef, SstableStore, TieredCache,
-    TieredCacheMetricsBuilder,
+    set_foyer_metrics_registry, FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError,
+    HummockStorage, MemoryLimiter, SstableObjectIdManagerRef, SstableStore,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -445,11 +447,12 @@ pub mod verify {
             self.actual.flush(delete_ranges).await
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.actual.init(epoch);
+        async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+            self.actual.init(options.clone()).await?;
             if let Some(expected) = &mut self.expected {
-                expected.init(epoch);
+                expected.init(options).await?;
             }
+            Ok(())
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -528,7 +531,7 @@ pub mod verify {
 }
 
 impl StateStoreImpl {
-    #[cfg_attr(not(target_os = "linux"), expect(unused_variables))]
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         s: &str,
@@ -536,33 +539,75 @@ impl StateStoreImpl {
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
-        tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
-        #[cfg(not(target_os = "linux"))]
-        let tiered_cache = TieredCache::none();
+        set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
 
-        #[cfg(target_os = "linux")]
-        let tiered_cache = if opts.file_cache_dir.is_empty() {
-            TieredCache::none()
+        let data_file_cache = if opts.data_file_cache_dir.is_empty() {
+            FileCache::none()
         } else {
-            use crate::hummock::file_cache::cache::FileCacheOptions;
-            use crate::hummock::HummockError;
+            const MB: usize = 1024 * 1024;
 
-            let options = FileCacheOptions {
-                dir: opts.file_cache_dir.to_string(),
-                capacity: opts.file_cache_capacity_mb * 1024 * 1024,
-                total_buffer_capacity: opts.file_cache_total_buffer_capacity_mb * 1024 * 1024,
-                cache_file_fallocate_unit: opts.file_cache_file_fallocate_unit_mb * 1024 * 1024,
-                cache_meta_fallocate_unit: opts.file_cache_meta_fallocate_unit_mb * 1024 * 1024,
-                cache_file_max_write_size: opts.file_cache_file_max_write_size_mb * 1024 * 1024,
-                flush_buffer_hooks: vec![],
+            let foyer_store_config = FoyerStoreConfig {
+                name: "data".to_string(),
+                dir: PathBuf::from(opts.data_file_cache_dir.clone()),
+                capacity: opts.data_file_cache_capacity_mb * MB,
+                file_capacity: opts.data_file_cache_file_capacity_mb * MB,
+                buffer_pool_size: opts.data_file_cache_buffer_pool_size_mb * MB,
+                device_align: opts.data_file_cache_device_align,
+                device_io_size: opts.data_file_cache_device_io_size,
+                lfu_window_to_cache_size_ratio: opts.data_file_cache_lfu_window_to_cache_size_ratio,
+                lfu_tiny_lru_capacity_ratio: opts.data_file_cache_lfu_tiny_lru_capacity_ratio,
+                rated_random_rate: opts.data_file_cache_rated_random_rate_mb * MB,
+                flushers: opts.data_file_cache_flushers,
+                reclaimers: opts.data_file_cache_reclaimers,
+                flush_rate_limit: opts.data_file_cache_flush_rate_limit_mb * MB,
+                reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
+                recover_concurrency: opts.data_file_cache_recover_concurrency,
+                event_listener: vec![],
+                enable_filter: !opts.cache_refill_data_refill_levels.is_empty(),
             };
-            let metrics = Arc::new(tiered_cache_metrics_builder.file());
-            TieredCache::file(options, metrics)
+            let config = FoyerRuntimeConfig {
+                foyer_store_config,
+                runtime_worker_threads: None,
+            };
+            FileCache::foyer(config)
                 .await
-                .map_err(HummockError::tiered_cache)?
+                .map_err(HummockError::file_cache)?
+        };
+
+        let meta_file_cache = if opts.meta_file_cache_dir.is_empty() {
+            FileCache::none()
+        } else {
+            const MB: usize = 1024 * 1024;
+
+            let foyer_store_config = FoyerStoreConfig {
+                name: "meta".to_string(),
+                dir: PathBuf::from(opts.meta_file_cache_dir.clone()),
+                capacity: opts.meta_file_cache_capacity_mb * MB,
+                file_capacity: opts.meta_file_cache_file_capacity_mb * MB,
+                buffer_pool_size: opts.meta_file_cache_buffer_pool_size_mb * MB,
+                device_align: opts.meta_file_cache_device_align,
+                device_io_size: opts.meta_file_cache_device_io_size,
+                lfu_window_to_cache_size_ratio: opts.meta_file_cache_lfu_window_to_cache_size_ratio,
+                lfu_tiny_lru_capacity_ratio: opts.meta_file_cache_lfu_tiny_lru_capacity_ratio,
+                rated_random_rate: opts.meta_file_cache_rated_random_rate_mb * MB,
+                flushers: opts.meta_file_cache_flushers,
+                reclaimers: opts.meta_file_cache_reclaimers,
+                flush_rate_limit: opts.meta_file_cache_flush_rate_limit_mb * MB,
+                reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
+                recover_concurrency: opts.meta_file_cache_recover_concurrency,
+                event_listener: vec![],
+                enable_filter: false,
+            };
+            let config = FoyerRuntimeConfig {
+                foyer_store_config,
+                runtime_worker_threads: None,
+            };
+            FileCache::foyer(config)
+                .await
+                .map_err(HummockError::file_cache)?
         };
 
         let store = match s {
@@ -586,11 +631,12 @@ impl StateStoreImpl {
                     opts.block_cache_capacity_mb * (1 << 20),
                     opts.meta_cache_capacity_mb * (1 << 20),
                     opts.high_priority_ratio,
-                    tiered_cache,
+                    data_file_cache,
+                    meta_file_cache,
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
-                let key_filter_manager = Arc::new(FilterKeyExtractorManager::new(Box::new(
+                let key_filter_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
                     RemoteTableAccessor::new(hummock_meta_client.get_inner().clone()),
                 )));
                 let inner = HummockStorage::new(
@@ -629,7 +675,7 @@ impl StateStoreImpl {
 pub trait HummockTrait {
     fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef;
     fn sstable_store(&self) -> SstableStoreRef;
-    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef;
+    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManager;
     fn get_memory_limiter(&self) -> Arc<MemoryLimiter>;
     fn backup_reader(&self) -> BackupReaderRef;
     fn as_hummock(&self) -> Option<&HummockStorage>;
@@ -644,7 +690,7 @@ impl HummockTrait for HummockStorage {
         self.sstable_store()
     }
 
-    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
+    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManager {
         self.filter_key_extractor_manager()
     }
 
@@ -776,7 +822,7 @@ pub mod boxed_state_store {
 
         fn is_dirty(&self) -> bool;
 
-        fn init(&mut self, epoch: u64);
+        async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
         fn seal_current_epoch(&mut self, next_epoch: u64);
     }
@@ -831,8 +877,8 @@ pub mod boxed_state_store {
             self.is_dirty()
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.init(epoch)
+        async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+            self.init(options).await
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -897,8 +943,11 @@ pub mod boxed_state_store {
             self.deref().is_dirty()
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.deref_mut().init(epoch)
+        fn init(
+            &mut self,
+            options: InitOptions,
+        ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            self.deref_mut().init(options)
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {

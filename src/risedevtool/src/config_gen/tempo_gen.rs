@@ -20,7 +20,7 @@ impl TempoGen {
         let http_listen_address = &config.listen_address;
         let http_listen_port = config.port;
 
-        let otlp_host = &config.otlp_address;
+        let otlp_host = &config.listen_address;
         let otlp_port = config.otlp_port;
 
         format!(

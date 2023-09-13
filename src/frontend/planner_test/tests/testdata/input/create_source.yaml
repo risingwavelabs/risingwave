@@ -13,3 +13,23 @@
     create source s with(connector='kafka') FORMAT PLAIN ENCODE JSON;
   expected_outputs:
   - planner_error
+- id: csv_delimiter_tab
+  sql: |
+    explain create table s0 (v1 int, v2 varchar) with (
+      connector = 'kafka',
+      topic = 'kafka_1_csv_topic',
+      properties.bootstrap.server = 'message_queue:29092',
+      scan.startup.mode = 'earliest'
+    ) FORMAT PLAIN ENCODE CSV (delimiter = ',', without_header = true);
+  expected_outputs:
+  - explain_output
+- id: csv_delimiter_tab
+  sql: |
+    explain create table s0 (v1 int, v2 varchar) with (
+      connector = 'kafka',
+      topic = 'kafka_1_csv_topic',
+      properties.bootstrap.server = 'message_queue:29092',
+      scan.startup.mode = 'earliest'
+    ) FORMAT PLAIN ENCODE CSV (delimiter = E'\t', without_header = true);
+  expected_outputs:
+  - explain_output

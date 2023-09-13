@@ -14,7 +14,7 @@ statement ok
 insert into f32_table values(pi());
 
 query I
-SELECT pi() 
+SELECT pi()
 ----
 3.141592653589793
 

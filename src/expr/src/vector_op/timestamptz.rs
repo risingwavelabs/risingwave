@@ -26,7 +26,7 @@ use crate::{ExprError, Result};
 pub fn time_zone_err(inner_err: String) -> ExprError {
     ExprError::InvalidParam {
         name: "time_zone",
-        reason: inner_err,
+        reason: inner_err.into(),
     }
 }
 
@@ -59,7 +59,8 @@ pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Times
             reason: format!(
                 "fail to interpret local timestamp \"{}\" in time zone \"{}\"",
                 input, time_zone
-            ),
+            )
+            .into(),
         })?;
     let usec = instant_local.timestamp_micros();
     Ok(Timestamptz::from_micros(usec))
@@ -275,17 +276,13 @@ mod tests {
 
     #[test]
     fn test_timestamptz_to_and_from_string() {
-        let str1 = "0001-11-15 15:35:40.999999+08:00";
+        let str1 = "1600-11-15 15:35:40.999999+08:00";
         let timestamptz1 = str_to_timestamptz(str1, "UTC").unwrap();
-        assert_eq!(timestamptz1.timestamp_micros(), -62108094259000001);
+        assert_eq!(timestamptz1.timestamp_micros(), -11648507059000001);
 
         let mut writer = String::new();
         timestamptz_to_string(timestamptz1, "UTC", &mut writer).unwrap();
-        assert_eq!(writer, "0001-11-15 07:35:40.999999+00:00");
-
-        let mut writer = String::new();
-        timestamptz_to_string(timestamptz1, "UTC", &mut writer).unwrap();
-        assert_eq!(writer, "0001-11-15 07:35:40.999999+00:00");
+        assert_eq!(writer, "1600-11-15 07:35:40.999999+00:00");
 
         let str2 = "1969-12-31 23:59:59.999999+00:00";
         let timestamptz2 = str_to_timestamptz(str2, "UTC").unwrap();

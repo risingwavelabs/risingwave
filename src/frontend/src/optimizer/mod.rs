@@ -1,3 +1,4 @@
+use std::assert_matches::assert_matches;
 use std::collections::HashMap;
 // Copyright 2023 RisingWave Labs
 //
@@ -29,6 +30,7 @@ pub use plan_visitor::{
 mod logical_optimization;
 mod optimizer_context;
 mod plan_expr_rewriter;
+mod plan_expr_visitor;
 mod rule;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
@@ -48,10 +50,10 @@ use self::plan_node::{
     LogicalSource, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
     StreamWatermarkFilter, ToStreamContext,
 };
-use self::plan_visitor::has_batch_exchange;
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
-use self::property::RequiredDist;
+use self::plan_visitor::{has_batch_exchange, CardinalityVisitor};
+use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
@@ -175,12 +177,21 @@ impl PlanRoot {
 
         let ctx = plan.ctx();
         // Inline session timezone mainly for rewriting now()
-        plan = inline_session_timezone_in_exprs(ctx, plan)?;
+        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
+        if ctx.is_explain_trace() {
+            ctx.trace("To Batch Plan:");
+            ctx.trace(plan.explain_to_string());
+        }
 
-        let ctx = plan.ctx();
+        plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Merge BatchProject",
+            vec![BatchProjectMergeRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
@@ -397,6 +408,14 @@ impl PlanRoot {
         Ok(plan)
     }
 
+    /// Visit the plan root and compute the cardinality.
+    ///
+    /// Panics if not called on a logical plan.
+    fn compute_cardinality(&self) -> Cardinality {
+        assert_matches!(self.plan.convention(), Convention::Logical);
+        CardinalityVisitor.visit(self.plan.clone())
+    }
+
     /// Optimize and generate a create table plan.
     #[allow(clippy::too_many_arguments)]
     pub fn gen_table_plan(
@@ -419,7 +438,8 @@ impl PlanRoot {
             append_only,
             columns
                 .iter()
-                .filter_map(|c| (!c.is_generated()).then(|| c.column_desc.clone()))
+                .filter(|&c| (!c.is_generated()))
+                .map(|c| c.column_desc.clone())
                 .collect(),
         )
         .into();
@@ -489,6 +509,7 @@ impl PlanRoot {
         definition: String,
         emit_on_window_close: bool,
     ) -> Result<StreamMaterialize> {
+        let cardinality = self.compute_cardinality();
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
         StreamMaterialize::create(
@@ -500,6 +521,7 @@ impl PlanRoot {
             self.out_names.clone(),
             definition,
             TableType::MaterializedView,
+            cardinality,
         )
     }
 
@@ -509,6 +531,7 @@ impl PlanRoot {
         index_name: String,
         definition: String,
     ) -> Result<StreamMaterialize> {
+        let cardinality = self.compute_cardinality();
         let stream_plan = self.gen_optimized_stream_plan(false)?;
 
         StreamMaterialize::create(
@@ -520,6 +543,7 @@ impl PlanRoot {
             self.out_names.clone(),
             definition,
             TableType::Index,
+            cardinality,
         )
     }
 
@@ -530,12 +554,16 @@ impl PlanRoot {
         definition: String,
         properties: WithOptions,
         emit_on_window_close: bool,
+        db_name: String,
+        sink_from_table_name: String,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
         StreamSink::create(
             stream_plan,
             sink_name,
+            db_name,
+            sink_from_table_name,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),

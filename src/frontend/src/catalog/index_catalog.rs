@@ -19,6 +19,7 @@ use std::sync::Arc;
 use educe::Educe;
 use itertools::Itertools;
 use risingwave_common::catalog::IndexId;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::PbIndex;
 
@@ -58,6 +59,10 @@ pub struct IndexCatalog {
     pub function_mapping: HashMap<FunctionCall, usize>,
 
     pub original_columns: Vec<ColumnId>,
+
+    pub created_at_epoch: Option<Epoch>,
+
+    pub initialized_at_epoch: Option<Epoch>,
 }
 
 impl IndexCatalog {
@@ -117,6 +122,8 @@ impl IndexCatalog {
             secondary_to_primary_mapping,
             function_mapping,
             original_columns,
+            created_at_epoch: index_prost.created_at_epoch.map(Epoch::from),
+            initialized_at_epoch: index_prost.initialized_at_epoch.map(Epoch::from),
         }
     }
 
@@ -175,6 +182,8 @@ impl IndexCatalog {
                 .map(|expr| expr.to_expr_proto())
                 .collect_vec(),
             original_columns: self.original_columns.iter().map(Into::into).collect_vec(),
+            initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
+            created_at_epoch: self.created_at_epoch.map(|e| e.0),
         }
     }
 

@@ -108,12 +108,12 @@ int vfs_read_enter(struct pt_regs *ctx, struct file *file, char *buf, size_t cou
     u64 ts = bpf_ktime_get_ns();
 
     if ((u64)file->f_op != (u64)EXT4_FILE_OPERATIONS) return 0;
-    
+
     if (!scmp(&file->f_path.dentry->d_iname[0], &target[0])) return 0;
 
     u64 magic = *((u64 *)buf);
     u64 sid = *(((u64 *)buf) + 1);
-    
+
     struct data_t data = {0};
     data.vfs_read_enter_ts = ts;
     data.magic = magic;
@@ -128,7 +128,7 @@ int vfs_read_leave(struct pt_regs *ctx, struct file *file, char *buf, size_t cou
     u64 id = bpf_get_current_pid_tgid();
 
     u64 ts = bpf_ktime_get_ns();
-    
+
     struct data_t *data = tss.lookup(&id);
     if (data == 0) return 0;
     data->vfs_read_leave_ts = ts;
@@ -136,13 +136,13 @@ int vfs_read_leave(struct pt_regs *ctx, struct file *file, char *buf, size_t cou
     events.perf_submit(ctx, data, sizeof(*data));
 
     tss.delete(&id);
-    
+
     return 0;
 }
 
 int ext4_file_read_iter_enter(struct pt_regs *ctx, struct kiocb *iocb, struct iov_iter *to) {
     u64 id = bpf_get_current_pid_tgid();
-    
+
     u64 ts = bpf_ktime_get_ns();
 
     struct data_t *data = tss.lookup(&id);
@@ -154,19 +154,19 @@ int ext4_file_read_iter_enter(struct pt_regs *ctx, struct kiocb *iocb, struct io
 
 int ext4_file_read_iter_leave(struct pt_regs *ctx, struct kiocb *iocb, struct iov_iter *to) {
     u64 id = bpf_get_current_pid_tgid();
-    
+
     u64 ts = bpf_ktime_get_ns();
-    
+
     struct data_t *data = tss.lookup(&id);
     if (data == 0) return 0;
     data->ext4_file_read_iter_leave_ts = ts;
-    
+
     return 0;
 }
 
 int iomap_dio_rw_enter(struct pt_regs *ctx, struct kiocb *iocb, struct iov_iter *iter) {
     u64 id = bpf_get_current_pid_tgid();
-    
+
     u64 ts = bpf_ktime_get_ns();
 
     struct data_t *data = tss.lookup(&id);
@@ -178,7 +178,7 @@ int iomap_dio_rw_enter(struct pt_regs *ctx, struct kiocb *iocb, struct iov_iter 
 
 int iomap_dio_rw_leave(struct pt_regs *ctx, struct kiocb *iocb, struct iov_iter *iter) {
     u64 id = bpf_get_current_pid_tgid();
-    
+
     u64 ts = bpf_ktime_get_ns();
 
     struct data_t *data = tss.lookup(&id);
@@ -190,7 +190,7 @@ int iomap_dio_rw_leave(struct pt_regs *ctx, struct kiocb *iocb, struct iov_iter 
 
 int filemap_write_and_wait_range_enter(struct pt_regs *ctx, struct address_space *mapping, long long lstart, long long lend) {
     u64 id = bpf_get_current_pid_tgid();
-    
+
     u64 ts = bpf_ktime_get_ns();
 
     struct data_t *data = tss.lookup(&id);
@@ -202,13 +202,13 @@ int filemap_write_and_wait_range_enter(struct pt_regs *ctx, struct address_space
 
 int filemap_write_and_wait_range_leave(struct pt_regs *ctx, struct address_space *mapping, long long lstart, long long lend) {
     u64 id = bpf_get_current_pid_tgid();
-    
+
     u64 ts = bpf_ktime_get_ns();
 
     struct data_t *data = tss.lookup(&id);
     if (data == 0) return 0;
     data->filemap_write_and_wait_range_leave_ts = ts;
-    
+
     return 0;
 }
 "#;

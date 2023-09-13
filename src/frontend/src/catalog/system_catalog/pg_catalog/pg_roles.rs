@@ -12,21 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::BuiltinView;
 
 /// The catalog `pg_roles` provides access to information about database roles. This is simply a
 /// publicly readable view of `pg_authid` that blanks out the password field.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-roles.html`]
-pub const PG_ROLES_TABLE_NAME: &str = "pg_roles";
-pub const PG_ROLES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Varchar, "rolname"),
-    (DataType::Boolean, "rolsuper"),
-    (DataType::Boolean, "rolinherit"),
-    (DataType::Boolean, "rolcreaterole"),
-    (DataType::Boolean, "rolcreatedb"),
-    (DataType::Boolean, "rolcanlogin"),
-    (DataType::Varchar, "rolpassword"),
-];
+pub static PG_ROLES: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_roles",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "oid"),
+        (DataType::Varchar, "rolname"),
+        (DataType::Boolean, "rolsuper"),
+        (DataType::Boolean, "rolinherit"),
+        (DataType::Boolean, "rolcreaterole"),
+        (DataType::Boolean, "rolcreatedb"),
+        (DataType::Boolean, "rolcanlogin"),
+        (DataType::Boolean, "rolreplication"),
+        (DataType::Timestamptz, "rolvaliduntil"),
+        (DataType::Boolean, "rolbypassrls"),
+        (DataType::Varchar, "rolpassword"),
+    ],
+    sql: "SELECT id AS oid, \
+                name AS rolname, \
+                is_super AS rolsuper, \
+                true AS rolinherit, \
+                create_user AS rolcreaterole, \
+                create_db AS rolcreatedb, \
+                can_login AS rolcanlogin, \
+                true AS rolreplication, \
+                NULL::timestamptz AS rolvaliduntil, \
+                true AS rolbypassrls, \
+                '********' AS rolpassword \
+            FROM rw_catalog.rw_users"
+        .into(),
+});

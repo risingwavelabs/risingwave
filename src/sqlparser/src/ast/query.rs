@@ -388,7 +388,7 @@ pub enum TableFactor {
         alias: Option<TableAlias>,
     },
     /// `<expr>(args)[ AS <alias> ]`
-    /// 
+    ///
     /// Note that scalar functions can also be used in this way.
     TableFunction {
         name: ObjectName,
@@ -436,7 +436,12 @@ impl fmt::Display for TableFactor {
                 }
                 Ok(())
             }
-            TableFactor::TableFunction { name, alias, args, with_ordinality } => {
+            TableFactor::TableFunction {
+                name,
+                alias,
+                args,
+                with_ordinality,
+            } => {
                 write!(f, "{}({})", name, display_comma_separated(args))?;
                 if *with_ordinality {
                     write!(f, " WITH ORDINALITY")?;

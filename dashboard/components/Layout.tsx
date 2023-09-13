@@ -99,13 +99,11 @@ function Layout({ children }: { children: React.ReactNode }) {
           <Box height="50px" width="full">
             <HStack spacing={0}>
               <Link href="/" passHref>
-                <a>
-                  <Image
-                    boxSize="50px"
-                    src="/risingwave.svg"
-                    alt="RisingWave Logo"
-                  />
-                </a>
+                <Image
+                  boxSize="50px"
+                  src="/risingwave.svg"
+                  alt="RisingWave Logo"
+                />
               </Link>
               <Text fontSize="xl">
                 <b>RisingWave</b> Dashboard

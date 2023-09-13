@@ -32,43 +32,43 @@ use std::time::Duration;
 pub use compactor_manager::*;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
-use sync_point::sync_point;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 pub use vacuum::*;
 
-use crate::storage::MetaStore;
 use crate::MetaOpts;
 
 /// Start hummock's asynchronous tasks.
-pub fn start_hummock_workers<S>(
-    hummock_manager: HummockManagerRef<S>,
-    vacuum_manager: VacuumManagerRef<S>,
+pub fn start_hummock_workers(
+    hummock_manager: HummockManagerRef,
+    vacuum_manager: VacuumManagerRef,
     meta_opts: &MetaOpts,
-) -> Vec<(JoinHandle<()>, Sender<()>)>
-where
-    S: MetaStore,
-{
-    let mut workers = vec![start_checkpoint_loop(
-        hummock_manager,
-        Duration::from_secs(meta_opts.hummock_version_checkpoint_interval_sec),
-        meta_opts.min_delta_log_num_for_hummock_version_checkpoint,
-    )];
-    workers.push(start_vacuum_scheduler(
-        vacuum_manager,
-        Duration::from_secs(meta_opts.vacuum_interval_sec),
-    ));
+) -> Vec<(JoinHandle<()>, Sender<()>)> {
+    // These critical tasks are put in their own timer loop deliberately, to avoid long-running ones
+    // from blocking others.
+    let workers = vec![
+        start_checkpoint_loop(
+            hummock_manager,
+            Duration::from_secs(meta_opts.hummock_version_checkpoint_interval_sec),
+            meta_opts.min_delta_log_num_for_hummock_version_checkpoint,
+        ),
+        start_vacuum_metadata_loop(
+            vacuum_manager.clone(),
+            Duration::from_secs(meta_opts.vacuum_interval_sec),
+        ),
+        start_vacuum_object_loop(
+            vacuum_manager,
+            Duration::from_secs(meta_opts.vacuum_interval_sec),
+        ),
+    ];
     workers
 }
 
-/// Starts a task to periodically vacuum hummock.
-pub fn start_vacuum_scheduler<S>(
-    vacuum: VacuumManagerRef<S>,
+/// Starts a task to periodically vacuum stale metadata.
+pub fn start_vacuum_metadata_loop(
+    vacuum: VacuumManagerRef,
     interval: Duration,
-) -> (JoinHandle<()>, Sender<()>)
-where
-    S: MetaStore,
-{
+) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         let mut min_trigger_interval = tokio::time::interval(interval);
@@ -79,25 +79,47 @@ where
                 _ = min_trigger_interval.tick() => {},
                 // Shutdown vacuum
                 _ = &mut shutdown_rx => {
-                    tracing::info!("Vacuum is stopped");
+                    tracing::info!("Vacuum metadata loop is stopped");
                     return;
                 }
             }
-            // May metadata vacuum and SST vacuum split into two tasks.
             if let Err(err) = vacuum.vacuum_metadata().await {
                 tracing::warn!("Vacuum metadata error {:#?}", err);
             }
-            if let Err(err) = vacuum.vacuum_sst_data().await {
-                tracing::warn!("Vacuum SST error {:#?}", err);
-            }
-            sync_point!("AFTER_SCHEDULE_VACUUM");
         }
     });
     (join_handle, shutdown_tx)
 }
 
-pub fn start_checkpoint_loop<S: MetaStore>(
-    hummock_manager: HummockManagerRef<S>,
+/// Starts a task to periodically vacuum stale objects.
+pub fn start_vacuum_object_loop(
+    vacuum: VacuumManagerRef,
+    interval: Duration,
+) -> (JoinHandle<()>, Sender<()>) {
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let join_handle = tokio::spawn(async move {
+        let mut min_trigger_interval = tokio::time::interval(interval);
+        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                // Wait for interval
+                _ = min_trigger_interval.tick() => {},
+                // Shutdown vacuum
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Vacuum object loop is stopped");
+                    return;
+                }
+            }
+            if let Err(err) = vacuum.vacuum_object().await {
+                tracing::warn!("Vacuum object error {:#?}", err);
+            }
+        }
+    });
+    (join_handle, shutdown_tx)
+}
+
+pub fn start_checkpoint_loop(
+    hummock_manager: HummockManagerRef,
     interval: Duration,
     min_delta_log_num: u64,
 ) -> (JoinHandle<()>, Sender<()>) {

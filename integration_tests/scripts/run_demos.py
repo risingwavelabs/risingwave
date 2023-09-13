@@ -86,6 +86,46 @@ def run_iceberg_demo():
 
     assert len(output_content.strip()) > 0
 
+def run_clickhouse_demo():
+    demo = "clickhouse-sink"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: clickhouse-sink")
+
+    subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
+    sleep(40)
+
+
+    subprocess.run(["docker", "compose", "exec", "clickhouse-server", "bash", "/opt/clickhouse/clickhouse-sql/run-sql-file.sh", "create_clickhouse_table"],
+                   cwd=demo_dir, check=True)
+
+    sql_files = ['create_source.sql', 'create_mv.sql', 'create_sink.sql']
+    for fname in sql_files:
+        sql_file = os.path.join(demo_dir,  fname)
+        print("executing sql: ", open(sql_file).read())
+        run_sql_file(sql_file, demo_dir)
+        sleep(10)
+
+    print("sink created. Wait for 2 min time for ingestion")
+
+    # wait for two minutes ingestion
+    sleep(120)
+
+    query_output_file_name = "query_outout.txt"
+
+    query_output_file = open(query_output_file_name, "wb")
+
+    subprocess.run(["docker", "compose", "exec", "clickhouse-server", "bash", "/opt/clickhouse/clickhouse-sql/run-sql-file.sh", "clickhouse_query"],
+                   cwd=demo_dir, check=True, stdout=query_output_file)
+    query_output_file.close()
+
+    output_content = open(query_output_file_name).read()
+
+    print(output_content)
+
+    assert len(output_content.strip()) > 0
+
 
 arg_parser = argparse.ArgumentParser(description='Run the demo')
 arg_parser.add_argument('--format',
@@ -107,5 +147,7 @@ if args.case == "iceberg-sink":
         print("skip protobuf test for iceberg-sink")
     else:
         run_iceberg_demo()
+elif args.case == "clickhouse-sink":
+    run_clickhouse_demo()
 else:
     run_demo(args.case, args.format)

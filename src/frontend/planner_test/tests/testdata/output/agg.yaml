@@ -1099,8 +1099,7 @@
     Bind error: failed to bind expression: count(a1) FILTER(WHERE unnest(ARRAY[1]) < 1)
 
     Caused by:
-      Feature is not yet implemented: table function in filter clause
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+      Invalid input syntax: table functions are not allowed in FILTER
 - name: agg order by - subquery
   sql: |
     /* This case is valid in PostgreSQL */
@@ -1271,26 +1270,29 @@
       └─LogicalProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   batch_plan: |-
-    BatchProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / (sum0(count(t.v1)) - 1:Int64)::Decimal))) as $expr2, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / sum0(count(t.v1))::Decimal)) as $expr3] }
-    └─BatchSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1))] }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
+    BatchProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - (($expr2 * $expr2) / $expr3)) / (sum0(count(t.v1)) - 1:Int64)::Decimal))) as $expr4, Sqrt(((sum(sum($expr1))::Decimal - (($expr2 * $expr2) / $expr3)) / $expr3)) as $expr5] }
+    └─BatchProject { exprs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), sum(sum(t.v1))::Decimal as $expr2, sum0(count(t.v1))::Decimal as $expr3] }
+      └─BatchSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1))] }
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
+            └─BatchProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
+              └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+  batch_local_plan: |-
+    BatchProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - (($expr2 * $expr2) / $expr3)) / (count(t.v1) - 1:Int64)::Decimal))) as $expr4, Sqrt(((sum($expr1)::Decimal - (($expr2 * $expr2) / $expr3)) / $expr3)) as $expr5] }
+    └─BatchProject { exprs: [sum($expr1), sum(t.v1), count(t.v1), sum(t.v1)::Decimal as $expr2, count(t.v1)::Decimal as $expr3] }
+      └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
+        └─BatchExchange { order: [], dist: Single }
           └─BatchProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
             └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
-  batch_local_plan: |-
-    BatchProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1)::Decimal)) / (count(t.v1) - 1:Int64)::Decimal))) as $expr2, Sqrt(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1)::Decimal)) / count(t.v1)::Decimal)) as $expr3] }
-    └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
-          └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [stddev_samp, stddev_pop], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / (sum0(count(t.v1)) - 1:Int64)::Decimal))) as $expr2, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / sum0(count(t.v1))::Decimal)) as $expr3] }
-      └─StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), count] }
-        └─StreamExchange { dist: Single }
-          └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
-            └─StreamProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1, t._row_id] }
-              └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - (($expr2 * $expr2) / $expr3)) / (sum0(count(t.v1)) - 1:Int64)::Decimal))) as $expr4, Sqrt(((sum(sum($expr1))::Decimal - (($expr2 * $expr2) / $expr3)) / $expr3)) as $expr5] }
+      └─StreamProject { exprs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), sum(sum(t.v1))::Decimal as $expr2, sum0(count(t.v1))::Decimal as $expr3] }
+        └─StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), count] }
+          └─StreamExchange { dist: Single }
+            └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
+              └─StreamProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1, t._row_id] }
+                └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: stddev_samp with other columns
   sql: |
     select count(''), stddev_samp(1);

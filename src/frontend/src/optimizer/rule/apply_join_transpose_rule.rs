@@ -25,6 +25,7 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalJoin, PlanTreeNodeBinary};
 use crate::optimizer::plan_visitor::{ExprCorrelatedIdFinder, PlanCorrelatedIdFinder};
+use crate::optimizer::rule::apply_offset_rewriter::ApplyCorrelatedIndicesConverter;
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -121,7 +122,7 @@ impl Rule for ApplyJoinTransposeRule {
         }
 
         assert!(
-            join.is_full_out(),
+            join.output_indices_is_trivial(),
             "ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule"
         );
 
@@ -211,15 +212,9 @@ impl ApplyJoinTransposeRule {
             join_left_len,
             join_left_offset: apply_left_len as isize,
             join_right_offset: apply_left_len as isize,
-            index_mapping: ColIndexMapping::new(
-                correlated_indices
-                    .clone()
-                    .into_iter()
-                    .map(Some)
-                    .collect_vec(),
-            )
-            .inverse()
-            .expect("must be invertible"),
+            index_mapping: ApplyCorrelatedIndicesConverter::convert_to_index_mapping(
+                &correlated_indices,
+            ),
             correlated_id,
         };
 
@@ -297,15 +292,9 @@ impl ApplyJoinTransposeRule {
             join_left_len,
             join_left_offset: 0,
             join_right_offset: apply_left_len as isize,
-            index_mapping: ColIndexMapping::new(
-                correlated_indices
-                    .clone()
-                    .into_iter()
-                    .map(Some)
-                    .collect_vec(),
-            )
-            .inverse()
-            .expect("must be invertible"),
+            index_mapping: ApplyCorrelatedIndicesConverter::convert_to_index_mapping(
+                &correlated_indices,
+            ),
             correlated_id,
         };
 
@@ -385,7 +374,7 @@ impl ApplyJoinTransposeRule {
             }
         };
         let mut output_indices_mapping =
-            ColIndexMapping::new(output_indices.iter().map(|x| Some(*x)).collect());
+            ColIndexMapping::without_target_size(output_indices.iter().map(|x| Some(*x)).collect());
         let new_join = LogicalJoin::new(
             join.left(),
             new_join_right,
@@ -419,15 +408,9 @@ impl ApplyJoinTransposeRule {
             join_left_len,
             join_left_offset: apply_left_len as isize,
             join_right_offset: 2 * apply_left_len as isize,
-            index_mapping: ColIndexMapping::new(
-                correlated_indices
-                    .clone()
-                    .into_iter()
-                    .map(Some)
-                    .collect_vec(),
-            )
-            .inverse()
-            .expect("must be invertible"),
+            index_mapping: ApplyCorrelatedIndicesConverter::convert_to_index_mapping(
+                &correlated_indices,
+            ),
             correlated_id,
         };
 
@@ -452,7 +435,7 @@ impl ApplyJoinTransposeRule {
                 .clone()
                 .into_iter()
                 .map(|expr| rewriter.rewrite_expr(expr))
-                .chain(natural_conjunctions.into_iter())
+                .chain(natural_conjunctions)
                 .collect_vec(),
         };
 
@@ -564,8 +547,9 @@ impl ApplyJoinTransposeRule {
                 new_join.into()
             }
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                let mut output_indices_mapping =
-                    ColIndexMapping::new(output_indices.iter().map(|x| Some(*x)).collect());
+                let mut output_indices_mapping = ColIndexMapping::without_target_size(
+                    output_indices.iter().map(|x| Some(*x)).collect(),
+                );
                 // Leave other condition for predicate push down to deal with
                 LogicalFilter::create(
                     new_join.into(),

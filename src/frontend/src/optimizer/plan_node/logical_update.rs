@@ -20,8 +20,8 @@ use risingwave_common::types::DataType;
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, LogicalProject,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
 use crate::expr::{ExprImpl, ExprRewriter};
@@ -102,11 +102,19 @@ impl ExprRewritable for LogicalUpdate {
 }
 
 impl ColPrunable for LogicalUpdate {
-    fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let input = self.input();
-        let required_cols: Vec<_> = (0..input.schema().len()).collect();
-        self.clone_with_input(input.prune_col(&required_cols, ctx))
-            .into()
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let pruned_input = {
+            let input = &self.core.input;
+            let required_cols: Vec<_> = (0..input.schema().len()).collect();
+            input.prune_col(&required_cols, ctx)
+        };
+
+        // No pruning.
+        LogicalProject::with_out_col_idx(
+            self.clone_with_input(pruned_input).into(),
+            required_cols.iter().copied(),
+        )
+        .into()
     }
 }
 

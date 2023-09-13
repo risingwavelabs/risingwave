@@ -1,5 +1,5 @@
 statement ok
-INSERT INTO part (p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment) VALUES 
+INSERT INTO part (p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment) VALUES
 (1,'goldenrod lavender spring chocolate lace','Manufacturer#1','Brand#13','PROMO BURNISHED COPPER',7,'JUMBO PKG',901.00,'ly. slyly ironi'),
 (2,'blush thistle blue yellow saddle','Manufacturer#1','Brand#13','LARGE BRUSHED BRASS',1,'LG CASE',902.00,'lar accounts amo'),
 (3,'spring green yellow purple cornsilk','Manufacturer#4','Brand#42','STANDARD POLISHED BRASS',21,'WRAP CASE',903.00,'egular deposits hag'),

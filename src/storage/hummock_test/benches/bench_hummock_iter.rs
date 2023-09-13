@@ -20,6 +20,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{pin_mut, TryStreamExt};
 use risingwave_common::cache::CachePriority;
 use risingwave_hummock_test::get_notification_client_for_test;
+use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
 use risingwave_hummock_test::test_utils::TestIngestBatch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -78,7 +79,9 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     let epoch = 100;
-    hummock_storage.init(epoch);
+    runtime
+        .block_on(hummock_storage.init_for_test(epoch))
+        .unwrap();
 
     for batch in batches {
         runtime
@@ -101,13 +104,10 @@ fn criterion_benchmark(c: &mut Criterion) {
                     (Unbounded, Unbounded),
                     epoch,
                     ReadOptions {
-                        prefix_hint: None,
                         ignore_range_tombstone: true,
-                        retention_seconds: None,
-                        table_id: Default::default(),
-                        read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
+                        ..Default::default()
                     },
                 ))
                 .unwrap();

@@ -242,7 +242,7 @@ with t(v) as (
 	values ('nan'), ('inf'), ('-inf'), ('-0')
 ) select
 	v,
-	exp(v::decimal)::float8, -- display with trailing zeros, use `trim_scale` later
+	trim_scale(exp(v::decimal)),
 	exp(v::float8)
 from t;
 ----

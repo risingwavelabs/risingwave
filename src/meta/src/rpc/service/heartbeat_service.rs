@@ -18,30 +18,20 @@ use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
 use tonic::{Request, Response, Status};
 
 use crate::manager::ClusterManagerRef;
-use crate::storage::MetaStore;
 
 #[derive(Clone)]
-pub struct HeartbeatServiceImpl<S>
-where
-    S: MetaStore,
-{
-    cluster_manager: ClusterManagerRef<S>,
+pub struct HeartbeatServiceImpl {
+    cluster_manager: ClusterManagerRef,
 }
 
-impl<S> HeartbeatServiceImpl<S>
-where
-    S: MetaStore,
-{
-    pub fn new(cluster_manager: ClusterManagerRef<S>) -> Self {
+impl HeartbeatServiceImpl {
+    pub fn new(cluster_manager: ClusterManagerRef) -> Self {
         HeartbeatServiceImpl { cluster_manager }
     }
 }
 
 #[async_trait::async_trait]
-impl<S> HeartbeatService for HeartbeatServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl HeartbeatService for HeartbeatServiceImpl {
     #[cfg_attr(coverage, no_coverage)]
     async fn heartbeat(
         &self,

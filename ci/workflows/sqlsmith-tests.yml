@@ -1,3 +1,9 @@
+auto-retry: &auto-retry
+  automatic:
+    # Agent terminated because the AWS EC2 spot instance killed by AWS.
+    - signal_reason: agent_stop
+      limit: 3
+
 steps:
   - label: "check ci image rebuild"
     plugins:
@@ -8,6 +14,7 @@ steps:
               config:
                 command: "ci/build-ci-image.sh"
                 label: "ci build images"
+    retry: *auto-retry
   - wait
 
   - label: "build"
@@ -19,6 +26,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
+    retry: *auto-retry
 
   - label: "fuzz test"
     command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
@@ -32,3 +40,4 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
+    retry: *auto-retry

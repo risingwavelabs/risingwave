@@ -25,7 +25,8 @@ use crate::{
     CompactorConfig, CompactorService, ComputeNodeConfig, ComputeNodeService, EtcdConfig,
     EtcdService, FrontendConfig, FrontendService, GrafanaConfig, GrafanaGen,
     HummockInMemoryStrategy, MetaNodeConfig, MetaNodeService, MinioConfig, MinioService,
-    PrometheusConfig, PrometheusGen, PrometheusService, RedPandaConfig,
+    PrometheusConfig, PrometheusGen, PrometheusService, RedPandaConfig, TempoConfig, TempoGen,
+    TempoService,
 };
 
 #[serde_with::skip_serializing_none]
@@ -68,6 +69,7 @@ pub struct DockerImageConfig {
     pub risingwave: String,
     pub prometheus: String,
     pub grafana: String,
+    pub tempo: String,
     pub minio: String,
     pub redpanda: String,
     pub etcd: String,
@@ -116,8 +118,12 @@ fn get_cmd_args(cmd: &Command, with_argv_0: bool) -> Result<Vec<String>> {
     Ok(result)
 }
 
-fn get_cmd_envs(cmd: &Command) -> Result<BTreeMap<String, String>> {
+fn get_cmd_envs(cmd: &Command, rust_backtrace: bool) -> Result<BTreeMap<String, String>> {
     let mut result = BTreeMap::new();
+    if rust_backtrace {
+        result.insert("RUST_BACKTRACE".to_string(), "1".to_string());
+    }
+
     for (k, v) in cmd.get_envs() {
         let k = k
             .to_str()
@@ -187,7 +193,8 @@ impl Compose for ComputeNodeConfig {
         let mut command = Command::new("compute-node");
         ComputeNodeService::apply_command_args(&mut command, self)?;
         if self.enable_tiered_cache {
-            command.arg("--file-cache-dir").arg("/filecache");
+            command.arg("--data-file-cache-dir").arg("/foyer/data");
+            command.arg("--meta-file-cache-dir").arg("/foyer/meta");
         }
 
         if let Some(c) = &config.rw_config_path {
@@ -196,6 +203,7 @@ impl Compose for ComputeNodeConfig {
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
+        let environment = get_cmd_envs(&command, true)?;
         let command = get_cmd_args(&command, true)?;
 
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
@@ -203,9 +211,7 @@ impl Compose for ComputeNodeConfig {
 
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
-            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
-                .into_iter()
-                .collect(),
+            environment,
             volumes: [
                 ("./risingwave.toml:/risingwave.toml".to_string()),
                 format!("{}:/filecache", self.id),
@@ -240,12 +246,12 @@ impl Compose for MetaNodeConfig {
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
+        let environment = get_cmd_envs(&command, true)?;
         let command = get_cmd_args(&command, true)?;
+
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
-            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
-                .into_iter()
-                .collect(),
+            environment,
             volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
                 .into_iter()
                 .collect(),
@@ -273,12 +279,12 @@ impl Compose for FrontendConfig {
             command.arg("--config-path").arg("/risingwave.toml");
         }
 
+        let environment = get_cmd_envs(&command, true)?;
         let command = get_cmd_args(&command, true)?;
+
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
-            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
-                .into_iter()
-                .collect(),
+            environment,
             volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
                 .into_iter()
                 .collect(),
@@ -306,12 +312,12 @@ impl Compose for CompactorConfig {
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
         let provide_minio = self.provide_minio.as_ref().unwrap();
 
+        let environment = get_cmd_envs(&command, true)?;
         let command = get_cmd_args(&command, true)?;
+
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
-            environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
-                .into_iter()
-                .collect(),
+            environment,
             volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
                 .into_iter()
                 .collect(),
@@ -334,7 +340,7 @@ impl Compose for MinioConfig {
         MinioService::apply_command_args(&mut command, self)?;
         command.arg("/data");
 
-        let env = get_cmd_envs(&command)?;
+        let env = get_cmd_envs(&command, false)?;
         let command = get_cmd_args(&command, false)?;
         let bucket_name = &self.hummock_bucket;
 
@@ -456,27 +462,61 @@ impl Compose for GrafanaConfig {
         )?;
 
         fs_err::write(
-            config_root.join("grafana-risedev-datasource.yml"),
+            config_root.join("risedev-prometheus.yml"),
             GrafanaGen.gen_prometheus_datasource_yml(self)?,
         )?;
 
         fs_err::write(
-            config_root.join("grafana-risedev-dashboard.yml"),
+            config_root.join("risedev-dashboard.yml"),
             GrafanaGen.gen_dashboard_yml(self, config_root, "/")?,
         )?;
 
-        let service = ComposeService {
+        let mut service = ComposeService {
             image: config.image.grafana.clone(),
             expose: vec![self.port.to_string()],
             ports: vec![format!("{}:{}", self.port, self.port)],
             volumes: vec![
                 format!("{}:/var/lib/grafana", self.id),
                 "./grafana.ini:/etc/grafana/grafana.ini".to_string(),
-                "./grafana-risedev-datasource.yml:/etc/grafana/provisioning/datasources/grafana-risedev-datasource.yml".to_string(),
-                "./grafana-risedev-dashboard.yml:/etc/grafana/provisioning/dashboards/grafana-risedev-dashboard.yml".to_string(),
+                "./risedev-prometheus.yml:/etc/grafana/provisioning/datasources/risedev-prometheus.yml".to_string(),
+                "./risedev-dashboard.yml:/etc/grafana/provisioning/dashboards/risedev-dashboard.yml".to_string(),
                 "./risingwave-dashboard.json:/risingwave-dashboard.json".to_string()
             ],
             healthcheck: Some(health_check_port(self.port)),
+            ..Default::default()
+        };
+
+        if !self.provide_tempo.as_ref().unwrap().is_empty() {
+            fs_err::write(
+                config_root.join("risedev-tempo.yml"),
+                GrafanaGen.gen_tempo_datasource_yml(self)?,
+            )?;
+            service.volumes.push(
+                "./risedev-tempo.yml:/etc/grafana/provisioning/datasources/risedev-tempo.yml"
+                    .to_string(),
+            );
+        }
+
+        Ok(service)
+    }
+}
+
+impl Compose for TempoConfig {
+    fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
+        let mut command = Command::new("tempo");
+        TempoService::apply_command_args(&mut command, "/tmp/tempo", "/etc/tempo.yaml")?;
+        let command = get_cmd_args(&command, false)?;
+
+        let config_root = Path::new(&config.config_directory);
+        let config_file_path = config_root.join("tempo.yaml");
+        fs_err::write(config_file_path, TempoGen.gen_tempo_yml(self))?;
+
+        let service = ComposeService {
+            image: config.image.tempo.clone(),
+            command,
+            expose: vec![self.port.to_string(), self.otlp_port.to_string()],
+            ports: vec![format!("{}:{}", self.port, self.port)],
+            volumes: vec![format!("./tempo.yaml:/etc/tempo.yaml")],
             ..Default::default()
         };
 

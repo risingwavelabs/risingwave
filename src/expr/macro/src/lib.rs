@@ -17,8 +17,7 @@
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::ToTokens;
-use syn::{parse_macro_input, Error, Result};
+use syn::{Error, Result};
 
 mod gen;
 mod parse;
@@ -333,15 +332,13 @@ mod utils;
 /// [type matrix]: #appendix-type-matrix
 #[proc_macro_attribute]
 pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let attr = parse_macro_input!(attr as syn::AttributeArgs);
-    let item = parse_macro_input!(item as syn::ItemFn);
+    fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
+        let fn_attr: FunctionAttr = syn::parse(attr)?;
+        let user_fn: UserFunctionAttr = syn::parse(item.clone())?;
 
-    fn inner(attr: syn::AttributeArgs, mut item: syn::ItemFn) -> Result<TokenStream2> {
-        let fn_attr = FunctionAttr::parse(&attr, &mut item)?;
-
-        let mut tokens = item.into_token_stream();
+        let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_descriptor(false)?);
+            tokens.extend(attr.generate_descriptor(&user_fn, false)?);
         }
         Ok(tokens)
     }
@@ -353,15 +350,13 @@ pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro_attribute]
 pub fn build_function(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let attr = parse_macro_input!(attr as syn::AttributeArgs);
-    let item = parse_macro_input!(item as syn::ItemFn);
+    fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
+        let fn_attr: FunctionAttr = syn::parse(attr)?;
+        let user_fn: UserFunctionAttr = syn::parse(item.clone())?;
 
-    fn inner(attr: syn::AttributeArgs, mut item: syn::ItemFn) -> Result<TokenStream2> {
-        let fn_attr = FunctionAttr::parse(&attr, &mut item)?;
-
-        let mut tokens = item.into_token_stream();
+        let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_descriptor(true)?);
+            tokens.extend(attr.generate_descriptor(&user_fn, true)?);
         }
         Ok(tokens)
     }
@@ -373,15 +368,13 @@ pub fn build_function(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro_attribute]
 pub fn aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let attr = parse_macro_input!(attr as syn::AttributeArgs);
-    let item = parse_macro_input!(item as syn::ItemFn);
+    fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
+        let fn_attr: FunctionAttr = syn::parse(attr)?;
+        let user_fn: UserFunctionAttr = syn::parse(item.clone())?;
 
-    fn inner(attr: syn::AttributeArgs, mut item: syn::ItemFn) -> Result<TokenStream2> {
-        let fn_attr = FunctionAttr::parse(&attr, &mut item)?;
-
-        let mut tokens = item.into_token_stream();
+        let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_agg_descriptor(false)?);
+            tokens.extend(attr.generate_agg_descriptor(&user_fn, false)?);
         }
         Ok(tokens)
     }
@@ -393,15 +386,13 @@ pub fn aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro_attribute]
 pub fn build_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let attr = parse_macro_input!(attr as syn::AttributeArgs);
-    let item = parse_macro_input!(item as syn::ItemFn);
+    fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
+        let fn_attr: FunctionAttr = syn::parse(attr)?;
+        let user_fn: UserFunctionAttr = syn::parse(item.clone())?;
 
-    fn inner(attr: syn::AttributeArgs, mut item: syn::ItemFn) -> Result<TokenStream2> {
-        let fn_attr = FunctionAttr::parse(&attr, &mut item)?;
-
-        let mut tokens = item.into_token_stream();
+        let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_agg_descriptor(true)?);
+            tokens.extend(attr.generate_agg_descriptor(&user_fn, true)?);
         }
         Ok(tokens)
     }
@@ -411,7 +402,7 @@ pub fn build_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct FunctionAttr {
     name: String,
     args: Vec<String>,
@@ -422,7 +413,7 @@ struct FunctionAttr {
     init_state: Option<String>,
     prebuild: Option<String>,
     type_infer: Option<String>,
-    user_fn: UserFunctionAttr,
+    deprecated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -431,6 +422,8 @@ struct UserFunctionAttr {
     name: String,
     /// The last argument type is `&mut dyn Write`.
     write: bool,
+    /// The last argument type is `retract: bool`.
+    retract: bool,
     /// The argument type are `Option`s.
     arg_option: bool,
     /// The return type.
@@ -471,6 +464,7 @@ impl FunctionAttr {
         format!("{}_{}_{}", self.name, self.args.join("_"), self.ret)
             .replace("[]", "list")
             .replace(['<', '>', ' ', ','], "_")
+            .replace("__", "_")
     }
 }
 
