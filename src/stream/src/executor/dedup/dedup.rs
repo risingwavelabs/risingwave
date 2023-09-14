@@ -77,7 +77,9 @@ impl<S: StateStore> DedupExecutor<S> {
 
         // Consume the first barrier message and initialize state table.
         let barrier = expect_first_barrier(&mut input).await?;
-        self.state_table.init_epoch(barrier.epoch);
+        // todo: uncomment this line
+        // self.state_table.init_epoch(barrier.epoch);
+        self.state_table.commit_no_data_expected(barrier.epoch);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
@@ -139,7 +141,7 @@ impl<S: StateStore> DedupExecutor<S> {
                             StreamChunk::new(ops.clone(), columns.clone(), Some(vis.clone()));
 
                         columns.push(Arc::new(cnt.into()));
-                        let state_chunk = StreamChunk::new(ops, columns, Some(vis));
+                        let state_chunk = StreamChunk::new(ops, columns, None);
                         println!("write chunk: {}", state_chunk.to_pretty());
                         self.state_table.write_chunk(state_chunk);
 
@@ -192,7 +194,7 @@ impl<S: StateStore> DedupExecutor<S> {
             read_from_storage = true;
 
             let table = &self.state_table;
-            futures.push(async move { (key, table.get_encoded_row(key).await) });
+            futures.push(async move { (key, table.get_row(key).await) });
         }
 
         if read_from_storage {
@@ -201,8 +203,8 @@ impl<S: StateStore> DedupExecutor<S> {
                 let (key, value) = result;
                 if let Some(v) = value? {
                     // Only insert into the cache when we have this key in storage.
-                    println!("populate cache with key: {:?}, value {:?}", key, v);
-                    let dup_cnt = 0;
+                    println!("row {:?}", v);
+                    let dup_cnt = v.last().unwrap().into_int64();
                     self.cache.insert(key.to_owned(), dup_cnt);
                 }
             }
@@ -235,9 +237,12 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
 
+    use risingwave_common::array::{I64Array, Op, Utf8Array};
+    use risingwave_common::buffer::Bitmap;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -245,6 +250,85 @@ mod tests {
     use crate::common::table::state_table::StateTable;
     use crate::executor::test_utils::MockSource;
     use crate::executor::ActorContext;
+
+    // dedup executor will see the whole line as pk and the value is number of duplication
+    #[tokio::test]
+    async fn test_dedup_load_memory() {
+        let table_id = TableId::new(1);
+        let column_descs = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar),
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // duplication count
+        ];
+        let pk_indices = vec![0, 1];
+        let order_types = vec![OrderType::ascending(), OrderType::ascending()];
+        let state_store = MemoryStateStore::new();
+        let mut state_table = StateTable::new_without_distribution(
+            state_store,
+            table_id,
+            column_descs,
+            order_types,
+            pk_indices.clone(),
+        )
+        .await;
+
+        let chunk = StreamChunk::new(
+            vec![Op::Insert, Op::Insert],
+            vec![
+                Arc::new(I64Array::from_iter(vec![1, 2]).into()),
+                Arc::new(Utf8Array::from_iter(vec!["a", "b"]).into()),
+                Arc::new(I64Array::from_iter(vec![2, 3]).into()), // dup_count
+            ],
+            Some(Bitmap::from_iter(vec![true, true])),
+        );
+        println!("chunk: {}", chunk.to_pretty());
+        state_table.init_epoch(EpochPair::new_test_epoch(1));
+        state_table.write_chunk(chunk);
+        state_table
+            .commit(EpochPair::new_test_epoch(2))
+            .await
+            .unwrap();
+
+        // input schema has fewer columns than state table
+        let input_schema = Schema::new(vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Varchar),
+        ]);
+
+        let (mut tx, input) = MockSource::channel(input_schema, pk_indices.clone());
+        let mut dedup_executor = Box::new(DedupExecutor::new(
+            Box::new(input),
+            state_table,
+            pk_indices,
+            1,
+            ActorContext::create(123),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(StreamingMetrics::unused()),
+        ))
+        .execute();
+
+        tx.push_barrier(3, false);
+        dedup_executor.next().await.unwrap().unwrap();
+
+        let chunk1: StreamChunk = {
+            StreamChunk::new(
+                vec![Op::Delete, Op::Delete],
+                vec![
+                    Arc::new(I64Array::from_iter(vec![1, 2]).into()),
+                    Arc::new(Utf8Array::from_iter(vec!["a", "b"]).into()),
+                ],
+                Some(Bitmap::from_iter(vec![true, true])),
+            )
+        };
+        tx.push_chunk(chunk1.clone());
+        tx.push_chunk(chunk1.clone());
+
+        let msg = dedup_executor.next().await.unwrap().unwrap();
+        println!("msg: {}", msg.into_chunk().unwrap().to_pretty());
+
+        tx.push_barrier(4, false);
+        dedup_executor.next().await.unwrap().unwrap();
+    }
 
     #[tokio::test]
     async fn test_dedup_executor() {
