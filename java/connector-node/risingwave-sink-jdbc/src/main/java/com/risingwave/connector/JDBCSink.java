@@ -27,10 +27,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class JDBCSink extends SinkWriterBase {
+    // The order of variants matters here, should not change it
     enum OpType {
-        INSERT,
         DELETE,
-        UPSERT
+        UPSERT,
+        INSERT,
     }
 
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
@@ -46,8 +47,6 @@ public class JDBCSink extends SinkWriterBase {
     private PreparedStatement deletePreparedStmt;
 
     private boolean updateFlag = false;
-
-    private final HashMap<OpType, PreparedStatement> stagingStatements = new HashMap<>();
 
     private static final Logger LOG = LoggerFactory.getLogger(JDBCSink.class);
 
@@ -164,7 +163,7 @@ public class JDBCSink extends SinkWriterBase {
             switch (row.getOp()) {
                 case INSERT:
                     jdbcDialect.bindUpsertStatement(preparedStmt, conn, getTableSchema(), row);
-                    return preparedStmt;
+                    break;
                 case UPDATE_INSERT:
                     if (!updateFlag) {
                         throw Status.FAILED_PRECONDITION
@@ -173,12 +172,14 @@ public class JDBCSink extends SinkWriterBase {
                     }
                     jdbcDialect.bindUpsertStatement(preparedStmt, conn, getTableSchema(), row);
                     updateFlag = false;
-                    return preparedStmt;
+                    break;
                 default:
                     throw Status.FAILED_PRECONDITION
                             .withDescription("unexpected op type: " + row.getOp())
                             .asRuntimeException();
             }
+            preparedStmt.addBatch();
+            return preparedStmt;
         } catch (SQLException e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(
@@ -207,6 +208,7 @@ public class JDBCSink extends SinkWriterBase {
                 Object fromRow = getTableSchema().getFromRow(primaryKey, row);
                 deletePreparedStmt.setObject(placeholderIdx++, fromRow);
             }
+            deletePreparedStmt.addBatch();
             return deletePreparedStmt;
         } catch (SQLException e) {
             throw Status.INTERNAL
@@ -218,6 +220,7 @@ public class JDBCSink extends SinkWriterBase {
 
     @Override
     public void write(Iterator<SinkRow> rows) {
+        var stagingStatements = new TreeMap<OpType, PreparedStatement>();
         while (rows.hasNext()) {
             try (SinkRow row = rows.next()) {
                 if (row.getOp() == Data.Op.UPDATE_DELETE) {
@@ -225,62 +228,43 @@ public class JDBCSink extends SinkWriterBase {
                     continue;
                 }
                 if (config.isUpsertSink()) {
-                    prepareForUpsert(row);
+                    if (row.getOp() == Data.Op.DELETE) {
+                        var stmt = prepareDeleteStatement(row);
+                        stagingStatements.put(OpType.DELETE, stmt);
+                    } else {
+                        var stmt = prepareUpsertStatement(row);
+                        stagingStatements.put(OpType.UPSERT, stmt);
+                    }
                 } else {
-                    prepareForAppendOnly(row);
+                    var stmt = prepareInsertStatement(row);
+                    stagingStatements.put(OpType.INSERT, stmt);
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         }
 
-        // execute staging statement in batch after all rows are prepared,
-        // and we need to delete first to prevent accidentally deletion
-        var deleteStmt = stagingStatements.remove(OpType.DELETE);
-        if (deleteStmt != null) {
-            executeStatement(deleteStmt);
-        }
-
-        var upsertStmt = stagingStatements.remove(OpType.UPSERT);
-        if (upsertStmt != null) {
-            executeStatement(upsertStmt);
-        }
-
-        var insertStmt = stagingStatements.remove(OpType.INSERT);
-        if (insertStmt != null) {
-            executeStatement(insertStmt);
-        }
-    }
-
-    private void prepareForUpsert(SinkRow row) throws SQLException {
-        PreparedStatement stmt;
-        if (row.getOp() == Data.Op.DELETE) {
-            stmt = prepareDeleteStatement(row);
-            stmt.addBatch();
-            stagingStatements.put(OpType.DELETE, stmt);
-        } else {
-            stmt = prepareUpsertStatement(row);
-            stmt.addBatch();
-            stagingStatements.put(OpType.UPSERT, stmt);
-        }
-    }
-
-    private void prepareForAppendOnly(SinkRow row) throws SQLException {
-        PreparedStatement stmt = prepareInsertStatement(row);
-        stmt.addBatch();
-        stagingStatements.put(OpType.INSERT, stmt);
-    }
-
-    private void executeStatement(PreparedStatement stmt) {
         try {
-            LOG.debug("Executing statement: {}", stmt);
-            stmt.executeBatch();
-            stmt.clearParameters();
+            // Execute staging statements after all rows are prepared.
+            // Note that we execute statement in the order of DELETE, UPSERT, INSERT as defined in
+            // OpType.
+            for (var entry : stagingStatements.entrySet()) {
+                executeStatement(entry.getValue());
+            }
+
+            conn.commit();
         } catch (SQLException e) {
-            throw Status.INTERNAL
-                    .withDescription(String.format(ERROR_REPORT_TEMPLATE, stmt, e.getMessage()))
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
                     .asRuntimeException();
         }
+    }
+
+    private void executeStatement(PreparedStatement stmt) throws SQLException {
+        LOG.debug("Executing statement: {}", stmt);
+        stmt.executeBatch();
+        stmt.clearParameters();
     }
 
     @Override
@@ -289,14 +273,6 @@ public class JDBCSink extends SinkWriterBase {
             throw Status.FAILED_PRECONDITION
                     .withDescription(
                             "expected UPDATE_INSERT to complete an UPDATE operation, got `sync`")
-                    .asRuntimeException();
-        }
-        try {
-            conn.commit();
-        } catch (SQLException e) {
-            throw io.grpc.Status.INTERNAL
-                    .withDescription(
-                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
                     .asRuntimeException();
         }
     }

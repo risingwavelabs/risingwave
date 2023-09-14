@@ -138,6 +138,11 @@ public class JDBCSinkTest {
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
         Connection conn = sink.getConn();
+        Statement stmt = conn.createStatement();
+
+        ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM test");
+        assertTrue(rs.next());
+        assertEquals(0, rs.getInt(1));
 
         sink.write(
                 Iterators.forArray(
@@ -158,7 +163,15 @@ public class JDBCSinkTest {
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
-                                "I want to sleep".getBytes()),
+                                "I want to sleep".getBytes())));
+
+        // chunk will commit after sink.write()
+        rs = stmt.executeQuery("SELECT COUNT(*) FROM test");
+        assertTrue(rs.next());
+        assertEquals(2, rs.getInt(1));
+
+        sink.write(
+                Iterators.forArray(
                         new ArraySinkRow(
                                 Op.UPDATE_DELETE,
                                 1,
@@ -186,11 +199,13 @@ public class JDBCSinkTest {
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
-        sink.sync();
 
-        Statement stmt = conn.createStatement();
-        ResultSet rs = stmt.executeQuery("SELECT * FROM test");
-        rs.next();
+        rs = stmt.executeQuery("SELECT COUNT(*) FROM test");
+        assertTrue(rs.next());
+        assertEquals(1, rs.getInt(1));
+
+        rs = stmt.executeQuery("SELECT * FROM test");
+        assertTrue(rs.next());
 
         // check if rows are inserted
         assertEquals(1, rs.getInt(1));
@@ -237,8 +252,8 @@ public class JDBCSinkTest {
                         .withUrlParam("user", "postgres")
                         .withUrlParam("password", "password");
         pg.start();
-        testJDBCSync(pg, TestType.TestPg);
         testJDBCWrite(pg, TestType.TestPg);
+        testJDBCSync(pg, TestType.TestPg);
         testJDBCDrop(pg, TestType.TestPg);
         pg.stop();
     }
@@ -254,8 +269,8 @@ public class JDBCSinkTest {
                         .withUrlParam("user", "postgres")
                         .withUrlParam("password", "password");
         mysql.start();
-        testJDBCSync(mysql, TestType.TestMySQL);
         testJDBCWrite(mysql, TestType.TestMySQL);
+        testJDBCSync(mysql, TestType.TestMySQL);
         testJDBCDrop(mysql, TestType.TestMySQL);
         mysql.stop();
     }
