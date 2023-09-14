@@ -420,7 +420,7 @@ pub fn build_function(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
     fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
         let fn_attr: FunctionAttr = syn::parse(attr)?;
-        let user_fn: UserFunctionAttr = syn::parse(item.clone())?;
+        let user_fn: AggregateFnOrImpl = syn::parse(item.clone())?;
 
         let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
@@ -438,7 +438,7 @@ pub fn aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn build_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
     fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
         let fn_attr: FunctionAttr = syn::parse(attr)?;
-        let user_fn: UserFunctionAttr = syn::parse(item.clone())?;
+        let user_fn: AggregateFnOrImpl = syn::parse(item.clone())?;
 
         let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
@@ -454,16 +454,32 @@ pub fn build_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[derive(Debug, Clone, Default)]
 struct FunctionAttr {
+    /// Function name
     name: String,
+    /// Input argument types
     args: Vec<String>,
+    /// Return type
     ret: String,
+    /// Whether it is a table function
     is_table_function: bool,
+    /// Whether it is an append-only aggregate function
+    append_only: bool,
+    /// Optional function for batch evaluation.
     batch_fn: Option<String>,
+    /// State type for aggregate function.
+    /// If not specified, it will be the same as return type.
     state: Option<String>,
+    /// Initial state value for aggregate function.
+    /// If not specified, it will be NULL.
     init_state: Option<String>,
+    /// Prebuild function for arguments.
+    /// This could be any Rust expression.
     prebuild: Option<String>,
+    /// Type inference function.
     type_infer: Option<String>,
+    /// Whether the function is volatile.
     volatile: bool,
+    /// Whether the function is deprecated.
     deprecated: bool,
 }
 
@@ -492,6 +508,52 @@ struct UserFunctionAttr {
     generic: usize,
     /// The span of return type.
     return_type_span: proc_macro2::Span,
+}
+
+#[derive(Debug, Clone)]
+struct AggregateImpl {
+    struct_name: String,
+    accumulate: UserFunctionAttr,
+    retract: Option<UserFunctionAttr>,
+    #[allow(dead_code)] // TODO(wrj): add merge to trait
+    merge: Option<UserFunctionAttr>,
+    finalize: Option<UserFunctionAttr>,
+    #[allow(dead_code)] // TODO(wrj): support encode
+    encode_state: Option<UserFunctionAttr>,
+    #[allow(dead_code)] // TODO(wrj): support decode
+    decode_state: Option<UserFunctionAttr>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
+enum AggregateFnOrImpl {
+    /// A simple accumulate/retract function.
+    Fn(UserFunctionAttr),
+    /// A full impl block.
+    Impl(AggregateImpl),
+}
+
+impl AggregateFnOrImpl {
+    fn as_fn(&self) -> &UserFunctionAttr {
+        match self {
+            AggregateFnOrImpl::Fn(attr) => attr,
+            _ => panic!("expect fn"),
+        }
+    }
+
+    fn accumulate(&self) -> &UserFunctionAttr {
+        match self {
+            AggregateFnOrImpl::Fn(attr) => attr,
+            AggregateFnOrImpl::Impl(impl_) => &impl_.accumulate,
+        }
+    }
+
+    fn has_retract(&self) -> bool {
+        match self {
+            AggregateFnOrImpl::Fn(fn_) => fn_.retract,
+            AggregateFnOrImpl::Impl(impl_) => impl_.retract.is_some(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
