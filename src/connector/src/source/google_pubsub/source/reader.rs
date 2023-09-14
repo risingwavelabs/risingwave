@@ -23,11 +23,10 @@ use tonic::Code;
 
 use super::TaggedReceivedMessage;
 use crate::parser::ParserConfig;
-use crate::source::common::{into_chunk_stream, CommonSplitReader};
-use crate::source::google_pubsub::PubsubProperties;
+use crate::source::google_pubsub::{PubsubProperties, PubsubSplit};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
-    SplitMetaData, SplitReader,
+    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
+    SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
 const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
@@ -107,10 +106,11 @@ impl CommonSplitReader for PubsubSplitReader {
 #[async_trait]
 impl SplitReader for PubsubSplitReader {
     type Properties = PubsubProperties;
+    type Split = PubsubSplit;
 
     async fn new(
         properties: PubsubProperties,
-        splits: Vec<SplitImpl>,
+        splits: Vec<PubsubSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
@@ -119,12 +119,7 @@ impl SplitReader for PubsubSplitReader {
             splits.len() == 1,
             "the pubsub reader only supports a single split"
         );
-        let split = splits
-            .into_iter()
-            .next()
-            .unwrap()
-            .into_google_pubsub()
-            .unwrap();
+        let split = splits.into_iter().next().unwrap();
 
         // Set environment variables consumed by `google_cloud_pubsub`
         properties.initialize_env();

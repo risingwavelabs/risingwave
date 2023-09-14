@@ -20,9 +20,11 @@ use itertools::{Either, Itertools};
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding;
 use risingwave_expr::agg::{agg_kinds, AggKind};
+use risingwave_expr::sig::agg::AGG_FUNC_SIG_MAP;
 use risingwave_pb::data::PbDatum;
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
@@ -273,7 +275,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         HashMap<usize, TableCatalog>,
     ) {
         (
-            self.infer_result_table(me, vnode_col_idx, window_col_idx),
+            self.infer_intermediate_state_table(me, vnode_col_idx, window_col_idx),
             self.infer_stream_agg_state(me, vnode_col_idx, window_col_idx),
             self.infer_distinct_dedup_tables(me, vnode_col_idx, window_col_idx),
         )
@@ -470,13 +472,43 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .collect()
     }
 
-    pub fn infer_result_table(
+    /// table schema:
+    /// group key | state for AGG1 | state for AGG2 | ...
+    pub fn infer_intermediate_state_table(
         &self,
         me: &impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> TableCatalog {
-        let out_fields = me.schema().fields();
+        let mut out_fields = me.schema().fields().to_vec();
+
+        // rewrite data types in fields
+        let in_append_only = self.input.append_only();
+        for (agg_call, field) in self
+            .agg_calls
+            .iter()
+            .zip_eq_fast(&mut out_fields[self.group_key.len()..])
+        {
+            let sig = AGG_FUNC_SIG_MAP
+                .get(
+                    agg_call.agg_kind,
+                    &agg_call
+                        .inputs
+                        .iter()
+                        .map(|input| (&input.data_type).into())
+                        .collect_vec(),
+                    (&agg_call.return_type).into(),
+                    in_append_only,
+                )
+                .expect("agg not found");
+            if !in_append_only && sig.append_only {
+                // we use materialized input state for non-retractable aggregate function.
+                // for backward compatibility, the state type is same as the return type.
+                // its values in the intermediate state table are always null.
+            } else {
+                field.data_type = sig.state_type.into();
+            }
+        }
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
         let n_group_key_cols = self.group_key.len();
 

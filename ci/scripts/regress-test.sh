@@ -30,7 +30,8 @@ mv target/debug/risingwave_regress_test-"$profile" target/debug/risingwave_regre
 chmod +x ./target/debug/risingwave_regress_test
 
 echo "--- Postgres regress test"
-apt-get update && apt-get -y install locales
+apt-get -y update
+apt-get -y install locales
 locale-gen C
 export LANGUAGE=C
 export LANG=C

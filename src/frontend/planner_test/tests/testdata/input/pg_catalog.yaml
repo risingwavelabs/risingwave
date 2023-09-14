@@ -23,3 +23,8 @@
   expected_outputs:
   - batch_plan
   - logical_plan
+- sql: |
+    select 'boolin'::regproc
+  expected_outputs:
+  - logical_plan
+  - batch_plan
