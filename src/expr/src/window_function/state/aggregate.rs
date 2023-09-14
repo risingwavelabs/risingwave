@@ -24,7 +24,7 @@ use smallvec::SmallVec;
 
 use super::buffer::WindowBuffer;
 use super::{StateEvictHint, StateKey, StatePos, WindowState};
-use crate::agg::{build as builg_agg, AggArgs, AggCall, BoxedAggregateFunction};
+use crate::agg::{build_append_only, AggArgs, AggCall, BoxedAggregateFunction};
 use crate::function::window::{WindowFuncCall, WindowFuncKind};
 use crate::Result;
 
@@ -86,7 +86,7 @@ impl WindowState for AggregateState {
 
     fn curr_output(&self) -> Result<Datum> {
         let wrapper = AggregatorWrapper {
-            agg: builg_agg(&self.agg_call)?,
+            agg: build_append_only(&self.agg_call)?,
             arg_data_types: &self.arg_data_types,
         };
         wrapper.aggregate(self.buffer.curr_window_values().map(SmallVec::as_slice))
