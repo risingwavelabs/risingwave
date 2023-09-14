@@ -459,7 +459,10 @@ mod tests {
 
         // The truncate should work because it is before the flush
         reader
-            .truncate(TruncateOffset::Chunk { epoch: epoch1, chunk_id: chunk_id1 })
+            .truncate(TruncateOffset::Chunk {
+                epoch: epoch1,
+                chunk_id: chunk_id1,
+            })
             .await
             .unwrap();
         let epoch3 = epoch2 + 1;

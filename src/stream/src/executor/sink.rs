@@ -20,7 +20,7 @@ use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prometheus::Histogram;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{merge_chunk_row, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
@@ -31,7 +31,7 @@ use risingwave_connector::sink::{
 };
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
-use super::{BoxedExecutor, Executor, Message};
+use super::{BoxedExecutor, Executor, Message, PkIndices};
 use crate::common::log_store::{
     LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
 };
@@ -44,6 +44,7 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     metrics: Arc<StreamingMetrics>,
     sink: SinkImpl,
     identity: String,
+    pk_indices: PkIndices,
     input_columns: Vec<ColumnCatalog>,
     input_schema: Schema,
     sink_param: SinkParam,
@@ -79,6 +80,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         columns: Vec<ColumnCatalog>,
         actor_context: ActorContextRef,
         log_store_factory: F,
+        pk_indices: PkIndices,
     ) -> StreamExecutorResult<Self> {
         let (log_reader, log_writer) = log_store_factory.build().await;
 
@@ -92,6 +94,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             metrics,
             sink,
             identity: format!("SinkExecutor {:X?}", sink_writer_param.executor_id),
+            pk_indices,
             input_columns: columns,
             input_schema,
             sink_param,
@@ -114,6 +117,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         let write_log_stream = Self::execute_write_log(
             self.input,
+            self.pk_indices,
             self.log_writer,
             self.input_columns.clone(),
             self.sink_param.sink_type,
@@ -135,6 +139,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_write_log(
         input: BoxedExecutor,
+        stream_key: PkIndices,
         mut log_writer: impl LogWriter,
         columns: Vec<ColumnCatalog>,
         sink_type: SinkType,
@@ -163,6 +168,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             match msg? {
                 Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
+                    // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
+                    // V->V).
+                    let chunk = merge_chunk_row(chunk, &stream_key);
                     let visible_chunk = if sink_type == SinkType::ForceAppendOnly {
                         // Force append-only by dropping UPDATE/DELETE messages. We do this when the
                         // user forces the sink to be append-only while it is actually not based on
@@ -311,7 +319,7 @@ impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
     }
 
     fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.sink_param.pk_indices
+        &self.pk_indices
     }
 
     fn identity(&self) -> &str {
@@ -395,7 +403,7 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            pk_indices: pk.clone(),
+            downstream_pk: pk.clone(),
             sink_type: SinkType::ForceAppendOnly,
             db_name: "test".into(),
             sink_from_name: "test".into(),
@@ -409,6 +417,7 @@ mod test {
             columns.clone(),
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
+            pk,
         )
         .await
         .unwrap();
@@ -492,7 +501,7 @@ mod test {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            pk_indices: pk.clone(),
+            downstream_pk: pk.clone(),
             sink_type: SinkType::ForceAppendOnly,
             db_name: "test".into(),
             sink_from_name: "test".into(),
@@ -506,6 +515,7 @@ mod test {
             columns,
             ActorContext::create(0),
             BoundedInMemLogStoreFactory::new(1),
+            pk,
         )
         .await
         .unwrap();

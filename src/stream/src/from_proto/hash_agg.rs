@@ -84,8 +84,9 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             vnodes.clone(),
         )
         .await;
-        let result_table = StateTable::from_table_catalog(
-            node.get_result_table().unwrap(),
+        // disable sanity check so that old value is not required when updating states
+        let intermediate_state_table = StateTable::from_table_catalog_inconsistent_op(
+            node.get_intermediate_state_table().unwrap(),
             store.clone(),
             vnodes.clone(),
         )
@@ -106,7 +107,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 agg_calls,
                 row_count_index: node.get_row_count_index() as usize,
                 storages,
-                result_table,
+                intermediate_state_table,
                 distinct_dedup_tables,
                 watermark_epoch: stream.get_watermark_epoch(),
                 metrics: params.executor_stats,
