@@ -48,6 +48,8 @@ pub use tracing;
 
 use self::catalog::SinkType;
 use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
+use self::encoder::SerTo;
+use self::formatter::{format_chunk, SinkFormatter};
 use self::iceberg::{IcebergSink, ICEBERG_SINK, REMOTE_ICEBERG_SINK};
 use crate::sink::boxed::BoxSink;
 use crate::sink::catalog::{SinkCatalog, SinkId};
@@ -201,6 +203,34 @@ pub trait SinkWriterV1: Send + 'static {
     // aborts the current transaction because some error happens. we should rollback to the last
     // commit point.
     async fn abort(&mut self) -> Result<()>;
+}
+
+pub trait FormattedSink {
+    type K;
+    type V;
+    async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()>;
+
+    async fn write_chunk<F: SinkFormatter>(
+        &mut self,
+        chunk: StreamChunk,
+        formatter: F,
+    ) -> Result<()>
+    where
+        F::K: SerTo<Self::K>,
+        F::V: SerTo<Self::V>,
+    {
+        for r in format_chunk(formatter, &chunk) {
+            let (event_key_object, event_object) = r?;
+
+            self.write_one(
+                event_key_object.map(SerTo::ser_to).transpose()?,
+                event_object.map(SerTo::ser_to).transpose()?,
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
 }
 
 pub struct SinkWriterV1Adapter<W: SinkWriterV1> {

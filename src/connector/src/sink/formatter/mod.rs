@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::Op;
+use itertools::Itertools;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::Row;
 
 use crate::sink::Result;
@@ -29,4 +30,14 @@ pub trait SinkFormatter {
     type I: IntoIterator<Item = (Option<Self::K>, Option<Self::V>)>;
 
     fn format_row(&mut self, op: Op, row: impl Row + Copy) -> Result<Self::I>;
+}
+
+pub fn format_chunk<'a, F: SinkFormatter + 'a>(
+    mut formatter: F,
+    chunk: &'a StreamChunk,
+) -> impl Iterator<Item = Result<<F::I as IntoIterator>::Item>> + 'a {
+    chunk
+        .rows()
+        .map(move |(op, row)| formatter.format_row(op, row))
+        .flatten_ok()
 }
