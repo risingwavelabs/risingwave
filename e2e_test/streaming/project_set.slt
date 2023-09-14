@@ -127,6 +127,17 @@ select * from mv;
 {d,e}   e 2
 
 statement ok
+update t set arr = Array['a', 'c'] where arr = Array['a','b', 'c'];
+
+query I rowsort
+select * from mv;
+----
+{a,c} a 1
+{a,c} c 2
+{d,e} d 1
+{d,e} e 2
+
+statement ok
 drop materialized view mv;
 
 statement ok
