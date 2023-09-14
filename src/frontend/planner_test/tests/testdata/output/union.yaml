@@ -80,7 +80,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
         └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0, 1, 2]) from 1
@@ -170,7 +170,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
         └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0, 1, 2]) from 1

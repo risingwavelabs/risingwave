@@ -36,7 +36,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [v1, min(v2), count(distinct v3)], output_watermarks: [v1] }
         └── StreamHashAgg [append_only, eowc] { group_key: [v1], aggs: [min(v2), count(distinct v3), count], output_watermarks: [v1] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: [ (distinct key: v3, table id: 1) ]
             └── StreamExchange Hash([0]) from 1
@@ -109,7 +109,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [$expr1, max(t.b)], output_watermarks: [$expr1] }
         └── StreamHashAgg [append_only, eowc] { group_key: [$expr1], aggs: [max(t.b), count], output_watermarks: [$expr1] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
