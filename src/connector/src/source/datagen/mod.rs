@@ -24,6 +24,8 @@ use serde_with::{serde_as, DisplayFromStr};
 pub use source::*;
 pub use split::*;
 
+use crate::source::SourceProperties;
+
 pub const DATAGEN_CONNECTOR: &str = "datagen";
 
 #[serde_as]
@@ -53,6 +55,14 @@ pub struct DatagenProperties {
     /// datagen will create v2 by randomly generating from default_min to default_max
     #[serde(flatten)]
     fields: HashMap<String, String>,
+}
+
+impl SourceProperties for DatagenProperties {
+    type Split = DatagenSplit;
+    type SplitEnumerator = DatagenSplitEnumerator;
+    type SplitReader = DatagenSplitReader;
+
+    const SOURCE_NAME: &'static str = DATAGEN_CONNECTOR;
 }
 
 fn default_rows_per_second() -> u64 {

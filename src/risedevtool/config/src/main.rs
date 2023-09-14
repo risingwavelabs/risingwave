@@ -73,6 +73,7 @@ pub enum Components {
     Sanitizer,
     DynamicLinking,
     HummockTrace,
+    Coredump,
 }
 
 impl Components {
@@ -94,6 +95,7 @@ impl Components {
             Self::Sanitizer => "[Build] Enable sanitizer",
             Self::DynamicLinking => "[Build] Enable dynamic linking",
             Self::HummockTrace => "[Build] Hummock Trace",
+            Self::Coredump => "[Runtime] Enable coredump",
         }
         .into()
     }
@@ -179,7 +181,18 @@ but you might need the expertise to install dependencies correctly.
                 "
             }
             Self::HummockTrace => {
-            "With this option enabled, RiseDev will enable tracing for Hummock. See storage/hummock_trace for details."
+                "
+With this option enabled, RiseDev will enable tracing for Hummock.
+See storage/hummock_trace for details.
+                "
+            }
+            Self::Coredump => {
+                "
+With this option enabled, RiseDev will unlimit the size of core
+files before launching RisingWave. On Apple Silicon platforms,
+the binaries will also be codesigned with `get-task-allow` enabled.
+As a result, RisingWave will dump the core on panics.
+                "
             }
         }
         .into()
@@ -225,6 +238,7 @@ but you might need the expertise to install dependencies correctly.
             Self::BuildConnectorNode => "ENABLE_BUILD_RW_CONNECTOR",
             Self::DynamicLinking => "ENABLE_DYNAMIC_LINKING",
             Self::HummockTrace => "ENABLE_HUMMOCK_TRACE",
+            Self::Coredump => "ENABLE_COREDUMP",
         }
         .into()
     }

@@ -53,17 +53,19 @@ workspace-hack = { path = "../workspace-hack" }
 expect-test = "1"
 
 [build-dependencies]
-vergen = { version = "8", default-features = false, features = ["build", "git", "gitcl"] }
+vergen = { version = "8", default-features = false, features = [
+    "build",
+    "git",
+    "gitcl",
+] }
 
 [target.'cfg(enable_task_local_alloc)'.dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
-    "profiling",
-    "stats",
+tikv-jemallocator = { workspace = true, features = [
     "unprefixed_malloc_on_supported_platforms",
-], rev = "b7f9f3" }
+] }
 
 [[bin]]
 name = "risingwave"
