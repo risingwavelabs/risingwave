@@ -49,9 +49,7 @@ export default function HeapProfiling() {
   const { response: computeNodes } = useFetch(getClusterInfoComputeNode)
 
   const [computeNodeId, setComputeNodeId] = useState<number>()
-  const [profileCollapsed, setProfileCollapsed] = useState<string | undefined>(
-    ""
-  )
+  const [displayInfo, setDisplayInfo] = useState<string | undefined>("")
   const [profileList, setProfileList] = useState<
     ListHeapProfilingResponse | undefined
   >()
@@ -83,7 +81,7 @@ export default function HeapProfiling() {
       } catch (e: any) {
         console.error(e)
         let result = `Getting Profiling File List\n$Error: ${e.message}]`
-        setProfileCollapsed(result)
+        setDisplayInfo(result)
       }
     }
   }
@@ -141,7 +139,7 @@ export default function HeapProfiling() {
       analyzeTargetFileName
     )
 
-    setProfileCollapsed(
+    setDisplayInfo(
       `Analyzing ${analyzeTargetFileName} from Compute Node ${computeNodeId}`
     )
 
@@ -166,7 +164,7 @@ export default function HeapProfiling() {
       result = `${title}\n\nError: ${e.message}`
     }
 
-    setProfileCollapsed(result)
+    setDisplayInfo(result)
   }
 
   const retVal = (
@@ -238,7 +236,7 @@ export default function HeapProfiling() {
           overflowX="scroll"
           overflowY="scroll"
         >
-          {profileCollapsed === undefined ? (
+          {displayInfo === undefined ? (
             <SpinnerOverlay></SpinnerOverlay>
           ) : (
             <Editor
@@ -250,7 +248,7 @@ export default function HeapProfiling() {
                 wordWrap: "on",
               }}
               defaultValue='Select a compute node and target profiling result file and click "Analyze"...'
-              value={profileCollapsed}
+              value={displayInfo}
             ></Editor>
           )}
         </Box>
