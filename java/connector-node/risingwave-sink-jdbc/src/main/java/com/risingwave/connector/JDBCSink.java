@@ -22,9 +22,7 @@ import com.risingwave.connector.jdbc.JdbcDialectFactory;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
 import java.sql.*;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,6 +40,7 @@ public class JDBCSink extends SinkWriterBase {
     private PreparedStatement deletePreparedStmt;
 
     private boolean updateFlag = false;
+
     private static final Logger LOG = LoggerFactory.getLogger(JDBCSink.class);
 
     public JDBCSink(JDBCSinkConfig config, TableSchema tableSchema) {
@@ -59,9 +58,17 @@ public class JDBCSink extends SinkWriterBase {
         this.config = config;
         try {
             this.conn = DriverManager.getConnection(config.getJdbcUrl());
-            this.conn.setAutoCommit(false);
             this.pkColumnNames =
                     getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
+            // disable auto commit can improve performance
+            this.conn.setAutoCommit(false);
+            // explicitly set isolation level to RC
+            this.conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+
+            LOG.info(
+                    "JDBC connection: autoCommit = {}, trxn = {}",
+                    conn.getAutoCommit(),
+                    conn.getTransactionIsolation());
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -133,6 +140,7 @@ public class JDBCSink extends SinkWriterBase {
         try {
             var preparedStmt = insertPreparedStmt;
             jdbcDialect.bindInsertIntoStatement(preparedStmt, conn, getTableSchema(), row);
+            preparedStmt.addBatch();
             return preparedStmt;
         } catch (SQLException e) {
             throw io.grpc.Status.INTERNAL
@@ -149,7 +157,7 @@ public class JDBCSink extends SinkWriterBase {
             switch (row.getOp()) {
                 case INSERT:
                     jdbcDialect.bindUpsertStatement(preparedStmt, conn, getTableSchema(), row);
-                    return preparedStmt;
+                    break;
                 case UPDATE_INSERT:
                     if (!updateFlag) {
                         throw Status.FAILED_PRECONDITION
@@ -158,12 +166,14 @@ public class JDBCSink extends SinkWriterBase {
                     }
                     jdbcDialect.bindUpsertStatement(preparedStmt, conn, getTableSchema(), row);
                     updateFlag = false;
-                    return preparedStmt;
+                    break;
                 default:
                     throw Status.FAILED_PRECONDITION
                             .withDescription("unexpected op type: " + row.getOp())
                             .asRuntimeException();
             }
+            preparedStmt.addBatch();
+            return preparedStmt;
         } catch (SQLException e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(
@@ -192,6 +202,7 @@ public class JDBCSink extends SinkWriterBase {
                 Object fromRow = getTableSchema().getFromRow(primaryKey, row);
                 deletePreparedStmt.setObject(placeholderIdx++, fromRow);
             }
+            deletePreparedStmt.addBatch();
             return deletePreparedStmt;
         } catch (SQLException e) {
             throw Status.INTERNAL
@@ -203,48 +214,53 @@ public class JDBCSink extends SinkWriterBase {
 
     @Override
     public void write(Iterator<SinkRow> rows) {
+        PreparedStatement deleteStatement = null;
+        PreparedStatement upsertStatement = null;
+        PreparedStatement insertStatement = null;
+
         while (rows.hasNext()) {
             try (SinkRow row = rows.next()) {
-                PreparedStatement stmt;
                 if (row.getOp() == Data.Op.UPDATE_DELETE) {
                     updateFlag = true;
                     continue;
                 }
-
                 if (config.isUpsertSink()) {
-                    stmt = prepareForUpsert(row);
+                    if (row.getOp() == Data.Op.DELETE) {
+                        deleteStatement = prepareDeleteStatement(row);
+                    } else {
+                        upsertStatement = prepareUpsertStatement(row);
+                    }
                 } else {
-                    stmt = prepareForAppendOnly(row);
-                }
-
-                try {
-                    LOG.debug("Executing statement: {}", stmt);
-                    stmt.executeUpdate();
-                    stmt.clearParameters();
-                } catch (SQLException e) {
-                    throw Status.INTERNAL
-                            .withDescription(
-                                    String.format(ERROR_REPORT_TEMPLATE, stmt, e.getMessage()))
-                            .asRuntimeException();
+                    insertStatement = prepareInsertStatement(row);
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         }
-    }
 
-    private PreparedStatement prepareForUpsert(SinkRow row) {
-        PreparedStatement stmt;
-        if (row.getOp() == Data.Op.DELETE) {
-            stmt = prepareDeleteStatement(row);
-        } else {
-            stmt = prepareUpsertStatement(row);
+        try {
+            // Execute staging statements after all rows are prepared.
+            // We execute DELETE statement before to avoid accidentally deletion.
+            executeStatement(deleteStatement);
+            executeStatement(upsertStatement);
+            executeStatement(insertStatement);
+
+            conn.commit();
+        } catch (SQLException e) {
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
         }
-        return stmt;
     }
 
-    private PreparedStatement prepareForAppendOnly(SinkRow row) {
-        return prepareInsertStatement(row);
+    private void executeStatement(PreparedStatement stmt) throws SQLException {
+        if (stmt == null) {
+            return;
+        }
+        LOG.debug("Executing statement: {}", stmt);
+        stmt.executeBatch();
+        stmt.clearParameters();
     }
 
     @Override
@@ -253,14 +269,6 @@ public class JDBCSink extends SinkWriterBase {
             throw Status.FAILED_PRECONDITION
                     .withDescription(
                             "expected UPDATE_INSERT to complete an UPDATE operation, got `sync`")
-                    .asRuntimeException();
-        }
-        try {
-            conn.commit();
-        } catch (SQLException e) {
-            throw io.grpc.Status.INTERNAL
-                    .withDescription(
-                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
                     .asRuntimeException();
         }
     }
