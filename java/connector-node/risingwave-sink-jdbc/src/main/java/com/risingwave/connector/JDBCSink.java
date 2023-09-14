@@ -27,13 +27,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class JDBCSink extends SinkWriterBase {
-    // The order of variants matters here, should not change it
-    enum OpType {
-        DELETE,
-        UPSERT,
-        INSERT,
-    }
-
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
     private final JdbcDialect jdbcDialect;
@@ -221,7 +214,10 @@ public class JDBCSink extends SinkWriterBase {
 
     @Override
     public void write(Iterator<SinkRow> rows) {
-        var stagingStatements = new TreeMap<OpType, PreparedStatement>();
+        PreparedStatement deleteStatement = null;
+        PreparedStatement upsertStatement = null;
+        PreparedStatement insertStatement = null;
+
         while (rows.hasNext()) {
             try (SinkRow row = rows.next()) {
                 if (row.getOp() == Data.Op.UPDATE_DELETE) {
@@ -230,15 +226,12 @@ public class JDBCSink extends SinkWriterBase {
                 }
                 if (config.isUpsertSink()) {
                     if (row.getOp() == Data.Op.DELETE) {
-                        var stmt = prepareDeleteStatement(row);
-                        stagingStatements.put(OpType.DELETE, stmt);
+                        deleteStatement = prepareDeleteStatement(row);
                     } else {
-                        var stmt = prepareUpsertStatement(row);
-                        stagingStatements.put(OpType.UPSERT, stmt);
+                        upsertStatement = prepareUpsertStatement(row);
                     }
                 } else {
-                    var stmt = prepareInsertStatement(row);
-                    stagingStatements.put(OpType.INSERT, stmt);
+                    insertStatement = prepareInsertStatement(row);
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);
@@ -247,11 +240,10 @@ public class JDBCSink extends SinkWriterBase {
 
         try {
             // Execute staging statements after all rows are prepared.
-            // Note that we execute statement in the order of DELETE, UPSERT, INSERT as defined in
-            // OpType.
-            for (var entry : stagingStatements.entrySet()) {
-                executeStatement(entry.getValue());
-            }
+            // We execute DELETE statement before to avoid accidentally deletion.
+            executeStatement(deleteStatement);
+            executeStatement(upsertStatement);
+            executeStatement(insertStatement);
 
             conn.commit();
         } catch (SQLException e) {
@@ -263,6 +255,9 @@ public class JDBCSink extends SinkWriterBase {
     }
 
     private void executeStatement(PreparedStatement stmt) throws SQLException {
+        if (stmt == null) {
+            return;
+        }
         LOG.debug("Executing statement: {}", stmt);
         stmt.executeBatch();
         stmt.clearParameters();
