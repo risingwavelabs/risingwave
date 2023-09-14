@@ -318,13 +318,16 @@ impl CatalogController {
             .union(UnionType::All, query_view)
             .union(UnionType::All, query_function)
             .union(UnionType::All, query_connection)
+            .union(
+                UnionType::All,
+                Query::select()
+                    .expr(Expr::value(database_id as i32))
+                    .to_owned(),
+            )
             .to_owned();
         // drop related objects, the relations will be dropped cascade.
         Object::delete_many()
             .filter(object::Column::Oid.in_subquery(query_all))
-            .exec(&txn)
-            .await?;
-        Database::delete(database::ActiveModel::from(db))
             .exec(&txn)
             .await?;
 
