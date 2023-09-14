@@ -201,7 +201,7 @@ impl KinesisSinkWriter {
         })
     }
 
-    async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
+    async fn upsert(mut self: &Self, chunk: StreamChunk) -> Result<()> {
         let key_encoder = JsonEncoder::new(
             &self.schema,
             Some(&self.pk_indices),
@@ -210,10 +210,10 @@ impl KinesisSinkWriter {
         let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
         let f = UpsertFormatter::new(key_encoder, val_encoder);
 
-        (&*self).write_chunk(chunk, f).await
+        self.write_chunk(chunk, f).await
     }
 
-    async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
+    async fn append_only(mut self: &Self, chunk: StreamChunk) -> Result<()> {
         let key_encoder = JsonEncoder::new(
             &self.schema,
             Some(&self.pk_indices),
@@ -222,7 +222,7 @@ impl KinesisSinkWriter {
         let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
         let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
 
-        (&*self).write_chunk(chunk, f).await
+        self.write_chunk(chunk, f).await
     }
 
     async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
