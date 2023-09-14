@@ -542,9 +542,37 @@ impl KafkaSinkWriter {
         }
         Ok(())
     }
+
+    async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
+        // TODO: Remove the clones here, only to satisfy borrow checker at present
+        let schema = self.schema.clone();
+        let pk_indices = self.pk_indices.clone();
+        let key_encoder =
+            JsonEncoder::new(&schema, Some(&pk_indices), TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
+
+        // Initialize the upsert_stream
+        let f = UpsertFormatter::new(key_encoder, val_encoder);
+
+        self.write_chunk(chunk, f).await
+    }
+
+    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+        // TODO: Remove the clones here, only to satisfy borrow checker at present
+        let schema = self.schema.clone();
+        let pk_indices = self.pk_indices.clone();
+        let key_encoder =
+            JsonEncoder::new(&schema, Some(&pk_indices), TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
+
+        // Initialize the append_only_stream
+        let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
+
+        self.write_chunk(chunk, f).await
+    }
 }
 
-impl FormattedSink for &mut KafkaSinkWriter {
+impl FormattedSink for KafkaSinkWriter {
     type K = Vec<u8>;
     type V = Vec<u8>;
 
@@ -558,15 +586,7 @@ impl SinkWriterV1 for KafkaSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if self.is_append_only {
             // Append-only
-            // TODO: Remove the clones here, only to satisfy borrow checker at present
-            let schema = self.schema.clone();
-            let pk_indices = self.pk_indices.clone();
-            let key_encoder =
-                JsonEncoder::new(&schema, Some(&pk_indices), TimestampHandlingMode::Milli);
-            let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
-
-            let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
-            self.write_chunk(chunk, f).await
+            self.append_only(chunk).await
         } else {
             // Debezium
             if self.config.r#type == SINK_TYPE_DEBEZIUM {
@@ -580,15 +600,7 @@ impl SinkWriterV1 for KafkaSinkWriter {
                 .await
             } else {
                 // Upsert
-                // TODO: Remove the clones here, only to satisfy borrow checker at present
-                let schema = self.schema.clone();
-                let pk_indices = self.pk_indices.clone();
-                let key_encoder =
-                    JsonEncoder::new(&schema, Some(&pk_indices), TimestampHandlingMode::Milli);
-                let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
-
-                let f = UpsertFormatter::new(key_encoder, val_encoder);
-                self.write_chunk(chunk, f).await
+                self.upsert(chunk).await
             }
         }
     }

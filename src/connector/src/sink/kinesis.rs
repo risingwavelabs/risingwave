@@ -201,6 +201,30 @@ impl KinesisSinkWriter {
         })
     }
 
+    async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
+        let key_encoder = JsonEncoder::new(
+            &self.schema,
+            Some(&self.pk_indices),
+            TimestampHandlingMode::Milli,
+        );
+        let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
+        let f = UpsertFormatter::new(key_encoder, val_encoder);
+
+        (&*self).write_chunk(chunk, f).await
+    }
+
+    async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
+        let key_encoder = JsonEncoder::new(
+            &self.schema,
+            Some(&self.pk_indices),
+            TimestampHandlingMode::Milli,
+        );
+        let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
+        let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
+
+        (&*self).write_chunk(chunk, f).await
+    }
+
     async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
         let dbz_stream = gen_debezium_message_stream(
             &self.schema,
@@ -246,15 +270,7 @@ impl FormattedSink for &KinesisSinkWriter {
 impl SinkWriter for KinesisSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if self.is_append_only {
-            let key_encoder = JsonEncoder::new(
-                &self.schema,
-                Some(&self.pk_indices),
-                TimestampHandlingMode::Milli,
-            );
-            let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
-
-            let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
-            (&*self).write_chunk(chunk, f).await
+            self.append_only(chunk).await
         } else if self.config.r#type == SINK_TYPE_DEBEZIUM {
             self.debezium_update(
                 chunk,
@@ -265,15 +281,7 @@ impl SinkWriter for KinesisSinkWriter {
             )
             .await
         } else if self.config.r#type == SINK_TYPE_UPSERT {
-            let key_encoder = JsonEncoder::new(
-                &self.schema,
-                Some(&self.pk_indices),
-                TimestampHandlingMode::Milli,
-            );
-            let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
-
-            let f = UpsertFormatter::new(key_encoder, val_encoder);
-            (&*self).write_chunk(chunk, f).await
+            self.upsert(chunk).await
         } else {
             unreachable!()
         }
