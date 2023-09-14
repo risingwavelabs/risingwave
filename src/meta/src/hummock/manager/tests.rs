@@ -846,15 +846,6 @@ async fn test_trigger_manual_compaction() {
         assert!(result.is_ok());
     }
 
-    let task_id: u64 = 4;
-    let compact_task = hummock_manager
-        .compaction_task_from_assignment_for_test(task_id)
-        .await
-        .unwrap()
-        .compact_task
-        .unwrap();
-    assert_eq!(task_id, compact_task.task_id);
-
     {
         let option = ManualCompactionOption::default();
         // all sst pending , test no compaction avail

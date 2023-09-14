@@ -552,7 +552,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "storage_compact_task_size",
             "Total size of compact that have been issued to state store",
-            exponential_buckets(4096.0, 1.6, 28).unwrap()
+            exponential_buckets(1048576.0, 2.0, 16).unwrap()
         );
 
         let compact_task_size =
