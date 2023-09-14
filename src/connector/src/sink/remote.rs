@@ -52,7 +52,7 @@ pub const VALID_REMOTE_SINKS: [&str; 5] = [
     "jdbc",
     REMOTE_ICEBERG_SINK,
     "deltalake",
-    "elasticsearch-7",
+    "elasticsearch",
     "cassandra",
 ];
 

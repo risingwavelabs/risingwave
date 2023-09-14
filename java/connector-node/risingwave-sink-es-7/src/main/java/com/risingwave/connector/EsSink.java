@@ -56,17 +56,17 @@ import org.slf4j.LoggerFactory;
  *
  * 4. bulkprocessor and high-level-client are deprecated in es 8 java api.
  */
-public class EsSink7 extends SinkWriterBase {
-    private static final Logger LOG = LoggerFactory.getLogger(EsSink7.class);
+public class EsSink extends SinkWriterBase {
+    private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
-    private final EsSink7Config config;
+    private final EsSinkConfig config;
     private final BulkProcessor bulkProcessor;
     private final RestHighLevelClient client;
     // For bulk listener
     private final List<Integer> primaryKeyIndexes;
 
-    public EsSink7(EsSink7Config config, TableSchema tableSchema) {
+    public EsSink(EsSinkConfig config, TableSchema tableSchema) {
         super(tableSchema);
         HttpHost host;
         try {
@@ -76,6 +76,8 @@ public class EsSink7 extends SinkWriterBase {
         }
 
         this.config = config;
+
+        // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
         this.client =
                 new RestHighLevelClientBuilder(
                                 configureRestClientBuilder(RestClient.builder(host), config)
@@ -102,7 +104,7 @@ public class EsSink7 extends SinkWriterBase {
     }
 
     private static RestClientBuilder configureRestClientBuilder(
-            RestClientBuilder builder, EsSink7Config config) {
+            RestClientBuilder builder, EsSinkConfig config) {
         // Possible config:
         // 1. Connection path prefix
         // 2. Username and password
@@ -120,7 +122,7 @@ public class EsSink7 extends SinkWriterBase {
     }
 
     private BulkProcessor.Builder applyBulkConfig(
-            RestHighLevelClient client, EsSink7Config config, BulkProcessor.Listener listener) {
+            RestHighLevelClient client, EsSinkConfig config, BulkProcessor.Listener listener) {
         BulkProcessor.Builder builder =
                 BulkProcessor.builder(
                         (BulkRequestConsumerFactory)
@@ -185,7 +187,14 @@ public class EsSink7 extends SinkWriterBase {
     private Map<String, Object> buildDoc(SinkRow row) {
         Map<String, Object> doc = new HashMap();
         for (int i = 0; i < getTableSchema().getNumColumns(); i++) {
-            doc.put(getTableSchema().getColumnDesc(i).getName(), row.get(i));
+            Object col = row.get(i);
+            if (col instanceof Date) {
+                // es client doesn't natively support java.sql.Timestamp/Time/Date
+                // so we need to convert Date type into a string as suggested in
+                // https://github.com/elastic/elasticsearch/issues/31377#issuecomment-398102292
+                col = col.toString();
+            }
+            doc.put(getTableSchema().getColumnDesc(i).getName(), col);
         }
         return doc;
     }
