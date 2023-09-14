@@ -15,3 +15,8 @@ insert into t1 values(1, 1);
 
 statement ok
 create materialized view mv2 as select id from t1;
+
+query I
+select * from mv;
+----
+1
