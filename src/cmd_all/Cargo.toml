@@ -63,7 +63,9 @@ vergen = { version = "8", default-features = false, features = [
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { workspace = true }
+tikv-jemallocator = { workspace = true, features = [
+    "unprefixed_malloc_on_supported_platforms",
+] }
 
 [[bin]]
 name = "risingwave"

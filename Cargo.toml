@@ -115,7 +115,6 @@ arrow-select = "46"
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",
   "stats",
-  "unprefixed_malloc_on_supported_platforms",
 ], rev = "64a2d9" }
 
 risingwave_backup = { path = "./src/storage/backup" }
