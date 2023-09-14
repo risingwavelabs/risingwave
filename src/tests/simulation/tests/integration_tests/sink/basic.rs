@@ -75,7 +75,7 @@ impl Sink for TestSink {
     type Coordinator = BoxCoordinator;
     type Writer = BoxWriter<()>;
 
-    async fn validate(&self) -> Result<()> {
+    async fn validate(&self) -> risingwave_connector::sink::Result<()> {
         Ok(())
     }
 
