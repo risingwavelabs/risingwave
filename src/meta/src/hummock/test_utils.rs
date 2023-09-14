@@ -107,7 +107,6 @@ pub async fn add_test_tables(
         3
     );
     compact_task.target_level = 6;
-    
     if temp_compactor {
         let compactor = hummock_manager
             .compactor_manager_ref_for_test()

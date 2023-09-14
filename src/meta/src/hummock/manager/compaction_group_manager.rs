@@ -458,7 +458,7 @@ impl HummockManager {
             return Ok(parent_group_id);
         }
         let table_ids = table_ids.iter().cloned().unique().collect_vec();
-        let mut compaction_guard = write_lock!(self, compaction).await;
+        let compaction_guard = write_lock!(self, compaction).await;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
@@ -655,13 +655,7 @@ impl HummockManager {
         }
         for task in canceled_tasks {
             if !self
-                .report_compact_task_impl(
-                    task.task_id,
-                    TaskStatus::ManualCanceled,
-                    vec![],
-                    &mut compaction_guard,
-                    None,
-                )
+                .report_compact_task(task.task_id, TaskStatus::ManualCanceled, vec![], None)
                 .await
                 .unwrap_or(false)
             {

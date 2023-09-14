@@ -777,13 +777,13 @@ impl HummockManager {
         &self,
         compaction_group_id: CompactionGroupId,
         selector: &mut Box<dyn LevelSelector>,
-        compaction_guard: &mut RwLockWriteGuard<'_, Compaction>,
     ) -> Result<Option<CompactTask>> {
         // TODO: `get_all_table_options` will hold catalog_manager async lock, to avoid holding the
         // lock in compaction_guard, take out all table_options in advance there may be a
         // waste of resources here, need to add a more efficient filter in catalog_manager
         let all_table_id_to_option = self.catalog_manager.get_all_table_options().await;
 
+        let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
         let compaction_statuses = &mut compaction.compaction_statuses;
 
@@ -875,17 +875,51 @@ impl HummockManager {
         let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
         let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
 
-        let mut compact_task_assignment =
-            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
-        compact_task_assignment.insert(
-            compact_task.task_id,
-            CompactTaskAssignment {
-                compact_task: Some(compact_task.clone()),
-                context_id: META_NODE_ID, // deprecated
-            },
-        );
+        if is_trivial_reclaim {
+            compact_task.set_task_status(TaskStatus::Success);
+            self.report_compact_task_impl(
+                task_id,
+                Some(compact_task.clone()),
+                TaskStatus::Success,
+                vec![],
+                &mut compaction_guard,
+                None,
+            )
+            .await?;
+            tracing::debug!(
+                "TrivialReclaim for compaction group {}: remove {} sstables, cost time: {:?}",
+                compaction_group_id,
+                compact_task
+                    .input_ssts
+                    .iter()
+                    .map(|level| level.table_infos.len())
+                    .sum::<usize>(),
+                start_time.elapsed()
+            );
+        } else if is_trivial_move && can_trivial_move {
+            // compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
+            // this task has been finished and `trivial_move_task` does not need to be schedule.
+            compact_task.set_task_status(TaskStatus::Success);
+            compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
+            self.report_compact_task_impl(
+                task_id,
+                Some(compact_task.clone()),
+                TaskStatus::Success,
+                compact_task.input_ssts[0].table_infos.clone(),
+                &mut compaction_guard,
+                None,
+            )
+            .await?;
 
-        if !(is_trivial_reclaim || (is_trivial_move && can_trivial_move)) {
+            tracing::debug!(
+                "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {}  cost time: {:?}",
+                compaction_group_id,
+                compact_task.input_ssts[0].table_infos.len(),
+                compact_task.input_ssts[0].level_idx,
+                compact_task.target_level,
+                start_time.elapsed()
+            );
+        } else {
             compact_task.table_options = table_id_to_option
                 .into_iter()
                 .filter_map(|(table_id, table_option)| {
@@ -899,6 +933,16 @@ impl HummockManager {
             compact_task.current_epoch_time = Epoch::now().0;
             compact_task.compaction_filter_mask =
                 group_config.compaction_config.compaction_filter_mask;
+
+            let mut compact_task_assignment =
+                BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
+            compact_task_assignment.insert(
+                compact_task.task_id,
+                CompactTaskAssignment {
+                    compact_task: Some(compact_task.clone()),
+                    context_id: META_NODE_ID, // deprecated
+                },
+            );
 
             // We are using a single transaction to ensure that each task has progress when it is
             // created.
@@ -968,9 +1012,12 @@ impl HummockManager {
                     start_time.elapsed(),
                     compact_task_statistics
                 );
-        } else {
-            // For trivial tasks, commit the memory state for subsequent reports.
-            compact_task_assignment.commit();
+        }
+
+        #[cfg(test)]
+        {
+            drop(compaction_guard);
+            self.check_state_consistency().await;
         }
 
         Ok(Some(compact_task))
@@ -993,7 +1040,14 @@ impl HummockManager {
         assert!(CANCEL_STATUS_SET.contains(&task_status));
         let mut compaction_guard = write_lock!(self, compaction).await;
         let ret = self
-            .report_compact_task_impl(task_id, task_status, vec![], &mut compaction_guard, None)
+            .report_compact_task_impl(
+                task_id,
+                None,
+                task_status,
+                vec![],
+                &mut compaction_guard,
+                None,
+            )
             .await?;
         #[cfg(test)]
         {
@@ -1022,7 +1076,6 @@ impl HummockManager {
         Ok(())
     }
 
-    #[named]
     pub async fn get_compact_task(
         &self,
         compaction_group_id: CompactionGroupId,
@@ -1032,91 +1085,32 @@ impl HummockManager {
             anyhow::anyhow!("failpoint metastore error")
         )));
 
-        let result;
-        loop {
-            let mut compaction_guard = write_lock!(self, compaction).await;
-            if let Some(compact_task) = self
-                .get_compact_task_impl(compaction_group_id, selector, &mut compaction_guard)
-                .await?
-            {
-                let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
-                let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
-                let can_trivial_move: bool =
-                    matches!(selector.task_type(), compact_task::TaskType::Dynamic);
+        while let Some(task) = self
+            .get_compact_task_impl(compaction_group_id, selector)
+            .await?
+        {
+            let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&task);
+            let is_trivial_move = CompactStatus::is_trivial_move_task(&task);
 
-                if is_trivial_reclaim {
-                    if let Err(err) = self
-                        .report_compact_task_impl(
-                            compact_task.task_id,
-                            TaskStatus::Success,
-                            vec![],
-                            &mut compaction_guard,
-                            None,
-                        )
-                        .await
-                    {
-                        let compaction = compaction_guard.deref_mut();
-                        let mut compact_task_assignment =
-                            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
+            println!(
+                "task {} task{:?} status {:?} is_trivial_reclaim {} is_trivial_move {}",
+                task.task_id,
+                task,
+                task.task_status().as_str_name(),
+                is_trivial_reclaim,
+                is_trivial_move
+            );
 
-                        // remove task_assignment
-                        let _ = compact_task_assignment.remove(compact_task.task_id);
-                        return Err(err);
-                    }
-
-                    tracing::debug!(
-                        "TrivialReclaim for compaction group {}: remove {} sstables",
-                        compaction_group_id,
-                        compact_task
-                            .input_ssts
-                            .iter()
-                            .map(|level| level.table_infos.len())
-                            .sum::<usize>(),
-                    );
-                } else if is_trivial_move && can_trivial_move {
-                    if let Err(err) = self
-                        .report_compact_task_impl(
-                            compact_task.task_id,
-                            TaskStatus::Success,
-                            compact_task.input_ssts[0].table_infos.clone(),
-                            &mut compaction_guard,
-                            None,
-                        )
-                        .await
-                    {
-                        let compaction = compaction_guard.deref_mut();
-                        let mut compact_task_assignment =
-                            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
-
-                        // remove task_assignment
-                        let _ = compact_task_assignment.remove(compact_task.task_id);
-
-                        return Err(err);
-                    }
-                    tracing::debug!(
-                        "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {} ",
-                        compaction_group_id,
-                        compact_task.input_ssts[0].table_infos.len(),
-                        compact_task.input_ssts[0].level_idx,
-                        compact_task.target_level,
-                    );
-                } else {
-                    result = Some(compact_task);
-                    break;
-                }
-
-                #[cfg(test)]
-                {
-                    drop(compaction_guard);
-                    self.check_state_consistency().await;
-                }
-            } else {
-                result = None;
-                break;
+            if let TaskStatus::Pending = task.task_status() {
+                return Ok(Some(task));
             }
+            assert!(
+                CompactStatus::is_trivial_move_task(&task)
+                    || CompactStatus::is_trivial_reclaim(&task)
+            );
         }
 
-        Ok(result)
+        Ok(None)
     }
 
     pub async fn manual_get_compact_task(
@@ -1160,6 +1154,7 @@ impl HummockManager {
         let mut guard = write_lock!(self, compaction).await;
         self.report_compact_task_impl(
             task_id,
+            None,
             task_status,
             sorted_output_ssts,
             &mut guard,
@@ -1179,6 +1174,7 @@ impl HummockManager {
     pub async fn report_compact_task_impl(
         &self,
         task_id: u64,
+        compact_task: Option<CompactTask>,
         task_status: TaskStatus,
         sorted_output_ssts: Vec<SstableInfo>,
         compaction_guard: &mut RwLockWriteGuard<'_, Compaction>,
@@ -1193,7 +1189,9 @@ impl HummockManager {
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
 
         // remove task_assignment
-        let mut compact_task = {
+        let mut compact_task = if let Some(input_task) = compact_task {
+            input_task
+        } else {
             match compact_task_assignment.remove(task_id) {
                 Some(compact_task) => compact_task.compact_task.unwrap(),
                 None => {
@@ -2866,6 +2864,11 @@ fn gen_version_delta<'a>(
     group_deltas.push(group_delta);
     version_delta.gc_object_ids.append(&mut gc_object_ids);
     version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
+    println!(
+        "version_delta safe_epoch {} compact_task.watermark {}",
+        version_delta.safe_epoch, compact_task.watermark
+    );
+
     // Don't persist version delta generated by compaction to meta store in deterministic mode.
     // Because it will override existing version delta that has same ID generated in the data
     // ingestion phase.

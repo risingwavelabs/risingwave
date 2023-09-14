@@ -222,7 +222,6 @@ pub(crate) mod tests {
             Default::default(),
         )
         .await;
-
         let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
         {
             FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
@@ -352,8 +351,14 @@ pub(crate) mod tests {
                 key.clone(),
                 read_epoch,
                 ReadOptions {
+                    ignore_range_tombstone: false,
+
+                    prefix_hint: None,
+                    table_id: Default::default(),
+                    retention_seconds: None,
+                    read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
-                    ..Default::default()
                 },
             )
             .await;
@@ -365,12 +370,18 @@ pub(crate) mod tests {
                 key.clone(),
                 ((TEST_WATERMARK - 1) * 1000) << 16,
                 ReadOptions {
+                    ignore_range_tombstone: false,
                     prefix_hint: Some(key.clone()),
+                    table_id: Default::default(),
+                    retention_seconds: None,
+                    read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
-                    ..Default::default()
                 },
             )
             .await;
+        println!("ret {:?}", ret);
+
         assert!(ret.is_err());
     }
 
@@ -612,6 +623,7 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
+
         assert!(compact_task.is_none());
 
         // 3. get the latest version and check

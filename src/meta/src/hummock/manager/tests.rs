@@ -1645,11 +1645,7 @@ async fn test_split_compaction_group_trivial_expired() {
 
     let mut selector: Box<dyn LevelSelector> = Box::<SpaceReclaimCompactionSelector>::default();
     let reclaim_task = hummock_manager
-        .get_compact_task_impl(
-            2,
-            &mut selector,
-            &mut hummock_manager.compaction_guard_for_test().await,
-        )
+        .get_compact_task_impl(2, &mut selector)
         .await
         .unwrap()
         .unwrap();
