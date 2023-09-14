@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::ops::Bound;
+use std::ops::Bound::Unbounded;
 
 use futures::{pin_mut, StreamExt};
 use risingwave_common::array::{Op, StreamChunk};
@@ -282,8 +283,9 @@ async fn test_state_table_iter_with_prefix() {
     ]));
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let iter = state_table
-        .iter_row_with_pk_prefix(&pk_prefix, Default::default())
+        .iter_row_with_pk_prefix_sub_range(&pk_prefix, sub_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
