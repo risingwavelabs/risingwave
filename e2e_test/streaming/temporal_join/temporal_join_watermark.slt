@@ -15,7 +15,7 @@ statement ok
 create materialized view temporal_join_mv as select id1, a1, id2, v1 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
 
 statement ok
-create materialized view eowc_mv as select window_start, array_agg(id1) from tumble(temporal_join_mv, v1, interval '5 s') group by window_start emit on window close;
+create materialized view eowc_mv as select window_start, count(id1) from tumble(temporal_join_mv, v1, interval '5 s') group by window_start emit on window close;
 
 query IIII rowsort
 select * from temporal_join_mv;
@@ -41,7 +41,7 @@ select * from temporal_join_mv;
 query IIII rowsort
 select * from eowc_mv;
 ----
-2023-09-14 06:00:00+00:00 {1}
+2023-09-14 06:00:00+00:00 1
 
 statement ok
 insert into stream values (3, 3, 3, '2023-09-14 06:00:45');
@@ -58,8 +58,8 @@ select * from temporal_join_mv;
 query IIII rowsort
 select * from eowc_mv;
 ----
-2023-09-14 06:00:00+00:00 {1}
-2023-09-14 06:00:25+00:00 {2}
+2023-09-14 06:00:00+00:00 1
+2023-09-14 06:00:25+00:00 1
 
 statement ok
 drop table stream cascade;
