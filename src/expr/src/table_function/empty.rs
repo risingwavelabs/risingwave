@@ -12,16 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::ListRef;
-use risingwave_common::types::ScalarRefImpl;
-use risingwave_expr_macro::function;
-
 use super::*;
 
-#[function(
-    "unnest(list) -> setof any",
-    type_infer = "|args| Ok(args[0].unnest_list().clone())"
-)]
-fn unnest(list: ListRef<'_>) -> impl Iterator<Item = Option<ScalarRefImpl<'_>>> {
-    list.flatten().into_iter()
+/// An empty table function that returns nothing.
+pub fn empty(return_type: DataType) -> BoxedTableFunction {
+    Empty { return_type }.boxed()
+}
+
+#[derive(Debug)]
+struct Empty {
+    return_type: DataType,
+}
+
+#[async_trait::async_trait]
+impl TableFunction for Empty {
+    fn return_type(&self) -> DataType {
+        self.return_type.clone()
+    }
+
+    async fn eval<'a>(&'a self, _input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
+        futures_util::stream::empty().boxed()
+    }
 }

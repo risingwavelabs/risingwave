@@ -70,6 +70,12 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 
     async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>>;
+
+    /// Returns vector of (worker_id, min_pinned_version_id)
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
+
+    /// Returns vector of (worker_id, min_pinned_snapshot_id)
+    async fn list_hummock_pinned_snapshots(&self) -> Result<Vec<(u32, u64)>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -144,5 +150,35 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
     async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>> {
         let tables = self.0.get_tables(table_ids).await?;
         Ok(tables)
+    }
+
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>> {
+        let pinned_versions = self
+            .0
+            .risectl_get_pinned_versions_summary()
+            .await?
+            .summary
+            .unwrap()
+            .pinned_versions;
+        let ret = pinned_versions
+            .into_iter()
+            .map(|v| (v.context_id, v.min_pinned_id))
+            .collect();
+        Ok(ret)
+    }
+
+    async fn list_hummock_pinned_snapshots(&self) -> Result<Vec<(u32, u64)>> {
+        let pinned_snapshots = self
+            .0
+            .risectl_get_pinned_snapshots_summary()
+            .await?
+            .summary
+            .unwrap()
+            .pinned_snapshots;
+        let ret = pinned_snapshots
+            .into_iter()
+            .map(|s| (s.context_id, s.minimal_pinned_snapshot))
+            .collect();
+        Ok(ret)
     }
 }

@@ -395,6 +395,7 @@ define_keywords!(
     REFERENCING,
     REGCLASS,
     REGISTRY,
+    REGPROC,
     REGR_AVGX,
     REGR_AVGY,
     REGR_COUNT,
