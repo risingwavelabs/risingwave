@@ -35,7 +35,7 @@ type CreateMviewEpoch = Epoch;
 type ConsumedRows = u64;
 
 #[derive(Clone, Copy, Debug)]
-enum ChainState {
+pub enum ChainState {
     Init,
     ConsumingUpstream(Epoch, ConsumedRows),
     Done(ConsumedRows),
@@ -186,33 +186,24 @@ pub(super) struct CreateMviewProgressTracker {
     actor_map: HashMap<ActorId, CreateMviewEpoch>,
 }
 
-/// FIXME: This is just a mock to simulate backfill state.
-/// We need to get the actual state from the barriers.
-pub struct BackfillState {
-    status: ChainState,
-}
-
-impl BackfillState {
-    pub fn get_status(&self) -> ChainState {
-        self.status
-    }
-}
-
-/// Each Materialized View which scans from upstream MVs has a chain executor.
-/// We should track progress of each MaterializedView which has a stateful executor.
-/// This is built from barriers passing through the backfill executor.
-pub struct BackfillProgress {
-    inner: Vec<(ActorId, BackfillState)>,
-}
-
 impl CreateMviewProgressTracker {
-    /// Empty backfill state -> Can't recover, just start from scratch.
-    /// Non-empty backfill state -> Recover from the backfill state.
+    /// Backfill progress and tracking_commands are the only dynamic parts of the state.
+    /// For BackfillProgress, it can also be derived from state_table.
+    /// However, this requires the stream graph to init BEFORE meta recovers fully.
+    /// To support that meta needs to recover in 2 parts:
+    /// 1. Initial recovery, not all state is recovered yet, just send some initial barriers
+    ///    to collect state.
+    /// 2. Full recovery, all state is recovered.
+    /// That shifts complexity to Meta node.
+    /// Only AFTER initial barrier
+    ///
+    /// Tracking Commands seems to be required to be initialized elsewhere first.
+    /// Then we can use the tracking commands to initialize the progress map.
     ///
     /// The `actor_map` contains the mapping from actor to its stream job identifier
     /// (the epoch where it was created).
     pub fn recover(
-        backfill_progress: BackfillProgress,
+        backfill_progress: Vec<(ActorId, ChainState)>,
         actor_map: HashMap<ActorId, CreateMviewEpoch>,
         table_map: HashMap<CreateMviewEpoch, TableId>,
         upstream_mv_counts: HashMap<CreateMviewEpoch, HashMap<TableId, usize>>,
@@ -220,7 +211,7 @@ impl CreateMviewProgressTracker {
         version_stats: HummockVersionStats,
         mut tracking_commands: HashMap<CreateMviewEpoch, TrackingCommand>,
     ) -> Self {
-        let progress_per_actor = backfill_progress.inner;
+        let progress_per_actor = backfill_progress;
         let progress_map = progress_per_actor
             .into_iter()
             .map(|(actor_id, state)| {
@@ -248,8 +239,7 @@ impl CreateMviewProgressTracker {
                     .sum();
                 let mut consumed_rows = 0;
                 let definition = definitions.get(&epoch).unwrap().clone();
-                for (_, (actor_id, state)) in state_per_actor {
-                    let status = state.get_status();
+                for (_, (actor_id, status)) in state_per_actor {
                     match status {
                         ChainState::Init => {}
                         ChainState::ConsumingUpstream(epoch, actor_consumed_rows) => {
@@ -263,7 +253,7 @@ impl CreateMviewProgressTracker {
                         }
                     };
                     // FIXME: Should Done states be in the map?
-                    states.insert(actor_id, state.get_status()).unwrap();
+                    states.insert(actor_id, status).unwrap();
                 }
                 let progress = Progress {
                     states,

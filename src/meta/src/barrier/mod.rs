@@ -939,10 +939,25 @@ impl GlobalBarrierManager {
         }
 
         if self.enable_recovery {
+            let backfill_progress = Default::default(); // We delay filling this until stream graph setup.
+            let actor_map = Default::default();
+            let table_map = Default::default();
+            let upstream_mv_counts = Default::default();
+            let definitions = Default::default();
+            let version_stats = todo!();
+            let tracking_commands = Default::default();
             // If failed, enter recovery mode.
             self.set_status(BarrierManagerStatus::Recovering).await;
             let mut tracker = self.tracker.lock().await;
-            *tracker = CreateMviewProgressTracker::new();
+            *tracker = CreateMviewProgressTracker::recover(
+                backfill_progress,
+                actor_map,
+                table_map,
+                upstream_mv_counts,
+                definitions,
+                version_stats,
+                tracking_commands,
+            );
 
             let latest_snapshot = self.hummock_manager.latest_snapshot();
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
