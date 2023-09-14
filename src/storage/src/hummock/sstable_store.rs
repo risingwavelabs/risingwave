@@ -27,7 +27,7 @@ use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
-    BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadataIter, ObjectStoreRef,
+    MonitoredStreamingReader, ObjectError, ObjectMetadataIter, ObjectStoreRef,
     ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::SstableInfo;
@@ -260,7 +260,7 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockResponse> {
         let object_id = sst.id;
-        let (block_loc, uncompressed_capacity) = sst.calculate_block_info(block_index);
+        let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
 
         stats.cache_data_block_total += 1;
         let mut fetch_block = || {
@@ -269,6 +269,7 @@ impl SstableStore {
             let data_path = self.get_sst_data_path(object_id);
             let store = self.store.clone();
             let use_file_cache = !matches!(policy, CachePolicy::Disable);
+            let range = range.clone();
 
             async move {
                 let key = SstableBlockIndex {
@@ -284,7 +285,7 @@ impl SstableStore {
                     return Ok(block);
                 }
 
-                let block_data = store.read(&data_path, Some(block_loc)).await?;
+                let block_data = store.read(&data_path, range).await?;
                 let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
 
                 Ok(block)
@@ -405,10 +406,7 @@ impl SstableStore {
                     let store = self.store.clone();
                     let meta_path = self.get_sst_data_path(object_id);
                     let stats_ptr = stats.remote_io_time.clone();
-                    let loc = BlockLocation {
-                        offset: sst.meta_offset as usize,
-                        size: (sst.file_size - sst.meta_offset) as usize,
-                    };
+                    let range = sst.meta_offset as usize..sst.file_size as usize;
                     async move {
                         if let Some(sst) = meta_file_cache
                             .lookup(&object_id)
@@ -421,7 +419,7 @@ impl SstableStore {
 
                         let now = Instant::now();
                         let buf = store
-                            .read(&meta_path, Some(loc))
+                            .read(&meta_path, range)
                             .await
                             .map_err(HummockError::object_io_error)?;
                         let meta = SstableMeta::decode(&mut &buf[..])?;
@@ -533,7 +531,7 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<bool> {
         let object_id = sst.id;
-        let (block_loc, uncompressed_capacity) = sst.calculate_block_info(block_index);
+        let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
 
         stats.cache_data_block_total += 1;
         let fetch_block = move || {
@@ -542,7 +540,7 @@ impl SstableStore {
             let store = self.store.clone();
 
             async move {
-                let data = store.read(&data_path, Some(block_loc)).await?;
+                let data = store.read(&data_path, range).await?;
                 let block = Block::decode(data, uncompressed_capacity)?;
                 let block = Box::new(block);
 

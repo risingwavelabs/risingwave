@@ -1,20 +1,20 @@
 query ITITT
-SELECT oid, typname, typelem, typnotnull, typtype FROM pg_catalog.pg_type order by oid;
+SELECT oid, typname, typelem, typnotnull, typtype, typinput FROM pg_catalog.pg_type order by oid;
 ----
-16	bool	0	f	b
-17	bytea	0	f	b
-20	int8	0	f	b
-21	int2	0	f	b
-23	int4	0	f	b
-25	text	0	f	b
-700	float4	0	f	b
-701	float8	0	f	b
-1043	varchar	0	f	b
-1082	date	0	f	b
-1083	time	0	f	b
-1114	timestamp	0	f	b
-1184	timestamptz	0	f	b
-1186	interval	0	f	b
-1301	rw_int256	0	f	b
-1700	numeric	0	f	b
-3802	jsonb	0	f	b
+16	bool	0	f	b boolin
+17	bytea	0	f	b byteain
+20	int8	0	f	b int8in
+21	int2	0	f	b int2in
+23	int4	0	f	b int4in
+25	text	0	f	b textin
+700	float4	0	f	b float4in
+701	float8	0	f	b float8in
+1043	varchar	0	f	b varcharin
+1082	date	0	f	b date_in
+1083	time	0	f	b time_in
+1114	timestamp	0	f	b timestamp_in
+1184	timestamptz	0	f	b timestamptz_in
+1186	interval	0	f	b interval_in
+1301	rw_int256	0	f	b rw_int256_in
+1700	numeric	0	f	b numeric_in
+3802	jsonb	0	f	b jsonb_in
