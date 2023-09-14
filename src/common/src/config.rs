@@ -1121,7 +1121,7 @@ pub mod default {
         }
 
         pub fn concurrency() -> usize {
-            100
+            10
         }
     }
 
