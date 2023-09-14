@@ -338,11 +338,11 @@ mod tests {
     use futures_util::FutureExt;
     use risingwave_common::array::{Array, DataChunk, I32Array, StreamChunk};
 
-    use crate::agg::AggCall;
+    use crate::aggregate::AggCall;
 
     #[test]
     fn test() {
-        let approx_count_distinct = crate::agg::build_append_only(&AggCall::from_pretty(
+        let approx_count_distinct = crate::aggregate::build_append_only(&AggCall::from_pretty(
             "(approx_count_distinct:int8 $0:int4)",
         ))
         .unwrap();

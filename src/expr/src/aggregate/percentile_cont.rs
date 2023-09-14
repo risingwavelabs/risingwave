@@ -19,8 +19,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
-use super::{AggStateDyn, AggregateFunction, AggregateState};
-use crate::agg::AggCall;
+use super::{AggCall, AggStateDyn, AggregateFunction, AggregateState};
 use crate::Result;
 
 /// Computes the continuous percentile, a value corresponding to the specified fraction within the

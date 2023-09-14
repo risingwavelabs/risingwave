@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 use risingwave_common::types::DataTypeName;
 
 use super::FuncSigDebug;
-use crate::agg::{AggCall, AggKind, BoxedAggregateFunction};
+use crate::aggregate::{AggCall, AggKind, BoxedAggregateFunction};
 use crate::Result;
 
 pub static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| unsafe {

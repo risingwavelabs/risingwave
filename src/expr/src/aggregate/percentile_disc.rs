@@ -20,8 +20,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
-use super::{AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction};
-use crate::agg::AggCall;
+use super::{AggCall, AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction};
 use crate::Result;
 
 /// Computes the discrete percentile, the first value within the ordered set of aggregated argument

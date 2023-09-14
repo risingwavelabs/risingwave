@@ -21,7 +21,7 @@ use risingwave_pb::expr::window_frame::{PbBound, PbExclusion};
 use risingwave_pb::expr::{PbWindowFrame, PbWindowFunction};
 
 use super::WindowFuncKind;
-use crate::agg::AggArgs;
+use crate::aggregate::AggArgs;
 use crate::Result;
 
 #[derive(Debug, Clone)]

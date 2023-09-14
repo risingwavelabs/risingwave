@@ -26,7 +26,7 @@
 
 extern crate self as risingwave_expr;
 
-pub mod agg;
+pub mod aggregate;
 mod error;
 pub mod expr;
 pub mod scalar;

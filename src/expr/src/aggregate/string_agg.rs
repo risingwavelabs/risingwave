@@ -35,7 +35,7 @@ fn string_agg(
 mod tests {
     use risingwave_common::array::*;
 
-    use crate::agg::AggCall;
+    use crate::aggregate::AggCall;
     use crate::Result;
 
     #[tokio::test]
@@ -47,7 +47,7 @@ mod tests {
             + ccc ,
             + ddd ,",
         );
-        let string_agg = crate::agg::build_append_only(&AggCall::from_pretty(
+        let string_agg = crate::aggregate::build_append_only(&AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
         let mut state = string_agg.create_state();
@@ -68,7 +68,7 @@ mod tests {
             + ccc _
             + ddd .",
         );
-        let string_agg = crate::agg::build_append_only(&AggCall::from_pretty(
+        let string_agg = crate::aggregate::build_append_only(&AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
         let mut state = string_agg.create_state();

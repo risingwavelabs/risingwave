@@ -24,7 +24,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
 use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::*;
-use risingwave_expr::agg::{build_append_only, AggArgs, AggCall, AggKind};
+use risingwave_expr::aggregate::{build_append_only, AggArgs, AggCall, AggKind};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
 use risingwave_expr::sig::func::func_sigs;

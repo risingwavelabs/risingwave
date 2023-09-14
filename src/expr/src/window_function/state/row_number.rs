@@ -82,7 +82,7 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::agg::AggArgs;
+    use crate::aggregate::AggArgs;
     use crate::window_function::{Frame, FrameBound, WindowFuncKind};
 
     fn create_state_key(pk: i64) -> StateKey {

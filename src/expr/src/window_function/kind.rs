@@ -15,7 +15,7 @@
 use parse_display::{Display, FromStr};
 use risingwave_common::bail;
 
-use crate::agg::AggKind;
+use crate::aggregate::AggKind;
 use crate::Result;
 
 /// Kind of window functions.
