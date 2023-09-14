@@ -105,6 +105,7 @@ impl MonitorService for MonitorServiceImpl {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[cfg_attr(coverage, no_coverage)]
     async fn heap_profiling(
         &self,
