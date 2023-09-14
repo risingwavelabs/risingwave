@@ -86,6 +86,7 @@ impl StreamNode for StreamSource {
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
             properties: source_catalog.properties.clone().into_iter().collect(),
+            rate_limit: None,
         });
         PbNodeBody::Source(SourceNode { source_inner })
     }

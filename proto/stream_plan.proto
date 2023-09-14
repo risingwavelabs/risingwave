@@ -150,6 +150,8 @@ message StreamSource {
   map<string, string> properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
+  // Streaming rate limit
+  optional uint32 rate_limit = 9;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves
