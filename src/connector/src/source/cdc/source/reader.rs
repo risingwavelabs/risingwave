@@ -166,10 +166,11 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
 
         while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {
             tracing::debug!("receive events {:?}", events.len());
-            self.source_ctx.metrics.connector_source_rows_received.with_label_values(&[
-                &source_type,
-                &source_id,
-            ]).inc_by(events.len() as u64);
+            self.source_ctx
+                .metrics
+                .connector_source_rows_received
+                .with_label_values(&[&source_type, &source_id])
+                .inc_by(events.len() as u64);
             let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
             yield msgs;
         }
