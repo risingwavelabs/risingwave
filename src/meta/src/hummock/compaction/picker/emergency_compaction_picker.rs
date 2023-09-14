@@ -42,7 +42,7 @@ impl EmergencyCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let unused_validator = Arc::new(CompactionTaskValidator::unused(self.config.clone()));
+        let unused_validator = Arc::new(CompactionTaskValidator::unused());
 
         let mut base_level_compaction_picker = LevelCompactionPicker::new_with_validator(
             self.target_level,

@@ -41,7 +41,6 @@ impl CompactionTaskValidator {
             ValidationRuleType::Tier,
             Box::new(TierCompactionTaskValidationRule {
                 config: config.clone(),
-                enable: true,
             }),
         );
 
@@ -49,52 +48,21 @@ impl CompactionTaskValidator {
             ValidationRuleType::Intra,
             Box::new(IntraCompactionTaskValidationRule {
                 config: config.clone(),
-                enable: true,
             }),
         );
 
         validation_rules.insert(
             ValidationRuleType::ToBase,
-            Box::new(BaseCompactionTaskValidationRule {
-                config,
-                enable: true,
-            }),
+            Box::new(BaseCompactionTaskValidationRule { config }),
         );
 
         CompactionTaskValidator { validation_rules }
     }
 
-    pub fn unused(config: Arc<CompactionConfig>) -> Self {
-        let mut validation_rules: HashMap<
-            ValidationRuleType,
-            Box<dyn CompactionTaskValidationRule>,
-        > = HashMap::default();
-
-        validation_rules.insert(
-            ValidationRuleType::Tier,
-            Box::new(TierCompactionTaskValidationRule {
-                config: config.clone(),
-                enable: false,
-            }),
-        );
-
-        validation_rules.insert(
-            ValidationRuleType::Intra,
-            Box::new(IntraCompactionTaskValidationRule {
-                config: config.clone(),
-                enable: false,
-            }),
-        );
-
-        validation_rules.insert(
-            ValidationRuleType::ToBase,
-            Box::new(BaseCompactionTaskValidationRule {
-                config,
-                enable: false,
-            }),
-        );
-
-        CompactionTaskValidator { validation_rules }
+    pub fn unused() -> Self {
+        CompactionTaskValidator {
+            validation_rules: HashMap::default(),
+        }
     }
 
     pub fn valid_compact_task(
@@ -103,10 +71,11 @@ impl CompactionTaskValidator {
         picker_type: ValidationRuleType,
         stats: &mut LocalPickerStatistic,
     ) -> bool {
-        self.validation_rules
-            .get(&picker_type)
-            .unwrap()
-            .validate(input, stats)
+        if let Some(validation_rule) = self.validation_rules.get(&picker_type) {
+            validation_rule.validate(input, stats)
+        } else {
+            true
+        }
     }
 }
 
@@ -116,15 +85,10 @@ pub trait CompactionTaskValidationRule {
 
 struct TierCompactionTaskValidationRule {
     config: Arc<CompactionConfig>,
-    enable: bool,
 }
 
 impl CompactionTaskValidationRule for TierCompactionTaskValidationRule {
     fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
-        if !self.enable {
-            return true;
-        }
-
         // so the design here wants to merge multiple overlapping-levels in one compaction
         let max_compaction_bytes = std::cmp::min(
             self.config.max_compaction_bytes,
@@ -161,15 +125,10 @@ impl CompactionTaskValidationRule for TierCompactionTaskValidationRule {
 
 struct IntraCompactionTaskValidationRule {
     config: Arc<CompactionConfig>,
-    enable: bool,
 }
 
 impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
     fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
-        if !self.enable {
-            return true;
-        }
-
         let intra_sub_level_compact_level_count =
             self.config.level0_sub_level_compact_level_count as usize;
 
@@ -215,15 +174,10 @@ impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
 
 struct BaseCompactionTaskValidationRule {
     config: Arc<CompactionConfig>,
-    enable: bool,
 }
 
 impl CompactionTaskValidationRule for BaseCompactionTaskValidationRule {
     fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
-        if !self.enable {
-            return true;
-        }
-
         // The size of target level may be too large, we shall skip this compact task and wait
         //  the data in base level compact to lower level.
         if input.target_input_size > self.config.max_compaction_bytes {

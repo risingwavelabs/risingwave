@@ -2558,8 +2558,8 @@ impl HummockManager {
                                 if let Some(compactor) = hummock_manager.compactor_manager.get_compactor(context_id) {
                                     if let Some((group, task_type)) = hummock_manager.auto_pick_compaction_group_and_type().await {
                                         let selector: &mut Box<dyn LevelSelector> = {
-                                            let mut versioning_guard = write_lock!(hummock_manager, versioning).await;
-                                            let versioning = versioning_guard.deref_mut();
+                                            let versioning_guard = read_lock!(hummock_manager, versioning).await;
+                                            let versioning = versioning_guard.deref();
 
                                             if versioning.write_limit.contains_key(&group) {
                                                 compaction_selectors.get_mut(&TaskType::Emergency).unwrap()
