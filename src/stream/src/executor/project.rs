@@ -269,14 +269,15 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+        let pk_indices = vec![0];
+        let (mut tx, source) = MockSource::channel(schema, pk_indices.clone());
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),
             Box::new(source),
-            vec![],
+            pk_indices,
             vec![test_expr],
             1,
             MultiMap::new(),

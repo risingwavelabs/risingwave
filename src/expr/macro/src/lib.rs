@@ -41,6 +41,7 @@ mod utils;
 ///     - [Optimization](#optimization)
 ///     - [Functions Returning Strings](#functions-returning-strings)
 ///     - [Preprocessing Constant Arguments](#preprocessing-constant-arguments)
+///     - [Context](#context)
 /// - [Table Function](#table-function)
 /// - [Registration and Invocation](#registration-and-invocation)
 /// - [Appendix: Type Matrix](#appendix-type-matrix)
@@ -196,6 +197,8 @@ mod utils;
 /// matrix]) and do not contain any Option or Result, the `#[function]` macro will automatically
 /// generate SIMD vectorized execution code.
 ///
+/// Therefore, try to avoid returning `Option` and `Result` whenever possible.
+///
 /// ## Functions Returning Strings
 ///
 /// For functions that return varchar types, you can also use the writer style function signature to
@@ -203,7 +206,7 @@ mod utils;
 ///
 /// ```ignore
 /// #[function("trim(varchar) -> varchar")]
-/// pub fn trim(s: &str, writer: &mut dyn Write) {
+/// fn trim(s: &str, writer: &mut impl Write) {
 ///     writer.write_str(s.trim()).unwrap();
 /// }
 /// ```
@@ -212,9 +215,23 @@ mod utils;
 ///
 /// ```ignore
 /// #[function("trim(varchar) -> varchar")]
-/// pub fn trim(s: &str, writer: &mut dyn Write) -> Result<()> {
+/// fn trim(s: &str, writer: &mut impl Write) -> Result<()> {
 ///     writer.write_str(s.trim()).unwrap();
 ///     Ok(())
+/// }
+/// ```
+///
+/// If null values may be returned, then the return value should be `Option<()>`:
+///
+/// ```ignore
+/// #[function("trim(varchar) -> varchar")]
+/// fn trim(s: &str, writer: &mut impl Write) -> Option<()> {
+///     if s.is_empty() {
+///         None
+///     } else {
+///         writer.write_str(s.trim()).unwrap();
+///         Some(())
+///     }
 /// }
 /// ```
 ///
@@ -237,12 +254,28 @@ mod utils;
 ///
 /// The `prebuild` argument can be specified, and its value is a Rust expression used to construct a
 /// new variable from the input arguments of the function. Here `$1`, `$2` represent the second and
-/// third arguments of the function (indexed from 0), and their types are `Datum`. In the Rust
+/// third arguments of the function (indexed from 0), and their types are `&str`. In the Rust
 /// function signature, these positions of parameters will be omitted, replaced by an extra new
 /// variable at the end.
 ///
-/// TODO: This macro will support both variable and constant inputs, and automatically optimize the
-/// preprocessing of constants. Currently, it only supports constant inputs.
+/// This macro generates two versions of the function. If all the input parameters that `prebuild`
+/// depends on are constants, it will precompute them during the build function. Otherwise, it will
+/// compute them for each input row during evaluation. This way, we support both constant and variable
+/// inputs while optimizing performance for constant inputs.
+///
+/// ## Context
+///
+/// If a function needs to obtain type information at runtime, you can add an `&Context` parameter to
+/// the function signature. For example:
+///
+/// ```ignore
+/// #[function("foo(int32) -> int64")]
+/// fn foo(a: i32, ctx: &Context) -> i64 {
+///    assert_eq!(ctx.arg_types[0], DataType::Int32);
+///    assert_eq!(ctx.return_type, DataType::Int64);
+///    // ...
+/// }
+/// ```
 ///
 /// # Table Function
 ///
@@ -338,7 +371,7 @@ pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_descriptor(&user_fn, false)?);
+            tokens.extend(attr.generate_function_descriptor(&user_fn, false)?);
         }
         Ok(tokens)
     }
@@ -356,7 +389,7 @@ pub fn build_function(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_descriptor(&user_fn, true)?);
+            tokens.extend(attr.generate_function_descriptor(&user_fn, true)?);
         }
         Ok(tokens)
     }
@@ -370,11 +403,11 @@ pub fn build_function(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
     fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
         let fn_attr: FunctionAttr = syn::parse(attr)?;
-        let user_fn: UserFunctionAttr = syn::parse(item.clone())?;
+        let user_fn: AggregateFnOrImpl = syn::parse(item.clone())?;
 
         let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_agg_descriptor(&user_fn, false)?);
+            tokens.extend(attr.generate_aggregate_descriptor(&user_fn, false)?);
         }
         Ok(tokens)
     }
@@ -388,11 +421,11 @@ pub fn aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn build_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
     fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
         let fn_attr: FunctionAttr = syn::parse(attr)?;
-        let user_fn: UserFunctionAttr = syn::parse(item.clone())?;
+        let user_fn: AggregateFnOrImpl = syn::parse(item.clone())?;
 
         let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_agg_descriptor(&user_fn, true)?);
+            tokens.extend(attr.generate_aggregate_descriptor(&user_fn, true)?);
         }
         Ok(tokens)
     }
@@ -404,58 +437,110 @@ pub fn build_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[derive(Debug, Clone, Default)]
 struct FunctionAttr {
+    /// Function name
     name: String,
+    /// Input argument types
     args: Vec<String>,
+    /// Return type
     ret: String,
+    /// Whether it is a table function
     is_table_function: bool,
+    /// Whether it is an append-only aggregate function
+    append_only: bool,
+    /// Optional function for batch evaluation.
     batch_fn: Option<String>,
+    /// State type for aggregate function.
+    /// If not specified, it will be the same as return type.
     state: Option<String>,
+    /// Initial state value for aggregate function.
+    /// If not specified, it will be NULL.
     init_state: Option<String>,
+    /// Prebuild function for arguments.
+    /// This could be any Rust expression.
     prebuild: Option<String>,
+    /// Type inference function.
     type_infer: Option<String>,
+    /// Whether the function is deprecated.
     deprecated: bool,
 }
 
+/// Attributes from function signature `fn(..)`
 #[derive(Debug, Clone)]
 struct UserFunctionAttr {
     /// Function name
     name: String,
+    /// Whether contains argument `&Context`.
+    context: bool,
     /// The last argument type is `&mut dyn Write`.
     write: bool,
     /// The last argument type is `retract: bool`.
     retract: bool,
     /// The argument type are `Option`s.
     arg_option: bool,
-    /// The return type.
-    return_type: ReturnType,
-    /// The inner type `T` in `impl Iterator<Item = T>`
-    iterator_item_type: Option<ReturnType>,
+    /// The return type kind.
+    return_type_kind: ReturnTypeKind,
+    /// The kind of inner type `T` in `impl Iterator<Item = T>`
+    iterator_item_kind: Option<ReturnTypeKind>,
+    /// The core return type without `Option` or `Result`.
+    core_return_type: String,
     /// The number of generic types.
     generic: usize,
     /// The span of return type.
     return_type_span: proc_macro2::Span,
-    // /// `#[list(0)]` in arguments.
-    // list: Vec<(usize, usize)>,
-    // /// `#[struct(0)]` in arguments.
-    // struct_: Vec<(usize, usize)>,
+}
+
+#[derive(Debug, Clone)]
+struct AggregateImpl {
+    struct_name: String,
+    accumulate: UserFunctionAttr,
+    retract: Option<UserFunctionAttr>,
+    #[allow(dead_code)] // TODO(wrj): add merge to trait
+    merge: Option<UserFunctionAttr>,
+    finalize: Option<UserFunctionAttr>,
+    #[allow(dead_code)] // TODO(wrj): support encode
+    encode_state: Option<UserFunctionAttr>,
+    #[allow(dead_code)] // TODO(wrj): support decode
+    decode_state: Option<UserFunctionAttr>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
+enum AggregateFnOrImpl {
+    /// A simple accumulate/retract function.
+    Fn(UserFunctionAttr),
+    /// A full impl block.
+    Impl(AggregateImpl),
+}
+
+impl AggregateFnOrImpl {
+    fn as_fn(&self) -> &UserFunctionAttr {
+        match self {
+            AggregateFnOrImpl::Fn(attr) => attr,
+            _ => panic!("expect fn"),
+        }
+    }
+
+    fn accumulate(&self) -> &UserFunctionAttr {
+        match self {
+            AggregateFnOrImpl::Fn(attr) => attr,
+            AggregateFnOrImpl::Impl(impl_) => &impl_.accumulate,
+        }
+    }
+
+    fn has_retract(&self) -> bool {
+        match self {
+            AggregateFnOrImpl::Fn(fn_) => fn_.retract,
+            AggregateFnOrImpl::Impl(impl_) => impl_.retract.is_some(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum ReturnType {
+enum ReturnTypeKind {
     T,
     Option,
     Result,
     ResultOption,
-}
-
-impl ReturnType {
-    fn contains_result(&self) -> bool {
-        matches!(self, ReturnType::Result | ReturnType::ResultOption)
-    }
-
-    fn contains_option(&self) -> bool {
-        matches!(self, ReturnType::Option | ReturnType::ResultOption)
-    }
 }
 
 impl FunctionAttr {
@@ -469,11 +554,11 @@ impl FunctionAttr {
 }
 
 impl UserFunctionAttr {
-    fn is_writer_style(&self) -> bool {
-        self.write && !self.arg_option
-    }
-
+    /// Returns true if the function is like `fn(T1, T2, .., Tn) -> T`.
     fn is_pure(&self) -> bool {
-        !self.write && !self.arg_option && self.return_type == ReturnType::T
+        !self.write
+            && !self.context
+            && !self.arg_option
+            && self.return_type_kind == ReturnTypeKind::T
     }
 }
