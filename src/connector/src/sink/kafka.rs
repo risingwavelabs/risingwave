@@ -33,6 +33,7 @@ use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
 
+use super::encoder::{JsonEncoder, TimestampHandlingMode};
 use super::{
     Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT,
@@ -546,10 +547,17 @@ impl KafkaSinkWriter {
         // TODO: Remove the clones here, only to satisfy borrow checker at present
         let schema = self.schema.clone();
         let pk_indices = self.pk_indices.clone();
+        let key_encoder =
+            JsonEncoder::new(&schema, Some(&pk_indices), TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
         // Initialize the upsert_stream
-        let upsert_stream =
-            gen_upsert_message_stream(&schema, &pk_indices, chunk, UpsertAdapterOpts::default());
+        let upsert_stream = gen_upsert_message_stream(
+            chunk,
+            UpsertAdapterOpts::default(),
+            key_encoder,
+            val_encoder,
+        );
 
         #[for_await]
         for msg in upsert_stream {
@@ -564,13 +572,16 @@ impl KafkaSinkWriter {
         // TODO: Remove the clones here, only to satisfy borrow checker at present
         let schema = self.schema.clone();
         let pk_indices = self.pk_indices.clone();
+        let key_encoder =
+            JsonEncoder::new(&schema, Some(&pk_indices), TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
         // Initialize the append_only_stream
         let append_only_stream = gen_append_only_message_stream(
-            &schema,
-            &pk_indices,
             chunk,
             AppendOnlyAdapterOpts::default(),
+            key_encoder,
+            val_encoder,
         );
 
         #[for_await]

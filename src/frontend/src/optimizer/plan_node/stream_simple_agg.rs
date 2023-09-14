@@ -89,7 +89,7 @@ impl_plan_tree_node_for_unary! { StreamSimpleAgg }
 impl StreamNode for StreamSimpleAgg {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
-        let (result_table, agg_states, distinct_dedup_tables) =
+        let (intermediate_state_table, agg_states, distinct_dedup_tables) =
             self.logical.infer_tables(&self.base, None, None);
 
         PbNodeBody::SimpleAgg(SimpleAggNode {
@@ -110,8 +110,8 @@ impl StreamNode for StreamSimpleAgg {
                 .into_iter()
                 .map(|s| s.into_prost(state))
                 .collect(),
-            result_table: Some(
-                result_table
+            intermediate_state_table: Some(
+                intermediate_state_table
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),

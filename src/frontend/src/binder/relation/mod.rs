@@ -55,7 +55,11 @@ pub enum Relation {
     Join(Box<BoundJoin>),
     Apply(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
-    TableFunction(ExprImpl),
+    /// Table function or scalar function.
+    TableFunction {
+        expr: ExprImpl,
+        with_ordinality: bool,
+    },
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
 }
@@ -69,7 +73,9 @@ impl RewriteExprsRecursive for Relation {
             Relation::WindowTableFunction(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Watermark(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Share(inner) => inner.rewrite_exprs_recursive(rewriter),
-            Relation::TableFunction(inner) => *inner = rewriter.rewrite_expr(inner.take()),
+            Relation::TableFunction { expr: inner, .. } => {
+                *inner = rewriter.rewrite_expr(inner.take())
+            }
             _ => {}
         }
     }
@@ -113,7 +119,10 @@ impl Relation {
                 );
                 correlated_indices
             }
-            Relation::TableFunction(table_function) => table_function
+            Relation::TableFunction {
+                expr: table_function,
+                with_ordinality: _,
+            } => table_function
                 .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
             _ => vec![],
         }
@@ -437,9 +446,14 @@ impl Binder {
                 alias,
                 for_system_time_as_of_proctime,
             } => self.bind_relation_by_name(name, alias, for_system_time_as_of_proctime),
-            TableFactor::TableFunction { name, alias, args } => {
+            TableFactor::TableFunction {
+                name,
+                alias,
+                args,
+                with_ordinality,
+            } => {
                 self.try_mark_lateral_as_visible();
-                let result = self.bind_table_function(name, alias, args);
+                let result = self.bind_table_function(name, alias, args, with_ordinality);
                 self.try_mark_lateral_as_invisible();
                 result
             }

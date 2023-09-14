@@ -57,7 +57,7 @@ pub type GetEventStreamJniSender = Sender<GetEventStreamResponse>;
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
 
 #[derive(Error, Debug)]
-enum BindingError {
+pub enum BindingError {
     #[error("JniError {error}")]
     Jni {
         #[from]
@@ -89,7 +89,7 @@ enum BindingError {
 
 type Result<T> = std::result::Result<T, BindingError>;
 
-fn to_guarded_slice<'array, 'env>(
+pub fn to_guarded_slice<'array, 'env>(
     array: &'array JByteArray<'env>,
     env: &'array mut JNIEnv<'env>,
 ) -> Result<SliceGuard<'env, 'array>> {

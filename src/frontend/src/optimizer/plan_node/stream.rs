@@ -567,7 +567,7 @@ pub fn to_stream_prost_body(
             })
         }
         Node::SimpleAgg(me) => {
-            let result_table = me.core.infer_result_table(base, None, None);
+            let intermediate_state_table = me.core.infer_intermediate_state_table(base, None, None);
             let agg_states = me.core.infer_stream_agg_state(base, None, None);
             let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, None, None);
 
@@ -590,8 +590,8 @@ pub fn to_stream_prost_body(
                     .into_iter()
                     .map(|s| s.into_prost(state))
                     .collect(),
-                result_table: Some(
-                    result_table
+                intermediate_state_table: Some(
+                    intermediate_state_table
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
@@ -624,9 +624,9 @@ pub fn to_stream_prost_body(
             PbNodeBody::GroupTopN(group_topn_node)
         }
         Node::HashAgg(me) => {
-            let result_table =
+            let intermediate_state_table =
                 me.core
-                    .infer_result_table(base, me.vnode_col_idx, me.window_col_idx);
+                    .infer_intermediate_state_table(base, me.vnode_col_idx, me.window_col_idx);
             let agg_states =
                 me.core
                     .infer_stream_agg_state(base, me.vnode_col_idx, me.window_col_idx);
@@ -648,8 +648,8 @@ pub fn to_stream_prost_body(
                     .into_iter()
                     .map(|s| s.into_prost(state))
                     .collect(),
-                result_table: Some(
-                    result_table
+                intermediate_state_table: Some(
+                    intermediate_state_table
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
@@ -698,7 +698,7 @@ pub fn to_stream_prost_body(
                     .map(|&idx| idx as u32)
                     .collect(),
                 agg_call_states: vec![],
-                result_table: None,
+                intermediate_state_table: None,
                 is_append_only: me.input.0.append_only,
                 distinct_dedup_tables: Default::default(),
             })
@@ -735,6 +735,8 @@ pub fn to_stream_prost_body(
             log_store_type: SinkLogStoreType::InMemoryLogStore as i32,
         }),
         Node::Source(me) => {
+            // TODO(kwannoel): Is branch used, seems to be a duplicate of stream_source?
+            let rate_limit = me.ctx().session_ctx().config().get_streaming_rate_limit();
             let me = &me.core.catalog;
             let source_inner = me.as_ref().map(|me| StreamSource {
                 source_id: me.id,
@@ -748,6 +750,7 @@ pub fn to_stream_prost_body(
                 row_id_index: me.row_id_index.map(|index| index as _),
                 columns: me.columns.iter().map(|c| c.to_protobuf()).collect(),
                 properties: me.properties.clone().into_iter().collect(),
+                rate_limit,
             });
             PbNodeBody::Source(SourceNode { source_inner })
         }
