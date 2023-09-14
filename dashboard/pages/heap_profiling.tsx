@@ -26,6 +26,7 @@ import {
 } from "@chakra-ui/react"
 import Editor from "@monaco-editor/react"
 import base64url from "base64url"
+import { randomUUID } from "crypto"
 import Head from "next/head"
 import path from "path"
 import { Fragment, useEffect, useState } from "react"
@@ -120,18 +121,8 @@ export default function HeapProfiling() {
   }, [selectedProfileList])
 
   async function dumpProfile() {
-    const title = `Dumping Profiling at Compute Node ${computeNodeId}`
-
-    let result
-    try {
-      api.get(`/api/monitor/dump_heap_profile/${computeNodeId}`)
-      getProfileList(computeNodes, computeNodeId)
-      result = `${title}\n\nSucceed!`
-    } catch (e: any) {
-      console.error(e)
-      result = `${title}\n\nError: ${e.message}`
-    }
-    setProfileCollapsed(result)
+    api.get(`/api/monitor/dump_heap_profile/${computeNodeId}`)
+    getProfileList(computeNodes, computeNodeId)
   }
 
   async function analyzeHeapFile() {
@@ -150,15 +141,27 @@ export default function HeapProfiling() {
       analyzeTargetFileName
     )
 
+    setProfileCollapsed(
+      `Analyzing ${analyzeTargetFileName} from Compute Node ${computeNodeId}`
+    )
+
     const title = `Collapsed Profiling of Compute Node ${computeNodeId} for ${analyzeTargetFileName}`
 
     let result
     try {
       let analyzeFilePathBase64 = base64url(analyzeFilePath)
-      const response: string = await api.get(
+      let resObj = await fetch(
         `/api/monitor/analyze/${computeNodeId}/${analyzeFilePathBase64}`
-      )
-      result = `${title}\n\n${response}`
+      ).then(async (res) => ({
+        filename: res.headers.get("content-disposition"),
+        blob: await res.blob(),
+      }))
+      let objUrl = window.URL.createObjectURL(resObj.blob)
+      let link = document.createElement("a")
+      link.href = objUrl
+      link.download = resObj.filename || randomUUID()
+      link.click()
+      result = `${title}\n\nDownloaded!`
     } catch (e: any) {
       result = `${title}\n\nError: ${e.message}`
     }
