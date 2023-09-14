@@ -164,13 +164,20 @@ impl Planner {
                 Ok(LogicalTableFunction::new(*tf, with_ordinality, self.ctx()).into())
             }
             expr => {
+                let mut schema = Schema {
+                    // TODO: should be named
+                    fields: vec![Field::unnamed(expr.return_type())],
+                };
                 if with_ordinality {
-                    todo!()
+                    schema
+                        .fields
+                        .push(Field::with_name(DataType::Int64, "ordinality"));
+                    Ok(LogicalValues::create(
+                        vec![vec![expr, ExprImpl::literal_bigint(1)]],
+                        schema,
+                        self.ctx(),
+                    ))
                 } else {
-                    let schema = Schema {
-                        // TODO: should be named
-                        fields: vec![Field::unnamed(expr.return_type())],
-                    };
                     Ok(LogicalValues::create(vec![vec![expr]], schema, self.ctx()))
                 }
             }

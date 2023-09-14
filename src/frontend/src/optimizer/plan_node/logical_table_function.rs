@@ -14,7 +14,7 @@
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::utils::{childless_record, Distill};
@@ -25,8 +25,7 @@ use super::{
 use crate::expr::{Expr, ExprRewriter, TableFunction};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
-    BatchTableFunction, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
-    ToStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
@@ -124,30 +123,19 @@ impl PredicatePushdown for LogicalTableFunction {
 
 impl ToBatch for LogicalTableFunction {
     fn to_batch(&self) -> Result<PlanRef> {
-        // TODO: actually this is also unreachable now, as it's always converted to ProjectSet. Maybe we can remove it.
-        if self.with_ordinality {
-            todo!()
-        }
-        Ok(BatchTableFunction::new(self.clone()).into())
+        unreachable!("TableFunction should be converted to ProjectSet")
     }
 }
 
 impl ToStream for LogicalTableFunction {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        Err(
-            ErrorCode::NotImplemented("LogicalTableFunction::to_stream".to_string(), None.into())
-                .into(),
-        )
+        unreachable!("TableFunction should be converted to ProjectSet")
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Err(ErrorCode::NotImplemented(
-            "LogicalTableFunction::logical_rewrite_for_stream".to_string(),
-            None.into(),
-        )
-        .into())
+        unreachable!("TableFunction should be converted to ProjectSet")
     }
 }
