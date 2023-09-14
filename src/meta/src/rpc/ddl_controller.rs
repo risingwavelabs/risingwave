@@ -436,7 +436,7 @@ impl DdlController {
                 }
                 StreamingJob::Sink(sink) => {
                     // Validate the sink on the connector node.
-                    validate_sink(sink, self.env.connector_client()).await?;
+                    validate_sink(sink).await?;
                 }
                 _ => {}
             }

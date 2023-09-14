@@ -234,7 +234,7 @@ impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
     type Writer = CoordinatedSinkWriter<IcebergWriter>;
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         let _ = self.create_table().await?;
         Ok(())
     }
