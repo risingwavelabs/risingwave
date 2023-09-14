@@ -200,7 +200,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [$expr5, (sum(max($expr8)) / count(max($expr8))::Decimal) as $expr10] }
         └── StreamHashAgg { group_key: [$expr5], aggs: [sum(max($expr8)), count(max($expr8)), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([1]) from 1
@@ -208,7 +208,7 @@
     Fragment 1
     StreamProject { exprs: [$expr2, $expr5, max($expr8)] }
     └── StreamHashAgg { group_key: [$expr2, $expr5], aggs: [max($expr8), count] }
-        ├── result table: 2
+        ├── intermediate state table: 2
         ├── state tables: [ 1 ]
         ├── distinct tables: []
         └── StreamProject { exprs: [$expr2, $expr5, $expr8, _row_id, _row_id] }
@@ -366,7 +366,7 @@
             └── StreamHashJoin { type: Inner, predicate: window_start = window_start, output: all } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
                 ├── StreamExchange Hash([1]) from 1
                 └── StreamProject { exprs: [window_start, max(count)] }
-                    └── StreamHashAgg { group_key: [window_start], aggs: [max(count), count] } { result table: 10, state tables: [ 9 ], distinct tables: [] }
+                    └── StreamHashAgg { group_key: [window_start], aggs: [max(count), count] } { intermediate state table: 10, state tables: [ 9 ], distinct tables: [] }
                         └── StreamExchange Hash([1]) from 5
 
     Fragment 1
@@ -374,7 +374,7 @@
     └── StreamExchange NoShuffle from 2
 
     Fragment 2
-    StreamHashAgg { group_key: [$expr3, window_start], aggs: [count] } { result table: 4, state tables: [], distinct tables: [] }
+    StreamHashAgg { group_key: [$expr3, window_start], aggs: [count] } { intermediate state table: 4, state tables: [], distinct tables: [] }
     └── StreamExchange Hash([0, 1]) from 3
 
     Fragment 3
@@ -633,7 +633,7 @@
 
     Fragment 4
     StreamProject { exprs: [$expr7, max($expr5), ($expr7 - '00:00:10':Interval) as $expr8] }
-    └── StreamHashAgg { group_key: [$expr7], aggs: [max($expr5), count] } { result table: 9, state tables: [ 8 ], distinct tables: [] }
+    └── StreamHashAgg { group_key: [$expr7], aggs: [max($expr5), count] } { intermediate state table: 9, state tables: [ 8 ], distinct tables: [] }
         └── StreamExchange Hash([0]) from 5
 
     Fragment 5
@@ -1390,7 +1390,7 @@
     └── StreamHashJoin { type: LeftOuter, predicate: $expr2 = $expr5, output: [$expr2, $expr3, max($expr6), _row_id, $expr5] } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
         ├── StreamExchange Hash([0]) from 1
         └── StreamProject { exprs: [$expr5, max($expr6)] }
-            └── StreamHashAgg { group_key: [$expr5], aggs: [max($expr6), count] } { result table: 6, state tables: [ 5 ], distinct tables: [] }
+            └── StreamHashAgg { group_key: [$expr5], aggs: [max($expr6), count] } { intermediate state table: 6, state tables: [ 5 ], distinct tables: [] }
                 └── StreamExchange Hash([0]) from 3
 
     Fragment 1
@@ -1516,7 +1516,7 @@
     ├── materialized table: 4294967294
     └── StreamDynamicFilter { predicate: (count($expr5) >= $expr6), output: [$expr2, $expr3, count($expr5)] } { left table: 0, right table: 1 }
         ├── StreamProject { exprs: [$expr2, $expr3, count($expr5)] }
-        │   └── StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr5), count] } { result table: 2, state tables: [], distinct tables: [] }
+        │   └── StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr5), count] } { intermediate state table: 2, state tables: [], distinct tables: [] }
         │       └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr5, output: [$expr2, $expr3, $expr5, _row_id, _row_id] }
         │           ├── left table: 3
         │           ├── right table: 5
@@ -1557,12 +1557,12 @@
 
     Fragment 6
     StreamProject { exprs: [(sum0(sum0(count)) / sum0(count($expr5))) as $expr6] }
-    └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr5)), count] } { result table: 11, state tables: [], distinct tables: [] }
+    └── StreamSimpleAgg { aggs: [sum0(sum0(count)), sum0(count($expr5)), count] } { intermediate state table: 11, state tables: [], distinct tables: [] }
         └── StreamExchange Single from 7
 
     Fragment 7
     StreamStatelessSimpleAgg { aggs: [sum0(count), count($expr5)] }
-    └── StreamHashAgg { group_key: [$expr5], aggs: [count] } { result table: 12, state tables: [], distinct tables: [] }
+    └── StreamHashAgg { group_key: [$expr5], aggs: [count] } { intermediate state table: 12, state tables: [], distinct tables: [] }
         └── StreamExchange Hash([0]) from 8
 
     Fragment 8
@@ -1659,7 +1659,7 @@
         ├── StreamExchange Hash([0]) from 1
         └── StreamProject { exprs: [$expr5] }
             └── StreamFilter { predicate: (count >= 20:Int32) }
-                └── StreamHashAgg { group_key: [$expr5], aggs: [count] } { result table: 5, state tables: [], distinct tables: [] }
+                └── StreamHashAgg { group_key: [$expr5], aggs: [count] } { intermediate state table: 5, state tables: [], distinct tables: [] }
                     └── StreamExchange Hash([0]) from 3
 
     Fragment 1
@@ -1769,7 +1769,7 @@
         ├── StreamExchange Hash([0]) from 1
         └── StreamProject { exprs: [$expr5] }
             └── StreamFilter { predicate: (count < 20:Int32) }
-                └── StreamHashAgg { group_key: [$expr5], aggs: [count] } { result table: 5, state tables: [], distinct tables: [] }
+                └── StreamHashAgg { group_key: [$expr5], aggs: [count] } { intermediate state table: 5, state tables: [], distinct tables: [] }
                     └── StreamExchange Hash([0]) from 3
 
     Fragment 1
@@ -1885,7 +1885,7 @@
     Fragment 1
     StreamGroupTopN { order: [count($expr5) DESC], limit: 1000, offset: 0, group_key: [$expr6] } { state table: 1 }
     └── StreamProject { exprs: [$expr2, $expr3, count($expr5), Vnode($expr2) as $expr6] }
-        └── StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr5), count] } { result table: 2, state tables: [], distinct tables: [] }
+        └── StreamHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr5), count] } { intermediate state table: 2, state tables: [], distinct tables: [] }
             └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr5, output: [$expr2, $expr3, $expr5, _row_id, _row_id] }
                 ├── left table: 3
                 ├── right table: 5
@@ -2011,19 +2011,19 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [min(min(max($expr7)))] }
         └── StreamSimpleAgg { aggs: [min(min(max($expr7))), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamHashAgg { group_key: [$expr9], aggs: [min(max($expr7)), count] }
-    ├── result table: 3
+    ├── intermediate state table: 3
     ├── state tables: [ 2 ]
     ├── distinct tables: []
     └── StreamProject { exprs: [$expr2, max($expr7), Vnode($expr2) as $expr9] }
         └── StreamHashAgg { group_key: [$expr2], aggs: [max($expr7), count] }
-            ├── result table: 5
+            ├── intermediate state table: 5
             ├── state tables: [ 4 ]
             ├── distinct tables: []
             └── StreamProject { exprs: [$expr2, $expr7, _row_id, _row_id] }

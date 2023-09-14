@@ -46,9 +46,7 @@ serde_derive = "1.0.188"
 serde_json = "1.0.106"
 sqllogictest = "0.15.3"
 tempfile = "3"
-tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
-    "profiling",
-], rev = "b7f9f3" }
+tikv-jemallocator = { workspace = true }
 tokio = { version = "0.2.23", package = "madsim-tokio" }
 tokio-postgres = "0.7"
 tracing = "0.1"

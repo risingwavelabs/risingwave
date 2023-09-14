@@ -113,7 +113,6 @@ impl MonitorService for MonitorServiceImpl {
         }
     }
 
-    #[cfg(target_os = "linux")]
     #[cfg_attr(coverage, no_coverage)]
     async fn heap_profiling(
         &self,
@@ -124,6 +123,12 @@ impl MonitorService for MonitorServiceImpl {
         use std::path::PathBuf;
 
         use tikv_jemalloc_ctl;
+
+        if !cfg!(target_os = "linux") {
+            return Err(Status::unimplemented(
+                "heap profiling is only implemented on Linux",
+            ));
+        }
 
         if !tikv_jemalloc_ctl::opt::prof::read().unwrap() {
             return Err(Status::failed_precondition(
@@ -159,17 +164,6 @@ impl MonitorService for MonitorServiceImpl {
         };
         let _ = unsafe { Box::from_raw(file_path_ptr) };
         response
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    #[cfg_attr(coverage, no_coverage)]
-    async fn heap_profiling(
-        &self,
-        _request: Request<HeapProfilingRequest>,
-    ) -> Result<Response<HeapProfilingResponse>, Status> {
-        Err(Status::unimplemented(
-            "heap profiling is only implemented on Linux",
-        ))
     }
 
     #[cfg_attr(coverage, no_coverage)]

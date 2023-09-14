@@ -128,9 +128,8 @@ impl JemallocMemoryControl {
                     .unwrap()
                     .to_string()
             } else {
-                let prof_prefix_mib = jemalloc_prof::prefix::mib().unwrap();
-                let prof_prefix = prof_prefix_mib.read().unwrap();
-                let mut file_path = prof_prefix.to_string_lossy().to_string();
+                let prof_prefix = jemalloc_opt::prof_prefix::read().unwrap();
+                let mut file_path = prof_prefix.to_str().unwrap().to_string();
                 file_path.push_str(&file_name);
                 file_path
             };

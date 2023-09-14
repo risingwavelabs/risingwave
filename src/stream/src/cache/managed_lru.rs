@@ -17,7 +17,6 @@ use std::borrow::Borrow;
 use std::cmp::min;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
-use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -163,18 +162,6 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         let v = self.inner.get_mut(k);
         v.map(|inner| {
             MutGuard::new(
-                inner,
-                &mut self.kv_heap_size,
-                &mut self.last_reported_size_bytes,
-                &mut self.memory_usage_metrics,
-            )
-        })
-    }
-
-    pub fn get_mut_unsafe(&mut self, k: &K) -> Option<UnsafeMutGuard<V>> {
-        let v = self.inner.get_mut(k);
-        v.map(|inner| {
-            UnsafeMutGuard::new(
                 inner,
                 &mut self.kv_heap_size,
                 &mut self.last_reported_size_bytes,
@@ -365,47 +352,5 @@ impl<'a, V: EstimateSize> Deref for MutGuard<'a, V> {
 impl<'a, V: EstimateSize> DerefMut for MutGuard<'a, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner
-    }
-}
-
-pub struct UnsafeMutGuard<V: EstimateSize> {
-    inner: NonNull<V>,
-    // The size of the original value
-    original_val_size: usize,
-    // The total size of a collection
-    total_size: NonNull<usize>,
-    last_reported_size_bytes: NonNull<usize>,
-    memory_usage_metrics: NonNull<IntGauge>,
-}
-
-impl<V: EstimateSize> UnsafeMutGuard<V> {
-    pub fn new(
-        inner: &mut V,
-        total_size: &mut usize,
-        last_reported_size_bytes: &mut usize,
-        memory_usage_metrics: &mut IntGauge,
-    ) -> Self {
-        let original_val_size = inner.estimated_size();
-        Self {
-            inner: inner.into(),
-            original_val_size,
-            total_size: total_size.into(),
-            last_reported_size_bytes: last_reported_size_bytes.into(),
-            memory_usage_metrics: memory_usage_metrics.into(),
-        }
-    }
-
-    /// # Safety
-    ///
-    /// 1. Only 1 `MutGuard` should be held for each value.
-    /// 2. The returned `MutGuard` should not be moved to other threads.
-    pub unsafe fn as_mut_guard<'a>(&mut self) -> MutGuard<'a, V> {
-        MutGuard {
-            inner: self.inner.as_mut(),
-            original_val_size: self.original_val_size,
-            total_size: self.total_size.as_mut(),
-            last_reported_size_bytes: self.last_reported_size_bytes.as_mut(),
-            memory_usage_metrics: self.memory_usage_metrics.as_mut(),
-        }
     }
 }

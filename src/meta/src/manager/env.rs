@@ -25,9 +25,9 @@ use crate::manager::{
     NotificationManagerRef,
 };
 use crate::model::ClusterId;
+use crate::storage::MetaStoreRef;
 #[cfg(any(test, feature = "test"))]
-use crate::storage::MemStore;
-use crate::storage::{MetaStoreBoxExt, MetaStoreRef};
+use crate::storage::{MemStore, MetaStoreBoxExt};
 use crate::MetaResult;
 
 /// [`MetaSrvEnv`] is the global environment in Meta service. The instance will be shared by all
