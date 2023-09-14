@@ -35,15 +35,15 @@ use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
-use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
-use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::GetSystemParamsRequest;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::filter_key_extractor::{
     FilterKeyExtractorManager, RemoteTableAccessor, RpcFilterKeyExtractorManager,
 };
-use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
+use risingwave_storage::hummock::compactor::{
+    CompactionExecutor, CompactorContext, GrpcProxyClient,
+};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
     HummockMemoryCollector, MemoryLimiter, SstableObjectIdManager, SstableStore,
@@ -55,7 +55,7 @@ use risingwave_storage::opts::StorageOpts;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
-use tonic::transport::{Channel, Endpoint};
+use tonic::transport::Endpoint;
 use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
@@ -337,9 +337,13 @@ pub async fn shared_compactor_serve(
         .connect()
         .await
         .expect("Failed to create channel via proxy rpc endpoint.");
-    let client: HummockManagerServiceClient<Channel> =
-        HummockManagerServiceClient::new(channel.clone());
-    let mut system_params_client = SystemParamsServiceClient::new(channel.clone());
+    let grpc_proxy_client = GrpcProxyClient::new(channel);
+    let mut system_params_client = grpc_proxy_client
+        .core
+        .read()
+        .await
+        .system_params_client
+        .clone();
     let system_params_response = system_params_client
         .get_system_params(GetSystemParamsRequest {})
         .await
@@ -380,7 +384,7 @@ pub async fn shared_compactor_serve(
                 async move {
                     let (join_handle, shutdown_sender) =
                         risingwave_storage::hummock::compactor::start_shared_compactor(
-                            client.clone(),
+                            grpc_proxy_client,
                             receiver,
                             compactor_context,
                         );

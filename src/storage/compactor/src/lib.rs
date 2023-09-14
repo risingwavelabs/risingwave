@@ -14,7 +14,7 @@
 
 mod compactor_observer;
 mod rpc;
-mod server;
+pub mod server;
 mod telemetry;
 
 use clap::Parser;

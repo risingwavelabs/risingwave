@@ -22,8 +22,11 @@ use risingwave_pb::hummock::report_compaction_task_request::{
     ReportTask as ReportSharedTask,
 };
 use risingwave_pb::hummock::{ReportFullScanTaskRequest, ReportVacuumTaskRequest};
-use tokio::sync::mpsc;
+use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
+use tokio::sync::{mpsc, RwLock};
+use tonic::transport::Channel;
 use tonic::Request;
+
 pub mod compactor_runner;
 mod context;
 mod iterator;
@@ -615,7 +618,7 @@ pub fn start_compactor(
 #[cfg_attr(coverage, no_coverage)]
 #[allow(clippy::too_many_arguments)]
 pub fn start_shared_compactor(
-    client: HummockManagerServiceClient<tonic::transport::Channel>,
+    grpc_proxy_client: GrpcProxyClient,
     mut receiver: mpsc::UnboundedReceiver<Request<DispatchCompactionTaskRequest>>,
     context: CompactorContext,
 ) -> (JoinHandle<()>, Sender<()>) {
@@ -623,15 +626,13 @@ pub fn start_shared_compactor(
     let task_progress = context.task_progress_manager.clone();
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let periodic_event_update_interval = Duration::from_millis(1000);
-    let report_task_client = client.clone();
-    let get_object_id_client = client.clone();
-    let mut report_heartbeat_client = client;
+
     let join_handle = tokio::spawn(async move {
         let shutdown_map = CompactionShutdownMap::default();
 
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
         let executor = context.compaction_executor.clone();
-
+        let mut report_task_client = grpc_proxy_client.core.read().await.hummock_client.clone();
         'consume_stream: loop {
             let request: Option<Request<DispatchCompactionTaskRequest>> = tokio::select! {
                 _ = periodic_event_interval.tick() => {
@@ -644,7 +645,7 @@ pub fn start_shared_compactor(
                         )),
                      };
 
-                    match report_heartbeat_client.report_compaction_task(report_compaction_task_request).await{
+                    match report_task_client.report_compaction_task(report_compaction_task_request).await{
                         Ok(_) => {},
                         Err(_) => tracing::warn!("Failed to report heartbeat"),
                     };
@@ -666,8 +667,11 @@ pub fn start_shared_compactor(
                 Some(request) => {
                     let context = context.clone();
                     let shutdown = shutdown_map.clone();
-                    let mut report_task_client = report_task_client.clone();
-                    let get_new_object_id_client = get_object_id_client.clone();
+                    let get_new_object_id_client =
+                        grpc_proxy_client.core.read().await.hummock_client.clone();
+                    let mut hummock_client =
+                        grpc_proxy_client.core.read().await.hummock_client.clone();
+
                     executor.spawn(async move {
                         let DispatchCompactionTaskRequest {
                             tables,
@@ -713,7 +717,7 @@ pub fn start_shared_compactor(
                                         })),
                                     };
 
-                                    match report_task_client
+                                    match hummock_client
                                         .report_compaction_task(report_compaction_task_request)
                                         .await
                                     {
@@ -732,7 +736,7 @@ pub fn start_shared_compactor(
                                             let report_vacuum_task_request = ReportVacuumTaskRequest {
                                                 vacuum_task: Some(vacuum_task),
                                             };
-                                            match report_task_client.report_vacuum_task(report_vacuum_task_request).await {
+                                            match hummock_client.report_vacuum_task(report_vacuum_task_request).await {
                                                 Ok(_) => tracing::info!("Finished vacuuming SSTs"),
                                                 Err(e) => tracing::warn!("Failed to report vacuum task: {:#?}", e),
                                             }
@@ -752,7 +756,7 @@ pub fn start_shared_compactor(
                                                 total_object_count,
                                                 total_object_size,
                                             };
-                                            match report_task_client
+                                            match hummock_client
                                                 .report_full_scan_task(report_full_scan_task_request)
                                                 .await
                                             {
@@ -814,4 +818,42 @@ fn get_task_progress(
         });
     }
     progress_list
+}
+
+#[derive(Debug, Clone)]
+pub struct GrpcProxyClientCore {
+    hummock_client: HummockManagerServiceClient<Channel>,
+    pub system_params_client: SystemParamsServiceClient<Channel>,
+}
+
+impl GrpcProxyClientCore {
+    pub(crate) fn new(channel: Channel) -> Self {
+        let hummock_client =
+            HummockManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
+        let system_params_client = SystemParamsServiceClient::new(channel);
+
+        Self {
+            hummock_client,
+            system_params_client,
+        }
+    }
+}
+
+/// Client to proxy server. Cloning the instance is lightweight.
+///
+/// Todo(wcy-fdu): add refresh client interface.
+#[derive(Debug, Clone)]
+pub struct GrpcProxyClient {
+    pub core: Arc<RwLock<GrpcProxyClientCore>>,
+}
+
+impl GrpcProxyClient {
+    pub fn new(channel: Channel) -> Self {
+        let core = Arc::new(RwLock::new(GrpcProxyClientCore::new(channel)));
+        Self { core }
+    }
+
+    fn _recreate_core(&self, _channel: Channel) {
+        todo!()
+    }
 }
