@@ -364,7 +364,7 @@ mod tests {
 
     use risingwave_common::types::{FloatExt, F64};
 
-    use crate::vector_op::trigonometric::*;
+    use crate::scalar::trigonometric::*;
 
     fn precision() -> f64 {
         1e-13

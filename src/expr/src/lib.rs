@@ -29,9 +29,9 @@ extern crate self as risingwave_expr;
 pub mod agg;
 mod error;
 pub mod expr;
+pub mod scalar;
 pub mod sig;
 pub mod table_function;
-pub mod vector_op;
 pub mod window_function;
 
 pub use ctor::ctor;

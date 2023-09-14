@@ -32,7 +32,7 @@ use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
-use risingwave_expr::vector_op::timestamptz::timestamptz_to_string;
+use risingwave_expr::scalar::timestamptz::timestamptz_to_string;
 use risingwave_sqlparser::ast::display_comma_separated;
 
 use crate::catalog::IndexCatalog;

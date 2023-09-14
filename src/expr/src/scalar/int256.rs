@@ -53,7 +53,7 @@ pub fn hex_to_int256(s: &str) -> Result<Int256> {
 mod tests {
     use risingwave_common::types::Int256;
 
-    use crate::vector_op::int256::hex_to_int256;
+    use crate::scalar::int256::hex_to_int256;
     use crate::ExprError::Parse;
 
     #[test]

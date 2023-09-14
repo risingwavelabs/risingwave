@@ -16,7 +16,7 @@ use risingwave_common::array::ListValue;
 use risingwave_expr_macro::function;
 
 use super::*;
-use crate::vector_op::regexp::RegexpContext;
+use crate::scalar::regexp::RegexpContext;
 use crate::ExprError;
 
 #[function(

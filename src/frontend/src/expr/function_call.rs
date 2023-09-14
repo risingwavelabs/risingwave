@@ -17,7 +17,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::vector_op::cast::literal_parsing;
+use risingwave_expr::scalar::cast::literal_parsing;
 use thiserror::Error;
 
 use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};

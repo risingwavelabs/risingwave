@@ -111,7 +111,7 @@ pub fn overlay_for(
         let start_right = start
             .checked_add(count)
             .ok_or(ExprError::NumericOutOfRange)?;
-        return super::substr::substr_start(s, start_right, writer);
+        return scalar::substr::substr_start(s, start_right, writer);
     };
 
     for c in chars.skip(count) {

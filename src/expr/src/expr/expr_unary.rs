@@ -22,7 +22,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::*;
-    use crate::vector_op::cast::{str_parse, try_cast};
+    use crate::scalar::cast::{str_parse, try_cast};
 
     #[tokio::test]
     async fn test_unary() {

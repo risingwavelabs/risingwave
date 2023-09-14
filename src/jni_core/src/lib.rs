@@ -867,7 +867,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsg
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::{DataType, Timestamptz};
-    use risingwave_expr::vector_op::cast::literal_parsing;
+    use risingwave_expr::scalar::cast::literal_parsing;
 
     /// make sure that the [`ScalarRefImpl::Int64`] received by
     /// [`Java_com_risingwave_java_binding_Binding_rowGetTimestampValue`]

@@ -16,7 +16,7 @@ use chrono::{Datelike, NaiveTime, Timelike};
 use risingwave_common::types::{Date, Decimal, Interval, Time, Timestamp, Timestamptz, F64};
 use risingwave_expr_macro::function;
 
-use crate::vector_op::timestamptz::time_zone_err;
+use crate::scalar::timestamptz::time_zone_err;
 use crate::{ExprError, Result};
 
 fn extract_date(date: impl Datelike, unit: &str) -> Option<Decimal> {

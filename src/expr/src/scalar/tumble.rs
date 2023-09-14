@@ -111,7 +111,7 @@ mod tests {
     use risingwave_common::types::{Date, Interval};
 
     use super::tumble_start_offset_date_time;
-    use crate::vector_op::tumble::{
+    use crate::scalar::tumble::{
         get_window_start, interval_to_micro_second, tumble_start_date_time,
     };
 

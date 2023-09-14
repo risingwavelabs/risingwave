@@ -102,7 +102,7 @@ mod tests {
 
     use super::*;
     use crate::expr::{Expression, LiteralExpression};
-    use crate::vector_op::cast::str_to_timestamp;
+    use crate::scalar::cast::str_to_timestamp;
 
     const CHUNK_SIZE: usize = 1024;
 

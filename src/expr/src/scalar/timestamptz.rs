@@ -191,7 +191,7 @@ mod tests {
     use risingwave_common::util::iter_util::ZipEqFast;
 
     use super::*;
-    use crate::vector_op::cast::str_to_timestamp;
+    use crate::scalar::cast::str_to_timestamp;
 
     #[test]
     fn test_time_zone_conversion() {

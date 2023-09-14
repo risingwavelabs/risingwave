@@ -78,7 +78,7 @@ mod tests {
     use risingwave_common::types::{Decimal, F64};
 
     use super::ceil_f64;
-    use crate::vector_op::round::*;
+    use crate::scalar::round::*;
 
     fn do_test(input: &str, digits: i32, expected_output: Option<&str>) {
         let v = Decimal::from_str(input).unwrap();

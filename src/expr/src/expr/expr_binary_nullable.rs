@@ -23,7 +23,7 @@ use risingwave_expr_macro::build_function;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::{BoxedExpression, Expression};
-use crate::vector_op::conjunction::{and, or};
+use crate::scalar::conjunction::{and, or};
 use crate::Result;
 
 /// This is just an implementation detail. The semantic is not guaranteed at SQL level because

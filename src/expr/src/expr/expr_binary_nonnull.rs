@@ -21,7 +21,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
 
     use super::super::*;
-    use crate::vector_op::arithmetic_op::{date_interval_add, date_interval_sub};
+    use crate::scalar::arithmetic_op::{date_interval_add, date_interval_sub};
 
     #[tokio::test]
     async fn test_binary() {
