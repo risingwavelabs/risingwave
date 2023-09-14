@@ -12,18 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+
 use anyhow::{anyhow, Result};
 use async_nats::jetstream::consumer;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 
+use super::message::NatsMessage;
 use super::NatsOffset;
 use crate::parser::ParserConfig;
 use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::nats::NatsProperties;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitImpl, SplitReader,
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
+    SplitReader,
 };
 
 pub struct NatsSplitReader {
@@ -32,6 +35,7 @@ pub struct NatsSplitReader {
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
     start_position: NatsOffset,
+    split_id: SplitId,
 }
 
 #[async_trait]
@@ -48,6 +52,7 @@ impl SplitReader for NatsSplitReader {
         // TODO: to simplify the logic, return 1 split for first version
         assert!(splits.len() == 1);
         let split = splits.into_iter().next().unwrap().into_nats().unwrap();
+        let split_id = split.split_id;
         let start_position = match &split.start_sequence {
             NatsOffset::None => match &properties.scan_startup_mode {
                 None => NatsOffset::Earliest,
@@ -89,7 +94,7 @@ impl SplitReader for NatsSplitReader {
         }
         let consumer = properties
             .common
-            .build_consumer(0, start_position.clone())
+            .build_consumer(split_id.to_string(), start_position.clone())
             .await?;
         Ok(Self {
             consumer,
@@ -97,6 +102,7 @@ impl SplitReader for NatsSplitReader {
             parser_config,
             source_ctx,
             start_position,
+            split_id,
         })
     }
 
@@ -116,7 +122,10 @@ impl CommonSplitReader for NatsSplitReader {
         for msgs in messages.ready_chunks(capacity) {
             let mut msg_vec = Vec::with_capacity(capacity);
             for msg in msgs {
-                msg_vec.push(SourceMessage::from_nats_jetstream_message(msg?));
+                msg_vec.push(SourceMessage::from(NatsMessage::new(
+                    self.split_id.clone(),
+                    msg?,
+                )));
             }
             yield msg_vec;
         }

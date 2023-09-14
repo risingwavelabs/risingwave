@@ -395,7 +395,7 @@ impl NatsCommon {
 
     pub(crate) async fn build_consumer(
         &self,
-        split_id: i32,
+        split_id: String,
         start_sequence: NatsOffset,
     ) -> anyhow::Result<
         async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,

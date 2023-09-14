@@ -33,14 +33,14 @@ pub struct NatsSplit {
     pub(crate) subject: String,
     // TODO: to simplify the logic, return 1 split for first version. May use parallelism in
     // future.
-    pub(crate) split_num: i32,
+    pub(crate) split_id: SplitId,
     pub(crate) start_sequence: NatsOffset,
 }
 
 impl SplitMetaData for NatsSplit {
     fn id(&self) -> SplitId {
         // TODO: should avoid constructing a string every time
-        format!("{}", self.split_num).into()
+        format!("{}", self.split_id).into()
     }
 
     fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
@@ -53,10 +53,10 @@ impl SplitMetaData for NatsSplit {
 }
 
 impl NatsSplit {
-    pub fn new(subject: String, split_num: i32, start_sequence: NatsOffset) -> Self {
+    pub fn new(subject: String, split_id: SplitId, start_sequence: NatsOffset) -> Self {
         Self {
             subject,
-            split_num,
+            split_id,
             start_sequence,
         }
     }
