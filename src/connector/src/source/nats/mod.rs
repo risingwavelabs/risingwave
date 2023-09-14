@@ -30,12 +30,6 @@ pub struct NatsProperties {
     pub scan_startup_mode: Option<String>,
 
     #[serde(
-        rename = "scan.startup.sequence_number",
-        alias = "nats.scan.startup.sequence_number"
-    )]
-    pub start_sequence: Option<String>,
-
-    #[serde(
         rename = "scan.startup.timestamp_millis",
         alias = "nats.scan.startup.timestamp_millis"
     )]

@@ -66,16 +66,9 @@ impl SplitReader for NatsSplitReader {
                             return Err(anyhow!("scan_startup_timestamp_millis is required"));
                         }
                     }
-                    "sequence_number" => {
-                        if let Some(seq) = &properties.start_sequence {
-                            NatsOffset::SequenceNumber(seq.clone())
-                        } else {
-                            return Err(anyhow!("scan_startup_sequence_number is required"));
-                        }
-                    }
                     _ => {
                         return Err(anyhow!(
-                            "invalid scan_startup_mode, accept earliest/latest/sequence_number/time"
+                            "invalid scan_startup_mode, accept earliest/latest/timestamp_millis"
                         ))
                     }
                 },
@@ -83,15 +76,6 @@ impl SplitReader for NatsSplitReader {
             start_position => start_position.to_owned(),
         };
 
-        // pay attention not to check timeoffset and start_time in properties. Because when recovery
-        // the policy may change to by sequence, but start time still filed.
-        if !matches!(start_position, NatsOffset::SequenceNumber(_))
-            && properties.start_sequence.is_some()
-        {
-            return Err(
-                anyhow!("scan.startup.mode need to be set to 'sequence_number' if you want to start with a specific sequence number")
-            );
-        }
         let consumer = properties
             .common
             .build_consumer(split_id.to_string(), start_position.clone())
