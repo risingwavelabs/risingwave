@@ -10094,6 +10094,7 @@ dependencies = [
  "subtle",
  "syn 1.0.109",
  "syn 2.0.33",
+ "tikv-jemalloc-sys",
  "time",
  "time-macros",
  "tinyvec",
