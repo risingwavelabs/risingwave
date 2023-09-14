@@ -29,6 +29,13 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: use alias columns explicitlity
+  sql: |
+    create table t(x int , arr int[]);
+    select x, arr, a, ord from t cross join unnest(arr) WITH ORDINALITY as foo(a,ord);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
 - sql: |
     create table t(x int , arr int[]);
     select * from t cross join unnest(arr) WITH ORDINALITY as foo(a,ord,bar);
