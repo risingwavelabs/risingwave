@@ -132,7 +132,10 @@ impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
         let intra_sub_level_compact_level_count =
             self.config.level0_sub_level_compact_level_count as usize;
 
-        if input.input_levels.len() < intra_sub_level_compact_level_count {
+        if input.input_levels.len() < intra_sub_level_compact_level_count
+            && input.total_file_count < self.config.level0_max_compact_file_number
+        {
+            stats.skip_by_count_limit += 1;
             return false;
         }
 
@@ -158,13 +161,6 @@ impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
         if is_write_amp_large && input.total_file_count < self.config.level0_max_compact_file_number
         {
             stats.skip_by_write_amp_limit += 1;
-            return false;
-        }
-
-        if input.input_levels.len() < intra_sub_level_compact_level_count
-            && input.total_file_count < self.config.level0_max_compact_file_number
-        {
-            stats.skip_by_count_limit += 1;
             return false;
         }
 
