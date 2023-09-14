@@ -583,12 +583,14 @@ fn parse_source_schema(p: &mut Parser) -> Result<CompatibleSourceSchema, ParserE
 }
 
 impl Parser {
-    fn peek_row_format(&mut self) -> bool {
+    /// Peek the next tokens to see if it is `FORMAT` or `ROW FORMAT` (for compatibility).
+    fn peek_source_schema_format(&mut self) -> bool {
         (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
             && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])) // ROW FORMAT
             || self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) // FORMAT
     }
 
+    /// Parse the source schema. The behavior depends on the `connector` type.
     pub fn parse_source_schema_with_connector(
         &mut self,
         connector: &str,
@@ -596,10 +598,9 @@ impl Parser {
         // row format for cdc source must be debezium json
         // row format for nexmark source must be native
         // default row format for datagen source is native
-
         if connector.contains("-cdc") {
             let expected = SourceSchemaV2::debezium_json();
-            if self.peek_row_format() {
+            if self.peek_source_schema_format() {
                 let schema = parse_source_schema(self)?.into_source_schema_v2();
                 if schema != expected {
                     return Err(ParserError::ParserError(format!(
@@ -611,7 +612,7 @@ impl Parser {
             Ok(expected.into())
         } else if connector.contains("nexmark") {
             let expected = SourceSchemaV2::native();
-            if self.peek_row_format() {
+            if self.peek_source_schema_format() {
                 let schema = parse_source_schema(self)?.into_source_schema_v2();
                 if schema != expected {
                     return Err(ParserError::ParserError(format!(
@@ -622,7 +623,7 @@ impl Parser {
             }
             Ok(expected.into())
         } else if connector.contains("datagen") {
-            Ok(if self.peek_row_format() {
+            Ok(if self.peek_source_schema_format() {
                 parse_source_schema(self)?
             } else {
                 SourceSchemaV2::native().into()
@@ -634,6 +635,7 @@ impl Parser {
 }
 
 impl SourceSchemaV2 {
+    /// Create a new source schema with `Debezium` format and `Json` encoding.
     pub const fn debezium_json() -> Self {
         SourceSchemaV2 {
             format: Format::Debezium,
@@ -642,6 +644,7 @@ impl SourceSchemaV2 {
         }
     }
 
+    /// Create a new source schema with `Native` format and encoding.
     pub const fn native() -> Self {
         SourceSchemaV2 {
             format: Format::Native,
