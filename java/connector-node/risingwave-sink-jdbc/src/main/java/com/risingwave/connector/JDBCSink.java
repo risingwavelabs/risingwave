@@ -147,6 +147,7 @@ public class JDBCSink extends SinkWriterBase {
         try {
             var preparedStmt = insertPreparedStmt;
             jdbcDialect.bindInsertIntoStatement(preparedStmt, conn, getTableSchema(), row);
+            preparedStmt.addBatch();
             return preparedStmt;
         } catch (SQLException e) {
             throw io.grpc.Status.INTERNAL
