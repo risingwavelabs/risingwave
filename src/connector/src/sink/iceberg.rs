@@ -14,16 +14,16 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use anyhow::anyhow;
 use arrow_array::RecordBatch;
 use arrow_schema::{DataType as ArrowDataType, Schema as ArrowSchema};
 use async_trait::async_trait;
-use icelake::config::{TableConfig, TableConfigRef};
+use icelake::catalog::load_catalog;
 use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, DataFile};
-use icelake::Table;
+use icelake::{Table, TableIdentifier};
+use itertools::Itertools;
 use opendal::services::S3;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
@@ -35,7 +35,6 @@ use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_json::Value;
-use url::Url;
 
 use super::{
     Sink, SinkError, SinkWriter, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION,
@@ -64,43 +63,26 @@ pub struct IcebergConfig {
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub force_append_only: bool,
 
-    // Catalog type values: "storage", "rest"
-    pub catalog: String,
-
-    #[serde(rename = "warehouse.path")]
-    pub path: String,
-
-    #[serde(rename = "s3.region")]
-    pub region: Option<String>,
-
-    #[serde(rename = "s3.endpoint")]
-    pub endpoint: Option<String>,
-
-    #[serde(rename = "s3.access.key")]
-    pub access_key: String,
-
-    #[serde(rename = "s3.secret.key")]
-    pub secret_key: String,
-
-    #[serde(rename = "database.name")]
-    pub database_name: String,
-
     #[serde(rename = "table.name")]
-    pub table_name: String,
+    pub table_name: String, // Full name of table, must include schema name
 
     #[serde(skip)]
-    pub iceberg_table_config: TableConfigRef,
+    pub iceberg_configs: HashMap<String, String>,
 }
 
 impl IcebergConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let iceberg_table_config =
-            Arc::new(TableConfig::try_from(&values).map_err(|e| SinkError::Iceberg(anyhow!(e)))?);
+        let iceberg_configs = values
+            .iter()
+            .filter(|(k, _v)| k.starts_with("iceberg."))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
         let mut config =
             serde_json::from_value::<IcebergConfig>(serde_json::to_value(values).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
-        config.iceberg_table_config = iceberg_table_config;
+        config.iceberg_configs = iceberg_configs;
 
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
@@ -111,12 +93,6 @@ impl IcebergConfig {
             )));
         }
 
-        if config.endpoint.is_none() && config.region.is_none() {
-            return Err(SinkError::Config(anyhow!(
-                "You must fill either s3 region or s3 endpoint",
-            )));
-        }
-
         Ok(config)
     }
 }
@@ -124,8 +100,6 @@ impl IcebergConfig {
 pub struct IcebergSink {
     config: IcebergConfig,
     param: SinkParam,
-    table_root: String,
-    bucket_name: String,
 }
 
 impl Debug for IcebergSink {
@@ -138,32 +112,17 @@ impl Debug for IcebergSink {
 
 impl IcebergSink {
     async fn create_table(&self) -> Result<Table> {
-        let mut builder = S3::default();
-
-        // Sink will not load config from file.
-        builder.disable_config_load();
-
-        builder
-            .root(&self.table_root)
-            .bucket(&self.bucket_name)
-            .access_key_id(&self.config.access_key)
-            .secret_access_key(&self.config.secret_key);
-
-        if let Some(region) = &self.config.region {
-            builder.region(region);
-        }
-
-        if let Some(endpoint) = &self.config.endpoint {
-            builder.endpoint(endpoint);
-        }
-
-        let op = opendal::Operator::new(builder)
-            .map_err(|err| SinkError::Config(anyhow!("{err}")))?
-            .finish();
-
-        let table = Table::open_with_config(op, self.config.iceberg_table_config.clone())
+        let catalog = load_catalog(&self.config.iceberg_configs)
             .await
-            .map_err(|err| SinkError::Iceberg(anyhow!("Create table fail: {}", err)))?;
+            .map_err(|e| SinkError::Iceberg(anyhow!("Unable to load iceberg catalog: {e}")))?;
+
+        let table_id = TableIdentifier::new(self.config.table_name.split('.'))
+            .map_err(|e| SinkError::Iceberg(anyhow!("Unable to parse table name: {e}")))?;
+
+        let table = catalog
+            .load_table(&table_id)
+            .await
+            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
         let sink_schema = self.param.schema();
         let iceberg_schema = table
@@ -179,42 +138,7 @@ impl IcebergSink {
         Ok(table)
     }
 
-    /// Parse bucket name and table root path.
-    ///
-    /// return (bucket name, table root path)
-    fn parse_bucket_and_root_from_path(config: &IcebergConfig) -> Result<(String, String)> {
-        let url = Url::parse(&config.path).map_err(|err| {
-            SinkError::Config(anyhow!(
-                "Fail to parse Invalid path: {}, caused by: {}",
-                &config.path,
-                err
-            ))
-        })?;
-
-        let scheme = url.scheme();
-        if scheme != "s3a" && scheme != "s3" && scheme != "s3n" {
-            return Err(SinkError::Config(anyhow!(
-                "Invalid path: {}, only support s3a,s3,s3n prefix",
-                &config.path
-            )));
-        }
-
-        let bucket = url
-            .host_str()
-            .ok_or_else(|| SinkError::Config(anyhow!("Invalid path: {}", &config.path)))?;
-        let root = url.path();
-
-        let table_root_path = if root.is_empty() {
-            format!("/{}/{}", config.database_name, config.table_name)
-        } else {
-            format!("{}/{}/{}", root, config.database_name, config.table_name)
-        };
-
-        Ok((bucket.to_string(), table_root_path))
-    }
-
     pub fn new(config: IcebergConfig, param: SinkParam) -> Result<Self> {
-        let (bucket_name, table_root) = Self::parse_bucket_and_root_from_path(&config)?;
         // TODO(ZENOTME): Only support append-only mode now.
         if !config.force_append_only {
             return Err(SinkError::Iceberg(anyhow!(
@@ -222,12 +146,7 @@ impl IcebergSink {
             )));
         }
 
-        Ok(Self {
-            config,
-            param,
-            table_root,
-            bucket_name,
-        })
+        Ok(Self { config, param })
     }
 }
 

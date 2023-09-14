@@ -23,12 +23,14 @@ CREATE SINK s6 AS select * from mv6 WITH (
     connector = 'iceberg',
     type = 'append-only',
     force_append_only = 'true',
-    warehouse.path = 's3://icebergdata/demo',
-    s3.endpoint = 'http://127.0.0.1:9301',
-    s3.access.key = 'hummockadmin',
-    s3.secret.key = 'hummockadmin',
-    database.name='demo_db',
-    table.name='demo_table'
+    table.name = 'demo_db.demo_table',
+
+    iceberg.catalog.type = 'storage',
+    iceberg.catalog.name = 'demo',
+    iceberg.catalog.demo.warehouse = 's3://icebergdata/demo',
+    iceberg.table.io.endpoint = 'http://127.0.0.1:9301',
+    iceberg.table.io.access_key_id = 'admin',
+    iceberg.table.io.secret_access_key = 'password'
 );
 
 statement ok
