@@ -70,7 +70,7 @@ pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Times
 pub fn timestamptz_to_string(
     elem: Timestamptz,
     time_zone: &str,
-    writer: &mut dyn Write,
+    writer: &mut impl Write,
 ) -> Result<()> {
     let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
     let instant_local = elem.to_datetime_in_zone(time_zone);

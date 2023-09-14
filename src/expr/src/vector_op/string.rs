@@ -31,7 +31,7 @@ use risingwave_expr_macro::function;
 /// A
 /// ```
 #[function("chr(int32) -> varchar")]
-pub fn chr(code: i32, writer: &mut dyn Write) {
+pub fn chr(code: i32, writer: &mut impl Write) {
     if let Some(c) = std::char::from_u32(code as u32) {
         write!(writer, "{}", c).unwrap();
     }
@@ -73,7 +73,7 @@ pub fn starts_with(s: &str, prefix: &str) -> bool {
 /// The Quick Brown Fox
 /// ```
 #[function("initcap(varchar) -> varchar")]
-pub fn initcap(s: &str, writer: &mut dyn Write) {
+pub fn initcap(s: &str, writer: &mut impl Write) {
     let mut capitalize_next = true;
     for c in s.chars() {
         if capitalize_next {
@@ -105,7 +105,7 @@ pub fn initcap(s: &str, writer: &mut dyn Write) {
 /// abc
 /// ```
 #[function("lpad(varchar, int32) -> varchar")]
-pub fn lpad(s: &str, length: i32, writer: &mut dyn Write) {
+pub fn lpad(s: &str, length: i32, writer: &mut impl Write) {
     lpad_fill(s, length, " ", writer);
 }
 
@@ -126,7 +126,7 @@ pub fn lpad(s: &str, length: i32, writer: &mut dyn Write) {
 /// hi
 /// ```
 #[function("lpad(varchar, int32, varchar) -> varchar")]
-pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
+pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut impl Write) {
     let s_len = s.chars().count();
     let fill_len = fill.chars().count();
 
@@ -169,7 +169,7 @@ pub fn lpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
 /// abc
 /// ```
 #[function("rpad(varchar, int32) -> varchar")]
-pub fn rpad(s: &str, length: i32, writer: &mut dyn Write) {
+pub fn rpad(s: &str, length: i32, writer: &mut impl Write) {
     rpad_fill(s, length, " ", writer);
 }
 
@@ -201,7 +201,7 @@ pub fn rpad(s: &str, length: i32, writer: &mut dyn Write) {
 /// hi
 /// ```
 #[function("rpad(varchar, int32, varchar) -> varchar")]
-pub fn rpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
+pub fn rpad_fill(s: &str, length: i32, fill: &str, writer: &mut impl Write) {
     let s_len = s.chars().count();
     let fill_len = fill.chars().count();
 
@@ -239,7 +239,7 @@ pub fn rpad_fill(s: &str, length: i32, fill: &str, writer: &mut dyn Write) {
 /// fedcba
 /// ```
 #[function("reverse(varchar) -> varchar")]
-pub fn reverse(s: &str, writer: &mut dyn Write) {
+pub fn reverse(s: &str, writer: &mut impl Write) {
     for c in s.chars().rev() {
         write!(writer, "{}", c).unwrap();
     }
@@ -257,7 +257,7 @@ pub fn reverse(s: &str, writer: &mut dyn Write) {
 /// Karel
 /// ```
 #[function("to_ascii(varchar) -> varchar")]
-pub fn to_ascii(s: &str, writer: &mut dyn Write) {
+pub fn to_ascii(s: &str, writer: &mut impl Write) {
     for c in s.chars() {
         let ascii = match c {
             'Á' | 'À' | 'Â' | 'Ã' => 'A',
@@ -320,12 +320,12 @@ pub fn to_ascii(s: &str, writer: &mut dyn Write) {
 /// 8000000000000000
 /// ```
 #[function("to_hex(int32) -> varchar")]
-pub fn to_hex_i32(n: i32, writer: &mut dyn Write) {
+pub fn to_hex_i32(n: i32, writer: &mut impl Write) {
     write!(writer, "{:x}", n).unwrap();
 }
 
 #[function("to_hex(int64) -> varchar")]
-pub fn to_hex_i64(n: i64, writer: &mut dyn Write) {
+pub fn to_hex_i64(n: i64, writer: &mut impl Write) {
     write!(writer, "{:x}", n).unwrap();
 }
 
@@ -365,7 +365,7 @@ pub fn to_hex_i64(n: i64, writer: &mut dyn Write) {
 /// select
 /// ```
 #[function("quote_ident(varchar) -> varchar")]
-pub fn quote_ident(s: &str, writer: &mut dyn Write) {
+pub fn quote_ident(s: &str, writer: &mut impl Write) {
     let needs_quotes = s.chars().any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'));
     if !needs_quotes {
         write!(writer, "{}", s).unwrap();
@@ -414,7 +414,7 @@ pub fn quote_ident(s: &str, writer: &mut dyn Write) {
 /// (empty)
 /// ```
 #[function("left(varchar, int32) -> varchar")]
-pub fn left(s: &str, n: i32, writer: &mut dyn Write) {
+pub fn left(s: &str, n: i32, writer: &mut impl Write) {
     let n = if n >= 0 {
         n as usize
     } else {
@@ -459,7 +459,7 @@ pub fn left(s: &str, n: i32, writer: &mut dyn Write) {
 /// (empty)
 /// ```
 #[function("right(varchar, int32) -> varchar")]
-pub fn right(s: &str, n: i32, writer: &mut dyn Write) {
+pub fn right(s: &str, n: i32, writer: &mut impl Write) {
     let skip = if n >= 0 {
         s.chars().count().saturating_sub(n as usize)
     } else {

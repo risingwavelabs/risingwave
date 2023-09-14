@@ -25,7 +25,7 @@ use rand::{Rng, SeedableRng};
 use risingwave_pb::data::{PbOp, PbStreamChunk};
 
 use super::vis::VisMut;
-use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt};
+use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt, RowRef};
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
 use crate::catalog::Schema;
@@ -68,6 +68,16 @@ impl Op {
             None => bail!("No such op type"),
         };
         Ok(op)
+    }
+
+    /// convert `UpdateDelete` to `Delete` and `UpdateInsert` to Insert
+    pub fn normalize_update(self) -> Op {
+        match self {
+            Op::Insert => Op::Insert,
+            Op::Delete => Op::Delete,
+            Op::UpdateDelete => Op::Delete,
+            Op::UpdateInsert => Op::Insert,
+        }
     }
 }
 
@@ -349,7 +359,19 @@ impl OpsMut {
         }
     }
 
+    pub fn len(&self) -> usize {
+        match &self.state {
+            OpsMutState::ArcRef(v) => v.len(),
+            OpsMutState::Mut(v) => v.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn set(&mut self, n: usize, val: Op) {
+        debug_assert!(n < self.len());
         if let OpsMutState::Mut(v) = &mut self.state {
             v[n] = val;
         } else {
@@ -360,6 +382,14 @@ impl OpsMut {
             };
             v[n] = val;
             self.state = OpsMutState::Mut(v);
+        }
+    }
+
+    pub fn get(&self, n: usize) -> Op {
+        debug_assert!(n < self.len());
+        match &self.state {
+            OpsMutState::ArcRef(v) => v[n],
+            OpsMutState::Mut(v) => v[n],
         }
     }
 }
@@ -397,18 +427,40 @@ impl From<StreamChunkMut> for StreamChunk {
         StreamChunk::from_parts(c.ops, DataChunk::from_parts(c.columns, c.vis.into()))
     }
 }
+
 pub struct OpRowMutRef<'a> {
     c: &'a mut StreamChunkMut,
     i: usize,
 }
 
 impl OpRowMutRef<'_> {
+    pub fn index(&self) -> usize {
+        self.i
+    }
+
+    pub fn vis(&self) -> bool {
+        self.c.vis.is_set(self.i)
+    }
+
+    pub fn op(&self) -> Op {
+        self.c.ops.get(self.i)
+    }
+
     pub fn set_vis(&mut self, val: bool) {
         self.c.set_vis(self.i, val);
     }
 
     pub fn set_op(&mut self, val: Op) {
         self.c.set_op(self.i, val);
+    }
+
+    pub fn row_ref(&self) -> RowRef<'_> {
+        RowRef::with_columns(self.c.columns(), self.i)
+    }
+
+    /// return if the two row ref is in the same chunk
+    pub fn same_chunk(&self, other: &Self) -> bool {
+        std::ptr::eq(self.c, other.c)
     }
 }
 
@@ -421,13 +473,20 @@ impl StreamChunkMut {
         self.ops.set(n, val);
     }
 
+    pub fn columns(&self) -> &[ArrayRef] {
+        &self.columns
+    }
+
     /// get the mut reference of the stream chunk.
-    pub fn to_mut_rows(&self) -> impl Iterator<Item = OpRowMutRef<'_>> {
+    pub fn to_rows_mut(&mut self) -> impl Iterator<Item = (RowRef<'_>, OpRowMutRef<'_>)> {
         unsafe {
             (0..self.vis.len()).map(|i| {
                 let p = self as *const StreamChunkMut;
                 let p = p as *mut StreamChunkMut;
-                OpRowMutRef { c: &mut *p, i }
+                (
+                    RowRef::with_columns(self.columns(), i),
+                    OpRowMutRef { c: &mut *p, i },
+                )
             })
         }
     }
