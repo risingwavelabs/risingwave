@@ -736,6 +736,7 @@ pub fn to_stream_prost_body(
         }),
         Node::Source(me) => {
             // TODO(kwannoel): Is branch used, seems to be a duplicate of stream_source?
+            let rate_limit = me.ctx().session_ctx().config().get_streaming_rate_limit();
             let me = &me.core.catalog;
             let source_inner = me.as_ref().map(|me| StreamSource {
                 source_id: me.id,
@@ -749,7 +750,7 @@ pub fn to_stream_prost_body(
                 row_id_index: me.row_id_index.map(|index| index as _),
                 columns: me.columns.iter().map(|c| c.to_protobuf()).collect(),
                 properties: me.properties.clone().into_iter().collect(),
-                rate_limit: None,
+                rate_limit,
             });
             PbNodeBody::Source(SourceNode { source_inner })
         }
