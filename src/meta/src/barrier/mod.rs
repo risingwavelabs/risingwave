@@ -60,6 +60,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
+use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 

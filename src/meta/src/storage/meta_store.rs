@@ -116,6 +116,7 @@ impl<S: MetaStore> MetaStore for BoxedSnapshotMetaStore<S> {
     }
 }
 
+/// `cf` suffixes here stands for column family, i.e. namespace.
 #[async_trait]
 impl MetaStore for MetaStoreRef {
     type Snapshot = BoxedSnapshot;
