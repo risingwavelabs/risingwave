@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![expect(clippy::arc_with_non_send_sync, reason = "FIXME: later")]
+
 pub mod compaction_config;
 mod level_selector;
 mod overlap_strategy;

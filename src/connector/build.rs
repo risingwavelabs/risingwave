@@ -17,7 +17,7 @@ fn main() {
 
     println!("cargo:rerun-if-changed={}", proto_dir);
 
-    let proto_files = vec!["recursive"];
+    let proto_files = ["recursive"];
     let protos: Vec<String> = proto_files
         .iter()
         .map(|f| format!("{}/{}.proto", proto_dir, f))

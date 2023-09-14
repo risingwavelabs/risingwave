@@ -26,7 +26,7 @@ dyn-clone = "1.0.13"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-foyer = { git = "https://github.com/mrcroxx/foyer", rev = "2b8907c" }
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "2c6f080" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
@@ -75,11 +75,11 @@ zstd = { version = "0.12", default-features = false }
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.15", default-features = false }
 libc = "0.2"
-nix = { version = "0.26", features = ["fs", "mman"] }
+nix = { version = "0.27", features = ["fs", "mman"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
-libc = "0.2.147"
+libc = "0.2.148"
 mach2 = "0.4"
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -135,3 +135,6 @@ harness = false
 [[bench]]
 name = "bench_row"
 harness = false
+
+[lints]
+workspace = true

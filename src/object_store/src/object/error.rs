@@ -55,11 +55,9 @@ pub struct ObjectError {
 
 impl std::fmt::Debug for ObjectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::error::Error;
-
         write!(f, "{}", self.inner)?;
         writeln!(f)?;
-        if let Some(backtrace) = (&self.inner as &dyn Error).request_ref::<Backtrace>() {
+        if let Some(backtrace) = std::error::request_ref::<Backtrace>(&self.inner) {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(f, "  backtrace of `ObjectError`:\n{}", self.backtrace)?;

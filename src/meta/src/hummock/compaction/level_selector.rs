@@ -549,10 +549,7 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
             levels.member_table_ids.iter().cloned().collect(),
         );
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
-        let state = self
-            .state
-            .entry(group.group_id)
-            .or_insert_with(SpaceReclaimPickerState::default);
+        let state = self.state.entry(group.group_id).or_default();
 
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
         compaction_input.add_pending_task(task_id, level_handlers);
@@ -595,10 +592,7 @@ impl LevelSelector for TtlCompactionSelector {
             group.compaction_config.max_space_reclaim_bytes,
             table_id_to_options,
         );
-        let state = self
-            .state
-            .entry(group.group_id)
-            .or_insert_with(TtlPickerState::default);
+        let state = self.state.entry(group.group_id).or_default();
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
         compaction_input.add_pending_task(task_id, level_handlers);
 

@@ -38,9 +38,9 @@ use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use tonic::Status;
 use tracing::{error, warn};
 
+use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::iceberg::REMOTE_ICEBERG_SINK;
-use crate::sink::utils::{record_to_json, TimestampHandlingMode};
 use crate::sink::SinkError::Remote;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkCommitCoordinator, SinkError, SinkParam,
@@ -351,12 +351,9 @@ where
         let payload = match self.payload_format {
             SinkPayloadFormat::Json => {
                 let mut row_ops = vec![];
+                let enc = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::String);
                 for (op, row_ref) in chunk.rows() {
-                    let map = record_to_json(
-                        row_ref,
-                        &self.schema.fields,
-                        TimestampHandlingMode::String,
-                    )?;
+                    let map = enc.encode(row_ref)?;
                     let row_op = RowOp {
                         op_type: op.to_protobuf() as i32,
                         line: serde_json::to_string(&map)

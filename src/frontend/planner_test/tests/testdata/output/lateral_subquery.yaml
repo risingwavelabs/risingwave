@@ -150,3 +150,26 @@
     ORDER BY amount DESC LIMIT 1)
     AS max_sale on true;
   binder_error: 'Invalid input syntax: The combining JOIN type must be INNER or LEFT for a LATERAL reference.'
+- name: implicit lateral subquery of correlated table function
+  sql: |
+    create table t(x int , arr int[]);
+    select * from t cross join unnest(arr);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, Unnest($0)] }
+      ├─BatchExchange { order: [], dist: HashShard(t.arr) }
+      │ └─BatchScan { table: t, columns: [t.x, t.arr], distribution: SomeShard }
+      └─BatchProjectSet { select_list: [$0, Unnest($0)] }
+        └─BatchHashAgg { group_key: [t.arr], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard(t.arr) }
+            └─BatchScan { table: t, columns: [t.arr], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, arr, unnest, t._row_id(hidden), t.arr(hidden), projected_row_id(hidden)], stream_key: [t._row_id, t.arr, projected_row_id, arr], pk_columns: [t._row_id, t.arr, projected_row_id, arr], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, Unnest($0), t._row_id, t.arr, projected_row_id] }
+      ├─StreamExchange { dist: HashShard(t.arr) }
+      │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamProjectSet { select_list: [$0, Unnest($0)] }
+        └─StreamProject { exprs: [t.arr] }
+          └─StreamHashAgg { group_key: [t.arr], aggs: [count] }
+            └─StreamExchange { dist: HashShard(t.arr) }
+              └─StreamTableScan { table: t, columns: [t.arr, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

@@ -428,7 +428,7 @@ where
                     barrier.epoch,
                     &mut self.state_table,
                     false,
-                    &mut backfill_state,
+                    &backfill_state,
                     &mut committed_progress,
                     &mut temporary_state,
                 )
@@ -468,7 +468,7 @@ where
                         barrier.epoch,
                         &mut self.state_table,
                         false,
-                        &mut backfill_state,
+                        &backfill_state,
                         &mut committed_progress,
                         &mut temporary_state,
                     ).await?;
