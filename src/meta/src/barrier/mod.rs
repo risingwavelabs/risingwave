@@ -944,7 +944,7 @@ impl GlobalBarrierManager {
             let table_map = Default::default();
             let upstream_mv_counts = Default::default();
             let definitions = Default::default();
-            let version_stats = todo!();
+            let version_stats = self.hummock_manager.get_version_stats().await;
             let tracking_commands = Default::default();
             // If failed, enter recovery mode.
             self.set_status(BarrierManagerStatus::Recovering).await;
