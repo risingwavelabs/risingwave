@@ -513,4 +513,27 @@ impl HummockManagerService for HummockServiceImpl {
 
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
+
+    async fn list_branched_object(
+        &self,
+        _request: Request<ListBranchedObjectRequest>,
+    ) -> Result<Response<ListBranchedObjectResponse>, Status> {
+        let branched_objects = self
+            .hummock_manager
+            .list_branched_objects()
+            .await
+            .into_iter()
+            .flat_map(|(object_id, v)| {
+                v.into_iter()
+                    .map(move |(compaction_group_id, sst_id)| BranchedObject {
+                        object_id,
+                        sst_id,
+                        compaction_group_id,
+                    })
+            })
+            .collect();
+        Ok(Response::new(ListBranchedObjectResponse {
+            branched_objects,
+        }))
+    }
 }

@@ -35,7 +35,9 @@ use risingwave_pb::catalog::{
     PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
 use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
-use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_pb::hummock::{
+    BranchedObject, HummockSnapshot, HummockVersion, HummockVersionDelta,
+};
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
@@ -830,6 +832,22 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_hummock_pinned_snapshots(&self) -> RpcResult<Vec<(u32, u64)>> {
+        unimplemented!()
+    }
+
+    async fn get_hummock_current_version(&self) -> RpcResult<HummockVersion> {
+        unimplemented!()
+    }
+
+    async fn get_hummock_checkpoint_version(&self) -> RpcResult<HummockVersion> {
+        unimplemented!()
+    }
+
+    async fn list_version_deltas(&self) -> RpcResult<Vec<HummockVersionDelta>> {
+        unimplemented!()
+    }
+
+    async fn list_branched_objects(&self) -> RpcResult<Vec<BranchedObject>> {
         unimplemented!()
     }
 }
