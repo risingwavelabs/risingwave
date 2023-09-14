@@ -34,6 +34,7 @@
 #![feature(result_option_inspect)]
 #![feature(assert_matches)]
 #![feature(lazy_cell)]
+#![feature(return_position_impl_trait_in_trait)]
 
 mod error;
 pub mod exchange_source;

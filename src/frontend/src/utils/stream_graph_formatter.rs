@@ -169,8 +169,8 @@ impl StreamGraphFormatter {
             )),
             stream_node::NodeBody::SimpleAgg(inner) => {
                 fields.push((
-                    "result table",
-                    self.pretty_add_table(inner.get_result_table().unwrap()),
+                    "intermediate state table",
+                    self.pretty_add_table(inner.get_intermediate_state_table().unwrap()),
                 ));
                 fields.push(("state tables", self.call_states(&inner.agg_call_states)));
                 fields.push((
@@ -180,8 +180,8 @@ impl StreamGraphFormatter {
             }
             stream_node::NodeBody::HashAgg(inner) => {
                 fields.push((
-                    "result table",
-                    self.pretty_add_table(inner.get_result_table().unwrap()),
+                    "intermediate state table",
+                    self.pretty_add_table(inner.get_intermediate_state_table().unwrap()),
                 ));
                 fields.push(("state tables", self.call_states(&inner.agg_call_states)));
                 fields.push((

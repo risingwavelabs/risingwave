@@ -23,7 +23,7 @@ use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::nats::split::NatsSplit;
 use crate::source::nats::NatsProperties;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitImpl, SplitReader,
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitReader,
 };
 
 pub struct NatsSplitReader {
@@ -36,20 +36,17 @@ pub struct NatsSplitReader {
 #[async_trait]
 impl SplitReader for NatsSplitReader {
     type Properties = NatsProperties;
+    type Split = NatsSplit;
 
     async fn new(
         properties: NatsProperties,
-        splits: Vec<SplitImpl>,
+        splits: Vec<NatsSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         // TODO: to simplify the logic, return 1 split for first version
         assert!(splits.len() == 1);
-        let splits = splits
-            .into_iter()
-            .map(|split| split.into_nats().unwrap())
-            .collect::<Vec<NatsSplit>>();
         let consumer = properties
             .common
             .build_consumer(0, splits[0].start_sequence)

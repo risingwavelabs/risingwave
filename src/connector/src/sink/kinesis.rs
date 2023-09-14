@@ -31,6 +31,7 @@ use tokio_retry::Retry;
 
 use super::SinkParam;
 use crate::common::KinesisCommon;
+use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 use crate::sink::utils::{
     gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
     AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
@@ -57,7 +58,7 @@ impl KinesisSink {
         Self {
             config,
             schema: param.schema(),
-            pk_indices: param.pk_indices,
+            pk_indices: param.downstream_pk,
             is_append_only: param.sink_type.is_append_only(),
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,
@@ -202,11 +203,17 @@ impl KinesisSinkWriter {
     }
 
     async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
-        let upsert_stream = gen_upsert_message_stream(
+        let key_encoder = JsonEncoder::new(
             &self.schema,
-            &self.pk_indices,
+            Some(&self.pk_indices),
+            TimestampHandlingMode::Milli,
+        );
+        let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
+        let upsert_stream = gen_upsert_message_stream(
             chunk,
             UpsertAdapterOpts::default(),
+            key_encoder,
+            val_encoder,
         );
 
         crate::impl_load_stream_write_record!(upsert_stream, self.put_record);
@@ -214,11 +221,17 @@ impl KinesisSinkWriter {
     }
 
     async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
-        let append_only_stream = gen_append_only_message_stream(
+        let key_encoder = JsonEncoder::new(
             &self.schema,
-            &self.pk_indices,
+            Some(&self.pk_indices),
+            TimestampHandlingMode::Milli,
+        );
+        let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
+        let append_only_stream = gen_append_only_message_stream(
             chunk,
             AppendOnlyAdapterOpts::default(),
+            key_encoder,
+            val_encoder,
         );
 
         crate::impl_load_stream_write_record!(append_only_stream, self.put_record);
