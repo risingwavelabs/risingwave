@@ -45,7 +45,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
         let properties = sink_desc.get_properties().clone();
-        let pk_indices = sink_desc
+        let downstream_pk = sink_desc
             .downstream_pk
             .iter()
             .map(|i| *i as usize)
@@ -65,7 +65,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            pk_indices,
+            downstream_pk,
             sink_type,
             db_name,
             sink_from_name,
@@ -102,6 +102,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                         columns,
                         params.actor_context,
                         factory,
+                        params.pk_indices,
                     )
                     .await?,
                 ))
@@ -130,6 +131,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                             columns,
                             params.actor_context,
                             factory,
+                            params.pk_indices,
                         )
                         .await?,
                     ))

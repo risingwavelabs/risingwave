@@ -251,7 +251,7 @@ message SimpleAggNode {
   // Only used for stateless simple agg.
   repeated uint32 distribution_key = 2;
   repeated AggCallState agg_call_states = 3;
-  catalog.Table result_table = 4;
+  catalog.Table intermediate_state_table = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
@@ -263,7 +263,7 @@ message HashAggNode {
   repeated uint32 group_key = 1;
   repeated expr.AggCall agg_calls = 2;
   repeated AggCallState agg_call_states = 3;
-  catalog.Table result_table = 4;
+  catalog.Table intermediate_state_table = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;

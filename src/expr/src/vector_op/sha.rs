@@ -16,31 +16,29 @@ use risingwave_expr_macro::function;
 use sha1::{Digest, Sha1};
 use sha2::{Sha224, Sha256, Sha384, Sha512};
 
-use crate::Result;
-
 #[function("sha1(bytea) -> bytea")]
-pub fn sha1(data: &[u8]) -> Result<Box<[u8]>> {
-    Ok(Sha1::digest(data).to_vec().into())
+pub fn sha1(data: &[u8]) -> impl AsRef<[u8]> {
+    Sha1::digest(data)
 }
 
 #[function("sha224(bytea) -> bytea")]
-pub fn sha224(data: &[u8]) -> Result<Box<[u8]>> {
-    Ok(Sha224::digest(data).to_vec().into())
+pub fn sha224(data: &[u8]) -> impl AsRef<[u8]> {
+    Sha224::digest(data)
 }
 
 #[function("sha256(bytea) -> bytea")]
-pub fn sha256(data: &[u8]) -> Result<Box<[u8]>> {
-    Ok(Sha256::digest(data).to_vec().into())
+pub fn sha256(data: &[u8]) -> impl AsRef<[u8]> {
+    Sha256::digest(data)
 }
 
 #[function("sha384(bytea) -> bytea")]
-pub fn sha384(data: &[u8]) -> Result<Box<[u8]>> {
-    Ok(Sha384::digest(data).to_vec().into())
+pub fn sha384(data: &[u8]) -> impl AsRef<[u8]> {
+    Sha384::digest(data)
 }
 
 #[function("sha512(bytea) -> bytea")]
-pub fn sha512(data: &[u8]) -> Result<Box<[u8]>> {
-    Ok(Sha512::digest(data).to_vec().into())
+pub fn sha512(data: &[u8]) -> impl AsRef<[u8]> {
+    Sha512::digest(data)
 }
 
 #[cfg(test)]
@@ -54,9 +52,8 @@ mod tests {
         )];
 
         for (ori, encoded) in cases {
-            let t = sha1(ori).unwrap();
-            let slice: &[u8] = &t;
-            assert_eq!(slice, encoded);
+            let t = sha1(ori);
+            assert_eq!(t.as_ref(), encoded);
         }
     }
 
@@ -67,9 +64,8 @@ mod tests {
         ];
 
         for (ori, encoded) in cases {
-            let t = sha224(ori).unwrap();
-            let slice: &[u8] = &t;
-            assert_eq!(slice, encoded);
+            let t = sha224(ori);
+            assert_eq!(t.as_ref(), encoded);
         }
     }
 
@@ -80,9 +76,8 @@ mod tests {
         ];
 
         for (ori, encoded) in cases {
-            let t = sha256(ori).unwrap();
-            let slice: &[u8] = &t;
-            assert_eq!(slice, encoded);
+            let t = sha256(ori);
+            assert_eq!(t.as_ref(), encoded);
         }
     }
 
@@ -93,9 +88,8 @@ mod tests {
         ];
 
         for (ori, encoded) in cases {
-            let t = sha384(ori).unwrap();
-            let slice: &[u8] = &t;
-            assert_eq!(slice, encoded);
+            let t = sha384(ori);
+            assert_eq!(t.as_ref(), encoded);
         }
     }
 
@@ -106,9 +100,8 @@ mod tests {
         ];
 
         for (ori, encoded) in cases {
-            let t = sha512(ori).unwrap();
-            let slice: &[u8] = &t;
-            assert_eq!(slice, encoded);
+            let t = sha512(ori);
+            assert_eq!(t.as_ref(), encoded);
         }
     }
 }
