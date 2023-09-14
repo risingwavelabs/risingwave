@@ -37,3 +37,9 @@ query iiiI
 select * from mv;
 ----
 1  0  1  1
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;
