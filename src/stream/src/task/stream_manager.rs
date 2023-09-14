@@ -531,7 +531,7 @@ impl LocalStreamManagerCore {
         // Build the executor with params.
         let executor_params = ExecutorParams {
             env: env.clone(),
-            pk_indices: pk_indices.clone(),
+            pk_indices,
             executor_id,
             operator_id,
             op_info,
@@ -544,7 +544,6 @@ impl LocalStreamManagerCore {
         };
 
         let executor = create_executor(executor_params, self, node, store).await?;
-        assert_eq!(executor.pk_indices(), &pk_indices);
 
         // Wrap the executor for debug purpose.
         let executor = WrapperExecutor::new(
