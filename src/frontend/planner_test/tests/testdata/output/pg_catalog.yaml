@@ -2,16 +2,16 @@
 - sql: |
     select * from pg_catalog.pg_type
   logical_plan: |-
-    LogicalProject { exprs: [rw_types.id, rw_types.name, 0:Int32, 0:Int32, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
+    LogicalProject { exprs: [rw_types.id, rw_types.name, 0:Int32, 0:Int32, rw_types.input_oid, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
     └─LogicalShare { id: 3 }
-      └─LogicalProject { exprs: [rw_types.id, rw_types.name, 0:Int32, 0:Int32, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
+      └─LogicalProject { exprs: [rw_types.id, rw_types.name, 0:Int32, 0:Int32, rw_types.input_oid, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
         └─LogicalJoin { type: Inner, on: (rw_schemas.name = 'pg_catalog':Varchar), output: all }
-          ├─LogicalScan { table: rw_types, columns: [rw_types.id, rw_types.name] }
+          ├─LogicalScan { table: rw_types, columns: [rw_types.id, rw_types.name, rw_types.input_oid] }
           └─LogicalScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
   batch_plan: |-
-    BatchProject { exprs: [rw_types.id, rw_types.name, 0:Int32, 0:Int32, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
+    BatchProject { exprs: [rw_types.id, rw_types.name, 0:Int32, 0:Int32, rw_types.input_oid, false:Boolean, 0:Int32, -1:Int32, 0:Int32, 0:Int32, rw_schemas.id, 'b':Varchar, 0:Int32, null:Varchar, null:Varchar, null:Int32] }
     └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-      ├─BatchScan { table: rw_types, columns: [rw_types.id, rw_types.name], distribution: Single }
+      ├─BatchScan { table: rw_types, columns: [rw_types.id, rw_types.name, rw_types.input_oid], distribution: Single }
       └─BatchProject { exprs: [rw_schemas.id] }
         └─BatchFilter { predicate: (rw_schemas.name = 'pg_catalog':Varchar) }
           └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
@@ -224,3 +224,9 @@
     LogicalProject { exprs: [2:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: 'BatchValues { rows: [[2:Int32]] }'
+- sql: |
+    select 'boolin'::regproc
+  logical_plan: |-
+    LogicalProject { exprs: ['boolin':Varchar] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  batch_plan: 'BatchValues { rows: [[''boolin'':Varchar]] }'

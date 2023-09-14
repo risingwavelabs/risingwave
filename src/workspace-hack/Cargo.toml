@@ -51,6 +51,7 @@ hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features
 hyper = { version = "0.14", features = ["full"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 itertools = { version = "0.10" }
+jni = { version = "0.21", features = ["invocation"] }
 lexical-core = { version = "0.8", features = ["format"] }
 lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-parse-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
@@ -60,7 +61,7 @@ lexical-write-integer = { version = "0.8", default-features = false, features = 
 libc = { version = "0.2", features = ["extra_traits"] }
 lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "bb8f063", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "fedb1e3", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 mio = { version = "0.8", features = ["net", "os-ext"] }
 multimap = { version = "0.8" }
@@ -148,6 +149,7 @@ hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features
 hyper = { version = "0.14", features = ["full"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 itertools = { version = "0.10" }
+jni = { version = "0.21", features = ["invocation"] }
 lexical-core = { version = "0.8", features = ["format"] }
 lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-parse-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
@@ -157,7 +159,7 @@ lexical-write-integer = { version = "0.8", default-features = false, features = 
 libc = { version = "0.2", features = ["extra_traits"] }
 lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "bb8f063", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "fedb1e3", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 mio = { version = "0.8", features = ["net", "os-ext"] }
 multimap = { version = "0.8" }

@@ -57,7 +57,7 @@ impl KinesisSink {
         Self {
             config,
             schema: param.schema(),
-            pk_indices: param.pk_indices,
+            pk_indices: param.downstream_pk,
             is_append_only: param.sink_type.is_append_only(),
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,

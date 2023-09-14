@@ -72,6 +72,7 @@ impl Binder {
             )));
         };
 
+        self.push_context();
         let mut clause = Some(Clause::From);
         std::mem::swap(&mut self.context.clause, &mut clause);
         let func = self.bind_function(Function {
@@ -82,8 +83,10 @@ impl Binder {
             order_by: vec![],
             filter: None,
             within_group: None,
-        })?;
+        });
         self.context.clause = clause;
+        self.pop_context()?;
+        let func = func?;
 
         let columns = if let DataType::Struct(s) = func.return_type() {
             // If the table function returns a struct, it's fields can be accessed just
