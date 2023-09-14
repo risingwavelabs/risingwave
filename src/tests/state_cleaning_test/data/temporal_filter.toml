@@ -9,7 +9,7 @@ init_sqls = [
         WATERMARK FOR created_at AS created_at - interval '9' second
     ) APPEND ONLY WITH (
         connector = 'datagen',
-        rows_per_second = 200,
+        datagen.rows.per.second = 200,
         datagen.split.num = 16,
         fields.created_at.max_past_mode = 'relative',
         fields.created_at.max_past = '10s',

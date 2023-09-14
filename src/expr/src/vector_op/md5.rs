@@ -17,12 +17,12 @@ use std::fmt::Write;
 use risingwave_expr_macro::function;
 
 #[function("md5(varchar) -> varchar")]
-pub fn md5(s: &str, writer: &mut dyn Write) {
+pub fn md5(s: &str, writer: &mut impl Write) {
     write!(writer, "{:x}", ::md5::compute(s)).unwrap();
 }
 
 #[function("md5(bytea) -> varchar")]
-pub fn md5_from_bytea(s: &[u8], writer: &mut dyn Write) {
+pub fn md5_from_bytea(s: &[u8], writer: &mut impl Write) {
     writer
         .write_str(&::hex::encode(::md5::compute(s).0))
         .unwrap();

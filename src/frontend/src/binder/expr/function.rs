@@ -1142,7 +1142,11 @@ impl Binder {
                 // non-deterministic
                 ("now", now()),
                 ("current_timestamp", now()),
-                ("proctime", proctime())
+                ("proctime", proctime()),
+                ("pg_sleep", raw_call(ExprType::PgSleep)),
+                ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
+                // TODO: implement pg_sleep_until
+                // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
             ]
             .into_iter()
             .collect()

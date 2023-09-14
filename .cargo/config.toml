@@ -37,7 +37,6 @@ rustflags = [
     # uncomment the following two lines to enable `TaskLocalAlloc`
     # "--cfg",
     # "enable_task_local_alloc",
-
 ]
 
 [unstable]
