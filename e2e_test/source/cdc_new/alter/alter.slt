@@ -1,0 +1,89 @@
+system ok
+psql -d postgres -c "
+DROP TABLE IF EXISTS t;
+CREATE TABLE t (k BIGINT PRIMARY KEY, v CHARACTER VARYING);
+INSERT INTO t VALUES (1, 'a'), (2, 'b');
+"
+
+statement ok
+CREATE TABLE t (k BIGINT PRIMARY KEY, v CHARACTER VARYING)
+WITH (
+    connector = 'postgres-cdc',
+    hostname = 'localhost',
+    port = '5432',
+    username = 'bugenzhao',
+    password = 'not used',
+    database.name = 'postgres',
+    schema.name = 'public',
+    table.name = 't',
+    slot.name = 't'
+)
+
+sleep 5s
+
+query IT
+SELECT * FROM t ORDER BY k
+----
+1 a
+2 b
+
+statement ok
+ALTER TABLE t ADD COLUMN v2 CHARACTER VARYING
+
+system ok
+psql -d postgres -c "
+INSERT INTO t VALUES (3, 'c');
+"
+
+sleep 20s
+
+query ITT
+SELECT * FROM t ORDER BY k
+----
+1 a NULL
+2 b NULL
+3 c NULL
+
+system ok
+psql -d postgres -c "
+ALTER TABLE t ADD COLUMN v2 CHARACTER VARYING;
+INSERT INTO t VALUES (4, 'd', 'dd');
+"
+
+sleep 5s
+
+query ITT
+SELECT * FROM t ORDER BY k
+----
+1 a NULL
+2 b NULL
+3 c NULL
+4 d dd
+
+statement ok
+ALTER TABLE t DROP COLUMN v
+
+system ok
+psql -d postgres -c "
+ALTER TABLE t DROP COLUMN v;
+INSERT INTO t VALUES (5, 'ee');
+"
+
+sleep 20s
+
+query IT
+SELECT * FROM t ORDER BY k
+----
+1 NULL
+2 NULL
+3 NULL
+4 dd
+5 ee
+
+statement ok
+DROP TABLE t
+
+system ok
+psql -d postgres -c "
+DROP TABLE t;
+"
