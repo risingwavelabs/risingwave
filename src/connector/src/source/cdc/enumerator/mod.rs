@@ -79,8 +79,7 @@ where
         };
 
         let validate_source_request_bytes = env
-            .byte_array_from_slice(&Message::encode_to_vec(&validate_source_request))
-            .unwrap();
+            .byte_array_from_slice(&Message::encode_to_vec(&validate_source_request))?;
 
         // validate connector properties
         let response = env.call_static_method(
