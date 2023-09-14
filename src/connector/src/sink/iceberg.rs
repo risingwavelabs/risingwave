@@ -57,12 +57,15 @@ pub type RemoteIcebergConfig = RemoteConfig;
 #[serde(deny_unknown_fields)]
 pub struct IcebergConfig {
     #[serde(skip_serializing)]
-    pub connector: String, // Must be "kafka" here.
+    pub connector: String, // Must be "iceberg" here.
 
     pub r#type: String, // accept "append-only" or "upsert"
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub force_append_only: bool,
+
+    // Catalog type values: "storage", "rest"
+    pub catalog: String,
 
     #[serde(rename = "warehouse.path")]
     pub path: String,
