@@ -940,9 +940,8 @@ impl GlobalBarrierManager {
         }
 
         if self.enable_recovery {
-            let backfill_progress = Default::default(); // We delay filling this until stream graph setup.
+            let creating_table_ids = Default::default();
             let actor_map = Default::default();
-            let table_map = Default::default();
             let upstream_mv_counts = Default::default();
             let definitions = Default::default();
             let version_stats = self.hummock_manager.get_version_stats().await;
@@ -951,9 +950,8 @@ impl GlobalBarrierManager {
             self.set_status(BarrierManagerStatus::Recovering).await;
             let mut tracker = self.tracker.lock().await;
             *tracker = CreateMviewProgressTracker::recover(
-                backfill_progress,
+                creating_table_ids,
                 actor_map,
-                table_map,
                 upstream_mv_counts,
                 definitions,
                 version_stats,
