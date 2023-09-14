@@ -129,12 +129,14 @@ struct IntraCompactionTaskValidationRule {
 
 impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
     fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
+        if input.total_file_count >= self.config.level0_max_compact_file_number {
+            return true;
+        }
+
         let intra_sub_level_compact_level_count =
             self.config.level0_sub_level_compact_level_count as usize;
 
-        if input.input_levels.len() < intra_sub_level_compact_level_count
-            && input.total_file_count < self.config.level0_max_compact_file_number
-        {
+        if input.input_levels.len() < intra_sub_level_compact_level_count {
             stats.skip_by_count_limit += 1;
             return false;
         }
@@ -158,8 +160,7 @@ impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
             max_level_size * self.config.level0_sub_level_compact_level_count as u64 / 2
                 >= input.select_input_size;
 
-        if is_write_amp_large && input.total_file_count < self.config.level0_max_compact_file_number
-        {
+        if is_write_amp_large {
             stats.skip_by_write_amp_limit += 1;
             return false;
         }
