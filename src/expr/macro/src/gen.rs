@@ -370,7 +370,7 @@ impl FunctionAttr {
             }
         } else {
             // no optimization
-            let array_zip = match num_args {
+            let array_zip = match children_indices.len() {
                 0 => quote! { std::iter::repeat(()).take(input.capacity()) },
                 _ => quote! { multizip((#(#arrays.iter(),)*)) },
             };

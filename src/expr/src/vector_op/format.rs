@@ -23,13 +23,12 @@ use super::string::quote_ident;
 use crate::{ExprError, Result};
 
 /// Formats arguments according to a format string.
-// TODO(wrj): prebuild the formatter.
-#[function("format(varchar, ...) -> varchar")]
-fn format(format_str: &str, row: impl Row, writer: &mut impl Write) -> Result<()> {
-    let formatter =
-        Formatter::from_str(format_str).map_err(|e| ExprError::Parse(e.to_string().into()))?;
-
-    let mut args = row.iter().skip(1);
+#[function(
+    "format(varchar, ...) -> varchar",
+    prebuild = "Formatter::from_str($0).map_err(|e| ExprError::Parse(e.to_string().into()))?"
+)]
+fn format(formatter: &Formatter, row: impl Row, writer: &mut impl Write) -> Result<()> {
+    let mut args = row.iter();
     for node in &formatter.nodes {
         match node {
             FormatterNode::Literal(literal) => writer.write_str(literal).unwrap(),
