@@ -205,6 +205,16 @@ pub trait SinkWriterV1: Send + 'static {
     async fn abort(&mut self) -> Result<()>;
 }
 
+/// A free-form sink that may output in multiple formats and encodings. Examples include kafka,
+/// kinesis, nats and redis.
+///
+/// The implementor specifies required key & value type (likely string or bytes), as well as how to
+/// write a single pair. The provided `write_chunk` method would handle the interaction with a
+/// `SinkFormatter`.
+///
+/// Currently kafka takes `&mut self` while kinesis takes `&self`. So we use `&mut self` in trait
+/// but implement it for `&Kinesis`. This allows us to hold `&mut &Kinesis` and `&Kinesis`
+/// simultaneously, preventing the schema clone issue propagating from kafka to kinesis.
 pub trait FormattedSink {
     type K;
     type V;

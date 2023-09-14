@@ -24,6 +24,15 @@ mod upsert;
 pub use append_only::AppendOnlyFormatter;
 pub use upsert::UpsertFormatter;
 
+/// Transforms a `StreamChunk` into a sequence of key-value pairs according a specific format,
+/// for example append-only, upsert or debezium.
+///
+/// Each row in the `StreamChunk` may emit 0, 1, or more output pairs, which would be concatenated
+/// (flattened) by [`format_chunk`]. This auxiliary function is not included as a provided method
+/// due to some typing issue.
+///
+/// Generator syntax, once available, may make this simpler. Note that we only need an iterator,
+/// and async generator would be an overkill.
 pub trait SinkFormatter {
     type K;
     type V;
