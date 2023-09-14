@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use anyhow::{anyhow, Result};
 use async_nats::jetstream::consumer;
 use async_trait::async_trait;

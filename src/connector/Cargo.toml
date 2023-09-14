@@ -93,6 +93,7 @@ serde_with = { version = "3", features = ["json"] }
 simd-json = "0.10.6"
 tempfile = "3"
 thiserror = "1"
+time = "0.3.28"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -109,8 +110,6 @@ tonic = { workspace = true }
 tracing = "0.1"
 url = "2"
 urlencoding = "2"
-time = "0.3.28"
-
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
