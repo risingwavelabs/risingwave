@@ -69,8 +69,8 @@ public class JDBCSink extends SinkWriterBase {
                     getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
             // disable auto commit can improve performance
             this.conn.setAutoCommit(false);
-            // use the lowest isolation level since we don't guarantee exactly-once
-            this.conn.setTransactionIsolation(Connection.TRANSACTION_READ_UNCOMMITTED);
+            // explicitly set isolation level to RC
+            this.conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
 
             LOG.info(
                     "JDBC connection: autoCommit = {}, trxn = {}",
