@@ -101,6 +101,22 @@ pub enum DdlCommand {
     DropConnection(ConnectionId),
 }
 
+impl DdlCommand {
+    fn allow_in_recovery(&self) -> bool {
+        match self {
+            DdlCommand::DropDatabase(_)
+            | DdlCommand::DropSchema(_)
+            | DdlCommand::DropSource(_, _)
+            | DdlCommand::DropFunction(_)
+            | DdlCommand::DropView(_, _)
+            | DdlCommand::DropStreamingJob(_, _)
+            | DdlCommand::DropConnection(_) => true,
+            // Simply ban all other commands in recovery.
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct DdlController {
     env: MetaSrvEnv,
@@ -217,7 +233,9 @@ impl DdlController {
     /// a lot of logic for revert, status management, notification and so on, ensuring consistency
     /// would be a huge hassle and pain if we don't spawn here.
     pub(crate) async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
-        self.check_barrier_manager_status().await?;
+        if !command.allow_in_recovery() {
+            self.check_barrier_manager_status().await?;
+        }
         let ctrl = self.clone();
         let fut = async move {
             match command {
