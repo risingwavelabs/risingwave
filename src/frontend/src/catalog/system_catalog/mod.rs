@@ -403,6 +403,8 @@ prepare_sys_catalog! {
     { BuiltinCatalog::View(&RW_RELATIONS) },
     { BuiltinCatalog::Table(&RW_COLUMNS), read_rw_columns_info },
     { BuiltinCatalog::Table(&RW_TYPES), read_rw_types },
+    { BuiltinCatalog::Table(&RW_HUMMOCK_PINNED_VERSIONS), read_hummock_pinned_versions await },
+    { BuiltinCatalog::Table(&RW_HUMMOCK_PINNED_SNAPSHOTS), read_hummock_pinned_snapshots await },
 }
 
 #[cfg(test)]
