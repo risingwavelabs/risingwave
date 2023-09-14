@@ -73,8 +73,8 @@ mod utils;
 /// When `setof` appears before the return type, this indicates that the function is a set-returning
 /// function (table function), meaning it can return multiple values instead of just one. For more
 /// details, see the section on table functions.
-/// 
-/// If no return type is specified, the function returns `void`. However, the void type is not 
+///
+/// If no return type is specified, the function returns `void`. However, the void type is not
 /// supported in our type system, so it now returns a null value of type int.
 ///
 /// ## Multiple Function Definitions
@@ -284,7 +284,7 @@ mod utils;
 /// ## Async Function
 ///
 /// Functions can be asynchronous.
-/// 
+///
 /// ```ignore
 /// #[function("pg_sleep(float64)")]
 /// async fn pg_sleep(second: F64) {
