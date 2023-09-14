@@ -50,8 +50,7 @@ impl GlobalMemoryManager {
         auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
     ) -> Arc<Self> {
         let memory_control_policy =
-            build_memory_control_policy(total_memory_bytes, auto_dump_heap_profile_config.clone())
-                .unwrap();
+            build_memory_control_policy(total_memory_bytes, auto_dump_heap_profile_config.clone());
         tracing::info!("memory control policy: {:?}", &memory_control_policy);
 
         if auto_dump_heap_profile_config.enabled {

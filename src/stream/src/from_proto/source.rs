@@ -27,7 +27,7 @@ use crate::executor::external::ExternalStorageTable;
 use crate::executor::source::StreamSourceCore;
 use crate::executor::source_executor::SourceExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::{CdcBackfillExecutor, FsSourceExecutor};
+use crate::executor::{CdcBackfillExecutor, FlowControlExecutor, FsSourceExecutor};
 
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
@@ -50,150 +50,157 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
-            let source_id = TableId::new(source.source_id);
-            let source_name = source.source_name.clone();
-            let source_info = source.get_info()?;
+            let executor = {
+                let source_id = TableId::new(source.source_id);
+                let source_name = source.source_name.clone();
+                let source_info = source.get_info()?;
 
-            let source_desc_builder = SourceDescBuilder::new(
-                source.columns.clone(),
-                params.env.source_metrics(),
-                source.row_id_index.map(|x| x as _),
-                source.properties.clone(),
-                source_info.clone(),
-                params.env.connector_params(),
-                params.env.config().developer.connector_message_buffer_size,
-                // `pk_indices` is used to ensure that a message will be skipped instead of parsed
-                // with null pk when the pk column is missing.
-                //
-                // Currently pk_indices for source is always empty since pk information is not
-                // passed via `StreamSource` so null pk may be emitted to downstream.
-                //
-                // TODO: use the correct information to fill in pk_dicies.
-                // We should consdier add back the "pk_column_ids" field removed by #8841 in
-                // StreamSource
-                params.pk_indices.clone(),
-            );
-
-            let source_ctrl_opts = SourceCtrlOpts {
-                chunk_size: params.env.config().developer.chunk_size,
-            };
-
-            let column_ids: Vec<_> = source
-                .columns
-                .iter()
-                .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
-                .collect();
-            let fields = source
-                .columns
-                .iter()
-                .map(|prost| {
-                    let column_desc = prost.column_desc.as_ref().unwrap();
-                    let data_type = DataType::from(column_desc.column_type.as_ref().unwrap());
-                    let name = column_desc.name.clone();
-                    Field::with_name(data_type, name)
-                })
-                .collect();
-            let schema = Schema::new(fields);
-
-            let state_table_handler = SourceStateTableHandler::from_table_catalog(
-                source.state_table.as_ref().unwrap(),
-                store.clone(),
-            )
-            .await;
-            let stream_source_core = StreamSourceCore::new(
-                source_id,
-                source_name,
-                column_ids,
-                source_desc_builder,
-                state_table_handler,
-            );
-
-            let connector = source
-                .properties
-                .get("connector")
-                .map(|c| c.to_ascii_lowercase())
-                .unwrap_or_default();
-            let is_fs_connector = FS_CONNECTORS.contains(&connector.as_str());
-
-            if is_fs_connector {
-                Ok(Box::new(FsSourceExecutor::new(
-                    params.actor_context,
-                    schema,
-                    params.pk_indices,
-                    stream_source_core,
-                    params.executor_stats,
-                    barrier_receiver,
-                    system_params,
-                    params.executor_id,
-                    source_ctrl_opts,
-                )?))
-            } else {
-                let source_exec = SourceExecutor::new(
-                    params.actor_context.clone(),
-                    schema.clone(),
-                    params.pk_indices.clone(),
-                    Some(stream_source_core),
-                    params.executor_stats.clone(),
-                    barrier_receiver,
-                    system_params,
-                    params.executor_id,
-                    source_ctrl_opts.clone(),
+                let source_desc_builder = SourceDescBuilder::new(
+                    source.columns.clone(),
+                    params.env.source_metrics(),
+                    source.row_id_index.map(|x| x as _),
+                    source.properties.clone(),
+                    source_info.clone(),
                     params.env.connector_params(),
+                    params.env.config().developer.connector_message_buffer_size,
+                    // `pk_indices` is used to ensure that a message will be skipped instead of parsed
+                    // with null pk when the pk column is missing.
+                    //
+                    // Currently pk_indices for source is always empty since pk information is not
+                    // passed via `StreamSource` so null pk may be emitted to downstream.
+                    //
+                    // TODO: use the correct information to fill in pk_dicies.
+                    // We should consdier add back the "pk_column_ids" field removed by #8841 in
+                    // StreamSource
+                    params.pk_indices.clone(),
                 );
 
-                let table_type = ExternalTableType::from_properties(&source.properties);
-                if table_type.can_backfill() && let Some(table_desc) = source_info.upstream_table.clone() {
-                    let upstream_table_name = SchemaTableName::from_properties(&source.properties);
-                    let pk_indices = table_desc
-                        .pk
-                        .iter()
-                        .map(|k| k.column_index as usize)
-                        .collect_vec();
+                let source_ctrl_opts = SourceCtrlOpts {
+                    chunk_size: params.env.config().developer.chunk_size,
+                };
 
-                    let order_types = table_desc
-                        .pk
-                        .iter()
-                        .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
-                        .collect_vec();
+                let column_ids: Vec<_> = source
+                    .columns
+                    .iter()
+                    .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
+                    .collect();
+                let fields = source
+                    .columns
+                    .iter()
+                    .map(|prost| {
+                        let column_desc = prost.column_desc.as_ref().unwrap();
+                        let data_type = DataType::from(column_desc.column_type.as_ref().unwrap());
+                        let name = column_desc.name.clone();
+                        Field::with_name(data_type, name)
+                    })
+                    .collect();
+                let schema = Schema::new(fields);
 
-                    let table_reader = table_type.create_table_reader(source.properties.clone(), schema.clone())?;
-                    let external_table = ExternalStorageTable::new(
-                         TableId::new(source.source_id),
-                        upstream_table_name,
-                        table_reader,
-                        schema.clone(),
-                        order_types,
-                        pk_indices.clone(),
-                         (0..table_desc.columns.len()).collect_vec(),
-                    );
+                let state_table_handler = SourceStateTableHandler::from_table_catalog(
+                    source.state_table.as_ref().unwrap(),
+                    store.clone(),
+                )
+                .await;
+                let stream_source_core = StreamSourceCore::new(
+                    source_id,
+                    source_name,
+                    column_ids,
+                    source_desc_builder,
+                    state_table_handler,
+                );
 
-                    // use the state table from source to store the backfill state (may refactor in future)
-                    let source_state_handler = SourceStateTableHandler::from_table_catalog(
-                        source.state_table.as_ref().unwrap(),
-                        store.clone(),
-                    ).await;
-                    let cdc_backfill = CdcBackfillExecutor::new(
-                        params.actor_context.clone(),
-                        external_table,
-                        Box::new(source_exec),
-                        (0..source.columns.len()).collect_vec(),    // eliminate the last column (_rw_offset)
-                        None,
-                        schema.clone(),
-                        pk_indices,
+                let connector = source
+                    .properties
+                    .get("connector")
+                    .map(|c| c.to_ascii_lowercase())
+                    .unwrap_or_default();
+                let is_fs_connector = FS_CONNECTORS.contains(&connector.as_str());
+
+                if is_fs_connector {
+                    FsSourceExecutor::new(
+                        params.actor_context,
+                        schema,
+                        params.pk_indices,
+                        stream_source_core,
                         params.executor_stats,
-                        source_state_handler,
-                        source_ctrl_opts.chunk_size
-                    );
-                    Ok(Box::new(cdc_backfill))
-
+                        barrier_receiver,
+                        system_params,
+                        params.executor_id,
+                        source_ctrl_opts,
+                    )?
+                    .boxed()
                 } else {
-                    Ok(Box::new(source_exec))
+                    let source_exec = SourceExecutor::new(
+                        params.actor_context.clone(),
+                        schema.clone(),
+                        params.pk_indices.clone(),
+                        Some(stream_source_core),
+                        params.executor_stats.clone(),
+                        barrier_receiver,
+                        system_params,
+                        params.executor_id,
+                        source_ctrl_opts.clone(),
+                        params.env.connector_params(),
+                    );
+
+                    let table_type = ExternalTableType::from_properties(&source.properties);
+                    if table_type.can_backfill() && let Some(table_desc) = source_info.upstream_table.clone() {
+                        let upstream_table_name = SchemaTableName::from_properties(&source.properties);
+                        let pk_indices = table_desc
+                            .pk
+                            .iter()
+                            .map(|k| k.column_index as usize)
+                            .collect_vec();
+
+                        let order_types = table_desc
+                            .pk
+                            .iter()
+                            .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
+                            .collect_vec();
+
+                        let table_reader = table_type.create_table_reader(source.properties.clone(), schema.clone())?;
+                        let external_table = ExternalStorageTable::new(
+                            TableId::new(source.source_id),
+                            upstream_table_name,
+                            table_reader,
+                            schema.clone(),
+                            order_types,
+                            pk_indices.clone(),
+                            (0..table_desc.columns.len()).collect_vec(),
+                        );
+
+                        // use the state table from source to store the backfill state (may refactor in future)
+                        let source_state_handler = SourceStateTableHandler::from_table_catalog(
+                            source.state_table.as_ref().unwrap(),
+                            store.clone(),
+                        ).await;
+                        let cdc_backfill = CdcBackfillExecutor::new(
+                            params.actor_context.clone(),
+                            external_table,
+                            Box::new(source_exec),
+                            (0..source.columns.len()).collect_vec(),    // eliminate the last column (_rw_offset)
+                            None,
+                            schema.clone(),
+                            pk_indices,
+                            params.executor_stats,
+                            source_state_handler,
+                            source_ctrl_opts.chunk_size
+                        );
+                        cdc_backfill.boxed()
+                    } else {
+                        source_exec.boxed()
+                    }
                 }
+            };
+            if let Ok(rate_limit) = source.get_rate_limit() {
+                Ok(FlowControlExecutor::new(executor, *rate_limit).boxed())
+            } else {
+                Ok(executor)
             }
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a
             // `PanicStateStore` type here for indication.
-            Ok(Box::new(SourceExecutor::<PanicStateStore>::new(
+            Ok(SourceExecutor::<PanicStateStore>::new(
                 params.actor_context,
                 params.schema,
                 params.pk_indices,
@@ -205,7 +212,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 // we don't expect any data in, so no need to set chunk_sizes
                 SourceCtrlOpts::default(),
                 params.env.connector_params(),
-            )))
+            )
+            .boxed())
         }
     }
 }

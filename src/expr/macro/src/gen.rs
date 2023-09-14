@@ -15,7 +15,7 @@
 //! Generate code for the functions.
 
 use itertools::Itertools;
-use proc_macro2::Span;
+use proc_macro2::{Ident, Span};
 use quote::{format_ident, quote};
 
 use super::*;
@@ -47,10 +47,10 @@ impl FunctionAttr {
         attrs
     }
 
-    /// Generate a descriptor of the function.
+    /// Generate a descriptor of the scalar or table function.
     ///
     /// The types of arguments and return value should not contain wildcard.
-    pub fn generate_descriptor(
+    pub fn generate_function_descriptor(
         &self,
         user_fn: &UserFunctionAttr,
         build_fn: bool,
@@ -72,7 +72,7 @@ impl FunctionAttr {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
         } else {
-            self.generate_build_fn(user_fn)?
+            self.generate_build_scalar_function(user_fn, true)?
         };
         let deprecated = self.deprecated;
         Ok(quote! {
@@ -90,191 +90,332 @@ impl FunctionAttr {
         })
     }
 
-    fn generate_build_fn(&self, user_fn: &UserFunctionAttr) -> Result<TokenStream2> {
+    /// Generate a build function for the scalar function.
+    ///
+    /// If `optimize_const` is true, the function will be optimized for constant arguments,
+    /// and fallback to the general version if any argument is not constant.
+    fn generate_build_scalar_function(
+        &self,
+        user_fn: &UserFunctionAttr,
+        optimize_const: bool,
+    ) -> Result<TokenStream2> {
         let num_args = self.args.len();
         let fn_name = format_ident!("{}", user_fn.name);
-        let arg_arrays = self
-            .args
-            .iter()
-            .map(|t| format_ident!("{}", types::array_type(t)));
-        let ret_array = format_ident!("{}", types::array_type(&self.ret));
-        let arg_types = self
-            .args
-            .iter()
-            .map(|t| types::ref_type(t).parse::<TokenStream2>().unwrap());
-        let ret_type = types::ref_type(&self.ret).parse::<TokenStream2>().unwrap();
-        let exprs = (0..num_args)
-            .map(|i| format_ident!("e{i}"))
-            .collect::<Vec<_>>();
-        #[expect(
-            clippy::redundant_clone,
-            reason = "false positive https://github.com/rust-lang/rust-clippy/issues/10545"
-        )]
-        let exprs0 = exprs.clone();
+        let struct_name = match optimize_const {
+            true => format_ident!("{}OptimizeConst", utils::to_camel_case(&self.ident_name())),
+            false => format_ident!("{}", utils::to_camel_case(&self.ident_name())),
+        };
 
-        let build_expr = if self.ret == "varchar" && user_fn.is_writer_style() {
-            let template_struct = match num_args {
-                1 => format_ident!("UnaryBytesExpression"),
-                2 => format_ident!("BinaryBytesExpression"),
-                3 => format_ident!("TernaryBytesExpression"),
-                4 => format_ident!("QuaternaryBytesExpression"),
-                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
-            };
-            let args = (0..=num_args).map(|i| format_ident!("x{i}"));
-            let args1 = args.clone();
-            let func = match user_fn.return_type {
-                ReturnType::T => quote! { Ok(#fn_name(#(#args1),*)) },
-                ReturnType::Result => quote! { #fn_name(#(#args1),*) },
-                _ => todo!("returning Option is not supported yet"),
-            };
-            quote! {
-                Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, _>::new(
-                    #(#exprs),*,
-                    return_type,
-                    |#(#args),*| #func,
-                )))
-            }
-        } else if self.args.iter().all(|t| t == "boolean")
-            && self.ret == "boolean"
-            && !user_fn.return_type.contains_result()
-            && self.batch_fn.is_some()
-        {
-            let template_struct = match num_args {
-                1 => format_ident!("BooleanUnaryExpression"),
-                2 => format_ident!("BooleanBinaryExpression"),
-                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
-            };
-            let batch_fn = format_ident!("{}", self.batch_fn.as_ref().unwrap());
-            let args = (0..num_args).map(|i| format_ident!("x{i}"));
-            let args1 = args.clone();
-            let func = if user_fn.arg_option && user_fn.return_type == ReturnType::Option {
-                quote! { #fn_name(#(#args1),*) }
-            } else if user_fn.arg_option {
-                quote! { Some(#fn_name(#(#args1),*)) }
-            } else {
-                let args2 = args.clone();
-                let args3 = args.clone();
-                quote! {
-                    match (#(#args1),*) {
-                        (#(Some(#args2)),*) => Some(#fn_name(#(#args3),*)),
-                        _ => None,
-                    }
-                }
-            };
-            quote! {
-                Ok(Box::new(crate::expr::template_fast::#template_struct::new(
-                    #(#exprs,)*
-                    #batch_fn,
-                    |#(#args),*| #func,
-                )))
-            }
-        } else if self.args.len() == 2 && self.ret == "boolean" && user_fn.is_pure() {
+        // we divide all arguments into two groups: prebuilt and non-prebuilt.
+        // prebuilt arguments are collected from the "prebuild" field.
+        // let's say we have a function with 3 arguments: [0, 1, 2]
+        // and the prebuild field contains "$1".
+        // then we have:
+        //     prebuilt_indices = [1]
+        //     non_prebuilt_indices = [0, 2]
+        //
+        // if the const argument optimization is enabled, prebuilt arguments are
+        // evaluated at build time, thus the children only contain non-prebuilt arguments:
+        //     children_indices = [0, 2]
+        // otherwise, the children contain all arguments:
+        //     children_indices = [0, 1, 2]
+
+        let prebuilt_indices = match &self.prebuild {
+            Some(s) => (0..num_args)
+                .filter(|i| s.contains(&format!("${i}")))
+                .collect_vec(),
+            None => vec![],
+        };
+        let non_prebuilt_indices = match &self.prebuild {
+            Some(s) => (0..num_args)
+                .filter(|i| !s.contains(&format!("${i}")))
+                .collect_vec(),
+            _ => (0..num_args).collect_vec(),
+        };
+        let children_indices = match optimize_const {
+            #[allow(clippy::redundant_clone)] // false-positive
+            true => non_prebuilt_indices.clone(),
+            false => (0..num_args).collect_vec(),
+        };
+
+        /// Return a list of identifiers with the given prefix and indices.
+        fn idents(prefix: &str, indices: &[usize]) -> Vec<Ident> {
+            indices
+                .iter()
+                .map(|i| format_ident!("{prefix}{i}"))
+                .collect()
+        }
+        let inputs = idents("i", &children_indices);
+        let prebuilt_inputs = idents("i", &prebuilt_indices);
+        let non_prebuilt_inputs = idents("i", &non_prebuilt_indices);
+        let all_child = idents("child", &(0..num_args).collect_vec());
+        let child = idents("child", &children_indices);
+        let array_refs = idents("array", &children_indices);
+        let arrays = idents("a", &children_indices);
+        let datums = idents("v", &children_indices);
+        let arg_arrays = children_indices
+            .iter()
+            .map(|i| format_ident!("{}", types::array_type(&self.args[*i])));
+        let arg_types = children_indices.iter().map(|i| {
+            types::ref_type(&self.args[*i])
+                .parse::<TokenStream2>()
+                .unwrap()
+        });
+        let annotation: TokenStream2 = match user_fn.core_return_type.as_str() {
+            // add type annotation for functions that return generic types
+            "T" | "T1" | "T2" | "T3" => format!(": Option<{}>", types::owned_type(&self.ret))
+                .parse()
+                .unwrap(),
+            _ => quote! {},
+        };
+        let ret_array_type = format_ident!("{}", types::array_type(&self.ret));
+        let builder_type = format_ident!("{}Builder", types::array_type(&self.ret));
+        let prebuilt_arg_type = match &self.prebuild {
+            Some(s) if optimize_const => s.split("::").next().unwrap().parse().unwrap(),
+            _ => quote! { () },
+        };
+        let prebuilt_arg_value = match &self.prebuild {
+            // example:
+            // prebuild = "RegexContext::new($1)"
+            // return = "RegexContext::new(i1)"
+            Some(s) => s
+                .replace('$', "i")
+                .parse()
+                .expect("invalid prebuild syntax"),
+            None => quote! { () },
+        };
+        let prebuild_const = if self.prebuild.is_some() && optimize_const {
+            let build_general = self.generate_build_scalar_function(user_fn, false)?;
+            quote! {{
+                let build_general = #build_general;
+                #(
+                    // try to evaluate constant for prebuilt arguments
+                    let #prebuilt_inputs = match children[#prebuilt_indices].eval_const() {
+                        Ok(s) => s,
+                        // prebuilt argument is not constant, fallback to general
+                        Err(_) => return build_general(return_type, children),
+                    };
+                    // get reference to the constant value
+                    let #prebuilt_inputs = match &#prebuilt_inputs {
+                        Some(s) => s.as_scalar_ref_impl().try_into()?,
+                        // the function should always return null if any const argument is null
+                        None => return Ok(Box::new(crate::expr::LiteralExpression::new(
+                            return_type,
+                            None,
+                        ))),
+                    };
+                )*
+                #prebuilt_arg_value
+            }}
+        } else {
+            quote! { () }
+        };
+        let generic = if self.ret == "boolean" && user_fn.generic == 3 {
+            // XXX: for generic compare functions, we need to specify the compatible type
             let compatible_type = types::ref_type(types::min_compatible_type(&self.args))
                 .parse::<TokenStream2>()
                 .unwrap();
-            let args = (0..num_args).map(|i| format_ident!("x{i}"));
-            let args1 = args.clone();
-            let generic = if user_fn.generic == 3 {
-                // XXX: for generic compare functions, we need to specify the compatible type
-                quote! { ::<_, _, #compatible_type> }
-            } else {
-                quote! {}
+            quote! { ::<_, _, #compatible_type> }
+        } else {
+            quote! {}
+        };
+        let prebuilt_arg = match (&self.prebuild, optimize_const) {
+            // use the prebuilt argument
+            (Some(_), true) => quote! { &self.prebuilt_arg, },
+            // build the argument on site
+            (Some(_), false) => quote! { &#prebuilt_arg_value, },
+            // no prebuilt argument
+            (None, _) => quote! {},
+        };
+        let context = match user_fn.context {
+            true => quote! { &self.context, },
+            false => quote! {},
+        };
+        let writer = match user_fn.write {
+            true => quote! { &mut writer, },
+            false => quote! {},
+        };
+        let await_ = user_fn.async_.then(|| quote! { .await });
+        // call the user defined function
+        // inputs: [ Option<impl ScalarRef> ]
+        let mut output = quote! { #fn_name #generic(#(#non_prebuilt_inputs,)* #prebuilt_arg #context #writer) #await_ };
+        output = match user_fn.return_type_kind {
+            // XXX: we don't support void type yet. return null::int for now.
+            _ if self.ret == "void" => quote! { { #output; Option::<i32>::None } },
+            ReturnTypeKind::T => quote! { Some(#output) },
+            ReturnTypeKind::Option => output,
+            ReturnTypeKind::Result => quote! { Some(#output?) },
+            ReturnTypeKind::ResultOption => quote! { #output? },
+        };
+        // if user function accepts non-option arguments, we assume the function
+        // returns null on null input, so we need to unwrap the inputs before calling.
+        if !user_fn.arg_option {
+            output = quote! {
+                match (#(#inputs,)*) {
+                    (#(Some(#inputs),)*) => #output,
+                    _ => None,
+                }
             };
+        };
+        // output: Option<impl ScalarRef or Scalar>
+        let append_output = match user_fn.write {
+            true => quote! {{
+                let mut writer = builder.writer().begin();
+                if #output.is_some() {
+                    writer.finish();
+                } else {
+                    drop(writer);
+                    builder.append_null();
+                }
+            }},
+            false if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
+                builder.append(#output.as_ref().map(|s| s.as_ref()));
+            },
+            false => quote! {
+                let output #annotation = #output;
+                builder.append(output.as_ref().map(|s| s.as_scalar_ref()));
+            },
+        };
+        // the output expression in `eval_row`
+        let row_output = match user_fn.write {
+            true => quote! {{
+                let mut writer = String::new();
+                #output.map(|_| writer.into())
+            }},
+            false if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
+                #output.map(|s| s.as_ref().into())
+            },
+            false => quote! {{
+                let output #annotation = #output;
+                output.map(|s| s.into())
+            }},
+        };
+        // the main body in `eval`
+        let eval = if let Some(batch_fn) = &self.batch_fn {
+            // user defined batch function
+            let fn_name = format_ident!("{}", batch_fn);
             quote! {
-                Ok(Box::new(crate::expr::template_fast::CompareExpression::<_, #(#arg_arrays),*>::new(
-                    #(#exprs,)*
-                    |#(#args),*| #fn_name #generic(#(#args1),*),
-                )))
+                let c = #fn_name(#(#arrays),*);
+                Ok(Arc::new(c.into()))
             }
-        } else if self.args.iter().all(|t| types::is_primitive(t)) && user_fn.is_pure() {
-            let template_struct = match num_args {
-                0 => format_ident!("NullaryExpression"),
-                1 => format_ident!("UnaryExpression"),
-                2 => format_ident!("BinaryExpression"),
-                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
-            };
-            quote! {
-                Ok(Box::new(crate::expr::template_fast::#template_struct::<_, #(#arg_types,)* #ret_type>::new(
-                    #(#exprs,)*
-                    return_type,
-                    #fn_name,
-                )))
-            }
-        } else if user_fn.arg_option || user_fn.return_type.contains_option() {
-            let template_struct = match num_args {
-                1 => format_ident!("UnaryNullableExpression"),
-                2 => format_ident!("BinaryNullableExpression"),
-                3 => format_ident!("TernaryNullableExpression"),
-                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
-            };
-            let args = (0..num_args).map(|i| format_ident!("x{i}"));
-            let args1 = args.clone();
-            let generic = if user_fn.generic == 3 {
-                // XXX: for generic compare functions, we need to specify the compatible type
-                let compatible_type = types::ref_type(types::min_compatible_type(&self.args))
-                    .parse::<TokenStream2>()
-                    .unwrap();
-                quote! { ::<_, _, #compatible_type> }
-            } else {
-                quote! {}
-            };
-            let mut func = quote! { #fn_name #generic(#(#args1),*) };
-            func = match user_fn.return_type {
-                ReturnType::T => quote! { Ok(Some(#func)) },
-                ReturnType::Option => quote! { Ok(#func) },
-                ReturnType::Result => quote! { #func.map(Some) },
-                ReturnType::ResultOption => quote! { #func },
-            };
-            if !user_fn.arg_option {
-                let args2 = args.clone();
-                let args3 = args.clone();
-                func = quote! {
-                    match (#(#args2),*) {
-                        (#(Some(#args3)),*) => #func,
-                        _ => Ok(None),
-                    }
-                };
-            };
-            quote! {
-                Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays,)* #ret_array, _>::new(
-                    #(#exprs,)*
-                    return_type,
-                    |#(#args),*| #func,
-                )))
+        } else if (types::is_primitive(&self.ret) || self.ret == "boolean") && user_fn.is_pure() {
+            // SIMD optimization for primitive types
+            match self.args.len() {
+                0 => quote! {
+                    let c = #ret_array_type::from_iter_bitmap(
+                        std::iter::repeat_with(|| #fn_name()).take(input.capacity())
+                        Bitmap::ones(input.capacity()),
+                    );
+                    Ok(Arc::new(c.into()))
+                },
+                1 => quote! {
+                    let c = #ret_array_type::from_iter_bitmap(
+                        a0.raw_iter().map(|a| #fn_name(a)),
+                        a0.null_bitmap().clone()
+                    );
+                    Ok(Arc::new(c.into()))
+                },
+                2 => quote! {
+                    // allow using `zip` for performance
+                    #[allow(clippy::disallowed_methods)]
+                    let c = #ret_array_type::from_iter_bitmap(
+                        a0.raw_iter()
+                            .zip(a1.raw_iter())
+                            .map(|(a, b)| #fn_name #generic(a, b)),
+                        a0.null_bitmap() & a1.null_bitmap(),
+                    );
+                    Ok(Arc::new(c.into()))
+                },
+                n => todo!("SIMD optimization for {n} arguments"),
             }
         } else {
-            let template_struct = match num_args {
-                0 => format_ident!("NullaryExpression"),
-                1 => format_ident!("UnaryExpression"),
-                2 => format_ident!("BinaryExpression"),
-                3 => format_ident!("TernaryExpression"),
-                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
-            };
-            let args = (0..num_args).map(|i| format_ident!("x{i}"));
-            let args1 = args.clone();
-            let func = match user_fn.return_type {
-                ReturnType::T => quote! { Ok(#fn_name(#(#args1),*)) },
-                ReturnType::Result => quote! { #fn_name(#(#args1),*) },
-                _ => panic!("return type should not contain Option"),
+            // no optimization
+            let array_zip = match num_args {
+                0 => quote! { std::iter::repeat(()).take(input.capacity()) },
+                _ => quote! { multizip((#(#arrays.iter(),)*)) },
             };
             quote! {
-                Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays,)* #ret_array, _>::new(
-                    #(#exprs,)*
-                    return_type,
-                    |#(#args),*| #func,
-                )))
+                let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
+
+                match input.vis() {
+                    Vis::Bitmap(vis) => {
+                        // allow using `zip` for performance
+                        #[allow(clippy::disallowed_methods)]
+                        for ((#(#inputs,)*), visible) in #array_zip.zip(vis.iter()) {
+                            if !visible {
+                                builder.append_null();
+                                continue;
+                            }
+                            #append_output
+                        }
+                    }
+                    Vis::Compact(_) => {
+                        for (#(#inputs,)*) in #array_zip {
+                            #append_output
+                        }
+                    }
+                }
+                Ok(Arc::new(builder.finish().into()))
             }
         };
+
         Ok(quote! {
-            |return_type, children| {
+            |return_type: DataType, children: Vec<crate::expr::BoxedExpression>|
+                -> crate::Result<crate::expr::BoxedExpression>
+            {
+                use std::sync::Arc;
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
+                use risingwave_common::buffer::Bitmap;
+                use risingwave_common::row::OwnedRow;
+                use risingwave_common::util::iter_util::ZipEqFast;
+                use itertools::multizip;
+
+                use crate::expr::{Context, BoxedExpression};
+                use crate::Result;
 
                 crate::ensure!(children.len() == #num_args);
+                let prebuilt_arg = #prebuild_const;
+                let context = Context {
+                    return_type,
+                    arg_types: children.iter().map(|c| c.return_type()).collect(),
+                };
                 let mut iter = children.into_iter();
-                #(let #exprs0 = iter.next().unwrap();)*
+                #(let #all_child = iter.next().unwrap();)*
 
-                #build_expr
+                #[derive(Debug)]
+                struct #struct_name {
+                    context: Context,
+                    #(#child: BoxedExpression,)*
+                    prebuilt_arg: #prebuilt_arg_type,
+                }
+                #[async_trait::async_trait]
+                impl crate::expr::Expression for #struct_name {
+                    fn return_type(&self) -> DataType {
+                        self.context.return_type.clone()
+                    }
+                    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+                        // evaluate children and downcast arrays
+                        #(
+                            let #array_refs = self.#child.eval_checked(input).await?;
+                            let #arrays: &#arg_arrays = #array_refs.as_ref().into();
+                        )*
+                        #eval
+                    }
+                    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+                        #(
+                            let #datums = self.#child.eval_row(input).await?;
+                            let #inputs: Option<#arg_types> = #datums.as_ref().map(|s| s.as_scalar_ref_impl().try_into().unwrap());
+                        )*
+                        Ok(#row_output)
+                    }
+                }
+
+                Ok(Box::new(#struct_name {
+                    context,
+                    #(#child,)*
+                    prebuilt_arg,
+                }))
             }
         })
     }
@@ -282,9 +423,11 @@ impl FunctionAttr {
     /// Generate a descriptor of the aggregate function.
     ///
     /// The types of arguments and return value should not contain wildcard.
-    pub fn generate_agg_descriptor(
+    /// `user_fn` could be either `fn` or `impl`.
+    /// If `build_fn` is true, `user_fn` must be a `fn` that builds the aggregate function.
+    pub fn generate_aggregate_descriptor(
         &self,
-        user_fn: &UserFunctionAttr,
+        user_fn: &AggregateFnOrImpl,
         build_fn: bool,
     ) -> Result<TokenStream2> {
         let name = self.name.clone();
@@ -294,12 +437,23 @@ impl FunctionAttr {
             args.push(data_type_name(ty));
         }
         let ret = data_type_name(&self.ret);
+        let state_type = match &self.state {
+            Some(ty) if ty != "ref" => data_type_name(ty),
+            _ => data_type_name(&self.ret),
+        };
+        let append_only = match build_fn {
+            false => !user_fn.has_retract(),
+            true => self.append_only,
+        };
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
-        let ctor_name = format_ident!("{}", self.ident_name());
+        let ctor_name = match append_only {
+            false => format_ident!("{}", self.ident_name()),
+            true => format_ident!("{}_append_only", self.ident_name()),
+        };
         let descriptor_type = quote! { crate::sig::agg::AggFuncSig };
         let build_fn = if build_fn {
-            let name = format_ident!("{}", user_fn.name);
+            let name = format_ident!("{}", user_fn.as_fn().name);
             quote! { #name }
         } else {
             self.generate_agg_build_fn(user_fn)?
@@ -311,18 +465,20 @@ impl FunctionAttr {
                 unsafe { crate::sig::agg::_register(#descriptor_type {
                     func: crate::agg::AggKind::#pb_type,
                     inputs_type: &[#(#args),*],
+                    state_type: #state_type,
                     ret_type: #ret,
                     build: #build_fn,
+                    append_only: #append_only,
                 }) };
             }
         })
     }
 
     /// Generate build function for aggregate function.
-    fn generate_agg_build_fn(&self, user_fn: &UserFunctionAttr) -> Result<TokenStream2> {
+    fn generate_agg_build_fn(&self, user_fn: &AggregateFnOrImpl) -> Result<TokenStream2> {
         let state_type: TokenStream2 = match &self.state {
             Some(state) if state == "ref" => types::ref_type(&self.ret).parse().unwrap(),
-            Some(state) if state != "ref" => state.parse().unwrap(),
+            Some(state) if state != "ref" => types::owned_type(state).parse().unwrap(),
             _ => types::owned_type(&self.ret).parse().unwrap(),
         };
         let let_arrays = self
@@ -364,28 +520,49 @@ impl FunctionAttr {
                 }
             }
         });
-        let fn_name = format_ident!("{}", user_fn.name);
         let args = (0..self.args.len()).map(|i| format_ident!("v{i}"));
         let args = quote! { #(#args,)* };
-        let retract = match user_fn.retract {
-            true => quote! { matches!(op, Op::Delete | Op::UpdateDelete) },
-            false => quote! {},
+        let panic_on_retract = {
+            let msg = format!(
+                "attempt to retract on aggregate function {}, but it is append-only",
+                self.name
+            );
+            quote! { assert_eq!(op, Op::Insert, #msg); }
         };
-        let check_retract = match user_fn.retract {
-            true => quote! {},
-            false => {
-                let msg = format!("aggregate function {} only supports append", self.name);
-                quote! { assert_eq!(op, Op::Insert, #msg); }
+        let mut next_state = match user_fn {
+            AggregateFnOrImpl::Fn(f) => {
+                let fn_name = format_ident!("{}", f.name);
+                match f.retract {
+                    true => {
+                        quote! { #fn_name(state, #args matches!(op, Op::Delete | Op::UpdateDelete)) }
+                    }
+                    false => quote! {{
+                        #panic_on_retract
+                        #fn_name(state, #args)
+                    }},
+                }
+            }
+            AggregateFnOrImpl::Impl(i) => {
+                let retract = match i.retract {
+                    Some(_) => quote! { self.function.retract(state, #args) },
+                    None => panic_on_retract,
+                };
+                quote! {
+                    if matches!(op, Op::Delete | Op::UpdateDelete) {
+                        #retract
+                    } else {
+                        self.function.accumulate(state, #args)
+                    }
+                }
             }
         };
-        let mut next_state = quote! { #fn_name(state, #args #retract) };
-        next_state = match user_fn.return_type {
-            ReturnType::T => quote! { Some(#next_state) },
-            ReturnType::Option => next_state,
-            ReturnType::Result => quote! { Some(#next_state?) },
-            ReturnType::ResultOption => quote! { #next_state? },
+        next_state = match user_fn.accumulate().return_type_kind {
+            ReturnTypeKind::T => quote! { Some(#next_state) },
+            ReturnTypeKind::Option => next_state,
+            ReturnTypeKind::Result => quote! { Some(#next_state?) },
+            ReturnTypeKind::ResultOption => quote! { #next_state? },
         };
-        if !user_fn.arg_option {
+        if !user_fn.accumulate().arg_option {
             match self.args.len() {
                 0 => {
                     next_state = quote! {
@@ -396,9 +573,16 @@ impl FunctionAttr {
                     };
                 }
                 1 => {
-                    let first_state = match &self.init_state {
-                        Some(_) => quote! { unreachable!() },
-                        _ => quote! { Some(v0.into()) },
+                    let first_state = if self.init_state.is_some() {
+                        quote! { unreachable!() }
+                    } else if let Some(s) = &self.state && s == "ref" {
+                        // for min/max/first/last, the state is the first value
+                        quote! { Some(v0) }
+                    } else {
+                        quote! {{
+                            let state = #state_type::default();
+                            #next_state
+                        }}
                     };
                     next_state = quote! {
                         match (state, v0) {
@@ -411,6 +595,32 @@ impl FunctionAttr {
                 _ => todo!("multiple arguments are not supported for non-option function"),
             }
         }
+        let get_result = match user_fn {
+            AggregateFnOrImpl::Impl(impl_) if impl_.finalize.is_some() => {
+                quote! {
+                    let state = match state {
+                        Some(s) => s.as_scalar_ref_impl().try_into().unwrap(),
+                        None => return Ok(None),
+                    };
+                    Ok(Some(self.function.finalize(state).into()))
+                }
+            }
+            _ => quote! { Ok(state.clone()) },
+        };
+        let function_field = match user_fn {
+            AggregateFnOrImpl::Fn(_) => quote! {},
+            AggregateFnOrImpl::Impl(i) => {
+                let struct_name = format_ident!("{}", i.struct_name);
+                quote! { function: #struct_name, }
+            }
+        };
+        let function_new = match user_fn {
+            AggregateFnOrImpl::Fn(_) => quote! {},
+            AggregateFnOrImpl::Impl(i) => {
+                let struct_name = format_ident!("{}", i.struct_name);
+                quote! { function: #struct_name::default(), }
+            }
+        };
 
         Ok(quote! {
             |agg| {
@@ -428,6 +638,7 @@ impl FunctionAttr {
                 #[derive(Clone)]
                 struct Agg {
                     return_type: DataType,
+                    #function_field
                 }
 
                 #[async_trait::async_trait]
@@ -446,7 +657,6 @@ impl FunctionAttr {
                             Vis::Bitmap(bitmap) => {
                                 for row_id in bitmap.iter_ones() {
                                     let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #check_retract
                                     #(#let_values)*
                                     state = #next_state;
                                 }
@@ -454,7 +664,6 @@ impl FunctionAttr {
                             Vis::Compact(_) => {
                                 for row_id in 0..input.capacity() {
                                     let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #check_retract
                                     #(#let_values)*
                                     state = #next_state;
                                 }
@@ -478,7 +687,6 @@ impl FunctionAttr {
                                         break;
                                     }
                                     let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #check_retract
                                     #(#let_values)*
                                     state = #next_state;
                                 }
@@ -486,7 +694,6 @@ impl FunctionAttr {
                             Vis::Compact(_) => {
                                 for row_id in range {
                                     let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #check_retract
                                     #(#let_values)*
                                     state = #next_state;
                                 }
@@ -497,12 +704,14 @@ impl FunctionAttr {
                     }
 
                     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
-                        Ok(state.as_datum().clone())
+                        let state = state.as_datum();
+                        #get_result
                     }
                 }
 
                 Ok(Box::new(Agg {
                     return_type: agg.return_type.clone(),
+                    #function_new
                 }))
             }
         })
@@ -563,7 +772,7 @@ impl FunctionAttr {
         let num_args = self.args.len();
         let return_types = output_types(&self.ret);
         let fn_name = format_ident!("{}", user_fn.name);
-        let struct_name = format_ident!("{}", self.ident_name());
+        let struct_name = format_ident!("{}", utils::to_camel_case(&self.ident_name()));
         let arg_ids = (0..num_args)
             .filter(|i| match &self.prebuild {
                 Some(s) => !s.contains(&format!("${i}")),
@@ -613,38 +822,38 @@ impl FunctionAttr {
                 ).into_ref();
             }
         };
-        let const_arg = match &self.prebuild {
-            Some(_) => quote! { &self.const_arg },
+        let prebuilt_arg = match &self.prebuild {
+            Some(_) => quote! { &self.prebuilt_arg },
             None => quote! {},
         };
-        let const_arg_type = match &self.prebuild {
+        let prebuilt_arg_type = match &self.prebuild {
             Some(s) => s.split("::").next().unwrap().parse().unwrap(),
             None => quote! { () },
         };
-        let const_arg_value = match &self.prebuild {
+        let prebuilt_arg_value = match &self.prebuild {
             Some(s) => s
                 .replace('$', "child")
                 .parse()
                 .expect("invalid prebuild syntax"),
             None => quote! { () },
         };
-        let iter = match user_fn.return_type {
-            ReturnType::T => quote! { iter },
-            ReturnType::Option => quote! { iter.flatten() },
-            ReturnType::Result => quote! { iter? },
-            ReturnType::ResultOption => quote! { value?.flatten() },
+        let iter = match user_fn.return_type_kind {
+            ReturnTypeKind::T => quote! { iter },
+            ReturnTypeKind::Option => quote! { iter.flatten() },
+            ReturnTypeKind::Result => quote! { iter? },
+            ReturnTypeKind::ResultOption => quote! { value?.flatten() },
         };
-        let iterator_item_type = user_fn.iterator_item_type.clone().ok_or_else(|| {
+        let iterator_item_type = user_fn.iterator_item_kind.clone().ok_or_else(|| {
             Error::new(
                 user_fn.return_type_span,
                 "expect `impl Iterator` in return type",
             )
         })?;
         let output = match iterator_item_type {
-            ReturnType::T => quote! { Some(output) },
-            ReturnType::Option => quote! { output },
-            ReturnType::Result => quote! { Some(output?) },
-            ReturnType::ResultOption => quote! { output? },
+            ReturnTypeKind::T => quote! { Some(output) },
+            ReturnTypeKind::Option => quote! { output },
+            ReturnTypeKind::Result => quote! { Some(output?) },
+            ReturnTypeKind::ResultOption => quote! { output? },
         };
 
         Ok(quote! {
@@ -658,15 +867,21 @@ impl FunctionAttr {
                 crate::ensure!(children.len() == #num_args);
                 let mut iter = children.into_iter();
                 #(let #all_child = iter.next().unwrap();)*
-                #(let #const_child = #const_child.eval_const()?;)*
+                #(
+                    let #const_child = #const_child.eval_const()?;
+                    let #const_child = match &#const_child {
+                        Some(s) => s.as_scalar_ref_impl().try_into()?,
+                        // the function should always return empty if any const argument is null
+                        None => return Ok(crate::table_function::empty(return_type)),
+                    };
+                )*
 
                 #[derive(Debug)]
-                #[allow(non_camel_case_types)]
                 struct #struct_name {
                     return_type: DataType,
                     chunk_size: usize,
                     #(#child: BoxedExpression,)*
-                    const_arg: #const_arg_type,
+                    prebuilt_arg: #prebuilt_arg_type,
                 }
                 #[async_trait::async_trait]
                 impl crate::table_function::TableFunction for #struct_name {
@@ -690,7 +905,7 @@ impl FunctionAttr {
 
                         for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()).enumerate() {
                             if let (#(Some(#inputs),)*) = row && visible {
-                                let iter = #fn_name(#(#inputs,)* #const_arg);
+                                let iter = #fn_name(#(#inputs,)* #prebuilt_arg);
                                 for output in #iter {
                                     index_builder.append(Some(i as i32));
                                     match #output {
@@ -722,7 +937,7 @@ impl FunctionAttr {
                     return_type,
                     chunk_size,
                     #(#child,)*
-                    const_arg: #const_arg_value,
+                    prebuilt_arg: #prebuilt_arg_value,
                 }))
             }
         })

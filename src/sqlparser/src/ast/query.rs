@@ -387,11 +387,14 @@ pub enum TableFactor {
         subquery: Box<Query>,
         alias: Option<TableAlias>,
     },
-    /// `<expr>[ AS <alias> ]`
+    /// `<expr>(args)[ AS <alias> ]`
+    ///
+    /// Note that scalar functions can also be used in this way.
     TableFunction {
         name: ObjectName,
         alias: Option<TableAlias>,
         args: Vec<FunctionArg>,
+        with_ordinality: bool,
     },
     /// Represents a parenthesized table factor. The SQL spec only allows a
     /// join expression (`(foo <JOIN> bar [ <JOIN> baz ... ])`) to be nested,
@@ -433,8 +436,16 @@ impl fmt::Display for TableFactor {
                 }
                 Ok(())
             }
-            TableFactor::TableFunction { name, alias, args } => {
+            TableFactor::TableFunction {
+                name,
+                alias,
+                args,
+                with_ordinality,
+            } => {
                 write!(f, "{}({})", name, display_comma_separated(args))?;
+                if *with_ordinality {
+                    write!(f, " WITH ORDINALITY")?;
+                }
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
                 }
