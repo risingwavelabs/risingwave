@@ -177,7 +177,6 @@
   sql: |
     create table t1(c varchar, n varchar, id varchar, d varchar);
     create table t2(c varchar, p varchar, id varchar, d varchar);
-
     select array_agg(t1.n order by path_idx) from t1
     join t2
     on t1.c = 'abc'
