@@ -392,7 +392,35 @@ mod tests {
 
     #[test]
     fn test_range_diff() {
-        // TODO()
+        fn test(
+            a: Range<usize>,
+            b: Range<usize>,
+            expected_removed: impl IntoIterator<Item = usize>,
+            expected_added: impl IntoIterator<Item = usize>,
+        ) {
+            let (removed, added) = range_diff(a, b);
+            let removed_set = removed.into_iter().flatten().collect::<HashSet<_>>();
+            let added_set = added.into_iter().flatten().collect::<HashSet<_>>();
+            let expected_removed_set = expected_removed.into_iter().collect::<HashSet<_>>();
+            let expected_added_set = expected_added.into_iter().collect::<HashSet<_>>();
+            assert_eq!(removed_set, expected_removed_set);
+            assert_eq!(added_set, expected_added_set);
+        }
+
+        test(0..0, 0..0, [], []);
+        test(0..1, 0..1, [], []);
+        test(0..1, 0..2, [], [1]);
+        test(0..2, 0..1, [1], []);
+        test(0..2, 1..2, [0], []);
+        test(1..2, 0..2, [], [0]);
+        test(0..1, 1..2, [0], [1]);
+        test(0..1, 2..3, [0], [2]);
+        test(1..2, 0..1, [1], [0]);
+        test(2..3, 0..1, [2], [0]);
+        test(0..3, 1..2, [0, 2], []);
+        test(1..2, 0..3, [], [0, 2]);
+        test(0..3, 2..4, [0, 1], [3]);
+        test(2..4, 0..3, [3], [0, 1]);
     }
 
     #[test]
