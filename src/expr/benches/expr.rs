@@ -24,7 +24,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
 use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::*;
-use risingwave_expr::agg::{build as build_agg, AggArgs, AggCall, AggKind};
+use risingwave_expr::agg::{build_append_only, AggArgs, AggCall, AggKind};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
 use risingwave_expr::sig::func::func_sigs;
@@ -361,7 +361,7 @@ fn bench_expr(c: &mut Criterion) {
             println!("todo: {sig:?}");
             continue;
         }
-        let agg = match build_agg(&AggCall {
+        let agg = match build_append_only(&AggCall {
             kind: sig.func,
             args: match sig.inputs_type {
                 [] => AggArgs::None,
