@@ -82,6 +82,10 @@ fn lookup_matrix(mut ty: &str, idx: usize) -> &str {
         ty = "list";
     } else if ty.starts_with("struct") {
         ty = "struct";
+    } else if ty == "void" {
+        // XXX: we don't support void type yet.
+        //      replace it with int32 for now.
+        ty = "int32";
     }
     let s = TYPE_MATRIX.trim().lines().find_map(|line| {
         let mut parts = line.split_whitespace();

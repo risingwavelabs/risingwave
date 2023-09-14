@@ -34,6 +34,7 @@ pub mod concat_op;
 pub mod concat_ws;
 pub mod conjunction;
 pub mod date_trunc;
+pub mod delay;
 pub mod encdec;
 pub mod exp;
 pub mod extract;

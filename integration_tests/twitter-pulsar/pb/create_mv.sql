@@ -4,7 +4,7 @@
 CREATE MATERIALIZED VIEW hot_hashtags AS WITH tags AS (
     SELECT
         unnest(regexp_matches((data).text, '#\w+', 'g')) AS hashtag,
-        (data).created_at :: timestamp AS created_at
+        (data).created_at :: timestamptz AS created_at
     FROM
         twitter
 )

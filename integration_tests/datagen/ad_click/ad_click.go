@@ -54,8 +54,8 @@ func (g *adClickGen) Load(ctx context.Context, outCh chan<- sink.SinkRecord) {
 		record := &clickEvent{
 			UserId:              rand.Int63n(100000),
 			AdId:                rand.Int63n(10),
-			ClickTimestamp:      now.Add(time.Duration(rand.Intn(1000)) * time.Millisecond).Format(gen.RwTimestampLayout),
-			ImpressionTimestamp: now.Format(gen.RwTimestampLayout),
+			ClickTimestamp:      now.Add(time.Duration(rand.Intn(1000)) * time.Millisecond).Format(gen.RwTimestamptzLayout),
+			ImpressionTimestamp: now.Format(gen.RwTimestamptzLayout),
 		}
 		select {
 		case <-ctx.Done():

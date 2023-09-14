@@ -260,6 +260,7 @@ impl FunctionAttr {
         let variadic_args = variadic.then(|| quote! { variadic_row, });
         let context = user_fn.context.then(|| quote! { &self.context, });
         let writer = user_fn.write.then(|| quote! { &mut writer, });
+        let await_ = user_fn.async_.then(|| quote! { .await });
         // call the user defined function
         // inputs: [ Option<impl ScalarRef> ]
         let mut output = quote! { #fn_name #generic(
@@ -268,10 +269,12 @@ impl FunctionAttr {
             #variadic_args
             #context
             #writer
-        ) };
+        ) #await_ };
         // handle error if the function returns `Result`
         // wrap a `Some` if the function doesn't return `Option`
         output = match user_fn.return_type_kind {
+            // XXX: we don't support void type yet. return null::int for now.
+            _ if self.ret == "void" => quote! { { #output; Option::<i32>::None } },
             ReturnTypeKind::T => quote! { Some(#output) },
             ReturnTypeKind::Option => output,
             ReturnTypeKind::Result => quote! { Some(#output?) },
@@ -322,7 +325,10 @@ impl FunctionAttr {
         };
         // the main body in `eval`
         let eval = if let Some(batch_fn) = &self.batch_fn {
-            assert!(!variadic, "customized batch function is not supported for variadic functions");
+            assert!(
+                !variadic,
+                "customized batch function is not supported for variadic functions"
+            );
             // user defined batch function
             let fn_name = format_ident!("{}", batch_fn);
             quote! {
@@ -368,8 +374,10 @@ impl FunctionAttr {
                 0 => quote! { std::iter::repeat(()).take(input.capacity()) },
                 _ => quote! { multizip((#(#arrays.iter(),)*)) },
             };
-            let let_variadic = variadic.then(|| quote! {
-                let variadic_row = variadic_input.row_at_unchecked_vis(i);
+            let let_variadic = variadic.then(|| {
+                quote! {
+                    let variadic_row = variadic_input.row_at_unchecked_vis(i);
+                }
             });
             quote! {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
@@ -461,9 +469,11 @@ impl FunctionAttr {
     /// Generate a descriptor of the aggregate function.
     ///
     /// The types of arguments and return value should not contain wildcard.
+    /// `user_fn` could be either `fn` or `impl`.
+    /// If `build_fn` is true, `user_fn` must be a `fn` that builds the aggregate function.
     pub fn generate_aggregate_descriptor(
         &self,
-        user_fn: &UserFunctionAttr,
+        user_fn: &AggregateFnOrImpl,
         build_fn: bool,
     ) -> Result<TokenStream2> {
         let name = self.name.clone();
@@ -473,12 +483,23 @@ impl FunctionAttr {
             args.push(data_type_name(ty));
         }
         let ret = data_type_name(&self.ret);
+        let state_type = match &self.state {
+            Some(ty) if ty != "ref" => data_type_name(ty),
+            _ => data_type_name(&self.ret),
+        };
+        let append_only = match build_fn {
+            false => !user_fn.has_retract(),
+            true => self.append_only,
+        };
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
-        let ctor_name = format_ident!("{}", self.ident_name());
+        let ctor_name = match append_only {
+            false => format_ident!("{}", self.ident_name()),
+            true => format_ident!("{}_append_only", self.ident_name()),
+        };
         let descriptor_type = quote! { crate::sig::agg::AggFuncSig };
         let build_fn = if build_fn {
-            let name = format_ident!("{}", user_fn.name);
+            let name = format_ident!("{}", user_fn.as_fn().name);
             quote! { #name }
         } else {
             self.generate_agg_build_fn(user_fn)?
@@ -490,18 +511,20 @@ impl FunctionAttr {
                 unsafe { crate::sig::agg::_register(#descriptor_type {
                     func: crate::agg::AggKind::#pb_type,
                     inputs_type: &[#(#args),*],
+                    state_type: #state_type,
                     ret_type: #ret,
                     build: #build_fn,
+                    append_only: #append_only,
                 }) };
             }
         })
     }
 
     /// Generate build function for aggregate function.
-    fn generate_agg_build_fn(&self, user_fn: &UserFunctionAttr) -> Result<TokenStream2> {
+    fn generate_agg_build_fn(&self, user_fn: &AggregateFnOrImpl) -> Result<TokenStream2> {
         let state_type: TokenStream2 = match &self.state {
             Some(state) if state == "ref" => types::ref_type(&self.ret).parse().unwrap(),
-            Some(state) if state != "ref" => state.parse().unwrap(),
+            Some(state) if state != "ref" => types::owned_type(state).parse().unwrap(),
             _ => types::owned_type(&self.ret).parse().unwrap(),
         };
         let let_arrays = self
@@ -543,28 +566,49 @@ impl FunctionAttr {
                 }
             }
         });
-        let fn_name = format_ident!("{}", user_fn.name);
         let args = (0..self.args.len()).map(|i| format_ident!("v{i}"));
         let args = quote! { #(#args,)* };
-        let retract = match user_fn.retract {
-            true => quote! { matches!(op, Op::Delete | Op::UpdateDelete) },
-            false => quote! {},
+        let panic_on_retract = {
+            let msg = format!(
+                "attempt to retract on aggregate function {}, but it is append-only",
+                self.name
+            );
+            quote! { assert_eq!(op, Op::Insert, #msg); }
         };
-        let check_retract = match user_fn.retract {
-            true => quote! {},
-            false => {
-                let msg = format!("aggregate function {} only supports append", self.name);
-                quote! { assert_eq!(op, Op::Insert, #msg); }
+        let mut next_state = match user_fn {
+            AggregateFnOrImpl::Fn(f) => {
+                let fn_name = format_ident!("{}", f.name);
+                match f.retract {
+                    true => {
+                        quote! { #fn_name(state, #args matches!(op, Op::Delete | Op::UpdateDelete)) }
+                    }
+                    false => quote! {{
+                        #panic_on_retract
+                        #fn_name(state, #args)
+                    }},
+                }
+            }
+            AggregateFnOrImpl::Impl(i) => {
+                let retract = match i.retract {
+                    Some(_) => quote! { self.function.retract(state, #args) },
+                    None => panic_on_retract,
+                };
+                quote! {
+                    if matches!(op, Op::Delete | Op::UpdateDelete) {
+                        #retract
+                    } else {
+                        self.function.accumulate(state, #args)
+                    }
+                }
             }
         };
-        let mut next_state = quote! { #fn_name(state, #args #retract) };
-        next_state = match user_fn.return_type_kind {
+        next_state = match user_fn.accumulate().return_type_kind {
             ReturnTypeKind::T => quote! { Some(#next_state) },
             ReturnTypeKind::Option => next_state,
             ReturnTypeKind::Result => quote! { Some(#next_state?) },
             ReturnTypeKind::ResultOption => quote! { #next_state? },
         };
-        if !user_fn.arg_option {
+        if !user_fn.accumulate().arg_option {
             match self.args.len() {
                 0 => {
                     next_state = quote! {
@@ -575,9 +619,16 @@ impl FunctionAttr {
                     };
                 }
                 1 => {
-                    let first_state = match &self.init_state {
-                        Some(_) => quote! { unreachable!() },
-                        _ => quote! { Some(v0.into()) },
+                    let first_state = if self.init_state.is_some() {
+                        quote! { unreachable!() }
+                    } else if let Some(s) = &self.state && s == "ref" {
+                        // for min/max/first/last, the state is the first value
+                        quote! { Some(v0) }
+                    } else {
+                        quote! {{
+                            let state = #state_type::default();
+                            #next_state
+                        }}
                     };
                     next_state = quote! {
                         match (state, v0) {
@@ -590,6 +641,32 @@ impl FunctionAttr {
                 _ => todo!("multiple arguments are not supported for non-option function"),
             }
         }
+        let get_result = match user_fn {
+            AggregateFnOrImpl::Impl(impl_) if impl_.finalize.is_some() => {
+                quote! {
+                    let state = match state {
+                        Some(s) => s.as_scalar_ref_impl().try_into().unwrap(),
+                        None => return Ok(None),
+                    };
+                    Ok(Some(self.function.finalize(state).into()))
+                }
+            }
+            _ => quote! { Ok(state.clone()) },
+        };
+        let function_field = match user_fn {
+            AggregateFnOrImpl::Fn(_) => quote! {},
+            AggregateFnOrImpl::Impl(i) => {
+                let struct_name = format_ident!("{}", i.struct_name);
+                quote! { function: #struct_name, }
+            }
+        };
+        let function_new = match user_fn {
+            AggregateFnOrImpl::Fn(_) => quote! {},
+            AggregateFnOrImpl::Impl(i) => {
+                let struct_name = format_ident!("{}", i.struct_name);
+                quote! { function: #struct_name::default(), }
+            }
+        };
 
         Ok(quote! {
             |agg| {
@@ -607,6 +684,7 @@ impl FunctionAttr {
                 #[derive(Clone)]
                 struct Agg {
                     return_type: DataType,
+                    #function_field
                 }
 
                 #[async_trait::async_trait]
@@ -625,7 +703,6 @@ impl FunctionAttr {
                             Vis::Bitmap(bitmap) => {
                                 for row_id in bitmap.iter_ones() {
                                     let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #check_retract
                                     #(#let_values)*
                                     state = #next_state;
                                 }
@@ -633,7 +710,6 @@ impl FunctionAttr {
                             Vis::Compact(_) => {
                                 for row_id in 0..input.capacity() {
                                     let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #check_retract
                                     #(#let_values)*
                                     state = #next_state;
                                 }
@@ -657,7 +733,6 @@ impl FunctionAttr {
                                         break;
                                     }
                                     let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #check_retract
                                     #(#let_values)*
                                     state = #next_state;
                                 }
@@ -665,7 +740,6 @@ impl FunctionAttr {
                             Vis::Compact(_) => {
                                 for row_id in range {
                                     let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #check_retract
                                     #(#let_values)*
                                     state = #next_state;
                                 }
@@ -676,12 +750,14 @@ impl FunctionAttr {
                     }
 
                     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
-                        Ok(state.as_datum().clone())
+                        let state = state.as_datum();
+                        #get_result
                     }
                 }
 
                 Ok(Box::new(Agg {
                     return_type: agg.return_type.clone(),
+                    #function_new
                 }))
             }
         })

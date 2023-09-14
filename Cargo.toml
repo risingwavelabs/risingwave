@@ -112,6 +112,10 @@ arrow-schema = "46"
 arrow-buffer = "46"
 arrow-flight = "46"
 arrow-select = "46"
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
+  "profiling",
+  "stats",
+], rev = "64a2d9" }
 
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
