@@ -96,14 +96,14 @@ func (g *adCtrGen) generate() []sink.SinkRecord {
 		&adImpressionEvent{
 			BidId:               bidId,
 			AdId:                adId,
-			ImpressionTimestamp: time.Now().Format(gen.RwTimestampLayout),
+			ImpressionTimestamp: time.Now().Format(gen.RwTimestamptzLayout),
 		},
 	}
 	if g.hasClick(adId) {
 		randomDelay := time.Duration(g.faker.IntRange(1, 10) * int(time.Second))
 		events = append(events, &adClickEvent{
 			BidId:          bidId,
-			ClickTimestamp: time.Now().Add(randomDelay).Format(gen.RwTimestampLayout),
+			ClickTimestamp: time.Now().Add(randomDelay).Format(gen.RwTimestamptzLayout),
 		})
 	}
 	return events

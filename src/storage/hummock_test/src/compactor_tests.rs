@@ -422,67 +422,54 @@ pub(crate) mod tests {
         .await;
 
         // 2. get compact task
-        let mut compact_task = hummock_manager_ref
+
+        // 3. compact
+        while let Some(compact_task) = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut default_level_selector(),
             )
             .await
             .unwrap()
-            .unwrap();
-        let compaction_filter_flag = CompactionFilterFlag::NONE;
-        compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        compact_task.current_epoch_time = 0;
+        {
+            // 3. compact
+            let (_tx, rx) = tokio::sync::oneshot::channel();
+            let (mut result_task, task_stats) = compact(
+                compact_ctx.clone(),
+                compact_task.clone(),
+                rx,
+                Box::new(sstable_object_id_manager.clone()),
+            )
+            .await;
 
-        // assert compact_task
-        assert_eq!(
-            compact_task
-                .input_ssts
-                .iter()
-                .map(|level| level.table_infos.len())
-                .sum::<usize>(),
-            SST_COUNT as usize / 2 + 1,
-        );
-        compact_task.target_level = 6;
-
-        // 3. compact
-        let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) = compact(
-            compact_ctx,
-            compact_task.clone(),
-            rx,
-            Box::new(sstable_object_id_manager.clone()),
-        )
-        .await;
-
-        hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
-            .await
-            .unwrap();
+            hummock_manager_ref
+                .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+                .await
+                .unwrap();
+        }
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
-        let output_table = version
+        let output_tables = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .levels
-            .last()
-            .unwrap()
-            .table_infos
-            .first()
-            .unwrap();
-        let table = storage
-            .sstable_store()
-            .sstable(output_table, &mut StoreLocalStatistic::default())
-            .await
-            .unwrap();
-        let target_table_size = storage.storage_opts().sstable_size_mb * (1 << 20);
-
-        assert!(
-            table.value().meta.estimated_size > target_table_size,
-            "table.meta.estimated_size {} <= target_table_size {}",
-            table.value().meta.estimated_size,
-            target_table_size
-        );
+            .iter()
+            .flat_map(|level| level.table_infos.clone())
+            .collect_vec();
+        for output_table in &output_tables {
+            let table = storage
+                .sstable_store()
+                .sstable(output_table, &mut StoreLocalStatistic::default())
+                .await
+                .unwrap();
+            let target_table_size = storage.storage_opts().sstable_size_mb * (1 << 20);
+            assert!(
+                table.value().meta.estimated_size > target_table_size,
+                "table.meta.estimated_size {} <= target_table_size {}",
+                table.value().meta.estimated_size,
+                target_table_size
+            );
+        }
 
         // 5. storage get back the correct kv after compaction
         storage.wait_version(version).await;

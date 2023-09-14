@@ -30,24 +30,19 @@ use crate::{ExprError, Result};
 #[aggregate("sum(interval) -> interval")]
 #[aggregate("sum(int256) -> int256")]
 #[aggregate("sum0(int64) -> int64", init_state = "0i64")]
-fn sum<S, T>(state: Option<S>, input: Option<T>, retract: bool) -> Result<Option<S>>
+fn sum<S, T>(state: S, input: T, retract: bool) -> Result<S>
 where
     S: Default + From<T> + CheckedAdd<Output = S> + CheckedSub<Output = S>,
 {
-    let Some(input) = input else {
-        return Ok(state);
-    };
-    let state = state.unwrap_or_default();
-    let result = if retract {
+    if retract {
         state
             .checked_sub(&S::from(input))
-            .ok_or_else(|| ExprError::NumericOutOfRange)?
+            .ok_or_else(|| ExprError::NumericOutOfRange)
     } else {
         state
             .checked_add(&S::from(input))
-            .ok_or_else(|| ExprError::NumericOutOfRange)?
-    };
-    Ok(Some(result))
+            .ok_or_else(|| ExprError::NumericOutOfRange)
+    }
 }
 
 #[aggregate("min(*) -> auto", state = "ref")]
@@ -60,7 +55,9 @@ fn max<T: Ord>(state: T, input: T) -> T {
     state.max(input)
 }
 
-#[aggregate("bit_and(*int) -> auto")]
+// XXX: state = "ref" is required so that
+// for the first non-null value, the state is set to that value.
+#[aggregate("bit_and(*int) -> auto", state = "ref")]
 fn bit_and<T>(state: T, input: T) -> T
 where
     T: BitAnd<Output = T>,
@@ -139,84 +136,6 @@ fn count_star(state: i64, retract: bool) -> i64 {
     }
 }
 
-/// Returns true if all non-null input values are true, otherwise false.
-///
-/// # Example
-///
-/// ```slt
-/// statement ok
-/// create table t (b1 boolean, b2 boolean, b3 boolean, b4 boolean);
-///
-/// query T
-/// select bool_and(b1) from t;
-/// ----
-/// NULL
-///
-/// statement ok
-/// insert into t values
-///     (true,  null, false, null),
-///     (false, true, null,  null),
-///     (null,  true, false, null);
-///
-/// query TTTTTT
-/// select
-///     bool_and(b1),
-///     bool_and(b2),
-///     bool_and(b3),
-///     bool_and(b4),
-///     bool_and(NOT b2),
-///     bool_and(NOT b3)
-/// FROM t;
-/// ----
-/// f t f NULL f t
-///
-/// statement ok
-/// drop table t;
-/// ```
-#[aggregate("bool_and(boolean) -> boolean")]
-fn bool_and(state: bool, input: bool) -> bool {
-    state && input
-}
-
-/// Returns true if any non-null input value is true, otherwise false.
-///
-/// # Example
-///
-/// ```slt
-/// statement ok
-/// create table t (b1 boolean, b2 boolean, b3 boolean, b4 boolean);
-///
-/// query T
-/// select bool_or(b1) from t;
-/// ----
-/// NULL
-///
-/// statement ok
-/// insert into t values
-///     (true,  null, false, null),
-///     (false, true, null,  null),
-///     (null,  true, false, null);
-///
-/// query TTTTTT
-/// select
-///     bool_or(b1),
-///     bool_or(b2),
-///     bool_or(b3),
-///     bool_or(b4),
-///     bool_or(NOT b2),
-///     bool_or(NOT b3)
-/// FROM t;
-/// ----
-/// t t f NULL f t
-///
-/// statement ok
-/// drop table t;
-/// ```
-#[aggregate("bool_or(boolean) -> boolean")]
-fn bool_or(state: bool, input: bool) -> bool {
-    state || input
-}
-
 #[cfg(test)]
 mod tests {
     extern crate test;
@@ -232,7 +151,7 @@ mod tests {
     use crate::agg::AggCall;
 
     fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {
-        let agg = crate::agg::build(&AggCall::from_pretty(pretty)).unwrap();
+        let agg = crate::agg::build_append_only(&AggCall::from_pretty(pretty)).unwrap();
         let mut state = agg.create_state();
         agg.update(&mut state, &input)
             .now_or_never()
@@ -515,7 +434,7 @@ mod tests {
         };
         let chunk = StreamChunk::from_parts(ops, DataChunk::new(vec![Arc::new(data)], vis));
         let pretty = format!("({agg_desc}:int8 $0:int8)");
-        let agg = crate::agg::build(&AggCall::from_pretty(pretty)).unwrap();
+        let agg = crate::agg::build_append_only(&AggCall::from_pretty(pretty)).unwrap();
         let mut state = agg.create_state();
         b.iter(|| {
             agg.update(&mut state, &chunk)

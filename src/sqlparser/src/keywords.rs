@@ -350,6 +350,7 @@ define_keywords!(
     OPTION,
     OR,
     ORDER,
+    ORDINALITY,
     OTHERS,
     OUT,
     OUTER,

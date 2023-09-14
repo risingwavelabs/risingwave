@@ -76,6 +76,9 @@ pub enum ExprError {
 
     #[error("field name must not be null")]
     FieldNameNull,
+
+    #[error("invalid state: {0}")]
+    InvalidState(String),
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);

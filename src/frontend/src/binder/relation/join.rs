@@ -59,7 +59,7 @@ impl Binder {
 
             let is_lateral = match &right {
                 Relation::Subquery(subquery) if subquery.lateral => true,
-                Relation::TableFunction(_) => true,
+                Relation::TableFunction { .. } => true,
                 _ => false,
             };
 
@@ -110,7 +110,7 @@ impl Binder {
 
             let is_lateral = match &right {
                 Relation::Subquery(subquery) if subquery.lateral => true,
-                Relation::TableFunction(_) => true,
+                Relation::TableFunction { .. } => true,
                 _ => false,
             };
 
