@@ -23,7 +23,7 @@ pub fn split_part(
     string_expr: &str,
     delimiter_expr: &str,
     nth_expr: i32,
-    writer: &mut dyn Write,
+    writer: &mut impl Write,
 ) -> Result<()> {
     if nth_expr == 0 {
         return Err(ExprError::InvalidParam {

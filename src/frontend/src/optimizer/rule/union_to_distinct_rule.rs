@@ -24,7 +24,8 @@ impl Rule for UnionToDistinctRule {
         let union: &LogicalUnion = plan.as_logical_union()?;
         if !union.all() {
             let union_all = LogicalUnion::create(true, union.inputs().into_iter().collect());
-            let distinct = Agg::new(vec![], (0..union.base.schema.len()).collect(), union_all);
+            let distinct = Agg::new(vec![], (0..union.base.schema.len()).collect(), union_all)
+                .with_enable_two_phase(false);
             Some(distinct.into())
         } else {
             None

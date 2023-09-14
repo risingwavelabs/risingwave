@@ -35,7 +35,8 @@ pub struct DistinctAggRule {
 impl Rule for DistinctAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
-        let (mut agg_calls, mut agg_group_keys, grouping_sets, input) = agg.clone().decompose();
+        let (mut agg_calls, mut agg_group_keys, grouping_sets, input, enable_two_phase) =
+            agg.clone().decompose();
         assert!(grouping_sets.is_empty());
 
         if agg_calls.iter().all(|c| !c.distinct) {
@@ -84,6 +85,7 @@ impl Rule for DistinctAggRule {
             agg_calls,
             flag_values,
             has_expand,
+            enable_two_phase,
         ))
     }
 }
@@ -237,7 +239,7 @@ impl DistinctAggRule {
             // append `flag`.
             group_keys.insert(project.schema().len() - 1);
         }
-        Agg::new(agg_calls, group_keys, project)
+        Agg::new(agg_calls, group_keys, project).with_enable_two_phase(false)
     }
 
     fn build_final_agg(
@@ -246,6 +248,7 @@ impl DistinctAggRule {
         mut agg_calls: Vec<PlanAggCall>,
         flag_values: Vec<usize>,
         has_expand: bool,
+        enable_two_phase: bool,
     ) -> PlanRef {
         // the index of `flag` in schema of the middle `LogicalAgg`, if has `Expand`.
         let pos_of_flag = mid_agg.group_key.len() - 1;
@@ -322,6 +325,8 @@ impl DistinctAggRule {
             }
         });
 
-        Agg::new(agg_calls, final_agg_group_keys, mid_agg.into()).into()
+        Agg::new(agg_calls, final_agg_group_keys, mid_agg.into())
+            .with_enable_two_phase(enable_two_phase)
+            .into()
     }
 }

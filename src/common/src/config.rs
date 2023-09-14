@@ -370,7 +370,7 @@ pub struct ServerConfig {
     pub unrecognized: Unrecognized<Self>,
 
     /// Enable heap profile dump when memory usage is high.
-    #[serde(default = "default::server::auto_dump_heap_profile")]
+    #[serde(default)]
     pub auto_dump_heap_profile: AutoDumpHeapProfileConfig,
 }
 
@@ -658,16 +658,17 @@ impl AsyncStackTraceOption {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct AutoDumpHeapProfileConfig {
+    /// Enable to auto dump heap profile when memory usage is high
+    #[serde(default = "default::auto_dump_heap_profile::enabled")]
+    pub enabled: bool,
+
+    /// The directory to dump heap profile. If empty, the prefix in `MALLOC_CONF` will be used
     #[serde(default = "default::auto_dump_heap_profile::dir")]
     pub dir: String,
+
+    /// The proportion (number between 0 and 1) of memory usage to trigger heap profile dump
     #[serde(default = "default::auto_dump_heap_profile::threshold")]
     pub threshold: f32,
-}
-
-impl AutoDumpHeapProfileConfig {
-    pub fn enabled(&self) -> bool {
-        !self.dir.is_empty()
-    }
 }
 
 serde_with::with_prefix!(streaming_prefix "stream_");
@@ -907,7 +908,7 @@ pub mod default {
     }
 
     pub mod server {
-        use crate::config::{AutoDumpHeapProfileConfig, MetricLevel};
+        use crate::config::MetricLevel;
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
@@ -923,10 +924,6 @@ pub mod default {
 
         pub fn telemetry_enabled() -> bool {
             true
-        }
-
-        pub fn auto_dump_heap_profile() -> AutoDumpHeapProfileConfig {
-            Default::default()
         }
     }
 
@@ -1124,11 +1121,15 @@ pub mod default {
         }
 
         pub fn concurrency() -> usize {
-            100
+            10
         }
     }
 
     pub mod auto_dump_heap_profile {
+        pub fn enabled() -> bool {
+            true
+        }
+
         pub fn dir() -> String {
             "".to_string()
         }
