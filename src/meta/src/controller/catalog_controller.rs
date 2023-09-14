@@ -21,11 +21,14 @@ use risingwave_pb::catalog::PbDatabase;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
-use sea_orm::sea_query::{Query, UnionType};
+use sea_orm::sea_query::{
+    Alias, CommonTableExpression, Expr, Query, QueryStatementBuilder, SelectStatement, UnionType,
+    WithClause,
+};
 use sea_orm::{
     ActiveModelBehavior, ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions,
-    ConnectionTrait, Database as SeaDB, DatabaseConnection, DatabaseTransaction, EntityTrait,
-    ModelTrait, QueryFilter, QuerySelect, TransactionTrait,
+    ConnectionTrait, Database as SeaDB, DatabaseConnection, DatabaseTransaction, EntityTrait, Iden,
+    JoinType, ModelTrait, Order, QueryFilter, Statement, TransactionTrait,
 };
 use tokio::sync::RwLock;
 
@@ -33,7 +36,8 @@ use crate::controller::{ModelWithObj, ObjectType};
 use crate::manager::{DatabaseId, MetaSrvEnv, NotificationVersion, UserId};
 use crate::model_v2::prelude::*;
 use crate::model_v2::{
-    connection, database, function, index, object, schema, sink, source, table, view,
+    connection, database, function, index, object, object_dependency, schema, sink, source, table,
+    view,
 };
 use crate::{MetaError, MetaResult};
 
@@ -145,6 +149,87 @@ impl CatalogController {
         }
 
         Ok(version)
+    }
+
+    /// This function will list all the objects that are used the given one. It runs a recursive CTE to find all the dependencies.
+    /// The cte and the query is as follows:
+    /// ```sql
+    /// WITH RECURSIVE used_by_object_ids (used_by) AS
+    /// (
+    ///     SELECT used_by FROM object_dependency WHERE object_dependency.oid = $1
+    ///     UNION ALL
+    ///     (
+    ///         SELECT object_dependency.used_by
+    ///                     FROM object_dependency
+    ///             INNER JOIN used_by_object_ids
+    ///                     ON used_by_object_ids.used_by = oid
+    ///     )
+    /// )
+    /// SELECT DISTINCT used_by FROM used_by_object_ids ORDER BY used_by DESC;
+    /// ```
+    async fn list_used_by(&self, obj_id: i32) -> MetaResult<Vec<i32>> {
+        let inner = self.inner.read().await;
+
+        let cte_alias = Alias::new("used_by_object_ids");
+        let cte_return_alias = Alias::new("used_by");
+
+        let base_query = SelectStatement::new()
+            .column(object_dependency::Column::UsedBy)
+            .from(object_dependency::Entity)
+            .and_where(object_dependency::Column::Oid.eq(obj_id))
+            .to_owned();
+
+        let cte_referencing = Query::select()
+            .column((object_dependency::Entity, object_dependency::Column::UsedBy))
+            .from(object_dependency::Entity)
+            .join(
+                JoinType::InnerJoin,
+                cte_alias.clone(),
+                Expr::col((cte_alias.clone(), cte_return_alias.clone()))
+                    .equals(object_dependency::Column::Oid),
+            )
+            .to_owned();
+
+        let common_table_expr = CommonTableExpression::new()
+            .query(
+                base_query
+                    .clone()
+                    .union(UnionType::All, cte_referencing)
+                    .to_owned(),
+            )
+            .column(cte_return_alias.clone())
+            .table_name(cte_alias.clone())
+            .to_owned();
+
+        let query = SelectStatement::new()
+            .distinct()
+            .column(cte_return_alias.clone())
+            .from(cte_alias)
+            .order_by(cte_return_alias.clone(), Order::Desc)
+            .to_owned()
+            .with(
+                WithClause::new()
+                    .recursive(true)
+                    .cte(common_table_expr)
+                    .to_owned(),
+            )
+            .to_owned();
+
+        let (sql, values) = query.build_any(&*inner.db.get_database_backend().get_query_builder());
+        let res = inner
+            .db
+            .query_all(Statement::from_sql_and_values(
+                inner.db.get_database_backend(),
+                sql,
+                values,
+            ))
+            .await?;
+
+        let ids: Vec<i32> = res
+            .into_iter()
+            .map(|row| row.try_get("", &cte_return_alias.to_string()).unwrap())
+            .collect_vec();
+        Ok(ids)
     }
 
     pub async fn drop_database(
