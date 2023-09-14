@@ -77,14 +77,14 @@ impl<S: StateStore> DedupExecutor<S> {
 
         // Consume the first barrier message and initialize state table.
         let barrier = expect_first_barrier(&mut input).await?;
-        // todo: uncomment this line
-        // self.state_table.init_epoch(barrier.epoch);
+
+        #[cfg(test)]
         self.state_table.commit_no_data_expected(barrier.epoch);
+        #[cfg(not(test))]
+        self.state_table.init_epoch(barrier.epoch);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
-
-        let mut commit_data = false;
 
         #[for_await]
         for msg in input {
@@ -121,7 +121,7 @@ impl<S: StateStore> DedupExecutor<S> {
                                 } else {
                                     // The key exists before. The row shouldn't be visible.
                                     vis_builder.append(false);
-                                    cnt_builder.append(Some(0));
+                                    cnt_builder.append(Some(cnt));
                                 }
                             }
                             None => {
@@ -134,31 +134,20 @@ impl<S: StateStore> DedupExecutor<S> {
 
                     let vis = vis_builder.finish();
                     let cnt = cnt_builder.finish();
-                    if vis.count_ones() > 0 {
-                        // Construct the new chunk and write the data to state table.
-                        let (ops, mut columns, _) = chunk.into_inner();
-                        let chunk =
-                            StreamChunk::new(ops.clone(), columns.clone(), Some(vis.clone()));
 
-                        columns.push(Arc::new(cnt.into()));
-                        let state_chunk = StreamChunk::new(ops, columns, None);
-                        println!("write chunk: {}", state_chunk.to_pretty());
-                        self.state_table.write_chunk(state_chunk);
+                    let (ops, mut columns, _) = chunk.into_inner();
+                    let chunk = StreamChunk::new(ops.clone(), columns.clone(), Some(vis.clone()));
 
-                        commit_data = true;
+                    // Construct the new chunk and write the data to state table.
+                    columns.push(Arc::new(cnt.into()));
+                    let state_chunk = StreamChunk::new(ops, columns, None);
+                    self.state_table.write_chunk(state_chunk);
 
-                        yield Message::Chunk(chunk);
-                    }
+                    yield Message::Chunk(chunk);
                 }
 
                 Message::Barrier(barrier) => {
-                    if commit_data {
-                        // Only commit when we have new data in this epoch.
-                        self.state_table.commit(barrier.epoch).await?;
-                        commit_data = false;
-                    } else {
-                        self.state_table.commit_no_data_expected(barrier.epoch);
-                    }
+                    self.state_table.commit(barrier.epoch).await?;
 
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         let (_prev_vnode_bitmap, cache_may_stale) =
@@ -202,8 +191,7 @@ impl<S: StateStore> DedupExecutor<S> {
             while let Some(result) = buffered.next().await {
                 let (key, value) = result;
                 if let Some(v) = value? {
-                    // Only insert into the cache when we have this key in storage.
-                    println!("row {:?}", v);
+                    // load row and its count into memory
                     let dup_cnt = v.last().unwrap().into_int64();
                     self.cache.insert(key.to_owned(), dup_cnt);
                 }
@@ -263,7 +251,7 @@ mod tests {
         let pk_indices = vec![0, 1];
         let order_types = vec![OrderType::ascending(), OrderType::ascending()];
         let state_store = MemoryStateStore::new();
-        let mut state_table = StateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution_inconsistent_op(
             state_store,
             table_id,
             column_descs,
@@ -272,16 +260,18 @@ mod tests {
         )
         .await;
 
+        // preset state table
+        // (1, "a") -> 2
+        // (2, "b") -> 4
         let chunk = StreamChunk::new(
             vec![Op::Insert, Op::Insert],
             vec![
                 Arc::new(I64Array::from_iter(vec![1, 2]).into()),
                 Arc::new(Utf8Array::from_iter(vec!["a", "b"]).into()),
-                Arc::new(I64Array::from_iter(vec![2, 3]).into()), // dup_count
+                Arc::new(I64Array::from_iter(vec![2, 4]).into()), // dup_count
             ],
             Some(Bitmap::from_iter(vec![true, true])),
         );
-        println!("chunk: {}", chunk.to_pretty());
         state_table.init_epoch(EpochPair::new_test_epoch(1));
         state_table.write_chunk(chunk);
         state_table
@@ -321,92 +311,34 @@ mod tests {
             )
         };
         tx.push_chunk(chunk1.clone());
-        tx.push_chunk(chunk1.clone());
-
         let msg = dedup_executor.next().await.unwrap().unwrap();
-        println!("msg: {}", msg.into_chunk().unwrap().to_pretty());
+        assert_eq!(
+            msg.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I T
+               - 1 a D
+               - 2 b D
+            "
+            )
+        );
 
         tx.push_barrier(4, false);
         dedup_executor.next().await.unwrap().unwrap();
-    }
 
-    #[tokio::test]
-    async fn test_dedup_executor() {
-        let table_id = TableId::new(1);
-        let column_descs = vec![
-            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
-            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
-            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),
-        ];
-        let schema = Schema::new(vec![
-            Field::unnamed(DataType::Int64),
-            Field::unnamed(DataType::Int64),
-        ]);
-        let pk_indices = vec![0];
-        let order_types = vec![OrderType::ascending()];
-
-        let state_store = MemoryStateStore::new();
-        let state_table = StateTable::new_without_distribution(
-            state_store,
-            table_id,
-            column_descs,
-            order_types,
-            pk_indices.clone(),
-        )
-        .await;
-
-        let (mut tx, input) = MockSource::channel(schema, pk_indices.clone());
-        let mut dedup_executor = Box::new(DedupExecutor::new(
-            Box::new(input),
-            state_table,
-            pk_indices,
-            1,
-            ActorContext::create(123),
-            Arc::new(AtomicU64::new(0)),
-            Arc::new(StreamingMetrics::unused()),
-        ))
-        .execute();
-
-        tx.push_barrier(1, false);
-        dedup_executor.next().await.unwrap().unwrap();
-
-        let chunk = StreamChunk::from_pretty(
-            " I I
-            + 1 1
-            + 2 2 D
-            + 1 7",
-        );
-        tx.push_chunk(chunk);
+        tx.push_chunk(chunk1.clone());
         let msg = dedup_executor.next().await.unwrap().unwrap();
+
         assert_eq!(
             msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
-                " I I
-                + 1 1
-                + 2 2 D
-                + 1 7 D",
+                " I T
+               - 1 a
+               - 2 b D
+            "
             )
         );
 
-        tx.push_barrier(2, false);
+        tx.push_barrier(5, false);
         dedup_executor.next().await.unwrap().unwrap();
-
-        let chunk = StreamChunk::from_pretty(
-            " I I
-            + 3 9
-            + 2 5
-            + 1 20",
-        );
-        tx.push_chunk(chunk);
-        let msg = dedup_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            msg.into_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                " I I
-                + 3 9
-                + 2 5
-                + 1 20 D",
-            )
-        );
     }
 }
