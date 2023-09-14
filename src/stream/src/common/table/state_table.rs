@@ -1304,8 +1304,8 @@ pub fn prefix_range_to_memcomparable(
     range: &(Bound<impl Row>, Bound<impl Row>),
 ) -> (Bound<Bytes>, Bound<Bytes>) {
     (
-        to_memcomparable(pk_serde, &range.0, false),
-        to_memcomparable(pk_serde, &range.1, true),
+        start_range_to_memcomparable(pk_serde, &range.0),
+        end_range_to_memcomparable(pk_serde, &range.1, None),
     )
 }
 
@@ -1341,39 +1341,8 @@ pub fn prefix_and_sub_range_to_memcomparable(
     };
     (
         start_range_to_memcomparable(pk_serde, &start_range),
-        end_range_to_memcomparable(pk_serde, &end_range, serialized_pk_prefix),
+        end_range_to_memcomparable(pk_serde, &end_range, Some(serialized_pk_prefix)),
     )
-}
-
-fn to_memcomparable<R: Row>(
-    pk_serde: &OrderedRowSerde,
-    bound: &Bound<R>,
-    is_upper: bool,
-) -> Bound<Bytes> {
-    let serialize_pk_prefix = |pk_prefix: &R| {
-        let prefix_serializer = pk_serde.prefix(pk_prefix.len());
-        serialize_pk(pk_prefix, &prefix_serializer)
-    };
-    match bound {
-        Unbounded => Unbounded,
-        Included(r) => {
-            let serialized = serialize_pk_prefix(r);
-            if is_upper {
-                end_bound_of_prefix(&serialized)
-            } else {
-                Included(serialized)
-            }
-        }
-        Excluded(r) => {
-            let serialized = serialize_pk_prefix(r);
-            if !is_upper {
-                // if lower
-                start_bound_of_excluded_prefix(&serialized)
-            } else {
-                Excluded(serialized)
-            }
-        }
-    }
 }
 
 fn start_range_to_memcomparable<R: Row>(
@@ -1385,9 +1354,7 @@ fn start_range_to_memcomparable<R: Row>(
         serialize_pk(pk_prefix, &prefix_serializer)
     };
     match bound {
-        Unbounded => {
-            unreachable!()
-        }
+        Unbounded => Unbounded,
         Included(r) => {
             let serialized = serialize_pk_prefix(r);
 
@@ -1404,14 +1371,17 @@ fn start_range_to_memcomparable<R: Row>(
 fn end_range_to_memcomparable<R: Row>(
     pk_serde: &OrderedRowSerde,
     bound: &Bound<R>,
-    serialized_pk_prefix: Bytes,
+    serialized_pk_prefix: Option<Bytes>,
 ) -> Bound<Bytes> {
     let serialize_pk_prefix = |pk_prefix: &R| {
         let prefix_serializer = pk_serde.prefix(pk_prefix.len());
         serialize_pk(pk_prefix, &prefix_serializer)
     };
     match bound {
-        Unbounded => end_bound_of_prefix(&serialized_pk_prefix),
+        Unbounded => match serialized_pk_prefix {
+            Some(serialized_pk_prefix) => end_bound_of_prefix(&serialized_pk_prefix),
+            None => Unbounded,
+        },
         Included(r) => {
             let serialized = serialize_pk_prefix(r);
 
