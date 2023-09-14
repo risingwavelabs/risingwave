@@ -336,21 +336,22 @@ message SubscribeRequest {
   uint32 worker_id = 3;
 }
 
-// Metadata for progress tracker of stream jobs.
-// We can use it to recover the progress of stream jobs.
-message CreateMviewProgressTrackerMetaData {
-  message StreamJobMetaData {
-    uint32 table_id = 1;
-    // Count the number of times each upstream mv appears in this stream job.
-    map<uint32, uint64> upstream_mv_count = 2;
-    // The DDL statement for this stream job.
-    string definition = 3;
-  }
-  // Maps actor to the stream job id, i.e. the CreateMviewEpoch of the stream job.
-  map<uint32, uint64> actor_map = 1;
-  // Maps stream job to its meta data.
-  map<uint64, StreamJobMetaData> stream_job_map = 2;
-}
+// All the data here can be found elsewhere.
+//// Metadata for progress tracker of stream jobs.
+//// We can use it to recover the progress of stream jobs.
+//message CreateMviewProgressTrackerMetaData {
+//  message StreamJobMetaData {
+//    uint32 table_id = 1;
+//    // Count the number of times each upstream mv appears in this stream job.
+//    map<uint32, uint64> upstream_mv_count = 2;
+//    // The DDL statement for this stream job.
+//    string definition = 3;
+//  }
+//  // Maps actor to the stream job id, i.e. the CreateMviewEpoch of the stream job.
+//  map<uint32, uint64> actor_map = 1;
+//  // Maps stream job to its meta data.
+//  map<uint64, StreamJobMetaData> stream_job_map = 2;
+//}
 
 message MetaSnapshot {
   message SnapshotVersion {

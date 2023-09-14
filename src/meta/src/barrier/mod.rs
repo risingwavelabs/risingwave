@@ -1008,6 +1008,7 @@ impl GlobalBarrierManager {
                                 sst_to_worker,
                             )
                             .await?;
+                        // TODO: Also store the stream job state.
                     }
                     BarrierKind::Barrier => {
                         new_snapshot = Some(self.hummock_manager.update_current_epoch(prev_epoch));

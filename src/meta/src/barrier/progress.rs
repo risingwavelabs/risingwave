@@ -24,6 +24,7 @@ use risingwave_common::row::Chain;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::meta::CreateMviewProgressTrackerMetaData;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
 use super::command::CommandContext;
@@ -47,9 +48,6 @@ struct Progress {
     states: HashMap<ActorId, ChainState>,
 
     done_count: usize,
-
-    /// Creating mv id.
-    creating_mv_id: TableId,
 
     /// Upstream mv count.
     /// Keep track of how many times each upstream MV
@@ -180,16 +178,17 @@ pub(super) struct CreateMviewProgressTracker {
     // Additionally if are to allow concurrent mview creation in the
     // future, CreateMViewEpoch will not be a good candidate for this.
     /// Progress of the create-mview DDL indicated by the epoch.
-    progress_map: HashMap<CreateMviewEpoch, (Progress, TrackingCommand)>,
+    progress_map: HashMap<TableId, (Progress, TrackingCommand)>,
 
     /// Find the epoch of the create-mview DDL by the actor containing the chain node.
-    actor_map: HashMap<ActorId, CreateMviewEpoch>,
+    actor_map: HashMap<ActorId, TableId>,
 }
 
 impl CreateMviewProgressTracker {
     /// Backfill progress and tracking_commands are the only dynamic parts of the state.
     /// For BackfillProgress, it can also be derived from state_table.
-    /// However, this requires the stream graph to init BEFORE meta recovers fully.
+    /// However, this requires the stream graph to init BEFORE meta
+    /// recovers fully.
     /// To support that meta needs to recover in 2 parts:
     /// 1. Initial recovery, not all state is recovered yet, just send some initial barriers
     ///    to collect state.
@@ -202,77 +201,130 @@ impl CreateMviewProgressTracker {
     ///
     /// The `actor_map` contains the mapping from actor to its stream job identifier
     /// (the epoch where it was created).
+    ///
+    /// Just use TableId to stream id.
+    /// Report the status to local barrier manager.
+    ///
+    /// Need to add some extra fields in initialize barrier to include
+    /// the actor ids which needs to report.
+    ///
+    /// For chain executors,
+    /// it will need to report the progress.
     pub fn recover(
-        backfill_progress: Vec<(ActorId, ChainState)>,
-        actor_map: HashMap<ActorId, CreateMviewEpoch>,
-        table_map: HashMap<CreateMviewEpoch, TableId>,
-        upstream_mv_counts: HashMap<CreateMviewEpoch, HashMap<TableId, usize>>,
-        definitions: HashMap<CreateMviewEpoch, String>,
+        creating_table_ids: Vec<TableId>,
+        // Add a status for the catalog proto.
+        // CREATE a TABLE
+        // 1. Set status to CREATING
+        // 2. Deal with barriers.
+        // 3. Build actors.
+        // 4. Recovery happens.
+        // 5. Query the catalog manager for all the CREATING statuses.
+        //    TableId first.
+        // Then Find the actors from the fragment manager.
+        // Then we have the mappings.
+        actor_map: HashMap<ActorId, TableId>,
+
+        // Get from table fragments, no need to store it as is.
+        mut upstream_mv_counts: HashMap<TableId, HashMap<TableId, usize>>,
+
+        // Get from Catalog Manager.
+        mut definitions: HashMap<TableId, String>,
+
         version_stats: HummockVersionStats,
-        mut tracking_commands: HashMap<CreateMviewEpoch, TrackingCommand>,
+
+        mut tracking_commands: HashMap<TableId, TrackingCommand>,
     ) -> Self {
-        let progress_per_actor = backfill_progress;
-        let progress_map = progress_per_actor
-            .into_iter()
-            .map(|(actor_id, state)| {
-                let epoch = actor_map.get(&actor_id).unwrap();
-                (epoch, (actor_id, state))
-            })
-            .sorted_by(|(epoch1, _), (epoch2, _)| epoch1.cmp(epoch2))
-            .group_by(|(epoch, _)| *epoch)
-            .into_iter()
-            .map(|(epoch, state_per_actor)| {
-                let mut states = HashMap::new();
-                let mut done_count = 0;
-                let creating_mv_id = *table_map.get(&epoch).unwrap();
-                // FIXME: Don't clone here.
-                let upstream_mv_count = upstream_mv_counts.get(&epoch).unwrap().clone();
-                let upstream_total_key_count = upstream_mv_count
-                    .iter()
-                    .map(|(upstream_mv, count)| {
-                        *count as u64
-                            * version_stats
-                                .table_stats
-                                .get(&upstream_mv.table_id)
-                                .map_or(0, |stat| stat.total_key_count as u64)
-                    })
-                    .sum();
-                let mut consumed_rows = 0;
-                let definition = definitions.get(&epoch).unwrap().clone();
-                for (_, (actor_id, status)) in state_per_actor {
-                    match status {
-                        ChainState::Init => {}
-                        ChainState::ConsumingUpstream(epoch, actor_consumed_rows) => {
-                            consumed_rows += actor_consumed_rows;
-                            // FIXME: Should Done states be in the map?
-                            // If no, then only insert here.
-                            // states.insert(actor_id, ChainState::ConsumingUpstream(epoch, consumed_rows));
-                        }
-                        ChainState::Done => {
-                            done_count += 1;
-                        }
-                    };
-                    // FIXME: Should Done states be in the map?
-                    states.insert(actor_id, status).unwrap();
-                }
-                let progress = Progress {
-                    states,
-                    done_count,
-                    creating_mv_id,
-                    upstream_mv_count,
-                    upstream_total_key_count,
-                    consumed_rows,
-                    definition,
-                };
-                let tracking_command = tracking_commands.remove(&epoch).unwrap();
-                (*epoch, (progress, tracking_command))
-            })
-            .collect();
+        let mut progress_map = HashMap::new();
+        for creating_table_id in creating_table_ids {
+            let upstream_mv_count = upstream_mv_counts.remove(&creating_table_id).unwrap();
+            let upstream_total_key_count = upstream_mv_count
+                .iter()
+                .map(|(upstream_mv, count)| {
+                    *count as u64
+                        * version_stats
+                        .table_stats
+                        .get(&upstream_mv.table_id)
+                        .map_or(0, |stat| stat.total_key_count as u64)
+                })
+                .sum();
+            let definition = definitions.remove(&creating_table_id).unwrap();
+            let progress = Progress {
+                states: Default::default(), // Fill only after first barrier pass.
+                done_count: 0, // Fill only after first barrier pass
+                upstream_mv_count: Default::default(),
+                upstream_total_key_count,
+                consumed_rows: 0, // Fill only after first barrier pass
+                definition
+            };
+            let tracking_command = tracking_commands.remove(&creating_table_id).unwrap();
+            progress_map.insert(creating_table_id, (progress, tracking_command));
+        }
         Self {
             progress_map,
             actor_map,
         }
     }
+        // let progress_map = progress_per_actor
+        //     .into_iter()
+        //     .map(|(actor_id, state)| {
+        //         let epoch = actor_map.get(&actor_id).unwrap();
+        //         (epoch, (actor_id, state))
+        //     })
+        //     .sorted_by(|(epoch1, _), (epoch2, _)| epoch1.cmp(epoch2))
+        //     .group_by(|(epoch, _)| *epoch)
+        //     .into_iter()
+        //     .map(|(epoch, state_per_actor)| {
+        //         let mut states = HashMap::new();
+        //         let mut done_count = 0;
+        //         let creating_mv_id = *table_map.get(&epoch).unwrap();
+        //         // FIXME: Don't clone here.
+        //         let upstream_mv_count = upstream_mv_counts.get(&epoch).unwrap().clone();
+        //         let upstream_total_key_count = upstream_mv_count
+        //             .iter()
+        //             .map(|(upstream_mv, count)| {
+        //                 *count as u64
+        //                     * version_stats
+        //                         .table_stats
+        //                         .get(&upstream_mv.table_id)
+        //                         .map_or(0, |stat| stat.total_key_count as u64)
+        //             })
+        //             .sum();
+        //         let mut consumed_rows = 0;
+        //         let definition = definitions.get(&epoch).unwrap().clone();
+                // TODO: This should be recovered separately.
+                // for (_, (actor_id, status)) in state_per_actor {
+                //     match status {
+                //         ChainState::Init => {}
+                //         ChainState::ConsumingUpstream(epoch, actor_consumed_rows) => {
+                //             consumed_rows += actor_consumed_rows;
+                //             // FIXME: Should Done states be in the map?
+                //             // If no, then only insert here.
+                //             // states.insert(actor_id, ChainState::ConsumingUpstream(epoch, consumed_rows));
+                //         }
+                //         ChainState::Done => {
+                //             done_count += 1;
+                //         }
+                //     };
+                //     // FIXME: Should Done states be in the map?
+                //     states.insert(actor_id, status).unwrap();
+                // }
+            //     let progress = Progress {
+            //         states,
+            //         done_count,
+            //         creating_mv_id,
+            //         upstream_mv_count,
+            //         upstream_total_key_count,
+            //         consumed_rows,
+            //         definition,
+            //     };
+            //     let tracking_command = tracking_commands.remove(&epoch).unwrap();
+            //     (*epoch, (progress, tracking_command))
+            // })
+            // .collect();
+        // Self {
+        //     progress_map,
+        //     actor_map,
+        // }
 
     pub fn new() -> Self {
         Self {
