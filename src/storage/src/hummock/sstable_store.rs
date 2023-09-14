@@ -422,7 +422,7 @@ impl SstableStore {
                             .read(&meta_path, range)
                             .await
                             .map_err(HummockError::object_io_error)?;
-                        let meta = SstableMeta::decode(&mut &buf[..])?;
+                        let meta = SstableMeta::decode(&buf[..])?;
 
                         let sst = Sstable::new(object_id, meta);
                         let charge = sst.estimate_size();

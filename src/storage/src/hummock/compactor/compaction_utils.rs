@@ -162,27 +162,17 @@ pub async fn generate_splits(
     sstable_infos: &Vec<SstableInfo>,
     compaction_size: u64,
     context: CompactorContext,
-) -> HummockResult<(Vec<KeyRange_vec>, bool)> {
+) -> HummockResult<Vec<KeyRange_vec>> {
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
-    let mut sstables = Vec::with_capacity(sstable_infos.len());
-    let mut is_blocked_filter = true;
-    let mut stats = StoreLocalStatistic::default();
-    for sstable_info in sstable_infos {
-        let sstable = context
-            .sstable_store
-            .sstable(sstable_info, &mut stats)
-            .await?;
-        if !sstable.value().filter_reader.is_block_based_filter() {
-            is_blocked_filter = false;
-        }
-        sstables.push(sstable);
-    }
     if compaction_size > parallel_compact_size {
         let mut indexes = vec![];
         // preload the meta and get the smallest key to split sub_compaction
-        for sstable in sstables {
+        for sstable_info in sstable_infos {
             indexes.extend(
-                sstable
+                context
+                    .sstable_store
+                    .sstable(sstable_info, &mut StoreLocalStatistic::default())
+                    .await?
                     .value()
                     .meta
                     .block_metas
@@ -234,11 +224,11 @@ pub async fn generate_splits(
                 remaining_size -= data_size;
                 last_key = key;
             }
-            return Ok((splits, is_blocked_filter));
+            return Ok(splits);
         }
     }
 
-    Ok((vec![], is_blocked_filter))
+    Ok(vec![])
 }
 
 pub fn estimate_task_output_capacity(context: CompactorContext, task: &CompactTask) -> usize {

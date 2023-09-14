@@ -20,7 +20,7 @@ use bytes::{Bytes, BytesMut};
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_pb::hummock::{BloomFilterType, SstableInfo};
 
 use super::utils::CompressionAlgorithm;
 use super::{
@@ -407,6 +407,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 .encode();
             }
         }
+        let bloom_filter_kind = if self.filter_builder.support_blocked_raw_data() {
+            BloomFilterType::Blocked
+        } else {
+            BloomFilterType::Sstable
+        };
         let bloom_filter = if self.options.bloom_false_positive > 0.0 {
             self.filter_builder.finish(self.memory_limiter.clone())
         } else {
@@ -506,6 +511,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let sst_info = SstableInfo {
             object_id: self.sstable_id,
             sst_id: self.sstable_id,
+            bloom_filter_kind: bloom_filter_kind as i32,
             key_range: Some(risingwave_pb::hummock::KeyRange {
                 left: meta.smallest_key.clone(),
                 right: meta.largest_key.clone(),

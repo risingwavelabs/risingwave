@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
+use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
 use tokio::sync::oneshot::Receiver;
 
 use super::task_progress::TaskProgress;
@@ -370,32 +370,32 @@ pub async fn compact(
         .iter()
         .map(|table_info| table_info.file_size)
         .sum::<u64>();
-
-    let optimize_by_copy_block =
+    let all_ssts_are_blocked_filter = sstable_infos
+        .iter()
+        .all(|table_info| table_info.bloom_filter_kind() == BloomFilterType::Blocked);
+    let optimize_by_copy_block = context.storage_opts.enable_fast_compaction
+        && all_ssts_are_blocked_filter
+        && !has_tombstone
+        && !has_ttl
+        && single_table
+        && compact_task.target_level > 0
+        && compact_task.input_ssts.len() == 2
+        && !compact_task.input_ssts[1].table_infos.is_empty()
+        && compact_task.compression_algorithm > 0;
+    if !optimize_by_copy_block {
         match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
-            Ok((splits, all_ssts_are_blocked_filter)) => {
-                let optimize_by_copy_block = context.storage_opts.enable_fast_compaction
-                    && all_ssts_are_blocked_filter
-                    && !has_tombstone
-                    && !has_ttl
-                    && single_table
-                    && compact_task.target_level > 0
-                    && compact_task.input_ssts.len() == 2
-                    && splits.len() <= 2
-                    && !compact_task.input_ssts[1].table_infos.is_empty()
-                    && compact_task.compression_algorithm > 0;
-                if !splits.is_empty() && !optimize_by_copy_block {
+            Ok(splits) => {
+                if !splits.is_empty() {
                     compact_task.splits = splits;
                 }
-                optimize_by_copy_block
             }
-
             Err(e) => {
                 tracing::warn!("Failed to generate_splits {:#?}", e);
                 task_status = TaskStatus::ExecuteFailed;
                 return compact_done(compact_task, context.clone(), vec![], task_status);
             }
-        };
+        }
+    }
     let compact_task_statistics = statistics_compact_task(&compact_task);
     // Number of splits (key ranges) is equal to number of compaction tasks
     let parallelism = compact_task.splits.len();
