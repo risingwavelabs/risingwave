@@ -78,16 +78,13 @@ impl SplitReader for NatsSplitReader {
             start_position => start_position.to_owned(),
         };
 
+        // pay attention not to check timeoffset and start_time in properties. Because when recovery
+        // the policy may change to by sequence, but start time still filed.
         if !matches!(start_position, NatsOffset::SequenceNumber(_))
             && properties.start_sequence.is_some()
         {
             return Err(
                 anyhow!("scan.startup.mode need to be set to 'sequence_number' if you want to start with a specific sequence number")
-            );
-        }
-        if !matches!(start_position, NatsOffset::Timestamp(_)) && properties.start_time.is_some() {
-            return Err(
-                anyhow!("scan.startup.mode need to be set to 'timestamp_millis' if you want to start with a specific timestamp millis")
             );
         }
         let consumer = properties
