@@ -6966,6 +6966,7 @@ dependencies = [
  "downcast-rs",
  "easy-ext",
  "either",
+ "enum-as-inner",
  "expect-test",
  "futures",
  "futures-async-stream",

@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::ops::Range;
 
-use either::Either;
+use risingwave_common::array::Op;
+use smallvec::{smallvec, SmallVec};
 
 use crate::function::window::{Frame, FrameBounds, FrameExclusion};
 
@@ -26,12 +27,13 @@ struct Entry<K: Ord, V> {
 
 // TODO(rc): May be a good idea to extract this into a separate crate.
 /// A common sliding window buffer.
-pub struct WindowBuffer<K: Ord, V> {
+pub struct WindowBuffer<K: Ord, V: Clone> {
     frame: Frame,
     buffer: VecDeque<Entry<K, V>>,
     curr_idx: usize,
     left_idx: usize,       // inclusive, note this can be > `curr_idx`
     right_excl_idx: usize, // exclusive, note this can be <= `curr_idx`
+    curr_delta: Option<Vec<(Op, V)>>,
 }
 
 /// Note: A window frame can be pure preceding, pure following, or acrossing the _current row_.
@@ -41,8 +43,8 @@ pub struct CurrWindow<'a, K> {
     pub following_saturated: bool,
 }
 
-impl<K: Ord, V> WindowBuffer<K, V> {
-    pub fn new(frame: Frame) -> Self {
+impl<K: Ord, V: Clone> WindowBuffer<K, V> {
+    pub fn new(frame: Frame, enable_delta: bool) -> Self {
         assert!(frame.bounds.is_valid());
         Self {
             frame,
@@ -50,6 +52,11 @@ impl<K: Ord, V> WindowBuffer<K, V> {
             curr_idx: 0,
             left_idx: 0,
             right_excl_idx: 0,
+            curr_delta: if enable_delta {
+                Some(Default::default())
+            } else {
+                None
+            },
         }
     }
 
@@ -116,28 +123,41 @@ impl<K: Ord, V> WindowBuffer<K, V> {
         }
     }
 
+    fn curr_window_outer(&self) -> Range<usize> {
+        self.left_idx..self.right_excl_idx
+    }
+
+    fn curr_window_exclusion(&self) -> Range<usize> {
+        match self.frame.exclusion {
+            FrameExclusion::CurrentRow => self.curr_idx..self.curr_idx + 1,
+            FrameExclusion::NoOthers => self.curr_idx..self.curr_idx,
+        }
+    }
+
+    fn curr_window_ranges(&self) -> (Range<usize>, Range<usize>) {
+        let selection = self.curr_window_outer();
+        let exclusion = self.curr_window_exclusion();
+        range_except(selection, exclusion)
+    }
+
     /// Iterate over values in the current window.
     pub fn curr_window_values(&self) -> impl Iterator<Item = &V> {
         assert!(self.left_idx <= self.right_excl_idx);
         assert!(self.right_excl_idx <= self.buffer.len());
 
-        let selection = self.left_idx..self.right_excl_idx;
-        if selection.is_empty() {
-            return Either::Left(std::iter::empty());
-        }
+        let (left, right) = self.curr_window_ranges();
+        self.buffer
+            .range(left)
+            .chain(self.buffer.range(right))
+            .map(|Entry { value, .. }| value)
+    }
 
-        let exclusion = match self.frame.exclusion {
-            FrameExclusion::CurrentRow => self.curr_idx..self.curr_idx + 1,
-            FrameExclusion::NoOthers => self.curr_idx..self.curr_idx,
-        };
-        let (left, right) = range_except(selection, exclusion);
-
-        Either::Right(
-            self.buffer
-                .range(left)
-                .chain(self.buffer.range(right))
-                .map(|Entry { value, .. }| value),
-        )
+    /// Iterate over the delta of values comparing the current window to the previous window.
+    /// The delta is not guaranteed to be sorted, especially when frame exclusion is not `NoOthers`.
+    pub fn curr_window_values_delta(&self) -> impl Iterator<Item = (Op, &V)> {
+        self.curr_delta
+            .iter()
+            .flat_map(|delta| delta.iter().map(|(op, value)| (*op, value)))
     }
 
     fn recalculate_left_right(&mut self) {
@@ -181,10 +201,63 @@ impl<K: Ord, V> WindowBuffer<K, V> {
         }
     }
 
+    fn recalculate_left_right_and_delta(&mut self) {
+        let old_outer = self.curr_window_outer();
+        let old_exclusion = self.curr_window_exclusion();
+        self.recalculate_left_right();
+        let new_outer = self.curr_window_outer();
+        let new_exclusion = self.curr_window_exclusion();
+
+        let (outer_removed, outer_added) = range_diff(old_outer.clone(), new_outer.clone());
+
+        let delta = self.curr_delta.as_mut().unwrap();
+
+        for idx in outer_removed.iter().cloned().flatten() {
+            if old_exclusion.contains(&idx) {
+                // not included in old window
+            } else {
+                delta.push((Op::Delete, self.buffer[idx].value.clone()));
+            }
+        }
+        for idx in outer_added.iter().cloned().flatten() {
+            if new_exclusion.contains(&idx) {
+                // not included in new window
+            } else {
+                delta.push((Op::Insert, self.buffer[idx].value.clone()));
+            }
+        }
+
+        if self.frame.exclusion.is_no_others() {
+            // no exclusion, we're done
+            return;
+        }
+
+        let outer_removed = outer_removed.into_iter().flatten().collect::<HashSet<_>>();
+        let outer_added = outer_added.into_iter().flatten().collect::<HashSet<_>>();
+        let mut old_exclusion = old_exclusion.into_iter().collect::<HashSet<_>>();
+        let mut new_exclusion = new_exclusion.into_iter().collect::<HashSet<_>>();
+        let still_excluded = old_exclusion
+            .intersection(&new_exclusion)
+            .copied()
+            .collect::<HashSet<_>>();
+        old_exclusion.retain(|idx| !outer_removed.contains(idx) /* already removed */ && !still_excluded.contains(idx));
+        new_exclusion.retain(|idx| !outer_added.contains(idx) /* already excluded */ && !still_excluded.contains(idx));
+        for idx in old_exclusion {
+            delta.push((Op::Insert, self.buffer[idx].value.clone()));
+        }
+        for idx in new_exclusion {
+            delta.push((Op::Delete, self.buffer[idx].value.clone()));
+        }
+    }
+
     /// Append a key-value pair to the buffer.
     pub fn append(&mut self, key: K, value: V) {
         self.buffer.push_back(Entry { key, value });
-        self.recalculate_left_right()
+        if self.curr_delta.is_some() {
+            self.recalculate_left_right_and_delta();
+        } else {
+            self.recalculate_left_right();
+        }
     }
 
     /// Get the smallest key that is still kept in the buffer.
@@ -197,7 +270,14 @@ impl<K: Ord, V> WindowBuffer<K, V> {
     /// Returns the keys that are removed from the buffer.
     pub fn slide(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
         self.curr_idx += 1;
-        self.recalculate_left_right();
+
+        if let Some(delta) = &mut self.curr_delta {
+            delta.clear();
+            self.recalculate_left_right_and_delta();
+        } else {
+            self.recalculate_left_right();
+        }
+
         let min_needed_idx = std::cmp::min(self.left_idx, self.curr_idx);
         self.curr_idx -= min_needed_idx;
         self.left_idx -= min_needed_idx;
@@ -211,7 +291,11 @@ impl<K: Ord, V> WindowBuffer<K, V> {
 /// Calculate range (A - B), the result might be the union of two ranges when B is totally included
 /// in the A.
 fn range_except(a: Range<usize>, b: Range<usize>) -> (Range<usize>, Range<usize>) {
-    if a.end <= b.start || b.end <= a.start {
+    if a.is_empty() {
+        (0..0, 0..0)
+    } else if b.is_empty() {
+        (a, 0..0)
+    } else if a.end <= b.start || b.end <= a.start {
         // a: [   )
         // b:        [   )
         // or
@@ -239,6 +323,66 @@ fn range_except(a: Range<usize>, b: Range<usize>) -> (Range<usize>, Range<usize>
     }
 }
 
+/// Calculate the difference of two ranges A and B, return (removed ranges, added ranges).
+/// Note this is quite different from [`range_except`].
+fn range_diff(
+    a: Range<usize>,
+    b: Range<usize>,
+) -> (SmallVec<[Range<usize>; 2]>, SmallVec<[Range<usize>; 2]>) {
+    if a.start == b.start {
+        if a.end == b.end {
+            // a: [   )
+            // b: [   )
+            (smallvec![], smallvec![])
+        } else if a.end < b.end {
+            // a: [   )
+            // b: [     )
+            (smallvec![], smallvec![a.end..b.end])
+        } else {
+            // a: [     )
+            // b: [   )
+            (smallvec![b.end..a.end], smallvec![])
+        }
+    } else if a.end == b.end {
+        debug_assert!(a.start != b.start);
+        if a.start < b.start {
+            // a: [     )
+            // b:   [   )
+            (smallvec![a.start..b.start], smallvec![])
+        } else {
+            // a:   [   )
+            // b: [     )
+            (smallvec![], smallvec![b.start..a.start])
+        }
+    } else {
+        debug_assert!(a.start != b.start && a.end != b.end);
+        if a.end <= b.start || b.end <= a.start {
+            // a: [   )
+            // b:     [  [   )
+            // or
+            // a:       [   )
+            // b: [   ) )
+            (smallvec![a], smallvec![b])
+        } else if b.start < a.start && a.end < b.end {
+            // a:  [   )
+            // b: [       )
+            (smallvec![], smallvec![b.start..a.start, a.end..b.end])
+        } else if a.start < b.start && b.end < a.end {
+            // a: [       )
+            // b:   [   )
+            (smallvec![a.start..b.start, b.end..a.end], smallvec![])
+        } else if a.end < b.end {
+            // a: [   )
+            // b:   [   )
+            (smallvec![a.start..b.start], smallvec![a.end..b.end])
+        } else {
+            // a:   [   )
+            // b: [   )
+            (smallvec![b.end..a.end], smallvec![b.start..a.start])
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
@@ -247,11 +391,16 @@ mod tests {
     use crate::function::window::{Frame, FrameBound};
 
     #[test]
+    fn test_range_diff() {
+        // TODO()
+    }
+
+    #[test]
     fn test_rows_frame_unbounded_preceding_to_current_row() {
-        let mut buffer = WindowBuffer::new(Frame::rows(
-            FrameBound::UnboundedPreceding,
-            FrameBound::CurrentRow,
-        ));
+        let mut buffer = WindowBuffer::new(
+            Frame::rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow),
+            true,
+        );
 
         let window = buffer.curr_window();
         assert!(window.key.is_none());
@@ -285,10 +434,10 @@ mod tests {
 
     #[test]
     fn test_rows_frame_preceding_to_current_row() {
-        let mut buffer = WindowBuffer::new(Frame::rows(
-            FrameBound::Preceding(1),
-            FrameBound::CurrentRow,
-        ));
+        let mut buffer = WindowBuffer::new(
+            Frame::rows(FrameBound::Preceding(1), FrameBound::CurrentRow),
+            true,
+        );
 
         let window = buffer.curr_window();
         assert!(window.key.is_none());
@@ -328,10 +477,10 @@ mod tests {
 
     #[test]
     fn test_rows_frame_preceding_to_preceding() {
-        let mut buffer = WindowBuffer::new(Frame::rows(
-            FrameBound::Preceding(2),
-            FrameBound::Preceding(1),
-        ));
+        let mut buffer = WindowBuffer::new(
+            Frame::rows(FrameBound::Preceding(2), FrameBound::Preceding(1)),
+            true,
+        );
 
         buffer.append(1, "RisingWave");
         let window = buffer.curr_window();
@@ -375,10 +524,10 @@ mod tests {
 
     #[test]
     fn test_rows_frame_current_row_to_unbounded_following() {
-        let mut buffer = WindowBuffer::new(Frame::rows(
-            FrameBound::CurrentRow,
-            FrameBound::UnboundedFollowing,
-        ));
+        let mut buffer = WindowBuffer::new(
+            Frame::rows(FrameBound::CurrentRow, FrameBound::UnboundedFollowing),
+            true,
+        );
 
         buffer.append(1, "RisingWave");
         let window = buffer.curr_window();
@@ -415,10 +564,10 @@ mod tests {
 
     #[test]
     fn test_rows_frame_current_row_to_following() {
-        let mut buffer = WindowBuffer::new(Frame::rows(
-            FrameBound::CurrentRow,
-            FrameBound::Following(1),
-        ));
+        let mut buffer = WindowBuffer::new(
+            Frame::rows(FrameBound::CurrentRow, FrameBound::Following(1)),
+            true,
+        );
 
         buffer.append(1, "RisingWave");
         let window = buffer.curr_window();
@@ -464,10 +613,10 @@ mod tests {
 
     #[test]
     fn test_rows_frame_following_to_following() {
-        let mut buffer = WindowBuffer::new(Frame::rows(
-            FrameBound::Following(1),
-            FrameBound::Following(2),
-        ));
+        let mut buffer = WindowBuffer::new(
+            Frame::rows(FrameBound::Following(1), FrameBound::Following(2)),
+            true,
+        );
 
         buffer.append(1, "RisingWave");
         let window = buffer.curr_window();
@@ -510,11 +659,14 @@ mod tests {
 
     #[test]
     fn test_rows_frame_exclude_current_row() {
-        let mut buffer = WindowBuffer::new(Frame::rows_with_exclusion(
-            FrameBound::UnboundedPreceding,
-            FrameBound::CurrentRow,
-            FrameExclusion::CurrentRow,
-        ));
+        let mut buffer = WindowBuffer::new(
+            Frame::rows_with_exclusion(
+                FrameBound::UnboundedPreceding,
+                FrameBound::CurrentRow,
+                FrameExclusion::CurrentRow,
+            ),
+            true,
+        );
 
         buffer.append(1, "hello");
         assert!(buffer

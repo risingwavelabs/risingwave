@@ -27,7 +27,7 @@ use super::{StateEvictHint, StateKey, StatePos, WindowState};
 use crate::agg::{
     AggArgs, AggCall, AggregateFunction, AggregateState as AggImplState, BoxedAggregateFunction,
 };
-use crate::function::window::{FrameExclusion, WindowFuncCall, WindowFuncKind};
+use crate::function::window::{WindowFuncCall, WindowFuncKind};
 use crate::sig::agg::AGG_FUNC_SIG_MAP;
 use crate::Result;
 
@@ -71,20 +71,17 @@ impl AggregateState {
             )
             .expect("the agg func must exist");
         let agg_func = (agg_func_sig.build)(&agg_call)?;
-        let agg_impl = if false /* TODO() */
-            && !agg_func_sig.append_only
-            && call.frame.exclusion == FrameExclusion::NoOthers
-        {
+        let (agg_impl, enable_delta) = if !agg_func_sig.append_only {
             let init_state = agg_func.create_state();
-            AggImpl::Incremental(init_state)
+            (AggImpl::Incremental(init_state), true)
         } else {
-            AggImpl::Full
+            (AggImpl::Full, false)
         };
         Ok(Self {
             agg_func,
             agg_impl,
             arg_data_types,
-            buffer: WindowBuffer::new(call.frame.clone()),
+            buffer: WindowBuffer::new(call.frame.clone(), enable_delta),
             buffer_heap_size: KvSize::new(),
         })
     }
@@ -155,7 +152,8 @@ impl WindowState for AggregateState {
         match self.agg_impl {
             AggImpl::Full => {}
             AggImpl::Incremental(ref mut state) => {
-                // for incremental agg, we need to update the state even if the caller doesn't need the output
+                // for incremental agg, we need to update the state even if the caller doesn't need
+                // the output
                 let wrapper = AggregatorWrapper {
                     agg_func: self.agg_func.as_ref(),
                     arg_data_types: &self.arg_data_types,

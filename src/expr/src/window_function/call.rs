@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
 
+use enum_as_inner::EnumAsInner;
 use risingwave_common::bail;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::window_frame::{PbBound, PbExclusion};
@@ -267,7 +268,7 @@ impl FrameBound<usize> {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, EnumAsInner)]
 pub enum FrameExclusion {
     CurrentRow,
     // Group,
