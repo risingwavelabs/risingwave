@@ -76,6 +76,8 @@ impl Parse for FunctionAttr {
                 parsed.type_infer = Some(get_value()?);
             } else if meta.path().is_ident("deprecated") {
                 parsed.deprecated = true;
+            } else if meta.path().is_ident("append_only") {
+                parsed.append_only = true;
             } else {
                 return Err(Error::new(
                     meta.span(),
@@ -90,7 +92,12 @@ impl Parse for FunctionAttr {
 impl Parse for UserFunctionAttr {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let itemfn: syn::ItemFn = input.parse()?;
-        let sig = &itemfn.sig;
+        Ok(UserFunctionAttr::from(&itemfn.sig))
+    }
+}
+
+impl From<&syn::Signature> for UserFunctionAttr {
+    fn from(sig: &syn::Signature) -> Self {
         let (return_type_kind, iterator_item_kind, core_return_type) = match &sig.output {
             syn::ReturnType::Default => (ReturnTypeKind::T, None, "()".into()),
             syn::ReturnType::Type(_, ty) => {
@@ -104,7 +111,7 @@ impl Parse for UserFunctionAttr {
                 }
             }
         };
-        Ok(UserFunctionAttr {
+        UserFunctionAttr {
             name: sig.ident.to_string(),
             write: sig.inputs.iter().any(arg_is_write),
             context: sig.inputs.iter().any(arg_is_context),
@@ -115,7 +122,40 @@ impl Parse for UserFunctionAttr {
             core_return_type,
             generic: sig.generics.params.len(),
             return_type_span: sig.output.span(),
+        }
+    }
+}
+
+impl Parse for AggregateImpl {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let itemimpl: syn::ItemImpl = input.parse()?;
+        let parse_function = |name: &str| {
+            itemimpl.items.iter().find_map(|item| match item {
+                syn::ImplItem::Fn(syn::ImplItemFn { sig, .. }) if sig.ident == name => {
+                    Some(UserFunctionAttr::from(sig))
+                }
+                _ => None,
+            })
+        };
+        Ok(AggregateImpl {
+            struct_name: itemimpl.self_ty.to_token_stream().to_string(),
+            accumulate: parse_function("accumulate").expect("expect accumulate function"),
+            retract: parse_function("retract"),
+            merge: parse_function("merge"),
+            finalize: parse_function("finalize"),
+            encode_state: parse_function("encode_state"),
+            decode_state: parse_function("decode_state"),
         })
+    }
+}
+
+impl Parse for AggregateFnOrImpl {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        if input.peek(Token![impl]) {
+            Ok(AggregateFnOrImpl::Impl(input.parse()?))
+        } else {
+            Ok(AggregateFnOrImpl::Fn(input.parse()?))
+        }
     }
 }
 
