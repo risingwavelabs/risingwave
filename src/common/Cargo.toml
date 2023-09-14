@@ -93,7 +93,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-toml = "0.7"
+toml = "0.8"
 tonic = { workspace = true }
 tracing = "0.1"
 tracing-opentelemetry = "0.21"
