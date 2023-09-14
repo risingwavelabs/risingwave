@@ -550,6 +550,18 @@ impl Binder {
                 self.resolve_regclass(class_name)
                     .map(|id| ExprImpl::literal_int(id as i32))
             }
+            AstDataType::Regproc => {
+                let lhs = self.bind_expr_inner(expr)?;
+                let lhs_ty = lhs.return_type();
+                if lhs_ty == DataType::Varchar {
+                    // FIXME: Currently, we only allow VARCHAR to be casted to Regproc.
+                    // FIXME: Check whether it's a valid proc
+                    // FIXME: The return type should be casted to Regproc, but we don't have this type.
+                    Ok(lhs)
+                } else {
+                    Err(ErrorCode::BindError(format!("Can't cast {} to regproc", lhs_ty)).into())
+                }
+            }
             _ => self.bind_cast_inner(expr, bind_data_type(&data_type)?),
         }
     }
@@ -655,6 +667,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         }
         AstDataType::Bytea => DataType::Bytea,
         AstDataType::Regclass
+        | AstDataType::Regproc
         | AstDataType::Uuid
         | AstDataType::Custom(_)
         | AstDataType::Decimal(_, _)
