@@ -45,7 +45,7 @@ use crate::hummock::level_handler::LevelHandler;
 
 pub const MAX_COMPACT_LEVEL_COUNT: usize = 42;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct LocalPickerStatistic {
     pub skip_by_write_amp_limit: u64,
     pub skip_by_count_limit: u64,

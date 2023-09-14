@@ -13,13 +13,17 @@
 // limitations under the License.
 
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::str::FromStr;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
+use jni::objects::{JByteArray, JValue, JValueOwned};
+use prost::Message;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::connector_service::SourceType;
+use risingwave_jni_core::jvm_runtime::JVM;
+use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, ValidateSourceResponse};
 
 use crate::source::cdc::{
     CdcProperties, CdcSourceTypeTrait, CdcSplitBase, Citus, DebeziumCdcSplit, MySqlCdcSplit, Mysql,
@@ -49,10 +53,6 @@ where
         props: CdcProperties<T>,
         context: SourceEnumeratorContextRef,
     ) -> anyhow::Result<Self> {
-        let connector_client = context.connector_client.clone().ok_or_else(|| {
-            anyhow!("connector node endpoint not specified or unable to connect to connector node")
-        })?;
-
         let server_addrs = props
             .props
             .get(DATABASE_SERVERS_KEY)
@@ -69,15 +69,42 @@ where
             SourceType::from(T::source_type())
         );
 
+        let mut env = JVM.as_ref()?.attach_current_thread()?;
+
+        let validate_source_request = ValidateSourceRequest {
+            source_id: context.info.source_id as u64,
+            source_type: props.get_source_type_pb() as _,
+            properties: props.props,
+            table_schema: Some(props.table_schema),
+        };
+
+        let validate_source_request_bytes =
+            env.byte_array_from_slice(&Message::encode_to_vec(&validate_source_request))?;
+
         // validate connector properties
-        connector_client
-            .validate_source_properties(
-                context.info.source_id as u64,
-                props.get_source_type_pb(),
-                props.props,
-                Some(props.table_schema),
-            )
-            .await?;
+        let response = env.call_static_method(
+            "com/risingwave/connector/source/JniSourceValidateHandler",
+            "validate",
+            "([B)[B",
+            &[JValue::Object(&validate_source_request_bytes)],
+        )?;
+
+        let validate_source_response_bytes = match response {
+            JValueOwned::Object(o) => unsafe { JByteArray::from_raw(o.into_raw()) },
+            _ => unreachable!(),
+        };
+
+        let validate_source_response: ValidateSourceResponse = Message::decode(
+            risingwave_jni_core::to_guarded_slice(&validate_source_response_bytes, &mut env)?
+                .deref(),
+        )?;
+
+        validate_source_response.error.map_or(Ok(()), |err| {
+            Err(anyhow!(format!(
+                "source cannot pass validation: {}",
+                err.error_message
+            )))
+        })?;
 
         tracing::debug!("validate cdc source properties success");
         Ok(Self {
