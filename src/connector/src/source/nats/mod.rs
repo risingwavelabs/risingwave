@@ -25,6 +25,15 @@ pub const NATS_CONNECTOR: &str = "nats";
 pub struct NatsProperties {
     #[serde(flatten)]
     pub common: NatsCommon,
+
+    #[serde(rename = "scan.startup.mode", alias = "nats.scan.startup.mode")]
+    pub scan_startup_mode: Option<String>,
+
+    #[serde(
+        rename = "scan.startup.timestamp_millis",
+        alias = "nats.scan.startup.timestamp_millis"
+    )]
+    pub start_time: Option<String>,
 }
 
 impl NatsProperties {}

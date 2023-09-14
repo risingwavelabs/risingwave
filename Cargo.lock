@@ -6902,6 +6902,7 @@ dependencies = [
  "simd-json",
  "tempfile",
  "thiserror",
+ "time 0.3.28",
  "tokio-retry",
  "tokio-stream",
  "tokio-util",
