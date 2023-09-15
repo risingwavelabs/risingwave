@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -97,12 +97,19 @@ pub struct CompactionStatistics {
 
     /// Block inheritances for fine-grained cache reill.
     ///
-    /// { sst obj id => [ (parent sst obj id, parent block idx) ] }
-    pub inheritances: BTreeMap<HummockSstableObjectId, BTreeSet<(HummockSstableObjectId, usize)>>,
+    /// [
+    ///     # ssts
+    ///     [
+    ///         # blocks
+    ///         { ( parent obj id, parent blk idx), .. } # parents
+    ///     ],
+    ///     ...
+    /// ]
+    pub inheritances: Vec<Vec<BTreeSet<(HummockSstableObjectId, usize)>>>,
 }
 
 impl CompactionStatistics {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn delete_ratio(&self) -> Option<u64> {
         if self.iter_total_key_counts == 0 {
             return None;

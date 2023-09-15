@@ -12,21 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
 use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{can_concat, HummockEpoch};
-use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_hummock_sdk::{can_concat, HummockEpoch, HummockSstableObjectId};
+use risingwave_pb::hummock::compact_task::inheritances::Inheritance;
+use risingwave_pb::hummock::compact_task::{Inheritances, TaskStatus};
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 use tokio::sync::oneshot::Receiver;
 
@@ -377,7 +379,7 @@ pub async fn compact(
     // Number of splits (key ranges) is equal to number of compaction tasks
     let parallelism = compact_task.splits.len();
     assert_ne!(parallelism, 0, "splits cannot be empty");
-    let mut output_ssts = Vec::with_capacity(parallelism);
+    let mut outputs = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
     let mut abort_handles = vec![];
     let task_progress_guard =
@@ -436,7 +438,7 @@ pub async fn compact(
                 context.memory_limiter.quota()
             );
         task_status = TaskStatus::NoAvailResourceCanceled;
-        return compact_done(compact_task, context.clone(), output_ssts, task_status);
+        return compact_done(compact_task, context.clone(), outputs, task_status);
     }
 
     context.compactor_metrics.compact_task_pending_num.inc();
@@ -486,7 +488,7 @@ pub async fn compact(
             future_result = buffered.next() => {
                 match future_result {
                     Some(Ok(Ok((split_index, ssts, compact_stat)))) => {
-                        output_ssts.push((split_index, ssts, compact_stat));
+                        outputs.push((split_index, ssts, compact_stat));
                     }
                     Some(Ok(Err(e))) => {
                         task_status = TaskStatus::ExecuteFailed;
@@ -518,16 +520,16 @@ pub async fn compact(
         for abort_handle in abort_handles {
             abort_handle.abort();
         }
-        output_ssts.clear();
+        outputs.clear();
     }
     // Sort by split/key range index.
-    if !output_ssts.is_empty() {
-        output_ssts.sort_by_key(|(split_index, ..)| *split_index);
+    if !outputs.is_empty() {
+        outputs.sort_by_key(|(split_index, ..)| *split_index);
     }
 
     // After a compaction is done, mutate the compaction task.
     let (compact_task, table_stats) =
-        compact_done(compact_task, context.clone(), output_ssts, task_status);
+        compact_done(compact_task, context.clone(), outputs, task_status);
     let cost_time = timer.stop_and_record() * 1000.0;
     tracing::info!(
         "Finished compaction task in {:?}ms: {}",
@@ -547,7 +549,7 @@ pub async fn compact(
 fn compact_done(
     mut compact_task: CompactTask,
     context: CompactorContext,
-    output_ssts: Vec<CompactOutput>,
+    outputs: Vec<CompactOutput>,
     task_status: TaskStatus,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     let mut table_stats_map = TableStatsMap::default();
@@ -560,14 +562,32 @@ fn compact_done(
         _,
         ssts,
         CompactionStatistics {
-            delta_drop_stat, ..
+            delta_drop_stat,
+            inheritances,
+            ..
         },
-    ) in output_ssts
+    ) in outputs
     {
         add_table_stats_map(&mut table_stats_map, &delta_drop_stat);
-        for sst_info in ssts {
+        for (sst_info, inheritance) in ssts.into_iter().zip_eq_fast(inheritances) {
+            let new_sst_obj_id = sst_info.sst_info.object_id;
+
             compaction_write_bytes += sst_info.file_size();
             compact_task.sorted_output_ssts.push(sst_info.sst_info);
+
+            let mut inheritances_pb = Inheritances::default();
+            for parents in inheritance {
+                for (parent_sst_obj_id, parent_sst_blk_idx) in parents {
+                    let inheritance_pb = Inheritance {
+                        parent_sst_obj_id,
+                        parent_sst_blk_idx: parent_sst_blk_idx as u64,
+                    };
+                    inheritances_pb.inheritances.push(inheritance_pb);
+                }
+            }
+            compact_task
+                .inheritances
+                .insert(new_sst_obj_id, inheritances_pb);
         }
     }
 
@@ -642,6 +662,7 @@ where
     let mut progress_key_num: u64 = 0;
     const PROGRESS_KEY_INTERVAL: u64 = 100;
     while iter.is_valid() {
+        let info = iter.info();
         progress_key_num += 1;
 
         if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
@@ -752,7 +773,7 @@ where
             // the same SST. Therefore we need to construct a corresponding
             // delete key to represent this.
             iter_key.epoch = earliest_range_delete_which_can_see_iter_key;
-            sst_builder
+            let (new_sst_idx, new_blk_idx) = sst_builder
                 .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
                 .verbose_instrument_await("add_full_key_delete")
                 .await?;
@@ -761,15 +782,20 @@ where
             last_table_stats.total_value_size += 1;
             iter_key.epoch = epoch;
             is_new_user_key = false;
-            // ********** compaction_statistics.inheritances.
+            record_compaction_inheritance(
+                &mut compaction_statistics,
+                &info,
+                new_sst_idx,
+                new_blk_idx,
+            );
         }
 
         // Don't allow two SSTs to share same user key
-        sst_builder
+        let (new_sst_idx, new_blk_idx) = sst_builder
             .add_full_key(iter_key, value, is_new_user_key)
             .verbose_instrument_await("add_full_key")
             .await?;
-        // ********** compaction_statistics.inheritances.
+        record_compaction_inheritance(&mut compaction_statistics, &info, new_sst_idx, new_blk_idx);
 
         iter.next().verbose_instrument_await("iter_next").await?;
     }
@@ -813,6 +839,38 @@ where
 
     Ok(compaction_statistics)
 }
+
+fn record_compaction_inheritance(
+    statistics: &mut CompactionStatistics,
+    info: &Option<(HummockSstableObjectId, usize)>,
+    new_sst_idx: usize,
+    new_blk_idx: usize,
+) {
+    let Some((sst_obj_id, blk_idx)) = info else {
+        return;
+    };
+
+    if statistics.inheritances.len() == new_sst_idx {
+        statistics.inheritances.push(vec![]);
+    }
+
+    if statistics.inheritances.last().unwrap().len() == new_blk_idx {
+        statistics
+            .inheritances
+            .last_mut()
+            .unwrap()
+            .push(BTreeSet::default());
+    }
+
+    statistics
+        .inheritances
+        .last_mut()
+        .unwrap()
+        .last_mut()
+        .unwrap()
+        .insert((*sst_obj_id, *blk_idx));
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
