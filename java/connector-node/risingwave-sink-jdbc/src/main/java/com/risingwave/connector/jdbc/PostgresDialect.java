@@ -51,7 +51,7 @@ public class PostgresDialect implements JdbcDialect {
         RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.TIMESTAMP, "timestamp");
         RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.INTERVAL, "varchar");
         RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.DATE, "date");
-        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.TIMESTAMPTZ, "timestampz");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.TIMESTAMPTZ, "timestamptz");
         RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.JSONB, "varchar");
     }
 
