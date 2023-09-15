@@ -289,7 +289,7 @@ pub async fn gen_upsert_message_stream<'a>(
                 continue;
             }
             Op::UpdateInsert => json_converter_gen_event_object(
-                &key_encoder,
+                &val_encoder,
                 Value::Object(val_encoder.encode(row)?),
                 enable_schema,
                 &schema_name,
