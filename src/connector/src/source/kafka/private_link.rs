@@ -216,10 +216,10 @@ pub fn insert_privatelink_broker_rewrite_map(
     let broker_addrs = servers.split(',').collect_vec();
 
     if let Some(endpoint) = privatelink_endpoint {
-        broker_rewrite_map = broker_addrs
-            .into_iter()
-            .map(|broker| (broker.to_string(), format!("{}", &endpoint)))
-            .collect();
+        for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
+            // rewrite the broker address to endpoint:port
+            broker_rewrite_map.insert(broker.to_string(), format!("{}:{}", &endpoint, link.port));
+        }
     } else {
         if svc.is_none() {
             return Err(anyhow!("Privatelink endpoint not found.",));
