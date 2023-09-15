@@ -237,16 +237,19 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
-        self.add(full_key, value, is_new_user_key).await
+        self.add(full_key, value, is_new_user_key).await?;
+        Ok(())
     }
 
     /// Add kv pair to sstable.
+    ///
+    /// Return the block index the new key belongs to.
     pub async fn add(
         &mut self,
         full_key: FullKey<&[u8]>,
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
-    ) -> HummockResult<()> {
+    ) -> HummockResult<usize> {
         const LARGE_KEY_LEN: usize = MAX_KEY_LEN >> 1;
 
         let mut is_new_table = false;
@@ -262,7 +265,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             );
         }
 
-        // TODO: refine me
         full_key.encode_into(&mut self.raw_key);
         value.encode(&mut self.raw_value);
         if is_new_user_key {
@@ -319,7 +321,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         self.raw_key.clear();
         self.raw_value.clear();
-        Ok(())
+
+        let blk_idx = self.block_metas.len() - 1;
+
+        Ok(blk_idx)
     }
 
     /// Finish building sst.

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -98,7 +98,7 @@ pub struct CompactionStatistics {
     /// Block inheritances for fine-grained cache reill.
     ///
     /// { sst obj id => [ (parent sst obj id, parent block idx) ] }
-    pub inheritances: BTreeMap<HummockSstableObjectId, Vec<(HummockSstableObjectId, u64)>>,
+    pub inheritances: BTreeMap<HummockSstableObjectId, BTreeSet<(HummockSstableObjectId, usize)>>,
 }
 
 impl CompactionStatistics {

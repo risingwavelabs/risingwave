@@ -761,6 +761,7 @@ where
             last_table_stats.total_value_size += 1;
             iter_key.epoch = epoch;
             is_new_user_key = false;
+            // ********** compaction_statistics.inheritances.
         }
 
         // Don't allow two SSTs to share same user key
@@ -768,6 +769,7 @@ where
             .add_full_key(iter_key, value, is_new_user_key)
             .verbose_instrument_await("add_full_key")
             .await?;
+        // ********** compaction_statistics.inheritances.
 
         iter.next().verbose_instrument_await("iter_next").await?;
     }

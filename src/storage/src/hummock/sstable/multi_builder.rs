@@ -147,7 +147,8 @@ where
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
-        self.add_full_key(full_key, value, is_new_user_key).await
+        self.add_full_key(full_key, value, is_new_user_key).await?;
+        Ok(())
     }
 
     /// Adds a key-value pair to the underlying builders.
@@ -157,12 +158,14 @@ where
     ///
     /// Note that in some cases like compaction of the same user key, automatic splitting is not
     /// allowed, where `allow_split` should be `false`.
+    ///
+    /// Return the sst index and block index the new key belongs to.
     pub async fn add_full_key(
         &mut self,
         full_key: FullKey<&[u8]>,
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
-    ) -> HummockResult<()> {
+    ) -> HummockResult<(usize, usize)> {
         let (switch_builder, vnode_changed) = self.check_table_and_vnode_change(&full_key.user_key);
 
         // We use this `need_seal_current` flag to store whether we need to call `seal_current` and
@@ -223,8 +226,11 @@ where
             self.current_builder = Some(builder);
         }
 
+        let sst_idx = self.sst_outputs.len();
         let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key, value, is_new_user_key).await
+        let blk_idx = builder.add(full_key, value, is_new_user_key).await?;
+
+        Ok((sst_idx, blk_idx))
     }
 
     pub fn check_table_and_vnode_change(&mut self, user_key: &UserKey<&[u8]>) -> (bool, bool) {
