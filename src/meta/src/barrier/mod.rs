@@ -951,7 +951,8 @@ impl GlobalBarrierManager {
                 .fragment_manager
                 .get_table_id_actor_mapping(&creating_table_ids)
                 .await;
-            let upstream_mv_counts = Default::default();
+            let upstream_mv_counts =
+                self.fragment_manager.get_upstream_relation_counts(&creating_table_ids).await;
             let definitions = Default::default();
             let version_stats = self.hummock_manager.get_version_stats().await;
             let tracking_commands = Default::default();

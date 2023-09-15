@@ -181,6 +181,31 @@ impl FragmentManager {
         actor_mapping
     }
 
+    /// Gets the counts for each upstream relation that each stream job
+    /// indicated by `table_ids` depends on.
+    pub async fn get_upstream_relation_counts(
+        &self,
+        table_ids: &[TableId],
+    ) -> HashMap<TableId, HashMap<TableId, usize>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut upstream_relation_counts = HashMap::new();
+        for table_id in table_ids {
+            if let Some(table_fragment) = map.get(table_id) {
+                let mut upstream_relation_count = HashMap::new();
+                for fragment in table_fragment.fragments.values() {
+                    for actor in &fragment.actors {
+                        for dispatcher in &actor.dispatcher {
+                            let upstream_table_id = dispatcher.upstream_table_id;
+                            *upstream_relation_count.entry(upstream_table_id).or_insert(0) += 1;
+                        }
+                    }
+                }
+                upstream_relation_counts.insert(*table_id, upstream_relation_count);
+            }
+        }
+        upstream_relation_counts
+    }
+
     pub fn get_mv_id_to_internal_table_ids_mapping(&self) -> Option<Vec<(u32, Vec<u32>)>> {
         match self.core.try_read() {
             Ok(core) => Some(
