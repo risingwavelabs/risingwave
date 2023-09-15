@@ -411,10 +411,11 @@ fn regexp_replace(
                 }
             } else {
                 // `N` is not specified
-                if ctx.regex.captures(&text[start..]).is_err() {
+                if let Ok(None) = ctx.regex.captures(&text[start..]) {
                     // No match
                     return Ok(text.into());
                 }
+
                 // Otherwise replace the source text
                 if let Ok(Some(capture)) = ctx.regex.captures(&text[start..]) {
                     let match_start = capture.get(0).unwrap().start();
