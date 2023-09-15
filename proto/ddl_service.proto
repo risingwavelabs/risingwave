@@ -100,6 +100,7 @@ message DropSinkResponse {
 message CreateMaterializedViewRequest {
   catalog.Table materialized_view = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
+  bool run_in_background = 3;
 }
 
 message CreateMaterializedViewResponse {

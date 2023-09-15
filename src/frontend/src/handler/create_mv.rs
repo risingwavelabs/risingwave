@@ -200,10 +200,19 @@ It only indicates the physical clustering of the data, which may improve the per
             ));
 
     let run_in_background = session.config().get_background_ddl();
-    let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .create_materialized_view(table, graph, run_in_background)
-        .await?;
+    {
+        let session = session.clone();
+        tokio::spawn(async move {
+            let result: Result<()> = {
+                let catalog_writer = session.catalog_writer_unsafe();
+                catalog_writer
+                    .create_materialized_view(table, graph, run_in_background)
+                    .await?;
+                Ok(())
+            };
+            result
+        });
+    }
 
     Ok(PgResponse::empty_result(
         StatementType::CREATE_MATERIALIZED_VIEW,

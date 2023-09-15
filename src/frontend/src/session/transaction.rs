@@ -247,6 +247,10 @@ impl SessionImpl {
             .map(|guard| self.env().catalog_writer(guard))
     }
 
+    pub fn catalog_writer_unsafe(&self) -> &dyn CatalogWriter {
+        self.env().catalog_writer_unsafe()
+    }
+
     /// Returns the user info writer, if write operations are permitted in the current transaction.
     pub fn user_info_writer(&self) -> Result<&dyn UserInfoWriter> {
         self.txn_write_guard()

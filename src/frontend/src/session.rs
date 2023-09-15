@@ -345,6 +345,11 @@ impl FrontendEnv {
         &*self.catalog_writer
     }
 
+    // FIXME(kwannoel):
+    pub fn catalog_writer_unsafe(&self) -> &dyn CatalogWriter {
+        &*self.catalog_writer
+    }
+
     /// Get a reference to the frontend env's catalog reader.
     pub fn catalog_reader(&self) -> &CatalogReader {
         &self.catalog_reader
