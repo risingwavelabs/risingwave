@@ -20,6 +20,7 @@ use std::time::Duration;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
+use futures::future::try_join_all;
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
@@ -524,43 +525,43 @@ impl SstableStore {
         &self.data_file_cache
     }
 
-    pub async fn may_fill_data_file_cache(
-        &self,
-        sst: &Sstable,
-        block_index: usize,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<bool> {
+    pub async fn fill_data_file_cache(&self, sst: &Sstable) -> HummockResult<()> {
         let object_id = sst.id;
-        let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
-
-        stats.cache_data_block_total += 1;
-        let fetch_block = move || {
-            stats.cache_data_block_miss += 1;
-            let data_path = self.get_sst_data_path(object_id);
-            let store = self.store.clone();
-
-            async move {
-                let data = store.read(&data_path, range).await?;
-                let block = Block::decode(data, uncompressed_capacity)?;
-                let block = Box::new(block);
-
-                Ok(block)
-            }
-        };
 
         if let Some(filter) = self.data_file_cache_refill_filter.as_ref() {
             filter.insert(object_id);
         }
 
-        let key = SstableBlockIndex {
-            sst_id: object_id,
-            block_idx: block_index as u64,
-        };
+        let data = self
+            .store
+            .read(&self.get_sst_data_path(object_id), ..)
+            .await?;
 
-        self.data_file_cache
-            .insert_with(key, fetch_block, uncompressed_capacity)
-            .await
-            .map_err(HummockError::file_cache)
+        let mut tasks = vec![];
+        for block_index in 0..sst.block_count() {
+            let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
+            let bytes = data.slice(range);
+            let block = Block::decode(bytes, uncompressed_capacity)?;
+            let block = Box::new(block);
+
+            let key = SstableBlockIndex {
+                sst_id: object_id,
+                block_idx: block_index as u64,
+            };
+
+            let cache = self.data_file_cache.clone();
+            let task = async move {
+                cache
+                    .insert_force(key, block)
+                    .await
+                    .map_err(HummockError::file_cache)
+            };
+            tasks.push(task);
+        }
+
+        try_join_all(tasks).await?;
+
+        Ok(())
     }
 }
 

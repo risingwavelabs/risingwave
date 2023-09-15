@@ -67,7 +67,7 @@ rand = "0.8"
 tempfile = "3"
 
 [target.'cfg(unix)'.dev-dependencies]
-tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "b7f9f3" }
+tikv-jemallocator = { workspace = true }
 
 [[bench]]
 name = "filter"
