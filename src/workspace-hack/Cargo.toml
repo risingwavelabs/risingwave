@@ -228,7 +228,6 @@ rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8
 rustix = { version = "0.38", features = ["fs", "termios"] }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 serde_json = { version = "1", default-features = false, features = ["raw_value"] }
-tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
 zstd-sys = { version = "2", features = ["std"] }
@@ -246,7 +245,6 @@ rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8
 rustix = { version = "0.38", features = ["fs", "termios"] }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 serde_json = { version = "1", default-features = false, features = ["raw_value"] }
-tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
 zstd-sys = { version = "2", features = ["std"] }
@@ -264,7 +262,6 @@ rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8
 rustix = { version = "0.38", features = ["fs", "termios"] }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 serde_json = { version = "1", default-features = false, features = ["raw_value"] }
-tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
 zstd-sys = { version = "2", features = ["std"] }
@@ -282,7 +279,6 @@ rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8
 rustix = { version = "0.38", features = ["fs", "termios"] }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 serde_json = { version = "1", default-features = false, features = ["raw_value"] }
-tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
 zstd-sys = { version = "2", features = ["std"] }
@@ -300,7 +296,6 @@ rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8
 rustix = { version = "0.38", features = ["fs", "termios"] }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 serde_json = { version = "1", default-features = false, features = ["raw_value"] }
-tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
 zstd-sys = { version = "2", features = ["std"] }
@@ -318,7 +313,6 @@ rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8
 rustix = { version = "0.38", features = ["fs", "termios"] }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 serde_json = { version = "1", default-features = false, features = ["raw_value"] }
-tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
 zstd-sys = { version = "2", features = ["std"] }
@@ -336,7 +330,6 @@ rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8
 rustix = { version = "0.38", features = ["fs", "termios"] }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 serde_json = { version = "1", default-features = false, features = ["raw_value"] }
-tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
 zstd-sys = { version = "2", features = ["std"] }
@@ -354,7 +347,6 @@ rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8
 rustix = { version = "0.38", features = ["fs", "termios"] }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 serde_json = { version = "1", default-features = false, features = ["raw_value"] }
-tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
 zstd-sys = { version = "2", features = ["std"] }
