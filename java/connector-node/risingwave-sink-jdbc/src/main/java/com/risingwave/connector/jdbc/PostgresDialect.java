@@ -43,7 +43,7 @@ public class PostgresDialect implements JdbcDialect {
         RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.INT32, "int4");
         RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.INT64, "int8");
         RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.FLOAT, "float4");
-        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.DOUBLE, "double precision");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.DOUBLE, "float8");
         RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.BOOLEAN, "bool");
         RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.VARCHAR, "varchar");
         RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.DECIMAL, "numeric");
