@@ -946,8 +946,23 @@ impl GlobalBarrierManager {
                 .await
                 .iter()
                 .map(|t| TableId { table_id: t.id })
-                .collect();
-            let actor_map = Default::default();
+                .collect_vec();
+            let creating_table_fragments = self
+                .fragment_manager
+                .list_table_fragments()
+                .await
+                .into_iter()
+                // FIXME(kwannoel): Not very efficient. Let's provide a hash set for `creating_table_ids`.
+                .filter(|fragment| creating_table_ids.iter().contains(&fragment.table_id()))
+                .collect_vec();
+            let mut actor_map = HashMap::new();
+            for fragment in creating_table_fragments {
+                let table_id = fragment.table_id();
+                let actor_ids = fragment.actor_ids();
+                for actor_id in actor_ids {
+                    actor_map.insert(actor_id, table_id).unwrap();
+                }
+            }
             let upstream_mv_counts = Default::default();
             let definitions = Default::default();
             let version_stats = self.hummock_manager.get_version_stats().await;
