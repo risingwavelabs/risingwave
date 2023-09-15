@@ -235,6 +235,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         mut table: PbTable,
         _graph: StreamFragmentGraph,
+        _run_in_background: bool,
     ) -> Result<()> {
         table.id = self.gen_id();
         self.catalog.write().create_table(&table);
@@ -260,7 +261,7 @@ impl CatalogWriter for MockCatalogWriter {
             table.optional_associated_source_id =
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
-        self.create_materialized_view(table, graph).await?;
+        self.create_materialized_view(table, graph, false).await?;
         Ok(())
     }
 

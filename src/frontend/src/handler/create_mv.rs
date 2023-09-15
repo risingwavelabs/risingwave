@@ -199,9 +199,10 @@ It only indicates the physical clustering of the data, which may improve the per
                 table.name.clone(),
             ));
 
+    let run_in_background = session.config().get_background_ddl();
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_materialized_view(table, graph)
+        .create_materialized_view(table, graph, run_in_background)
         .await?;
 
     Ok(PgResponse::empty_result(

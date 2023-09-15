@@ -70,6 +70,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
+        run_in_background: bool,
     ) -> Result<()>;
 
     async fn create_table(
@@ -190,12 +191,16 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
+        run_in_background: bool,
     ) -> Result<()> {
         let (_, version) = self
             .meta_client
             .create_materialized_view(table, graph)
             .await?;
-        self.wait_version(version).await
+        if !run_in_background {
+            self.wait_version(version).await?
+        }
+        Ok(())
     }
 
     async fn create_view(&self, view: PbView) -> Result<()> {
