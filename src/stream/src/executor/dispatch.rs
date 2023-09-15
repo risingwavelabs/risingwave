@@ -51,6 +51,7 @@ struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherImpl>,
     actor_id: u32,
     actor_id_str: String,
+    fragment_id_str: String,
     context: Arc<SharedContext>,
     metrics: Arc<StreamingMetrics>,
 }
@@ -76,7 +77,7 @@ impl DispatchExecutorInner {
             Message::Chunk(chunk) => {
                 self.metrics
                     .actor_out_record_cnt
-                    .with_label_values(&[&self.actor_id_str])
+                    .with_label_values(&[&self.actor_id_str, &self.fragment_id_str])
                     .inc_by(chunk.cardinality() as _);
                 if self.dispatchers.len() == 1 {
                     // special clone optimization when there is only one downstream dispatcher
@@ -98,7 +99,7 @@ impl DispatchExecutorInner {
         };
         self.metrics
             .actor_output_buffer_blocking_duration_ns
-            .with_label_values(&[&self.actor_id_str])
+            .with_label_values(&[&self.actor_id_str, &self.fragment_id_str])
             .inc_by(start_time.elapsed().as_nanos() as u64);
         Ok(())
     }
@@ -253,6 +254,7 @@ impl DispatchExecutor {
         input: BoxedExecutor,
         dispatchers: Vec<DispatcherImpl>,
         actor_id: u32,
+        fragment_id: u32,
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -262,6 +264,7 @@ impl DispatchExecutor {
                 dispatchers,
                 actor_id,
                 actor_id_str: actor_id.to_string(),
+                fragment_id_str: fragment_id.to_string(),
                 context,
                 metrics,
             },
