@@ -232,13 +232,20 @@ impl LogicalScan {
             return (self.core.clone(), Condition::true_cond(), None);
         }
 
-        let mut mapping = ColIndexMapping::with_target_size(
-            self.required_col_idx().iter().map(|i| Some(*i)).collect(),
-            self.table_desc().columns.len(),
-        )
-        .inverse()
-        .expect("must be invertible");
-        predicate = predicate.rewrite_expr(&mut mapping);
+        let mut inverse_mapping = {
+            let mapping = ColIndexMapping::with_target_size(
+                self.required_col_idx().iter().map(|i| Some(*i)).collect(),
+                self.table_desc().columns.len(),
+            );
+            // Since `required_col_idx` mapping is not invertible, we need to inverse manually.
+            let mut inverse_map = vec![None; mapping.target_size()];
+            for (src, dst) in mapping.mapping_pairs() {
+                inverse_map[dst] = Some(src);
+            }
+            ColIndexMapping::with_target_size(inverse_map, mapping.source_size())
+        };
+
+        predicate = predicate.rewrite_expr(&mut inverse_mapping);
 
         let scan_without_predicate = generic::Scan::new(
             self.table_name().to_string(),

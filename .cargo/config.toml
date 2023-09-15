@@ -24,7 +24,6 @@ rustflags = [
 ]
 
 [target.aarch64-apple-darwin]
-runner = "scripts/coredump/sign-and-run"
 rustflags = [
     # neon is enabled by default
     "-Clink-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld",

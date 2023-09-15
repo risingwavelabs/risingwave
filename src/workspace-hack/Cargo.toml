@@ -94,7 +94,6 @@ serde_json = { version = "1", features = ["alloc"] }
 serde_with = { version = "3", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
 subtle = { version = "2" }
-tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats"] }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
 tokio = { version = "1", features = ["full", "stats", "tracing"] }
@@ -196,7 +195,6 @@ smallvec = { version = "1", default-features = false, features = ["serde", "unio
 subtle = { version = "2" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
-tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats"] }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 time-macros = { version = "0.2", default-features = false, features = ["formatting", "parsing", "serde"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
@@ -216,5 +214,149 @@ unicode-normalization = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 zeroize = { version = "1", features = ["zeroize_derive"] }
+
+[target.x86_64-unknown-linux-gnu.dependencies]
+axum = { version = "0.6" }
+memchr = { version = "2" }
+mime_guess = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
+once_cell = { version = "1", features = ["unstable"] }
+openssl-sys = { version = "0.9", default-features = false, features = ["vendored"] }
+opentelemetry = { version = "0.20", default-features = false, features = ["metrics", "rt-tokio", "trace"] }
+opentelemetry_sdk = { version = "0.20", default-features = false, features = ["rt-tokio"] }
+rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8ea07c4", default-features = false, features = ["cmake-build", "gssapi", "libz", "ssl-vendored", "zstd"] }
+rustix = { version = "0.38", features = ["fs", "termios"] }
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
+serde_json = { version = "1", default-features = false, features = ["raw_value"] }
+tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
+zstd-sys = { version = "2", features = ["std"] }
+
+[target.x86_64-unknown-linux-gnu.build-dependencies]
+axum = { version = "0.6" }
+memchr = { version = "2" }
+mime_guess = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
+once_cell = { version = "1", features = ["unstable"] }
+openssl-sys = { version = "0.9", default-features = false, features = ["vendored"] }
+opentelemetry = { version = "0.20", default-features = false, features = ["metrics", "rt-tokio", "trace"] }
+opentelemetry_sdk = { version = "0.20", default-features = false, features = ["rt-tokio"] }
+rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8ea07c4", default-features = false, features = ["cmake-build", "gssapi", "libz", "ssl-vendored", "zstd"] }
+rustix = { version = "0.38", features = ["fs", "termios"] }
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
+serde_json = { version = "1", default-features = false, features = ["raw_value"] }
+tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
+zstd-sys = { version = "2", features = ["std"] }
+
+[target.aarch64-unknown-linux-gnu.dependencies]
+axum = { version = "0.6" }
+memchr = { version = "2" }
+mime_guess = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
+once_cell = { version = "1", features = ["unstable"] }
+openssl-sys = { version = "0.9", default-features = false, features = ["vendored"] }
+opentelemetry = { version = "0.20", default-features = false, features = ["metrics", "rt-tokio", "trace"] }
+opentelemetry_sdk = { version = "0.20", default-features = false, features = ["rt-tokio"] }
+rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8ea07c4", default-features = false, features = ["cmake-build", "gssapi", "libz", "ssl-vendored", "zstd"] }
+rustix = { version = "0.38", features = ["fs", "termios"] }
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
+serde_json = { version = "1", default-features = false, features = ["raw_value"] }
+tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
+zstd-sys = { version = "2", features = ["std"] }
+
+[target.aarch64-unknown-linux-gnu.build-dependencies]
+axum = { version = "0.6" }
+memchr = { version = "2" }
+mime_guess = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
+once_cell = { version = "1", features = ["unstable"] }
+openssl-sys = { version = "0.9", default-features = false, features = ["vendored"] }
+opentelemetry = { version = "0.20", default-features = false, features = ["metrics", "rt-tokio", "trace"] }
+opentelemetry_sdk = { version = "0.20", default-features = false, features = ["rt-tokio"] }
+rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8ea07c4", default-features = false, features = ["cmake-build", "gssapi", "libz", "ssl-vendored", "zstd"] }
+rustix = { version = "0.38", features = ["fs", "termios"] }
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
+serde_json = { version = "1", default-features = false, features = ["raw_value"] }
+tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
+zstd-sys = { version = "2", features = ["std"] }
+
+[target.x86_64-apple-darwin.dependencies]
+axum = { version = "0.6" }
+memchr = { version = "2" }
+mime_guess = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
+once_cell = { version = "1", features = ["unstable"] }
+openssl-sys = { version = "0.9", default-features = false, features = ["vendored"] }
+opentelemetry = { version = "0.20", default-features = false, features = ["metrics", "rt-tokio", "trace"] }
+opentelemetry_sdk = { version = "0.20", default-features = false, features = ["rt-tokio"] }
+rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8ea07c4", default-features = false, features = ["cmake-build", "gssapi", "libz", "ssl-vendored", "zstd"] }
+rustix = { version = "0.38", features = ["fs", "termios"] }
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
+serde_json = { version = "1", default-features = false, features = ["raw_value"] }
+tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
+zstd-sys = { version = "2", features = ["std"] }
+
+[target.x86_64-apple-darwin.build-dependencies]
+axum = { version = "0.6" }
+memchr = { version = "2" }
+mime_guess = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
+once_cell = { version = "1", features = ["unstable"] }
+openssl-sys = { version = "0.9", default-features = false, features = ["vendored"] }
+opentelemetry = { version = "0.20", default-features = false, features = ["metrics", "rt-tokio", "trace"] }
+opentelemetry_sdk = { version = "0.20", default-features = false, features = ["rt-tokio"] }
+rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8ea07c4", default-features = false, features = ["cmake-build", "gssapi", "libz", "ssl-vendored", "zstd"] }
+rustix = { version = "0.38", features = ["fs", "termios"] }
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
+serde_json = { version = "1", default-features = false, features = ["raw_value"] }
+tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
+zstd-sys = { version = "2", features = ["std"] }
+
+[target.aarch64-apple-darwin.dependencies]
+axum = { version = "0.6" }
+memchr = { version = "2" }
+mime_guess = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
+once_cell = { version = "1", features = ["unstable"] }
+openssl-sys = { version = "0.9", default-features = false, features = ["vendored"] }
+opentelemetry = { version = "0.20", default-features = false, features = ["metrics", "rt-tokio", "trace"] }
+opentelemetry_sdk = { version = "0.20", default-features = false, features = ["rt-tokio"] }
+rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8ea07c4", default-features = false, features = ["cmake-build", "gssapi", "libz", "ssl-vendored", "zstd"] }
+rustix = { version = "0.38", features = ["fs", "termios"] }
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
+serde_json = { version = "1", default-features = false, features = ["raw_value"] }
+tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
+zstd-sys = { version = "2", features = ["std"] }
+
+[target.aarch64-apple-darwin.build-dependencies]
+axum = { version = "0.6" }
+memchr = { version = "2" }
+mime_guess = { version = "2" }
+miniz_oxide = { version = "0.7", default-features = false, features = ["with-alloc"] }
+once_cell = { version = "1", features = ["unstable"] }
+openssl-sys = { version = "0.9", default-features = false, features = ["vendored"] }
+opentelemetry = { version = "0.20", default-features = false, features = ["metrics", "rt-tokio", "trace"] }
+opentelemetry_sdk = { version = "0.20", default-features = false, features = ["rt-tokio"] }
+rdkafka-sys = { git = "https://github.com/MaterializeInc/rust-rdkafka", rev = "8ea07c4", default-features = false, features = ["cmake-build", "gssapi", "libz", "ssl-vendored", "zstd"] }
+rustix = { version = "0.38", features = ["fs", "termios"] }
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
+serde_json = { version = "1", default-features = false, features = ["raw_value"] }
+tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
+zstd-sys = { version = "2", features = ["std"] }
 
 ### END HAKARI SECTION
