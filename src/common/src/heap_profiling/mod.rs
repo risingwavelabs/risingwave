@@ -14,3 +14,6 @@
 
 pub const MANUALLY_DUMP_MID_NAME: &str = "manually-dump.compute.dump";
 pub const AUTO_DUMP_MID_NAME: &str = "auto-dump.compute.dump";
+pub const COLLAPSED_SUFFIX: &str = "collapsed";
+
+pub mod jeprof;

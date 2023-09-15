@@ -20,7 +20,7 @@ use risingwave_pb::compactor::compactor_service_server::CompactorService;
 use risingwave_pb::compactor::{EchoRequest, EchoResponse};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    DownloadRequest, DownloadResponse, HeapProfilingRequest, HeapProfilingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
     ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
@@ -94,10 +94,10 @@ impl MonitorService for MonitorServiceImpl {
         ))
     }
 
-    async fn download(
+    async fn analyze_heap(
         &self,
-        _request: Request<DownloadRequest>,
-    ) -> Result<Response<DownloadResponse>, Status> {
+        _request: Request<AnalyzeHeapRequest>,
+    ) -> Result<Response<AnalyzeHeapResponse>, Status> {
         Err(Status::unimplemented(
             "Heap profiling unimplemented in compactor",
         ))

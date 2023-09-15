@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod heap_profile;
 mod prometheus;
 mod proxy;
 
 use std::collections::HashMap;
-use std::fs;
 use std::net::SocketAddr;
 use std::path::Path as FilePath;
 use std::sync::Arc;
@@ -59,6 +57,7 @@ pub(super) mod handlers {
     use axum::Json;
     use itertools::Itertools;
     use risingwave_common::bail;
+    use risingwave_common::heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table};
     use risingwave_pb::common::WorkerNode;
@@ -266,6 +265,14 @@ pub(super) mod handlers {
         let file_path =
             String::from_utf8(base64_url::decode(&file_path).map_err(err)?).map_err(err)?;
 
+        let file_name = FilePath::new(&file_path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        let collapsed_file_name = format!("{}.{}", file_name, COLLAPSED_SUFFIX);
+
         let worker_node = srv
             .cluster_manager
             .get_worker_by_id(worker_id)
@@ -276,35 +283,16 @@ pub(super) mod handlers {
 
         let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
 
-        // Cache path for the target node.
-        let node_cache_dir = FilePath::new(&srv.ui_path.clone().unwrap())
-            .join("profiling")
-            .join(worker_id.to_string());
-        fs::create_dir_all(node_cache_dir.clone()).map_err(err)?;
-
-        let cache_file_path = node_cache_dir.join(FilePath::new(&file_path).file_name().unwrap());
-        let cache_file_path_str = cache_file_path.to_string_lossy().to_string();
-        let collapsed_path_str = format!("{}.collapsed", cache_file_path_str);
-        let collapsed_path = FilePath::new(&collapsed_path_str);
-        if !collapsed_path.exists() {
-            let result = client.download(file_path.clone()).await.map_err(err)?;
-            fs::write(cache_file_path.clone(), result.result).map_err(err)?;
-            heap_profile::run_jeprof(cache_file_path_str, collapsed_path_str.clone()).await?;
-        }
-
-        let collapsed_str =
-            String::from_utf8_lossy(&fs::read(collapsed_path).map_err(err)?).to_string();
+        let collapsed_bin = client
+            .analyze_heap(file_path.clone())
+            .await
+            .map_err(err)?
+            .result;
+        let collapsed_str = String::from_utf8_lossy(&collapsed_bin).to_string();
 
         let response = Response::builder()
             .header("Content-Type", "application/octet-stream")
-            .header(
-                "Content-Disposition",
-                collapsed_path
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .to_string(),
-            )
+            .header("Content-Disposition", collapsed_file_name)
             .body(boxed(collapsed_str));
 
         response.map_err(err)

@@ -27,7 +27,7 @@ use risingwave_pb::compute::config_service_client::ConfigServiceClient;
 use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
-    DownloadRequest, DownloadResponse, HeapProfilingRequest, HeapProfilingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
     ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
@@ -221,11 +221,11 @@ impl ComputeClient {
             .into_inner())
     }
 
-    pub async fn download(&self, path: String) -> Result<DownloadResponse> {
+    pub async fn analyze_heap(&self, path: String) -> Result<AnalyzeHeapResponse> {
         Ok(self
             .monitor_client
             .to_owned()
-            .download(DownloadRequest { path })
+            .analyze_heap(AnalyzeHeapRequest { path })
             .await?
             .into_inner())
     }

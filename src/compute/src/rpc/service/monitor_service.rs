@@ -19,10 +19,12 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::config::ServerConfig;
-use risingwave_common::heap_profiling::{AUTO_DUMP_MID_NAME, MANUALLY_DUMP_MID_NAME};
+use risingwave_common::heap_profiling::{
+    self, AUTO_DUMP_MID_NAME, COLLAPSED_SUFFIX, MANUALLY_DUMP_MID_NAME,
+};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    DownloadRequest, DownloadResponse, HeapProfilingRequest, HeapProfilingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
     ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
@@ -180,7 +182,7 @@ impl MonitorService for MonitorServiceImpl {
             })
             .filter(|name| {
                 if let Ok(name) = name {
-                    name.contains(AUTO_DUMP_MID_NAME)
+                    name.contains(AUTO_DUMP_MID_NAME) && !name.ends_with(COLLAPSED_SUFFIX)
                 } else {
                     true
                 }
@@ -193,7 +195,7 @@ impl MonitorService for MonitorServiceImpl {
             })
             .filter(|name| {
                 if let Ok(name) = name {
-                    name.contains(MANUALLY_DUMP_MID_NAME)
+                    name.contains(MANUALLY_DUMP_MID_NAME) && !name.ends_with(COLLAPSED_SUFFIX)
                 } else {
                     true
                 }
@@ -208,13 +210,21 @@ impl MonitorService for MonitorServiceImpl {
     }
 
     #[cfg_attr(coverage, no_coverage)]
-    async fn download(
+    async fn analyze_heap(
         &self,
-        request: Request<DownloadRequest>,
-    ) -> Result<Response<DownloadResponse>, Status> {
-        let path = request.into_inner().get_path().clone();
-        let file = fs::read(Path::new(&path))?;
-        Ok(Response::new(DownloadResponse { result: file }))
+        request: Request<AnalyzeHeapRequest>,
+    ) -> Result<Response<AnalyzeHeapResponse>, Status> {
+        let dumped_path_str = request.into_inner().get_path().clone();
+        let collapsed_path_str = format!("{}.{}", dumped_path_str, COLLAPSED_SUFFIX);
+        let collapsed_path = Path::new(&collapsed_path_str);
+
+        // run jeprof if the target was not analyzed before
+        if !collapsed_path.exists() {
+            heap_profiling::jeprof::run(dumped_path_str, collapsed_path_str.clone()).await?;
+        }
+
+        let file = fs::read(Path::new(&collapsed_path_str))?;
+        Ok(Response::new(AnalyzeHeapResponse { result: file }))
     }
 }
 

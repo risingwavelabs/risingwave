@@ -198,10 +198,6 @@ impl Task for MetaNodeService {
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
 
-        let prefix_bin = env::var("PREFIX_BIN")?;
-        cmd.arg("--binary-path")
-            .arg(Path::new(&prefix_bin).join("risingwave/meta-node"));
-
         cmd.arg("--dashboard-ui-path")
             .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
 

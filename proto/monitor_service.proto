@@ -38,13 +38,13 @@ message ListHeapProfilingResponse {
   repeated string name_auto = 3;
 }
 
-// Download files
-message DownloadRequest {
+// Analyze dumped files
+message AnalyzeHeapRequest {
   // The file path
   string path = 1;
 }
 
-message DownloadResponse {
+message AnalyzeHeapResponse {
   bytes result = 1;
 }
 
@@ -53,5 +53,5 @@ service MonitorService {
   rpc Profiling(ProfilingRequest) returns (ProfilingResponse);
   rpc HeapProfiling(HeapProfilingRequest) returns (HeapProfilingResponse);
   rpc ListHeapProfiling(ListHeapProfilingRequest) returns (ListHeapProfilingResponse);
-  rpc Download(DownloadRequest) returns (DownloadResponse);
+  rpc AnalyzeHeap(AnalyzeHeapRequest) returns (AnalyzeHeapResponse);
 }

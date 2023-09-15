@@ -18,13 +18,10 @@ use std::{env, fs};
 
 use anyhow::anyhow;
 
-use super::handlers::{err, DashboardError};
+use crate::error::Result;
 
-pub async fn run_jeprof(
-    profile_path: String,
-    collapsed_path: String,
-) -> Result<(), DashboardError> {
-    let executable_path = env::current_exe().map_err(err)?;
+pub async fn run(profile_path: String, collapsed_path: String) -> Result<()> {
+    let executable_path = env::current_exe()?;
 
     let prof_cmd = move || {
         Command::new("jeprof")
@@ -36,16 +33,17 @@ pub async fn run_jeprof(
     match tokio::task::spawn_blocking(prof_cmd).await.unwrap() {
         Ok(output) => {
             if output.status.success() {
-                fs::write(Path::new(&collapsed_path), &output.stdout).map_err(err)?;
+                fs::write(Path::new(&collapsed_path), &output.stdout)?;
                 Ok(())
             } else {
-                Err(err(anyhow!(
+                Err(anyhow!(
                     "jeprof exit with an error. stdout: {}, stderr: {}",
                     String::from_utf8_lossy(&output.stdout),
                     String::from_utf8_lossy(&output.stderr)
-                )))
+                )
+                .into())
             }
         }
-        Err(e) => Err(err(e)),
+        Err(e) => Err(e.into()),
     }
 }
