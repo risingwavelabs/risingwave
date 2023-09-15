@@ -16,9 +16,11 @@ package com.risingwave.connector.jdbc;
 
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.proto.Data.DataType.TypeName;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -31,6 +33,26 @@ public class PostgresDialect implements JdbcDialect {
 
     public PostgresDialect(int[] columnSqlTypes) {
         this.columnSqlTypes = columnSqlTypes;
+    }
+    
+    private static final HashMap<TypeName, String> RW_TYPE_TO_JDBC_TYPE_NAME;
+
+    static {
+        RW_TYPE_TO_JDBC_TYPE_NAME = new HashMap<TypeName, String>();
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.INT16, "int2");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.INT32, "int4");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.INT64, "int8");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.FLOAT, "float4");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.DOUBLE, "double precision");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.BOOLEAN, "bool");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.VARCHAR, "varchar");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.DECIMAL, "numeric");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.TIME, "time");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.TIMESTAMP, "timestamp");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.INTERVAL, "varchar");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.DATE, "date");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.TIMESTAMPTZ, "timestampz");
+        RW_TYPE_TO_JDBC_TYPE_NAME.put(TypeName.JSONB, "varchar");
     }
 
     @Override
@@ -115,9 +137,13 @@ public class PostgresDialect implements JdbcDialect {
                     Object[] objArray = (Object[]) val;
                     assert (column.getDataType().getFieldTypeCount() == 1);
                     var fieldType = column.getDataType().getFieldType(0);
+                    var typeName = RW_TYPE_TO_JDBC_TYPE_NAME.get(fieldType.getTypeName());
+                    if (typeName == null) {
+                        typeName = fieldType.getTypeName().name();
+                    }
                     stmt.setArray(
                             placeholderIdx++,
-                            conn.createArrayOf(fieldType.getTypeName().name(), objArray));
+                            conn.createArrayOf(typeName, objArray));
                     break;
                 case VARCHAR:
                     // since VARCHAR column may sink to a UUID column, we get the target type
