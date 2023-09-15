@@ -143,7 +143,9 @@ impl DorisSink {
             risingwave_common::types::DataType::Bytea => {
                 Err(SinkError::Doris("doris can not support Bytea".to_string()))
             }
-            risingwave_common::types::DataType::Jsonb => Err(SinkError::Doris("Don't support Jsonb".to_string())),
+            risingwave_common::types::DataType::Jsonb => {
+                Err(SinkError::Doris("Don't support Jsonb".to_string()))
+            }
             risingwave_common::types::DataType::Serial => Ok(doris_data_type.contains("BIGINT")),
             risingwave_common::types::DataType::Int256 => Err(SinkError::Doris(
                 "doris can not support Interval".to_string(),
@@ -223,7 +225,7 @@ impl DorisSinkWriter {
             config.common.table.clone(),
         )
         .add_common_header()
-        .set_user_password("xxhx".to_string(), "123456".to_string())
+        .set_user_password(config.common.user.clone(), config.common.password.clone())
         .set_properties(map);
         let mut doris_insert_client = if !is_append_only {
             doris_insert_client.add_hidden_column()

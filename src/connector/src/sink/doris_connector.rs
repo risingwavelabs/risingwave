@@ -36,8 +36,6 @@ pub struct DorisInsertClient {
     url: String,
     header: HashMap<String, String>,
     sender: Option<Sender>,
-    join_handle: Option<JoinHandle<Result<DorisInsertResultResponse>>>,
-    buffer: BytesMut,
 }
 impl DorisInsertClient {
     pub fn new(url: String, db: String, table: String) -> Self {
@@ -46,8 +44,6 @@ impl DorisInsertClient {
             url,
             header: HashMap::default(),
             sender: None,
-            join_handle: None,
-            buffer: BytesMut::with_capacity(BUFFER_SIZE),
         }
     }
 
