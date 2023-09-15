@@ -18,6 +18,8 @@ set -euo pipefail
 
 PARENT_PATH=$(dirname "${BASH_SOURCE[0]}")
 
+echo "hi"
+
 run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
 }
