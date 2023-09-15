@@ -1288,7 +1288,8 @@ impl GrpcMetaClientCore {
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let meta_member_client = MetaMemberClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
-        let ddl_client = DdlServiceClient::new(channel.clone());
+        let ddl_client =
+            DdlServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let hummock_client =
             HummockManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let notification_client =
