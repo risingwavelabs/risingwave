@@ -33,15 +33,10 @@ impl RegexpContext {
     fn new(pattern: &str, flags: &str, replacement: &str) -> Result<Self> {
         let options = RegexpOptions::from_str(flags)?;
 
-        // FIXME: Any better solution?
-        let mut origin = String::with_capacity(pattern.len());
-
-        if options.case_insensitive {
-            origin.push_str("(?i:");
-            origin.push_str(pattern);
-            origin.push(')');
+        let origin = if options.case_insensitive {
+            format!("(?i:{})", pattern)
         } else {
-            origin = pattern.to_string();
+            pattern.to_string()
         };
 
         Ok(Self {
