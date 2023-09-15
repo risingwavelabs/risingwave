@@ -241,8 +241,8 @@ static CONVERT_DISTINCT_AGG_FOR_STREAM: LazyLock<OptimizationStage> = LazyLock::
         "Convert Distinct Aggregation",
         vec![
             UnionToDistinctRule::create(),
-             DistinctAggRule::create(true),
-             AggGroupBySimplifyRule::create(),
+            DistinctAggRule::create(true),
+            AggGroupBySimplifyRule::create(),
         ],
         ApplyOrder::TopDown,
     )

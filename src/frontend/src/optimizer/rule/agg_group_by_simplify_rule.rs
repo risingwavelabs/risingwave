@@ -14,11 +14,11 @@
 
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::agg::AggKind;
-use crate::expr::InputRef;
-use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
+use crate::expr::InputRef;
+use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::utils::{Condition, IndexSet};
 
 /// Use functional dependencies to simplify aggregation's group by
@@ -78,10 +78,7 @@ impl Rule for AggGroupBySimplifyRule {
             }
             let new_agg = Agg::new(new_agg_calls, new_group_key, agg.input());
 
-            Some(LogicalProject::with_out_col_idx(
-                new_agg.into(),
-                out_fields.into_iter(),
-            ).into())
+            Some(LogicalProject::with_out_col_idx(new_agg.into(), out_fields.into_iter()).into())
         } else {
             None
         }
