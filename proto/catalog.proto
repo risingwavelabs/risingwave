@@ -192,9 +192,10 @@ message Table {
   }
 
   enum TableStatus {
-    UNSPECIFIED = 0;
-    CREATING = 0;
-    CREATED = 1;
+    // Prefixed by `TABLE_STATUS` due to protobuf namespacing rules.
+    TABLE_STATUS_UNSPECIFIED = 0;
+    CREATING = 1;
+    CREATED = 2;
   }
 
   message TableVersion {
