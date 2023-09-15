@@ -259,7 +259,7 @@ export default function HeapProfiling() {
   return (
     <Fragment>
       <Head>
-        <title>Await Tree Dump</title>
+        <title>Heap Profiling</title>
       </Head>
       {retVal}
     </Fragment>

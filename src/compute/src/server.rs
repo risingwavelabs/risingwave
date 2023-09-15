@@ -287,8 +287,7 @@ pub async fn compute_node_serve(
     let memory_mgr = GlobalMemoryManager::new(
         streaming_metrics.clone(),
         total_memory_bytes,
-        config.server.auto_dump_heap_profile.clone(),
-        config.server.manually_dump_heap_profile_dir.clone(),
+        config.server.heap_profiling.clone(),
     );
     // Run a background memory monitor
     tokio::spawn(memory_mgr.clone().run(

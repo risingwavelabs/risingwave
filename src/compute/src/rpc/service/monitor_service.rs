@@ -141,7 +141,7 @@ impl MonitorService for MonitorServiceImpl {
         let file_name = format!("{}.{}\0", time_prefix, AUTO_DUMP_MID_NAME);
         let arg_dir = request.into_inner().get_dir().clone();
         let dir = PathBuf::from(if arg_dir.is_empty() {
-            &self.server_config.manually_dump_heap_profile_dir
+            &self.server_config.heap_profiling.dir
         } else {
             &arg_dir
         });
@@ -172,7 +172,7 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<ListHeapProfilingRequest>,
     ) -> Result<Response<ListHeapProfilingResponse>, Status> {
-        let auto_dump_dir = self.server_config.auto_dump_heap_profile.dir.clone();
+        let auto_dump_dir = self.server_config.heap_profiling.dir.clone();
         let auto_dump_files_name: Vec<_> = fs::read_dir(auto_dump_dir.clone())?
             .map(|entry| {
                 let entry = entry?;
@@ -186,7 +186,7 @@ impl MonitorService for MonitorServiceImpl {
                 }
             })
             .try_collect()?;
-        let manually_dump_dir = self.server_config.manually_dump_heap_profile_dir.clone();
+        let manually_dump_dir = self.server_config.heap_profiling.dir.clone();
         let manually_dump_files_name: Vec<_> = fs::read_dir(manually_dump_dir.clone())?
             .map(|entry| {
                 let entry = entry?;
