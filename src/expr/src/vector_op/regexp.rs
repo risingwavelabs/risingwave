@@ -32,11 +32,20 @@ pub struct RegexpContext {
 impl RegexpContext {
     fn new(pattern: &str, flags: &str, replacement: &str) -> Result<Self> {
         let options = RegexpOptions::from_str(flags)?;
+
+        // FIXME: Any better solution?
+        let mut origin = String::with_capacity(pattern.len());
+
+        if options.case_insensitive {
+            origin.push_str("(?i:");
+            origin.push_str(pattern);
+            origin.push_str(")");
+        } else {
+            origin = pattern.to_string();
+        };
+
         Ok(Self {
-            // regex: RegexBuilder::new(pattern)
-            //     .case_insensitive(options.case_insensitive)
-            //     .build()?,
-            regex: RegexBuilder::new(pattern).build().unwrap(),
+            regex: RegexBuilder::new(&origin).build().unwrap(),
             global: options.global,
             replacement: make_replacement(replacement),
         })
@@ -143,7 +152,7 @@ fn regexp_match(text: &str, regex: &RegexpContext) -> Option<ListValue> {
     // If there are multiple captures, then the first one is the whole match, and should be
     // ignored in PostgreSQL's behavior.
     let skip_first = regex.regex.captures_len() > 1;
-    let capture = regex.regex.captures(text).unwrap().unwrap();
+    let capture = regex.regex.captures(text).unwrap()?;
     let list = capture
         .iter()
         .skip(if skip_first { 1 } else { 0 })
@@ -174,7 +183,7 @@ fn regexp_count_start0(text: &str, regex: &RegexpContext) -> Result<i32> {
 fn regexp_count(text: &str, start: i32, regex: &RegexpContext) -> Result<i32> {
     // First get the start position to count for
     let start = match start {
-        ..0 => {
+        ..=0 => {
             return Err(ExprError::InvalidParam {
                 name: "start",
                 reason: start.to_string().into(),
@@ -258,7 +267,7 @@ fn regexp_replace(
 ) -> Result<Box<str>> {
     // The start position to begin the search
     let start = match start {
-        ..0 => {
+        ..=0 => {
             return Err(ExprError::InvalidParam {
                 name: "start",
                 reason: start.to_string().into(),
