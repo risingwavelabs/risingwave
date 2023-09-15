@@ -23,7 +23,9 @@ use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
+use risingwave_pb::catalog::table::{
+    OptionalAssociatedSourceId, PbTableStatus, PbTableType, PbTableVersion,
+};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
@@ -401,6 +403,7 @@ impl TableCatalog {
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
             cleaned_by_watermark: self.cleaned_by_watermark,
+            create_status: PbTableStatus::Creating.into(),
         }
     }
 
@@ -542,6 +545,7 @@ mod tests {
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_pb::catalog::table::PbTableStatus;
     use risingwave_pb::catalog::PbTable;
     use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
@@ -605,6 +609,7 @@ mod tests {
             cardinality: None,
             created_at_epoch: None,
             cleaned_by_watermark: false,
+            create_status: PbTableStatus::Creating.into(),
         }
         .into();
 

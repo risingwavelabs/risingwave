@@ -191,6 +191,11 @@ message Table {
     INTERNAL = 4;
   }
 
+  enum TableStatus {
+    CREATING = 0;
+    CREATED = 1;
+  }
+
   message TableVersion {
     // The version number, which will be 0 by default and be increased by 1 for
     // each schema change in the frontend.
@@ -249,6 +254,9 @@ message Table {
   // watermark_cache to avoid state cleaning as a performance optimization.
   // In older versions we can just initialize without it.
   bool cleaned_by_watermark = 30;
+
+  // Used to filter created / creating tables in meta.
+  TableStatus create_status = 31;
 
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.
