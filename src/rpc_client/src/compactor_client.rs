@@ -23,6 +23,7 @@ use risingwave_pb::hummock::{
     ReportVacuumTaskRequest, ReportVacuumTaskResponse,
 };
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
+use risingwave_pb::meta::{GetSystemParamsRequest, GetSystemParamsResponse};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
 use tokio::sync::RwLock;
@@ -59,7 +60,7 @@ impl CompactorClient {
 #[derive(Debug, Clone)]
 pub struct GrpcCompactorProxyClientCore {
     hummock_client: HummockManagerServiceClient<Channel>,
-    pub system_params_client: SystemParamsServiceClient<Channel>,
+    system_params_client: SystemParamsServiceClient<Channel>,
 }
 
 impl GrpcCompactorProxyClientCore {
@@ -123,5 +124,14 @@ impl GrpcCompactorProxyClient {
     ) -> std::result::Result<tonic::Response<ReportVacuumTaskResponse>, tonic::Status> {
         let mut hummock_client = self.core.read().await.hummock_client.clone();
         hummock_client.report_vacuum_task(request).await
+    }
+
+    pub async fn get_system_params(
+        &mut self,
+    ) -> std::result::Result<tonic::Response<GetSystemParamsResponse>, tonic::Status> {
+        let mut system_params_client = self.core.read().await.system_params_client.clone();
+        system_params_client
+            .get_system_params(GetSystemParamsRequest {})
+            .await
     }
 }

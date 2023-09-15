@@ -35,7 +35,6 @@ use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
-use risingwave_pb::meta::GetSystemParamsRequest;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::{GrpcCompactorProxyClient, MetaClient};
 use risingwave_storage::filter_key_extractor::{
@@ -336,14 +335,9 @@ pub async fn shared_compactor_serve(
         .await
         .expect("Failed to create channel via proxy rpc endpoint.");
     let grpc_proxy_client = GrpcCompactorProxyClient::new(channel);
-    let mut system_params_client = grpc_proxy_client
-        .core
-        .read()
-        .await
-        .system_params_client
-        .clone();
+    let mut system_params_client = grpc_proxy_client.clone();
     let system_params_response = system_params_client
-        .get_system_params(GetSystemParamsRequest {})
+        .get_system_params()
         .await
         .expect("Fail to get system params, the compactor pod cannot be started.");
     let system_params = system_params_response.into_inner().params.unwrap();
