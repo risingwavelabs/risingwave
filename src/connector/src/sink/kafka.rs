@@ -434,7 +434,8 @@ impl KafkaSinkWriter {
                 Err((e, rec)) => {
                     record = rec;
                     match e {
-                        KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
+                        KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull)
+                        | KafkaError::MessageProduction(RDKafkaErrorCode::MessageTimedOut) => {
                             tokio::time::sleep(self.config.retry_interval).await;
                             continue;
                         }
