@@ -2764,6 +2764,7 @@ fn gen_version_delta<'a>(
         prev_id: old_version.id,
         max_committed_epoch: old_version.max_committed_epoch,
         trivial_move,
+        inheritances: compact_task.inheritances.clone(),
         ..Default::default()
     };
     let group_deltas = &mut version_delta

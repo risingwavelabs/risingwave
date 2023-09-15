@@ -994,6 +994,7 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         max_committed_epoch: version.max_committed_epoch,
         group_deltas: Default::default(),
         gc_object_ids: vec![],
+        inheritances: Default::default(),
     }
 }
 

@@ -27,9 +27,9 @@ use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch, HummockSstableObjectId};
-use risingwave_pb::hummock::compact_task::inheritances::Inheritance;
-use risingwave_pb::hummock::compact_task::{Inheritances, TaskStatus};
-use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
+use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::inheritances::Inheritance;
+use risingwave_pb::hummock::{CompactTask, Inheritances, LevelType, SstableInfo};
 use tokio::sync::oneshot::Receiver;
 
 use super::task_progress::TaskProgress;

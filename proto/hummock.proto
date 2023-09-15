@@ -133,6 +133,7 @@ message HummockVersionDelta {
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
   repeated uint64 gc_object_ids = 7;
+  map<uint64, Inheritances> inheritances = 8;
 }
 
 message HummockVersionDeltas {
@@ -243,6 +244,15 @@ message TableOption {
   uint32 retention_seconds = 1;
 }
 
+// Compaction block-level inheritance info for cache refill.
+message Inheritances {
+  message Inheritance {
+    uint64 parent_sst_obj_id = 1;
+    uint64 parent_sst_blk_idx = 2;
+  }
+  repeated Inheritance inheritances = 1;
+}
+
 message CompactTask {
   enum TaskStatus {
     UNSPECIFIED = 0;
@@ -302,15 +312,6 @@ message CompactTask {
   bool split_by_state_table = 21;
   // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
   uint32 split_weight_by_vnode = 22;
-
-  message Inheritances {
-    message Inheritance {
-      uint64 parent_sst_obj_id = 1;
-      uint64 parent_sst_blk_idx = 2;
-    }
-    repeated Inheritance inheritances = 1;
-  }
-  // Compaction block-level inheritance info for cache refill.
   map<uint64, Inheritances> inheritances = 23;
 }
 
