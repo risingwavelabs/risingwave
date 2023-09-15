@@ -151,7 +151,7 @@ impl CatalogController {
         Ok(version)
     }
 
-    /// This function will list all the objects that are used the given one. It runs a recursive CTE to find all the dependencies.
+    /// This function will list all the objects that are using the given one. It runs a recursive CTE to find all the dependencies.
     /// The cte and the query is as follows:
     /// ```sql
     /// WITH RECURSIVE used_by_object_ids (used_by) AS

@@ -21,9 +21,9 @@ use crate::model_v2::{database, object, schema};
 use crate::MetaError;
 
 #[allow(dead_code)]
-mod catalog_controller;
+mod catalog;
 #[allow(dead_code)]
-mod system_param_controller;
+mod system_param;
 
 // todo: refine the error transform.
 impl From<sea_orm::DbErr> for MetaError {
@@ -78,18 +78,3 @@ impl From<ModelWithObj<schema::Model>> for PbSchema {
         }
     }
 }
-
-// impl From<user::Model> for PbUserInfo {
-//     fn from(model: user::Model) -> Self {
-//         Self {
-//             id: model.user_id as _,
-//             name: model.name,
-//             is_super: model.is_super.unwrap_or_default(),
-//             can_create_db: model.can_create_db.unwrap_or_default(),
-//             can_create_user: model.can_create_user.unwrap_or_default(),
-//             can_login: model.can_login.unwrap_or_default(),
-//             auth_info: None,
-//             grant_privileges: vec![],
-//         }
-//     }
-// }
