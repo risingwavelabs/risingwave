@@ -1552,9 +1552,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.4.2"
+version = "4.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a13b88d2c62ff462f88e4a121f17a82c1af05693a2f192b5c38d14de73c19f6"
+checksum = "84ed82781cea27b43c9b106a979fe450a13a31aab0500595fb3fc06616de08e6"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -2803,7 +2803,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=2c6f080#2c6f080835f49fc6026b97fd53d389bae81e9361"
+source = "git+https://github.com/mrcroxx/foyer?rev=41b1d39#41b1d3934cc92976737a9296273b4c5bee6422a0"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -2814,7 +2814,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=2c6f080#2c6f080835f49fc6026b97fd53d389bae81e9361"
+source = "git+https://github.com/mrcroxx/foyer?rev=41b1d39#41b1d3934cc92976737a9296273b4c5bee6422a0"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
@@ -2828,7 +2828,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=2c6f080#2c6f080835f49fc6026b97fd53d389bae81e9361"
+source = "git+https://github.com/mrcroxx/foyer?rev=41b1d39#41b1d3934cc92976737a9296273b4c5bee6422a0"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -2845,7 +2845,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=2c6f080#2c6f080835f49fc6026b97fd53d389bae81e9361"
+source = "git+https://github.com/mrcroxx/foyer?rev=41b1d39#41b1d3934cc92976737a9296273b4c5bee6422a0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2875,7 +2875,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=2c6f080#2c6f080835f49fc6026b97fd53d389bae81e9361"
+source = "git+https://github.com/mrcroxx/foyer?rev=41b1d39#41b1d3934cc92976737a9296273b4c5bee6422a0"
 dependencies = [
  "crossbeam-utils",
  "either",
@@ -7368,6 +7368,7 @@ dependencies = [
  "prometheus",
  "risingwave_common",
  "risingwave_variables",
+ "rlimit",
  "time",
  "tracing",
  "tracing-opentelemetry",
@@ -7708,6 +7709,15 @@ name = "rle-decode-fast"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
+
+[[package]]
+name = "rlimit"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3560f70f30a0f16d11d01ed078a07740fe6b489667abc7c7b029155d9f21c3d8"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "rsa"
@@ -8109,9 +8119,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.106"
+version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cc66a619ed80bf7a0f6b17dd063a84b88f6dea1813737cf469aef1d081142c2"
+checksum = "6b420ce6e3d8bd882e9b243c6eed35dbc9a6110c9769e74b584e0d68d1f20c65"
 dependencies = [
  "itoa",
  "ryu",
@@ -10095,7 +10105,6 @@ dependencies = [
  "subtle",
  "syn 1.0.109",
  "syn 2.0.33",
- "tikv-jemalloc-sys",
  "time",
  "time-macros",
  "tinyvec",
