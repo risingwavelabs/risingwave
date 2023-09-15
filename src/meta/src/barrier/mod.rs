@@ -959,7 +959,6 @@ impl GlobalBarrierManager {
                 .map(|t| (TableId { table_id: t.id }, t.definition))
                 .collect();
             let version_stats = self.hummock_manager.get_version_stats().await;
-            let tracking_commands = Default::default();
             // If failed, enter recovery mode.
             self.set_status(BarrierManagerStatus::Recovering).await;
             let mut tracker = self.tracker.lock().await;
@@ -969,7 +968,6 @@ impl GlobalBarrierManager {
                 upstream_mv_counts,
                 definitions,
                 version_stats,
-                tracking_commands,
             );
 
             let latest_snapshot = self.hummock_manager.latest_snapshot();

@@ -175,7 +175,7 @@ pub(super) struct CreateMviewProgressTracker {
     // Additionally if are to allow concurrent mview creation in the
     // future, CreateMViewEpoch will not be a good candidate for this.
     /// Progress of the create-mview DDL indicated by the epoch.
-    progress_map: HashMap<TableId, (Progress, TrackingCommand)>,
+    progress_map: HashMap<TableId, (Progress, Option<TrackingCommand>)>,
 
     /// Find the epoch of the create-mview DDL by the actor containing the chain node.
     actor_map: HashMap<ActorId, TableId>,
@@ -228,8 +228,6 @@ impl CreateMviewProgressTracker {
         mut definitions: HashMap<TableId, String>,
 
         version_stats: HummockVersionStats,
-
-        mut tracking_commands: HashMap<TableId, TrackingCommand>,
     ) -> Self {
         let mut progress_map = HashMap::new();
         for creating_table_id in creating_table_ids {
@@ -253,8 +251,7 @@ impl CreateMviewProgressTracker {
                 consumed_rows: 0, // Fill only after first barrier pass
                 definition,
             };
-            let tracking_command = tracking_commands.remove(&creating_table_id).unwrap();
-            progress_map.insert(creating_table_id, (progress, tracking_command));
+            progress_map.insert(creating_table_id, (progress, None));
         }
         Self {
             progress_map,
@@ -357,7 +354,7 @@ impl CreateMviewProgressTracker {
         // If the target command found in progress map, return and remove it. Note that the command
         // should have finished if not found.
         if let Some(Some(epoch)) = epochs.first() {
-            Some(self.progress_map.remove(epoch).unwrap().1)
+            self.progress_map.remove(epoch).unwrap().1
         } else {
             None
         }
@@ -432,7 +429,7 @@ impl CreateMviewProgressTracker {
         );
         let old = self
             .progress_map
-            .insert(creating_mv_id, (progress, command));
+            .insert(creating_mv_id, (progress, Some(command)));
         assert!(old.is_none());
         None
     }
@@ -491,7 +488,7 @@ impl CreateMviewProgressTracker {
                     for actor in o.get().0.actors() {
                         self.actor_map.remove(&actor);
                     }
-                    Some(o.remove().1)
+                    o.remove().1
                 } else {
                     None
                 }
