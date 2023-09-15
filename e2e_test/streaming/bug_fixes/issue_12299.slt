@@ -14,9 +14,18 @@ statement ok
 insert into t1 values(1, 1);
 
 statement ok
-create materialized view mv2 as select id from t1;
+create materialized view mv2 as select id from mv1;
 
 query I
-select * from mv;
+select * from mv2;
 ----
 1
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop table t1;
