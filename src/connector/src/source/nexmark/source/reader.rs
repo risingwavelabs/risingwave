@@ -33,8 +33,8 @@ use crate::source::nexmark::source::combined_event::{
 };
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
-    SplitReader, StreamChunkWithState,
+    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitMetaData, SplitReader,
+    StreamChunkWithState,
 };
 
 #[derive(Debug)]
@@ -55,11 +55,12 @@ pub struct NexmarkSplitReader {
 #[async_trait]
 impl SplitReader for NexmarkSplitReader {
     type Properties = NexmarkProperties;
+    type Split = NexmarkSplit;
 
     #[allow(clippy::unused_async)]
     async fn new(
         properties: NexmarkProperties,
-        splits: Vec<SplitImpl>,
+        splits: Vec<NexmarkSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
@@ -67,7 +68,7 @@ impl SplitReader for NexmarkSplitReader {
         tracing::debug!("Splits for nexmark found! {:?}", splits);
         assert!(splits.len() == 1);
         // TODO: currently, assume there's only one split in one reader
-        let split = splits.into_iter().next().unwrap().into_nexmark().unwrap();
+        let split = splits.into_iter().next().unwrap();
         let split_id = split.id();
 
         let split_index = split.split_index as u64;
@@ -182,7 +183,7 @@ mod tests {
 
     use super::*;
     use crate::source::nexmark::{NexmarkPropertiesInner, NexmarkSplitEnumerator};
-    use crate::source::{SourceEnumeratorContext, SplitEnumerator, SplitImpl};
+    use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
     async fn test_nexmark_split_reader() -> Result<()> {
@@ -197,12 +198,7 @@ mod tests {
         let mut enumerator =
             NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
                 .await?;
-        let list_splits_resp: Vec<SplitImpl> = enumerator
-            .list_splits()
-            .await?
-            .into_iter()
-            .map(SplitImpl::Nexmark)
-            .collect();
+        let list_splits_resp: Vec<_> = enumerator.list_splits().await?.into_iter().collect();
 
         assert_eq!(list_splits_resp.len(), 2);
 

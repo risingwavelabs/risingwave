@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
 };
+use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Function, FunctionArg, ObjectName, TableAlias};
 
@@ -34,16 +35,29 @@ impl Binder {
     ///
     /// Besides [`crate::expr::TableFunction`] expr, it can also be other things like window table
     /// functions, or scalar functions.
+    ///
+    /// `with_ordinality` is only supported for the `TableFunction` case now.
     pub(super) fn bind_table_function(
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,
         args: Vec<FunctionArg>,
+        with_ordinality: bool,
     ) -> Result<Relation> {
         let func_name = &name.0[0].real_value();
         // internal/system table functions
         {
             if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
+                if with_ordinality {
+                    return Err(ErrorCode::NotImplemented(
+                        format!(
+                            "WITH ORDINALITY for internal/system table function {}",
+                            func_name
+                        ),
+                        None.into(),
+                    )
+                    .into());
+                }
                 return self.bind_internal_table(args, alias);
             }
             if func_name.eq_ignore_ascii_case(PG_GET_KEYWORDS_FUNC_NAME)
@@ -51,6 +65,16 @@ impl Binder {
                     format!("{}.{}", PG_CATALOG_SCHEMA_NAME, PG_GET_KEYWORDS_FUNC_NAME).as_str(),
                 )
             {
+                if with_ordinality {
+                    return Err(ErrorCode::NotImplemented(
+                        format!(
+                            "WITH ORDINALITY for internal/system table function {}",
+                            func_name
+                        ),
+                        None.into(),
+                    )
+                    .into());
+                }
                 return self.bind_relation_by_name_inner(
                     Some(PG_CATALOG_SCHEMA_NAME),
                     PG_KEYWORDS_TABLE_NAME,
@@ -61,17 +85,31 @@ impl Binder {
         }
         // window table functions (tumble/hop)
         if let Ok(kind) = WindowTableFunctionKind::from_str(func_name) {
+            if with_ordinality {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "WITH ORDINALITY for window table function {}",
+                    func_name
+                ))
+                .into());
+            }
             return Ok(Relation::WindowTableFunction(Box::new(
                 self.bind_window_table_function(alias, kind, args)?,
             )));
         }
         // watermark
         if is_watermark_func(func_name) {
+            if with_ordinality {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "WITH ORDINALITY for watermark".to_string(),
+                )
+                .into());
+            }
             return Ok(Relation::Watermark(Box::new(
                 self.bind_watermark(alias, args)?,
             )));
         };
 
+        self.push_context();
         let mut clause = Some(Clause::From);
         std::mem::swap(&mut self.context.clause, &mut clause);
         let func = self.bind_function(Function {
@@ -82,16 +120,19 @@ impl Binder {
             order_by: vec![],
             filter: None,
             within_group: None,
-        })?;
+        });
         self.context.clause = clause;
+        self.pop_context()?;
+        let func = func?;
 
-        let columns = if let DataType::Struct(s) = func.return_type() {
-            // If the table function returns a struct, it's fields can be accessed just
-            // like a table's columns.
+        // bool indicates if the field is hidden
+        let mut columns = if let DataType::Struct(s) = func.return_type() {
+            // If the table function returns a struct, it will be flattened into multiple columns.
             let schema = Schema::from(&s);
             schema.fields.into_iter().map(|f| (false, f)).collect_vec()
         } else {
-            // If there is an table alias, we should use the alias as the table function's
+            // If there is an table alias (and it doesn't return a struct),
+            // we should use the alias as the table function's
             // column name. If column aliases are also provided, they
             // are handled in bind_table_to_context.
             //
@@ -109,9 +150,15 @@ impl Binder {
             };
             vec![(false, Field::with_name(func.return_type(), col_name))]
         };
+        if with_ordinality {
+            columns.push((false, Field::with_name(DataType::Int64, "ordinality")));
+        }
 
         self.bind_table_to_context(columns, func_name.clone(), alias)?;
 
-        Ok(Relation::TableFunction(func))
+        Ok(Relation::TableFunction {
+            expr: func,
+            with_ordinality,
+        })
     }
 }

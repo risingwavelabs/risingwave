@@ -18,6 +18,7 @@ use risingwave_common::array::{Array, BoolArray};
 use risingwave_common::buffer::Bitmap;
 use risingwave_expr_macro::function;
 
+#[function("equal(boolean, boolean) -> boolean", batch_fn = "boolarray_eq")]
 #[function("equal(*int, *int) -> boolean")]
 #[function("equal(*numeric, *numeric) -> boolean")]
 #[function("equal(*float, *float) -> boolean")]
@@ -45,6 +46,7 @@ where
     l.into() == r.into()
 }
 
+#[function("not_equal(boolean, boolean) -> boolean", batch_fn = "boolarray_ne")]
 #[function("not_equal(*int, *int) -> boolean")]
 #[function("not_equal(*numeric, *numeric) -> boolean")]
 #[function("not_equal(*float, *float) -> boolean")]
@@ -72,6 +74,10 @@ where
     l.into() != r.into()
 }
 
+#[function(
+    "greater_than_or_equal(boolean, boolean) -> boolean",
+    batch_fn = "boolarray_ge"
+)]
 #[function("greater_than_or_equal(*int, *int) -> boolean")]
 #[function("greater_than_or_equal(*numeric, *numeric) -> boolean")]
 #[function("greater_than_or_equal(*float, *float) -> boolean")]
@@ -99,6 +105,7 @@ where
     l.into() >= r.into()
 }
 
+#[function("greater_than(boolean, boolean) -> boolean", batch_fn = "boolarray_gt")]
 #[function("greater_than(*int, *int) -> boolean")]
 #[function("greater_than(*numeric, *numeric) -> boolean")]
 #[function("greater_than(*float, *float) -> boolean")]
@@ -126,6 +133,10 @@ where
     l.into() > r.into()
 }
 
+#[function(
+    "less_than_or_equal(boolean, boolean) -> boolean",
+    batch_fn = "boolarray_le"
+)]
 #[function("less_than_or_equal(*int, *int) -> boolean")]
 #[function("less_than_or_equal(*numeric, *numeric) -> boolean")]
 #[function("less_than_or_equal(*float, *float) -> boolean")]
@@ -153,6 +164,7 @@ where
     l.into() <= r.into()
 }
 
+#[function("less_than(boolean, boolean) -> boolean", batch_fn = "boolarray_lt")]
 #[function("less_than(*int, *int) -> boolean")]
 #[function("less_than(*numeric, *numeric) -> boolean")]
 #[function("less_than(*float, *float) -> boolean")]
@@ -180,6 +192,10 @@ where
     l.into() < r.into()
 }
 
+#[function(
+    "is_distinct_from(boolean, boolean) -> boolean",
+    batch_fn = "boolarray_is_distinct_from"
+)]
 #[function("is_distinct_from(*int, *int) -> boolean")]
 #[function("is_distinct_from(*numeric, *numeric) -> boolean")]
 #[function("is_distinct_from(*float, *float) -> boolean")]
@@ -207,6 +223,10 @@ where
     l.map(Into::into) != r.map(Into::into)
 }
 
+#[function(
+    "is_not_distinct_from(boolean, boolean) -> boolean",
+    batch_fn = "boolarray_is_not_distinct_from"
+)]
 #[function("is_not_distinct_from(*int, *int) -> boolean")]
 #[function("is_not_distinct_from(*numeric, *numeric) -> boolean")]
 #[function("is_not_distinct_from(*float, *float) -> boolean")]
@@ -234,60 +254,6 @@ where
     l.map(Into::into) == r.map(Into::into)
 }
 
-#[function("equal(boolean, boolean) -> boolean", batch_fn = "boolarray_eq")]
-pub fn boolean_eq(l: bool, r: bool) -> bool {
-    l == r
-}
-
-#[function("not_equal(boolean, boolean) -> boolean", batch_fn = "boolarray_ne")]
-pub fn boolean_ne(l: bool, r: bool) -> bool {
-    l != r
-}
-
-#[function(
-    "greater_than_or_equal(boolean, boolean) -> boolean",
-    batch_fn = "boolarray_ge"
-)]
-pub fn boolean_ge(l: bool, r: bool) -> bool {
-    l >= r
-}
-
-#[allow(clippy::bool_comparison)]
-#[function("greater_than(boolean, boolean) -> boolean", batch_fn = "boolarray_gt")]
-pub fn boolean_gt(l: bool, r: bool) -> bool {
-    l > r
-}
-
-#[function(
-    "less_than_or_equal(boolean, boolean) -> boolean",
-    batch_fn = "boolarray_le"
-)]
-pub fn boolean_le(l: bool, r: bool) -> bool {
-    l <= r
-}
-
-#[allow(clippy::bool_comparison)]
-#[function("less_than(boolean, boolean) -> boolean", batch_fn = "boolarray_lt")]
-pub fn boolean_lt(l: bool, r: bool) -> bool {
-    l < r
-}
-
-#[function(
-    "is_distinct_from(boolean, boolean) -> boolean",
-    batch_fn = "boolarray_is_distinct_from"
-)]
-pub fn boolean_is_distinct_from(l: Option<bool>, r: Option<bool>) -> bool {
-    l != r
-}
-
-#[function(
-    "is_not_distinct_from(boolean, boolean) -> boolean",
-    batch_fn = "boolarray_is_not_distinct_from"
-)]
-pub fn boolean_is_not_distinct_from(l: Option<bool>, r: Option<bool>) -> bool {
-    l == r
-}
-
 #[function("is_true(boolean) -> boolean", batch_fn = "boolarray_is_true")]
 pub fn is_true(v: Option<bool>) -> bool {
     v == Some(true)
@@ -309,6 +275,16 @@ pub fn is_false(v: Option<bool>) -> bool {
 )]
 pub fn is_not_false(v: Option<bool>) -> bool {
     v != Some(false)
+}
+
+#[function("is_null(*) -> boolean", batch_fn = "batch_is_null")]
+fn is_null<T>(v: Option<T>) -> bool {
+    v.is_none()
+}
+
+#[function("is_not_null(*) -> boolean", batch_fn = "batch_is_not_null")]
+fn is_not_null<T>(v: Option<T>) -> bool {
+    v.is_some()
 }
 
 // optimized functions for bool arrays
@@ -375,6 +351,14 @@ fn boolarray_is_false(a: &BoolArray) -> BoolArray {
 
 fn boolarray_is_not_false(a: &BoolArray) -> BoolArray {
     BoolArray::new(a.data() | !a.null_bitmap(), Bitmap::ones(a.len()))
+}
+
+fn batch_is_null(a: &impl Array) -> BoolArray {
+    BoolArray::new(!a.null_bitmap(), Bitmap::ones(a.len()))
+}
+
+fn batch_is_not_null(a: &impl Array) -> BoolArray {
+    BoolArray::new(a.null_bitmap().clone(), Bitmap::ones(a.len()))
 }
 
 #[cfg(test)]

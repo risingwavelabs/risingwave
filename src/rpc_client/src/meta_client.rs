@@ -1044,6 +1044,12 @@ impl MetaClient {
         ))
     }
 
+    pub async fn list_branched_object(&self) -> Result<Vec<BranchedObject>> {
+        let req = ListBranchedObjectRequest {};
+        let resp = self.inner.list_branched_object(req).await?;
+        Ok(resp.branched_objects)
+    }
+
     pub async fn delete_worker_node(&self, worker: HostAddress) -> Result<()> {
         let _resp = self
             .inner
@@ -1709,6 +1715,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
             ,{ hummock_client, subscribe_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeCompactionEventRequest>, Streaming<SubscribeCompactionEventResponse> }
+            ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

@@ -801,6 +801,7 @@ impl Binder {
                 ("array_remove", raw_call(ExprType::ArrayRemove)),
                 ("array_replace", raw_call(ExprType::ArrayReplace)),
                 ("array_max", raw_call(ExprType::ArrayMax)),
+                ("array_sum", raw_call(ExprType::ArraySum)),
                 ("array_position", raw_call(ExprType::ArrayPosition)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
@@ -1142,7 +1143,11 @@ impl Binder {
                 // non-deterministic
                 ("now", now()),
                 ("current_timestamp", now()),
-                ("proctime", proctime())
+                ("proctime", proctime()),
+                ("pg_sleep", raw_call(ExprType::PgSleep)),
+                ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
+                // TODO: implement pg_sleep_until
+                // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
             ]
             .into_iter()
             .collect()

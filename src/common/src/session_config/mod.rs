@@ -71,7 +71,7 @@ const CONFIG_KEYS: [&str; 37] = [
     "LOCK_TIMEOUT",
     "ROW_SECURITY",
     "STANDARD_CONFORMING_STRINGS",
-    "RW_STREAMING_RATE_LIMIT",
+    "STREAMING_RATE_LIMIT",
     "CDC_BACKFILL",
     "RW_STREAMING_OVER_WINDOW_CACHE_POLICY",
 ];
@@ -112,7 +112,7 @@ const STATEMENT_TIMEOUT: usize = 30;
 const LOCK_TIMEOUT: usize = 31;
 const ROW_SECURITY: usize = 32;
 const STANDARD_CONFORMING_STRINGS: usize = 33;
-const RW_STREAMING_RATE_LIMIT: usize = 34;
+const STREAMING_RATE_LIMIT: usize = 34;
 const CDC_BACKFILL: usize = 35;
 const STREAMING_OVER_WINDOW_CACHE_POLICY: usize = 36;
 
@@ -337,7 +337,7 @@ type StatementTimeout = ConfigI32<STATEMENT_TIMEOUT, 0>;
 type LockTimeout = ConfigI32<LOCK_TIMEOUT, 0>;
 type RowSecurity = ConfigBool<ROW_SECURITY, true>;
 type StandardConformingStrings = ConfigString<STANDARD_CONFORMING_STRINGS>;
-type StreamingRateLimit = ConfigU64<RW_STREAMING_RATE_LIMIT, 0>;
+type StreamingRateLimit = ConfigU64<STREAMING_RATE_LIMIT, 0>;
 type CdcBackfill = ConfigBool<CDC_BACKFILL, false>;
 
 /// Report status or notice to caller.

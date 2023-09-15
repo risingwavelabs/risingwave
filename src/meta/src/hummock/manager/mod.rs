@@ -2843,7 +2843,7 @@ async fn write_exclusive_cluster_id(
     const CLUSTER_ID_NAME: &str = "0";
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
-    match object_store.read(&cluster_id_full_path, None).await {
+    match object_store.read(&cluster_id_full_path, ..).await {
         Ok(cluster_id) => Err(ObjectError::internal(format!(
             "Data directory is already used by another cluster with id {:?}, path {}.",
             String::from_utf8(cluster_id.to_vec()).unwrap(),
