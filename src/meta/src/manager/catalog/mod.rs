@@ -2214,6 +2214,11 @@ impl CatalogManager {
         self.core.lock().await.database.list_tables()
     }
 
+    // FIXME(kwannoel): Filter by `status`
+    pub async fn list_creating_tables(&self) -> Vec<Table> {
+        self.list_tables().await
+    }
+
     pub async fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
         self.core.lock().await.database.get_all_table_options()
     }

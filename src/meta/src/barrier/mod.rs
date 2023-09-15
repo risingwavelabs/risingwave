@@ -940,7 +940,13 @@ impl GlobalBarrierManager {
         }
 
         if self.enable_recovery {
-            let creating_table_ids = Default::default();
+            let creating_table_ids = self
+                .catalog_manager
+                .list_creating_tables()
+                .await
+                .iter()
+                .map(|t| TableId { table_id: t.id })
+                .collect();
             let actor_map = Default::default();
             let upstream_mv_counts = Default::default();
             let definitions = Default::default();
