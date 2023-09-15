@@ -90,7 +90,7 @@ impl LogicalHopWindow {
         self.core.into_parts()
     }
 
-    pub fn output_indices_is_trivial(&self) -> bool {
+    pub fn output_indices_are_trivial(&self) -> bool {
         self.output_indices() == &(0..self.core.internal_column_num()).collect_vec()
     }
 

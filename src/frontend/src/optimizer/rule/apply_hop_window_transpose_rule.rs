@@ -49,7 +49,7 @@ impl Rule for ApplyHopWindowTransposeRule {
         let hop_window: &LogicalHopWindow = right.as_logical_hop_window()?;
         assert_eq!(join_type, JoinType::Inner);
 
-        if !hop_window.output_indices_is_trivial() {
+        if !hop_window.output_indices_are_trivial() {
             return None;
         }
 
