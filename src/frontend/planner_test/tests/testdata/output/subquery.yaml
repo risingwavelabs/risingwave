@@ -846,3 +846,14 @@
             └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
               └─BatchExchange { order: [], dist: HashShard(1:Int32) }
                 └─BatchValues { rows: [[1:Int32], [2:Int32]] }
+  stream_plan: |-
+    StreamMaterialize { columns: [col, k, ts, window_start, window_end], stream_key: [col, k, window_start, window_end], pk_columns: [col, k, window_start, window_end], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: Inner, predicate: 1:Int32 = t1.k, output: all }
+      ├─StreamAppendOnlyDedup { dedup_cols: [1:Int32] }
+      │ └─StreamExchange { dist: HashShard(1:Int32) }
+      │   └─StreamProject { exprs: [1:Int32] }
+      │     └─StreamValues { rows: [[1:Int32, 0:Int64], [2:Int32, 1:Int64]] }
+      └─StreamExchange { dist: HashShard(t1.k) }
+        └─StreamHopWindow { time_col: t1.ts, slide: 00:10:00, size: 00:30:00, output: all }
+          └─StreamFilter { predicate: IsNotNull(t1.ts) }
+            └─StreamTableScan { table: t1, columns: [t1.k, t1.ts], pk: [t1.k], dist: UpstreamHashShard(t1.k) }
