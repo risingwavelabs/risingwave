@@ -779,6 +779,7 @@ impl DataChunkTestExt for DataChunk {
                     "." => None,
                     "t" => Some(true.into()),
                     "f" => Some(false.into()),
+                    "(empty)" => Some("".into()),
                     _ => Some(ScalarImpl::from_text(val_str.as_bytes(), ty).unwrap()),
                 };
                 builder.append(datum);

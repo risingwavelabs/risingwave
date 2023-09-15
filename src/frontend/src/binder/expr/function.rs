@@ -22,7 +22,6 @@ use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::format::{Formatter, FormatterNode, SpecifierType};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
 use risingwave_common::{GIT_SHA, RW_VERSION};
@@ -755,7 +754,7 @@ impl Binder {
                     rewrite(ExprType::ConcatWs, Binder::rewrite_concat_to_concat_ws),
                 ),
                 ("concat_ws", raw_call(ExprType::ConcatWs)),
-                ("format", rewrite(ExprType::ConcatWs, Binder::rewrite_format_to_concat_ws)),
+                ("format", raw_call(ExprType::Format)),
                 ("translate", raw_call(ExprType::Translate)),
                 ("split_part", raw_call(ExprType::SplitPart)),
                 ("char_length", raw_call(ExprType::CharLength)),
@@ -1202,75 +1201,6 @@ impl Binder {
                 .collect();
             Ok(inputs)
         }
-    }
-
-    fn rewrite_format_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
-        let Some((format_expr, args)) = inputs.split_first() else {
-            return Err(ErrorCode::BindError(
-                "Function `format` takes at least 1 arguments (0 given)".to_string(),
-            )
-            .into());
-        };
-        let ExprImpl::Literal(expr_literal) = format_expr else {
-            return Err(ErrorCode::BindError(
-                "Function `format` takes a literal string as the first argument".to_string(),
-            )
-            .into());
-        };
-        let Some(ScalarImpl::Utf8(format_str)) = expr_literal.get_data() else {
-            return Err(ErrorCode::BindError(
-                "Function `format` takes a literal string as the first argument".to_string(),
-            )
-            .into());
-        };
-        let formatter = Formatter::parse(format_str)
-            .map_err(|err| -> RwError { ErrorCode::BindError(err.to_string()).into() })?;
-
-        let specifier_count = formatter
-            .nodes()
-            .iter()
-            .filter(|f_node| matches!(f_node, FormatterNode::Specifier(_)))
-            .count();
-        if specifier_count != args.len() {
-            return Err(ErrorCode::BindError(format!(
-                "Function `format` required {} arguments based on the `formatstr`, but {} found.",
-                specifier_count,
-                args.len()
-            ))
-            .into());
-        }
-
-        // iter the args.
-        let mut j = 0;
-        let new_args = [Ok(ExprImpl::literal_varchar("".to_string()))]
-            .into_iter()
-            .chain(formatter.nodes().iter().map(move |f_node| -> Result<_> {
-                let new_arg = match f_node {
-                    FormatterNode::Specifier(sp) => {
-                        // We've checked the count.
-                        let arg = &args[j];
-                        j += 1;
-                        match sp.ty {
-                            SpecifierType::SimpleString => arg.clone(),
-                            SpecifierType::SqlIdentifier => {
-                                FunctionCall::new(ExprType::QuoteIdent, vec![arg.clone()])?.into()
-                            }
-                            SpecifierType::SqlLiteral => {
-                                return Err::<_, RwError>(
-                                    ErrorCode::BindError(
-                                        "unsupported specifier type 'L'".to_string(),
-                                    )
-                                    .into(),
-                                )
-                            }
-                        }
-                    }
-                    FormatterNode::Literal(literal) => ExprImpl::literal_varchar(literal.clone()),
-                };
-                Ok(new_arg)
-            }))
-            .try_collect()?;
-        Ok(new_args)
     }
 
     /// Make sure inputs only have 2 value and rewrite the arguments.
