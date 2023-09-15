@@ -16,6 +16,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::stream_chunk::Op;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::DataType;
 use serde_json::{json, Map, Value};
 use tracing::warn;
 
@@ -253,22 +254,6 @@ pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>>
 #[derive(Debug, Clone, Default)]
 pub struct UpsertAdapterOpts {}
 
-fn gen_event_object(
-    schema: &Schema,
-    object: Value,
-    enable_schema: bool,
-    name: &Option<String>,
-) -> Option<Value> {
-    if enable_schema {
-        Some(json!({
-            "schema": generate_json_converter_schema(&schema.fields, name.as_ref().unwrap()),
-            "payload": object,
-        }))
-    } else {
-        Some(object)
-    }
-}
-
 #[try_stream(ok = (Option<Value>, Option<Value>), error = SinkError)]
 pub async fn gen_upsert_message_stream<'a>(
     chunk: StreamChunk,
@@ -279,24 +264,22 @@ pub async fn gen_upsert_message_stream<'a>(
     val_encoder: JsonEncoder<'a>,
 ) {
     for (op, row) in chunk.rows() {
-        let event_key_object_inner = Value::Object(key_encoder.encode(row)?;
+        let event_key_object_inner = Value::Object(key_encoder.encode(row)?);
         let event_key_object = if enable_schema {
-            Some(json!({
-                "schema": generate_json_converter_schema_with_indices(&schema.fields, schema_name.as_ref().unwrap(), pk_indices),
-                "payload": event_key_object_inner,
-            }))
+            json_converter_gen_event_object(
+                key_encoder.schema(),
+                event_key_object_inner,
+                enable_schema,
+                &schema_name,
+            )
         } else {
             Some(event_key_object_inner)
         };
 
         let event_object = match op {
-            Op::Insert => gen_event_object(
-                schema,
-                Value::Object(record_to_json(
-                    row,
-                    &schema.fields,
-                    TimestampHandlingMode::Milli,
-                )?),
+            Op::Insert => json_converter_gen_event_object(
+                val_encoder.schema(),
+                Value::Object(val_encoder.encode(row)?),
                 enable_schema,
                 &schema_name,
             ),
@@ -305,13 +288,9 @@ pub async fn gen_upsert_message_stream<'a>(
                 // upsert semantic does not require update delete event
                 continue;
             }
-            Op::UpdateInsert => gen_event_object(
-                schema,
-                Value::Object(record_to_json(
-                    row,
-                    &schema.fields,
-                    TimestampHandlingMode::Milli,
-                )?),
+            Op::UpdateInsert => json_converter_gen_event_object(
+                val_encoder.schema(),
+                Value::Object(val_encoder.encode(row)?),
                 enable_schema,
                 &schema_name,
             ),
@@ -339,6 +318,27 @@ pub async fn gen_append_only_message_stream<'a>(
         let event_object = Some(Value::Object(val_encoder.encode(row)?));
 
         yield (event_key_object, event_object);
+    }
+}
+
+fn json_converter_gen_event_object(
+    schema: &Schema,
+    object: Value,
+    enable_schema: bool,
+    name: &Option<String>,
+) -> Option<Value> {
+    if enable_schema {
+        Some(json!({
+            "schema": {
+                "type": "struct",
+                "fields": schema.fields().iter().map(json_converter_field_to_json).collect::<Vec<_>>(),
+                "optional": "false",
+                "name": name,
+            },
+            "payload": object,
+        }))
+    } else {
+        Some(object)
     }
 }
 
@@ -390,37 +390,13 @@ fn json_converter_field_to_json(field: &Field) -> Value {
     json!(mapping)
 }
 
-/// Generate schema for Kafka's `JsonConverter` when `schema.enable` is true
-fn generate_json_converter_schema(fields: &[Field], name: &str) -> Value {
-    json!({
-        "type": "struct",
-        "fields": fields.iter().map(json_converter_field_to_json).collect::<Vec<_>>(),
-        "optional": "false",
-        "name": name,
-    })
-}
-
-/// Generate schema for Kafka's `JsonConverter` when `schema.enable` is true according
-/// to indices
-fn generate_json_converter_schema_with_indices(
-    fields: &[Field],
-    name: &str,
-    indices: &[usize],
-) -> Value {
-    json!({
-        "type": "struct",
-        "fields": indices.iter().map(|i| json_converter_field_to_json(&fields[*i])).collect::<Vec<_>>(),
-        "optional": "false",
-        "name": name,
-    })
-}
-
 #[cfg(test)]
 mod tests {
 
     use risingwave_common::types::{DataType, Interval, ScalarImpl, StructType, Time, Timestamp};
 
     use super::*;
+    use crate::sink::encoder::datum_to_json_object;
     #[test]
     fn test_to_json_basic_type() {
         let mock_field = Field {
@@ -658,7 +634,14 @@ mod tests {
                 ..mock_field
             },
         ];
-        let schema = generate_json_converter_schema(&fields, "test").to_string();
+
+        let schema = json!({
+            "type": "struct",
+            "fields": fields.iter().map(json_converter_field_to_json).collect::<Vec<_>>(),
+            "optional": "false",
+            "name": "test",
+        })
+        .to_string();
         let ans = r#"{"fields":[{"field":"v1","optional":"true","type":"boolean"},{"field":"v2","optional":"true","type":"int16"},{"field":"v3","optional":"true","type":"int32"},{"field":"v4","optional":"true","type":"float"},{"field":"v5","optional":"true","type":"string"},{"field":"v6","optional":"true","type":"int32"},{"field":"v7","optional":"true","type":"string"},{"field":"v8","optional":"true","type":"int64"},{"field":"v9","optional":"true","type":"string"},{"field":"v10","fields":[{"field":"a","optional":"true","type":"int64"},{"field":"b","optional":"true","type":"string"},{"field":"c","fields":[{"field":"aa","optional":"true","type":"int64"},{"field":"bb","optional":"true","type":"double"}],"optional":"true","type":"struct"}],"optional":"true","type":"struct"},{"field":"v11","items":{"type":"bytes"},"optional":"true","type":"array"},{"field":"12","optional":"true","type":"string"},{"field":"13","optional":"true","type":"int32"},{"field":"14","optional":"true","type":"string"}],"name":"test","optional":"false","type":"struct"}"#;
         assert_eq!(schema, ans);
     }

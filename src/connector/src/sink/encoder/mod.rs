@@ -19,7 +19,7 @@ use crate::sink::Result;
 
 mod json;
 
-pub use json::JsonEncoder;
+pub use json::{datum_to_json_object, JsonEncoder};
 
 /// Encode a row of a relation into
 /// * an object in json

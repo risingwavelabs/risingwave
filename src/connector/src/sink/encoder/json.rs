@@ -86,7 +86,7 @@ impl SerTo<String> for Value {
     }
 }
 
-fn datum_to_json_object(
+pub fn datum_to_json_object(
     field: &Field,
     datum: DatumRef<'_>,
     timestamp_handling_mode: TimestampHandlingMode,
