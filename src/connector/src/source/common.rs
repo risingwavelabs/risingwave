@@ -27,7 +27,7 @@ pub(crate) trait CommonSplitReader: SplitReader + 'static {
 
 #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
 pub(crate) async fn into_chunk_stream(
-    reader: impl CommonSplitReader + Send,
+    reader: impl CommonSplitReader,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 ) {

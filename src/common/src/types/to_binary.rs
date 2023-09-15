@@ -31,6 +31,7 @@ macro_rules! implement_using_to_sql {
                     match ty {
                         DataType::$data_type => {
                             let mut output = BytesMut::new();
+                            #[allow(clippy::redundant_closure_call)]
                             $accessor(self).to_sql(&Type::ANY, &mut output).unwrap();
                             Ok(Some(output.freeze()))
                         },

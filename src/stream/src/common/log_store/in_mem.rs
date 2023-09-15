@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -35,6 +34,7 @@ enum InMemLogStoreItem {
         next_epoch: u64,
         is_checkpoint: bool,
     },
+    UpdateVnodeBitmap(Arc<Bitmap>),
 }
 
 /// An in-memory log store that can buffer a bounded amount of stream chunk in memory via bounded
@@ -95,162 +95,146 @@ impl LogStoreFactory for BoundedInMemLogStoreFactory {
     type Reader = BoundedInMemLogStoreReader;
     type Writer = BoundedInMemLogStoreWriter;
 
-    type BuildFuture = impl Future<Output = (Self::Reader, Self::Writer)>;
-
-    fn build(self) -> Self::BuildFuture {
-        async move {
-            let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
-            let (item_tx, item_rx) = channel(self.bound);
-            let (truncated_epoch_tx, truncated_epoch_rx) = unbounded_channel();
-            let reader = BoundedInMemLogStoreReader {
-                epoch_progress: UNINITIALIZED,
-                init_epoch_rx: Some(init_epoch_rx),
-                item_rx,
-                truncated_epoch_tx,
-            };
-            let writer = BoundedInMemLogStoreWriter {
-                curr_epoch: None,
-                init_epoch_tx: Some(init_epoch_tx),
-                item_tx,
-                truncated_epoch_rx,
-            };
-            (reader, writer)
-        }
+    async fn build(self) -> (Self::Reader, Self::Writer) {
+        let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
+        let (item_tx, item_rx) = channel(self.bound);
+        let (truncated_epoch_tx, truncated_epoch_rx) = unbounded_channel();
+        let reader = BoundedInMemLogStoreReader {
+            epoch_progress: UNINITIALIZED,
+            init_epoch_rx: Some(init_epoch_rx),
+            item_rx,
+            truncated_epoch_tx,
+        };
+        let writer = BoundedInMemLogStoreWriter {
+            curr_epoch: None,
+            init_epoch_tx: Some(init_epoch_tx),
+            item_tx,
+            truncated_epoch_rx,
+        };
+        (reader, writer)
     }
 }
 
 impl LogReader for BoundedInMemLogStoreReader {
-    type InitFuture<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
-    type NextItemFuture<'a> = impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + 'a;
-    type TruncateFuture<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
-
-    fn init(&mut self) -> Self::InitFuture<'_> {
-        async {
-            let init_epoch_rx = self
-                .init_epoch_rx
-                .take()
-                .expect("should not init for twice");
-            let epoch = init_epoch_rx
-                .await
-                .map_err(|e| anyhow!("unable to get init epoch: {:?}", e))?;
-            assert_eq!(self.epoch_progress, UNINITIALIZED);
-            self.epoch_progress = LogReaderEpochProgress::Consuming(epoch);
-            Ok(())
-        }
+    async fn init(&mut self) -> LogStoreResult<()> {
+        let init_epoch_rx = self
+            .init_epoch_rx
+            .take()
+            .expect("should not init for twice");
+        let epoch = init_epoch_rx
+            .await
+            .map_err(|e| anyhow!("unable to get init epoch: {:?}", e))?;
+        assert_eq!(self.epoch_progress, UNINITIALIZED);
+        self.epoch_progress = LogReaderEpochProgress::Consuming(epoch);
+        Ok(())
     }
 
-    fn next_item(&mut self) -> Self::NextItemFuture<'_> {
-        async {
-            match self.item_rx.recv().await {
-                Some(item) => match self.epoch_progress {
-                    Consuming(current_epoch) => match item {
-                        InMemLogStoreItem::StreamChunk(chunk) => {
-                            Ok((current_epoch, LogStoreReadItem::StreamChunk(chunk)))
-                        }
-                        InMemLogStoreItem::Barrier {
-                            is_checkpoint,
-                            next_epoch,
-                        } => {
-                            if is_checkpoint {
-                                self.epoch_progress = AwaitingTruncate {
-                                    next_epoch,
-                                    sealed_epoch: current_epoch,
-                                };
-                            } else {
-                                self.epoch_progress = Consuming(next_epoch);
-                            }
-                            Ok((current_epoch, LogStoreReadItem::Barrier { is_checkpoint }))
-                        }
-                    },
-                    AwaitingTruncate { .. } => {
-                        unreachable!("should not be awaiting for when barrier comes")
+    async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+        match self.item_rx.recv().await {
+            Some(item) => match self.epoch_progress {
+                Consuming(current_epoch) => match item {
+                    InMemLogStoreItem::StreamChunk(chunk) => {
+                        Ok((current_epoch, LogStoreReadItem::StreamChunk(chunk)))
                     }
+                    InMemLogStoreItem::Barrier {
+                        is_checkpoint,
+                        next_epoch,
+                    } => {
+                        if is_checkpoint {
+                            self.epoch_progress = AwaitingTruncate {
+                                next_epoch,
+                                sealed_epoch: current_epoch,
+                            };
+                        } else {
+                            self.epoch_progress = Consuming(next_epoch);
+                        }
+                        Ok((current_epoch, LogStoreReadItem::Barrier { is_checkpoint }))
+                    }
+                    InMemLogStoreItem::UpdateVnodeBitmap(vnode_bitmap) => Ok((
+                        current_epoch,
+                        LogStoreReadItem::UpdateVnodeBitmap(vnode_bitmap),
+                    )),
                 },
-                None => Err(LogStoreError::EndOfLogStream),
-            }
+                AwaitingTruncate { .. } => {
+                    unreachable!("should not be awaiting for when barrier comes")
+                }
+            },
+            None => Err(LogStoreError::EndOfLogStream),
         }
     }
 
-    fn truncate(&mut self) -> Self::TruncateFuture<'_> {
-        async move {
-            let sealed_epoch = match self.epoch_progress {
-                Consuming(_) => unreachable!("should be awaiting truncate"),
-                AwaitingTruncate {
-                    sealed_epoch,
-                    next_epoch,
-                } => {
-                    self.epoch_progress = Consuming(next_epoch);
-                    sealed_epoch
-                }
-            };
-            self.truncated_epoch_tx
-                .send(sealed_epoch)
-                .map_err(|_| anyhow!("unable to send sealed epoch"))?;
-            Ok(())
-        }
+    async fn truncate(&mut self) -> LogStoreResult<()> {
+        let sealed_epoch = match self.epoch_progress {
+            Consuming(_) => unreachable!("should be awaiting truncate"),
+            AwaitingTruncate {
+                sealed_epoch,
+                next_epoch,
+            } => {
+                self.epoch_progress = Consuming(next_epoch);
+                sealed_epoch
+            }
+        };
+        self.truncated_epoch_tx
+            .send(sealed_epoch)
+            .map_err(|_| anyhow!("unable to send sealed epoch"))?;
+        Ok(())
     }
 }
 
 impl LogWriter for BoundedInMemLogStoreWriter {
-    type FlushCurrentEpoch<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
-    type InitFuture<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
-    type WriteChunkFuture<'a> = impl Future<Output = LogStoreResult<()>> + 'a;
-
-    fn init(&mut self, epoch: EpochPair) -> Self::InitFuture<'_> {
-        async move {
-            let init_epoch_tx = self.init_epoch_tx.take().expect("cannot be init for twice");
-            init_epoch_tx
-                .send(epoch.curr)
-                .map_err(|_| anyhow!("unable to send init epoch"))?;
-            self.curr_epoch = Some(epoch.curr);
-            Ok(())
-        }
+    async fn init(&mut self, epoch: EpochPair) -> LogStoreResult<()> {
+        let init_epoch_tx = self.init_epoch_tx.take().expect("cannot be init for twice");
+        init_epoch_tx
+            .send(epoch.curr)
+            .map_err(|_| anyhow!("unable to send init epoch"))?;
+        self.curr_epoch = Some(epoch.curr);
+        Ok(())
     }
 
-    fn write_chunk(&mut self, chunk: StreamChunk) -> Self::WriteChunkFuture<'_> {
-        async {
-            self.item_tx
-                .send(InMemLogStoreItem::StreamChunk(chunk))
-                .await
-                .map_err(|_| anyhow!("unable to send stream chunk"))?;
-            Ok(())
-        }
+    async fn write_chunk(&mut self, chunk: StreamChunk) -> LogStoreResult<()> {
+        self.item_tx
+            .send(InMemLogStoreItem::StreamChunk(chunk))
+            .await
+            .map_err(|_| anyhow!("unable to send stream chunk"))?;
+        Ok(())
     }
 
-    fn flush_current_epoch(
+    async fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
         is_checkpoint: bool,
-    ) -> Self::FlushCurrentEpoch<'_> {
-        async move {
-            self.item_tx
-                .send(InMemLogStoreItem::Barrier {
-                    next_epoch,
-                    is_checkpoint,
-                })
+    ) -> LogStoreResult<()> {
+        self.item_tx
+            .send(InMemLogStoreItem::Barrier {
+                next_epoch,
+                is_checkpoint,
+            })
+            .await
+            .map_err(|_| anyhow!("unable to send barrier"))?;
+
+        let prev_epoch = self
+            .curr_epoch
+            .replace(next_epoch)
+            .expect("should have epoch");
+
+        if is_checkpoint {
+            let truncated_epoch = self
+                .truncated_epoch_rx
+                .recv()
                 .await
-                .map_err(|_| anyhow!("unable to send barrier"))?;
-
-            let prev_epoch = self
-                .curr_epoch
-                .replace(next_epoch)
-                .expect("should have epoch");
-
-            if is_checkpoint {
-                let truncated_epoch = self
-                    .truncated_epoch_rx
-                    .recv()
-                    .await
-                    .ok_or_else(|| anyhow!("cannot get truncated epoch"))?;
-                assert_eq!(truncated_epoch, prev_epoch);
-            }
-
-            Ok(())
+                .ok_or_else(|| anyhow!("cannot get truncated epoch"))?;
+            assert_eq!(truncated_epoch, prev_epoch);
         }
+
+        Ok(())
     }
 
-    fn update_vnode_bitmap(&mut self, _new_vnodes: Arc<Bitmap>) {
-        // Since this is in memory, we don't need to handle the vnode bitmap
+    async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
+        Ok(self
+            .item_tx
+            .send(InMemLogStoreItem::UpdateVnodeBitmap(new_vnodes))
+            .await
+            .map_err(|_| anyhow!("unable to send vnode bitmap"))?)
     }
 }
 

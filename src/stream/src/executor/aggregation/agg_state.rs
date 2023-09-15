@@ -43,7 +43,7 @@ pub enum AggStateStorage<S: StateStore> {
 /// State for single aggregation call. It manages the state cache and interact with the
 /// underlying state store if necessary.
 pub enum AggState {
-    /// State as single scalar value.
+    /// State as a single scalar value.
     /// e.g. `count`, `sum`, append-only `min`/`max`.
     Value(AggregateState),
 
@@ -67,15 +67,15 @@ impl AggState {
         agg_call: &AggCall,
         agg_func: &BoxedAggregateFunction,
         storage: &AggStateStorage<impl StateStore>,
-        prev_output: Option<&Datum>,
+        encoded_state: Option<&Datum>,
         pk_indices: &PkIndices,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
         Ok(match storage {
             AggStateStorage::Value => {
-                let state = match prev_output {
-                    Some(prev) => AggregateState::Datum(prev.clone()),
+                let state = match encoded_state {
+                    Some(encoded) => agg_func.decode_state(encoded.clone())?,
                     None => agg_func.create_state(),
                 };
                 Self::Value(state)

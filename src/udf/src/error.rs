@@ -40,6 +40,9 @@ pub enum Error {
 
     #[error("UDF service returned no data")]
     NoReturned,
+
+    #[error("Flight service error: {0}")]
+    ServiceError(String),
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<Error>(), 32);

@@ -67,8 +67,38 @@ impl UserDefinedTableFunction {
             .await?
         {
             let output = DataChunk::try_from(&res?)?;
+            self.check_output(&output)?;
             yield output;
         }
+    }
+
+    /// Check if the output chunk is valid.
+    fn check_output(&self, output: &DataChunk) -> Result<()> {
+        if output.columns().len() != 2 {
+            bail!(
+                "UDF returned {} columns, but expected 2",
+                output.columns().len()
+            );
+        }
+        if output.column_at(0).data_type() != DataType::Int32 {
+            bail!(
+                "UDF returned {:?} at column 0, but expected {:?}",
+                output.column_at(0).data_type(),
+                DataType::Int32,
+            );
+        }
+        if !output
+            .column_at(1)
+            .data_type()
+            .equals_datatype(&self.return_type)
+        {
+            bail!(
+                "UDF returned {:?} at column 1, but expected {:?}",
+                output.column_at(1).data_type(),
+                &self.return_type,
+            );
+        }
+        Ok(())
     }
 }
 

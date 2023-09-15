@@ -39,3 +39,6 @@ tempfile = "3"
 [[bench]]
 name = "json_parser"
 harness = false
+
+[lints]
+workspace = true

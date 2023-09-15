@@ -12,19 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use base64::engine::general_purpose;
-use base64::Engine as _;
-use chrono::{Datelike, Timelike};
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_chunk::Op;
-use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use serde_json::{json, Map, Value};
 use tracing::warn;
 
+use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
 use crate::sink::{Result, SinkError};
 
 const DEBEZIUM_NAME_FIELD_PREFIX: &str = "RisingWave";
@@ -62,6 +57,9 @@ pub async fn gen_debezium_message_stream<'a>(
 
     let mut update_cache: Option<Map<String, Value>> = None;
 
+    let key_encoder = JsonEncoder::new(schema, Some(pk_indices), TimestampHandlingMode::Milli);
+    let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+
     for (op, row) in chunk.rows() {
         let event_key_object: Option<Value> = Some(json!({
             "schema": json!({
@@ -70,14 +68,14 @@ pub async fn gen_debezium_message_stream<'a>(
                 "optional": false,
                 "name": concat_debezium_name_field(db_name, sink_from_name, "Key"),
             }),
-            "payload": pk_to_json(row, &schema.fields, pk_indices)?,
+            "payload": key_encoder.encode(row)?,
         }));
         let event_object: Option<Value> = match op {
             Op::Insert => Some(json!({
                 "schema": schema_to_json(schema, db_name, sink_from_name),
                 "payload": {
                     "before": null,
-                    "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
+                    "after": val_encoder.encode(row)?,
                     "op": "c",
                     "ts_ms": ts_ms,
                     "source": source_field,
@@ -87,7 +85,7 @@ pub async fn gen_debezium_message_stream<'a>(
                 let value_obj = Some(json!({
                     "schema": schema_to_json(schema, db_name, sink_from_name),
                     "payload": {
-                        "before": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
+                        "before": val_encoder.encode(row)?,
                         "after": null,
                         "op": "d",
                         "ts_ms": ts_ms,
@@ -105,11 +103,7 @@ pub async fn gen_debezium_message_stream<'a>(
                 continue;
             }
             Op::UpdateDelete => {
-                update_cache = Some(record_to_json(
-                    row,
-                    &schema.fields,
-                    TimestampHandlingMode::Milli,
-                )?);
+                update_cache = Some(val_encoder.encode(row)?);
                 continue;
             }
             Op::UpdateInsert => {
@@ -118,7 +112,7 @@ pub async fn gen_debezium_message_stream<'a>(
                         "schema": schema_to_json(schema, db_name, sink_from_name),
                         "payload": {
                             "before": before,
-                            "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
+                            "after": val_encoder.encode(row)?,
                             "op": "u",
                             "ts_ms": ts_ms,
                             "source": source_field,
@@ -245,155 +239,15 @@ pub(crate) fn field_to_json(field: &Field) -> Value {
     })
 }
 
-pub(crate) fn pk_to_json(
-    row: RowRef<'_>,
-    schema: &[Field],
-    pk_indices: &[usize],
-) -> Result<Map<String, Value>> {
-    let mut mappings = Map::with_capacity(schema.len());
-    for idx in pk_indices {
-        let field = &schema[*idx];
-        let key = field.name.clone();
-        let value = datum_to_json_object(field, row.datum_at(*idx), TimestampHandlingMode::Milli)
-            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
-        mappings.insert(key, value);
-    }
-    Ok(mappings)
-}
-
 pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>> {
+    let encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
     let mut records: Vec<String> = Vec::with_capacity(chunk.capacity());
     for (_, row) in chunk.rows() {
-        let record = Value::Object(record_to_json(
-            row,
-            &schema.fields,
-            TimestampHandlingMode::Milli,
-        )?);
+        let record = Value::Object(encoder.encode(row)?);
         records.push(record.to_string());
     }
 
     Ok(records)
-}
-
-#[derive(Clone, Copy)]
-pub enum TimestampHandlingMode {
-    Milli,
-    String,
-}
-
-pub fn record_to_json(
-    row: RowRef<'_>,
-    schema: &[Field],
-    timestamp_handling_mode: TimestampHandlingMode,
-) -> Result<Map<String, Value>> {
-    let mut mappings = Map::with_capacity(schema.len());
-    for (field, datum_ref) in schema.iter().zip_eq_fast(row.iter()) {
-        let key = field.name.clone();
-        let value = datum_to_json_object(field, datum_ref, timestamp_handling_mode)
-            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
-        mappings.insert(key, value);
-    }
-    Ok(mappings)
-}
-
-fn datum_to_json_object(
-    field: &Field,
-    datum: DatumRef<'_>,
-    timestamp_handling_mode: TimestampHandlingMode,
-) -> ArrayResult<Value> {
-    let scalar_ref = match datum {
-        None => return Ok(Value::Null),
-        Some(datum) => datum,
-    };
-
-    let data_type = field.data_type();
-
-    tracing::debug!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
-
-    let value = match (data_type, scalar_ref) {
-        (DataType::Boolean, ScalarRefImpl::Bool(v)) => {
-            json!(v)
-        }
-        (DataType::Int16, ScalarRefImpl::Int16(v)) => {
-            json!(v)
-        }
-        (DataType::Int32, ScalarRefImpl::Int32(v)) => {
-            json!(v)
-        }
-        (DataType::Int64, ScalarRefImpl::Int64(v)) => {
-            json!(v)
-        }
-        (DataType::Float32, ScalarRefImpl::Float32(v)) => {
-            json!(f32::from(v))
-        }
-        (DataType::Float64, ScalarRefImpl::Float64(v)) => {
-            json!(f64::from(v))
-        }
-        (DataType::Varchar, ScalarRefImpl::Utf8(v)) => {
-            json!(v)
-        }
-        (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
-            json!(v.to_text())
-        }
-        (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => {
-            // risingwave's timestamp with timezone is stored in UTC and does not maintain the
-            // timezone info and the time is in microsecond.
-            let parsed = v.to_datetime_utc().naive_utc();
-            let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
-            json!(v)
-        }
-        (DataType::Time, ScalarRefImpl::Time(v)) => {
-            // todo: just ignore the nanos part to avoid leap second complex
-            json!(v.0.num_seconds_from_midnight() as i64 * 1000)
-        }
-        (DataType::Date, ScalarRefImpl::Date(v)) => {
-            json!(v.0.num_days_from_ce())
-        }
-        (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => match timestamp_handling_mode {
-            TimestampHandlingMode::Milli => json!(v.0.timestamp_millis()),
-            TimestampHandlingMode::String => json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
-        },
-        (DataType::Bytea, ScalarRefImpl::Bytea(v)) => {
-            json!(general_purpose::STANDARD_NO_PAD.encode(v))
-        }
-        // P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
-        (DataType::Interval, ScalarRefImpl::Interval(v)) => {
-            json!(v.as_iso_8601())
-        }
-        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => {
-            json!(jsonb_ref.to_string())
-        }
-        (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
-            let elems = list_ref.iter();
-            let mut vec = Vec::with_capacity(elems.len());
-            let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
-            for sub_datum_ref in elems {
-                let value =
-                    datum_to_json_object(&inner_field, sub_datum_ref, timestamp_handling_mode)?;
-                vec.push(value);
-            }
-            json!(vec)
-        }
-        (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
-            let mut map = Map::with_capacity(st.len());
-            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
-                st.iter()
-                    .map(|(name, dt)| Field::with_name(dt.clone(), name)),
-            ) {
-                let value =
-                    datum_to_json_object(&sub_field, sub_datum_ref, timestamp_handling_mode)?;
-                map.insert(sub_field.name.clone(), value);
-            }
-            json!(map)
-        }
-        (data_type, scalar_ref) => {
-            return Err(ArrayError::internal(
-                format!("datum_to_json_object: unsupported data type: field name: {:?}, logical type: {:?}, physical type: {:?}", field.name, data_type, scalar_ref),
-            ));
-        }
-    };
-
-    Ok(value)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -417,15 +271,15 @@ fn gen_event_object(
 
 #[try_stream(ok = (Option<Value>, Option<Value>), error = SinkError)]
 pub async fn gen_upsert_message_stream<'a>(
-    schema: &'a Schema,
-    pk_indices: &'a [usize],
     chunk: StreamChunk,
     enable_schema: bool,
     schema_name: Option<String>,
     _opts: UpsertAdapterOpts,
+    key_encoder: JsonEncoder<'a>,
+    val_encoder: JsonEncoder<'a>,
 ) {
     for (op, row) in chunk.rows() {
-        let event_key_object_inner = Value::Object(pk_to_json(row, &schema.fields, pk_indices)?);
+        let event_key_object_inner = Value::Object(key_encoder.encode(row)?;
         let event_key_object = if enable_schema {
             Some(json!({
                 "schema": generate_json_converter_schema_with_indices(&schema.fields, schema_name.as_ref().unwrap(), pk_indices),
@@ -472,21 +326,17 @@ pub struct AppendOnlyAdapterOpts {}
 
 #[try_stream(ok = (Option<Value>, Option<Value>), error = SinkError)]
 pub async fn gen_append_only_message_stream<'a>(
-    schema: &'a Schema,
-    pk_indices: &'a [usize],
     chunk: StreamChunk,
     _opts: AppendOnlyAdapterOpts,
+    key_encoder: JsonEncoder<'a>,
+    val_encoder: JsonEncoder<'a>,
 ) {
     for (op, row) in chunk.rows() {
         if op != Op::Insert {
             continue;
         }
-        let event_key_object = Some(Value::Object(pk_to_json(row, &schema.fields, pk_indices)?));
-        let event_object = Some(Value::Object(record_to_json(
-            row,
-            &schema.fields,
-            TimestampHandlingMode::Milli,
-        )?));
+        let event_key_object = Some(Value::Object(key_encoder.encode(row)?));
+        let event_object = Some(Value::Object(val_encoder.encode(row)?));
 
         yield (event_key_object, event_object);
     }

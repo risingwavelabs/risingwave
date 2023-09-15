@@ -497,7 +497,7 @@ where
             self.stream
                 .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
         }
-        let mut res = res.map_err(|err| PsqlError::QueryError(err))?;
+        let mut res = res.map_err(PsqlError::QueryError)?;
 
         for notice in res.notices() {
             self.stream
@@ -518,7 +518,7 @@ where
             let mut rows_cnt = 0;
 
             while let Some(row_set) = res.values_stream().next().await {
-                let row_set = row_set.map_err(|err| PsqlError::QueryError(err))?;
+                let row_set = row_set.map_err(PsqlError::QueryError)?;
                 for row in row_set {
                     self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
                     rows_cnt += 1;
@@ -629,7 +629,7 @@ where
 
         self.statement_portal_dependency
             .entry(statement_name)
-            .or_insert_with(Vec::new)
+            .or_default()
             .clear();
 
         self.stream.write_no_flush(&BeMessage::ParseComplete)?;
@@ -786,7 +786,7 @@ where
             for portal_name in self
                 .statement_portal_dependency
                 .remove(&name)
-                .unwrap_or(vec![])
+                .unwrap_or_default()
             {
                 self.remove_portal(&portal_name);
             }

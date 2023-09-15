@@ -46,7 +46,6 @@ pub struct CompactorMetrics {
     pub iter_scan_key_counts: GenericCounterVec<AtomicU64>,
     pub write_build_l0_bytes: GenericCounter<AtomicU64>,
     pub sstable_distinct_epoch_count: Histogram,
-    pub preload_io_count: GenericCounter<AtomicU64>,
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
 }
@@ -221,12 +220,6 @@ impl CompactorMetrics {
 
         let sstable_distinct_epoch_count =
             register_histogram_with_registry!(opts, registry).unwrap();
-        let preload_io_count = register_int_counter_with_registry!(
-            "sstable_preload_io_count",
-            "Total number of preload io count",
-            registry
-        )
-        .unwrap();
 
         let opts = histogram_opts!(
             "compactor_compaction_event_consumed_latency",
@@ -266,7 +259,6 @@ impl CompactorMetrics {
             iter_scan_key_counts,
             write_build_l0_bytes,
             sstable_distinct_epoch_count,
-            preload_io_count,
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
         }
