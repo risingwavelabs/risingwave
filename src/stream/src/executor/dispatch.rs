@@ -490,8 +490,12 @@ pub trait Dispatcher: Debug + 'static {
 
     /// The ID of the dispatcher. A [`DispatchExecutor`] may have multiple dispatchers with
     /// different IDs.
+    ///
+    /// Note that the dispatcher id is always equal to the downstream fragment id.
+    /// See also `proto/stream_plan.proto`.
     fn dispatcher_id(&self) -> DispatcherId;
 
+    /// Dispatcher id in string. See [`dispatcher_id`].
     fn dispatcher_id_str(&self) -> &str;
 
     /// Whether the dispatcher has no outputs. If so, it'll be cleaned up from the
