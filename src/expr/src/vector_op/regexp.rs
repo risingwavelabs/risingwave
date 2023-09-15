@@ -40,7 +40,9 @@ impl RegexpContext {
         };
 
         Ok(Self {
-            regex: RegexBuilder::new(&origin).build().unwrap(),
+            regex: RegexBuilder::new(&origin)
+                .build()
+                .map_err(|e| ExprError::Parse(e.to_string().into()))?,
             global: options.global,
             replacement: make_replacement(replacement),
         })

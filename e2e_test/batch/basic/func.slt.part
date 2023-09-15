@@ -594,6 +594,9 @@ select regexp_replace('foobarXaz', '(?<!X)a', 'X');
 ----
 foobXrXaz
 
+query error Parsing error at position 2: Unknown group flag: (?1
+select regexp_replace('foobarXaz', '(?1:123)', 'X');
+
 query T
 select regexp_count('ABCABCAXYaxy', 'A.');
 ----
