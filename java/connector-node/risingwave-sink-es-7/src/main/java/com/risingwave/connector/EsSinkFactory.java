@@ -36,13 +36,13 @@ import org.elasticsearch.client.RestHighLevelClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class EsSink7Factory implements SinkFactory {
-    private static final Logger LOG = LoggerFactory.getLogger(EsSink7Factory.class);
+public class EsSinkFactory implements SinkFactory {
+    private static final Logger LOG = LoggerFactory.getLogger(EsSinkFactory.class);
 
     public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
-        EsSink7Config config = mapper.convertValue(tableProperties, EsSink7Config.class);
-        return new SinkWriterV1.Adapter(new EsSink7(config, tableSchema));
+        EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
+        return new SinkWriterV1.Adapter(new EsSink(config, tableSchema));
     }
 
     @Override
@@ -52,7 +52,7 @@ public class EsSink7Factory implements SinkFactory {
             Catalog.SinkType sinkType) {
         ObjectMapper mapper = new ObjectMapper();
         mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
-        EsSink7Config config = mapper.convertValue(tableProperties, EsSink7Config.class);
+        EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
 
         // 1. check url
         HttpHost host;

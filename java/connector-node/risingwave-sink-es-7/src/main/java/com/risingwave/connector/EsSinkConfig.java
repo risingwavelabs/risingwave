@@ -20,7 +20,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.risingwave.connector.api.sink.CommonSinkConfig;
 
-public class EsSink7Config extends CommonSinkConfig {
+public class EsSinkConfig extends CommonSinkConfig {
     /** Required */
     private String url;
 
@@ -38,7 +38,7 @@ public class EsSink7Config extends CommonSinkConfig {
     private String password;
 
     @JsonCreator
-    public EsSink7Config(
+    public EsSinkConfig(
             @JsonProperty(value = "url") String url, @JsonProperty(value = "index") String index) {
         this.url = url;
         this.index = index;
@@ -64,17 +64,17 @@ public class EsSink7Config extends CommonSinkConfig {
         return password;
     }
 
-    public EsSink7Config withDelimiter(String delimiter) {
+    public EsSinkConfig withDelimiter(String delimiter) {
         this.delimiter = delimiter;
         return this;
     }
 
-    public EsSink7Config withUsername(String username) {
+    public EsSinkConfig withUsername(String username) {
         this.username = username;
         return this;
     }
 
-    public EsSink7Config withPassword(String password) {
+    public EsSinkConfig withPassword(String password) {
         this.password = password;
         return this;
     }
