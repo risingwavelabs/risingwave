@@ -67,7 +67,6 @@ impl Progress {
     /// Create a [`Progress`] for some creating mview, with all `actors` containing the chain nodes.
     fn new(
         actors: impl IntoIterator<Item = ActorId>,
-        creating_mv_id: TableId,
         upstream_mv_count: HashMap<TableId, usize>,
         upstream_total_key_count: u64,
         definition: String,
@@ -427,7 +426,6 @@ impl CreateMviewProgressTracker {
 
         let progress = Progress::new(
             actors,
-            creating_mv_id,
             upstream_mv_count,
             upstream_total_key_count,
             definition,
