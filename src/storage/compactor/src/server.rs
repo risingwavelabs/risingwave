@@ -37,13 +37,11 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::meta::GetSystemParamsRequest;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
-use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::{GrpcCompactorProxyClient, MetaClient};
 use risingwave_storage::filter_key_extractor::{
     FilterKeyExtractorManager, RemoteTableAccessor, RpcFilterKeyExtractorManager,
 };
-use risingwave_storage::hummock::compactor::{
-    CompactionExecutor, CompactorContext, GrpcProxyClient,
-};
+use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
     HummockMemoryCollector, MemoryLimiter, SstableObjectIdManager, SstableStore,
@@ -337,7 +335,7 @@ pub async fn shared_compactor_serve(
         .connect()
         .await
         .expect("Failed to create channel via proxy rpc endpoint.");
-    let grpc_proxy_client = GrpcProxyClient::new(channel);
+    let grpc_proxy_client = GrpcCompactorProxyClient::new(channel);
     let mut system_params_client = grpc_proxy_client
         .core
         .read()

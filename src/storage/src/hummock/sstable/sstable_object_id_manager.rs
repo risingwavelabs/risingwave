@@ -22,10 +22,9 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, SstObjectIdRange};
-use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::GetNewSstIdsRequest;
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
-use risingwave_rpc_client::{ExtraInfoSource, HummockMetaClient};
+use risingwave_rpc_client::{ExtraInfoSource, GrpcCompactorProxyClient, HummockMetaClient};
 use sync_point::sync_point;
 use tokio::sync::{oneshot, Mutex as TokioMutux};
 
@@ -202,13 +201,10 @@ impl GetObjectId for Arc<SstableObjectIdManager> {
 
 struct SharedComapctorObjectIdManagerCore {
     output_object_ids: VecDeque<u64>,
-    client: HummockManagerServiceClient<tonic::transport::Channel>,
+    client: GrpcCompactorProxyClient,
 }
 impl SharedComapctorObjectIdManagerCore {
-    pub fn new(
-        output_object_ids: VecDeque<u64>,
-        client: HummockManagerServiceClient<tonic::transport::Channel>,
-    ) -> Self {
+    pub fn new(output_object_ids: VecDeque<u64>, client: GrpcCompactorProxyClient) -> Self {
         Self {
             output_object_ids,
             client,
@@ -222,10 +218,7 @@ pub struct SharedComapctorObjectIdManager {
 }
 
 impl SharedComapctorObjectIdManager {
-    pub fn new(
-        output_object_ids: VecDeque<u64>,
-        client: HummockManagerServiceClient<tonic::transport::Channel>,
-    ) -> Self {
+    pub fn new(output_object_ids: VecDeque<u64>, client: GrpcCompactorProxyClient) -> Self {
         Self {
             core: Arc::new(TokioMutux::new(SharedComapctorObjectIdManagerCore::new(
                 output_object_ids,
