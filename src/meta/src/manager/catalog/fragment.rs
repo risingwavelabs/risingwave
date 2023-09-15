@@ -163,6 +163,24 @@ impl FragmentManager {
         map.values().cloned().collect()
     }
 
+    pub async fn get_table_id_actor_mapping(
+        &self,
+        table_ids: &[TableId],
+    ) -> HashMap<ActorId, TableId> {
+        let map = &self.core.read().await.table_fragments;
+        let mut actor_mapping = HashMap::new();
+        for table_id in table_ids {
+            if let Some(table_fragment) = map.get(table_id) {
+                for fragment in table_fragment.fragments.values() {
+                    for actor in &fragment.actors {
+                        actor_mapping.insert(actor.actor_id, *table_id);
+                    }
+                }
+            }
+        }
+        actor_mapping
+    }
+
     pub fn get_mv_id_to_internal_table_ids_mapping(&self) -> Option<Vec<(u32, Vec<u32>)>> {
         match self.core.try_read() {
             Ok(core) => Some(
