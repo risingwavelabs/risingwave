@@ -183,6 +183,7 @@ impl FragmentManager {
 
     /// Gets the counts for each upstream relation that each stream job
     /// indicated by `table_ids` depends on.
+    /// FIXME: Modify `dependent_relations` and get it from there instead.
     pub async fn get_upstream_relation_counts(
         &self,
         table_ids: &[TableId],
@@ -190,17 +191,11 @@ impl FragmentManager {
         let map = &self.core.read().await.table_fragments;
         let mut upstream_relation_counts = HashMap::new();
         for table_id in table_ids {
-            if let Some(table_fragment) = map.get(table_id) {
-                let mut upstream_relation_count = HashMap::new();
-                for fragment in table_fragment.fragments.values() {
-                    for actor in &fragment.actors {
-                        for dispatcher in &actor.dispatcher {
-                            let upstream_table_id = dispatcher.upstream_table_id;
-                            *upstream_relation_count.entry(upstream_table_id).or_insert(0) += 1;
-                        }
-                    }
-                }
-                upstream_relation_counts.insert(*table_id, upstream_relation_count);
+            if let Some(table_fragments) = map.get(table_id) {
+                let dependent_ids = table_fragments.dependent_table_ids();
+                upstream_relation_counts
+                    .insert(*table_id, dependent_ids)
+                    .unwrap();
             }
         }
         upstream_relation_counts
@@ -557,7 +552,7 @@ impl FragmentManager {
             table_fragments.remove(table_fragment.table_id());
             let chain_actor_ids = table_fragment.chain_actor_ids();
             let dependent_table_ids = table_fragment.dependent_table_ids();
-            for dependent_table_id in dependent_table_ids {
+            for (dependent_table_id, _) in dependent_table_ids {
                 if table_ids.contains(&dependent_table_id) {
                     continue;
                 }

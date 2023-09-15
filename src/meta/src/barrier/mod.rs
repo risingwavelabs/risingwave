@@ -940,20 +940,24 @@ impl GlobalBarrierManager {
         }
 
         if self.enable_recovery {
-            let creating_table_ids = self
-                .catalog_manager
-                .list_creating_tables()
-                .await
+            let creating_tables = self.catalog_manager.list_creating_tables().await;
+            let creating_table_ids = creating_tables
                 .iter()
                 .map(|t| TableId { table_id: t.id })
                 .collect_vec();
+
             let actor_map = self
                 .fragment_manager
                 .get_table_id_actor_mapping(&creating_table_ids)
                 .await;
-            let upstream_mv_counts =
-                self.fragment_manager.get_upstream_relation_counts(&creating_table_ids).await;
-            let definitions = Default::default();
+            let upstream_mv_counts = self
+                .fragment_manager
+                .get_upstream_relation_counts(&creating_table_ids)
+                .await;
+            let definitions: HashMap<_, _> = creating_tables
+                .into_iter()
+                .map(|t| (TableId { table_id: t.id }, t.definition))
+                .collect();
             let version_stats = self.hummock_manager.get_version_stats().await;
             let tracking_commands = Default::default();
             // If failed, enter recovery mode.
