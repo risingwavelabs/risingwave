@@ -20,6 +20,7 @@ use std::sync::Arc;
 use chrono;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::config::AutoDumpHeapProfileConfig;
+use risingwave_common::heap_profiling::AUTO_DUMP_MID_NAME;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::task::LocalStreamManager;
 use tikv_jemalloc_ctl::{
@@ -116,10 +117,7 @@ impl JemallocMemoryControl {
             }
 
             let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-            let file_name = format!(
-                "{}.auto-dump-heap-prof.compute.dump.{}\0",
-                time_prefix, self.dump_seq,
-            );
+            let file_name = format!("{}.{}.{}\0", time_prefix, AUTO_DUMP_MID_NAME, self.dump_seq,);
 
             let file_path = if !self.auto_dump_heap_profile_config.dir.is_empty() {
                 Path::new(&self.auto_dump_heap_profile_config.dir)

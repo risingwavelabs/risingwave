@@ -23,10 +23,10 @@ use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use axum::body::Body;
+use axum::body::{boxed, Body};
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, get_service};
 use axum::Router;
 use hyper::Request;
@@ -259,7 +259,7 @@ pub(super) mod handlers {
     pub async fn analyze_heap(
         Path((worker_id, file_path)): Path<(WorkerId, String)>,
         Extension(srv): Extension<Service>,
-    ) -> Result<Json<String>> {
+    ) -> Result<Response> {
         if srv.ui_path.is_none() {
             bail!("Should provide ui_path");
         }
@@ -305,7 +305,19 @@ pub(super) mod handlers {
         let collapsed_str =
             String::from_utf8_lossy(&fs::read(collapsed_path).map_err(err)?).to_string();
 
-        Ok(collapsed_str.into())
+        let response = Response::builder()
+            .header("Content-Type", "application/octet-stream")
+            .header(
+                "Content-Disposition",
+                collapsed_path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+            )
+            .body(boxed(collapsed_str));
+
+        response.map_err(err)
     }
 }
 

@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::config::ServerConfig;
+use risingwave_common::heap_profiling::{AUTO_DUMP_MID_NAME, MANUALLY_DUMP_MID_NAME};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
     DownloadRequest, DownloadResponse, HeapProfilingRequest, HeapProfilingResponse,
@@ -137,7 +138,7 @@ impl MonitorService for MonitorServiceImpl {
         }
 
         let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-        let file_name = format!("{}.manually-dump-heap-prof.compute.dump\0", time_prefix,);
+        let file_name = format!("{}.{}\0", time_prefix, AUTO_DUMP_MID_NAME);
         let arg_dir = request.into_inner().get_dir().clone();
         let dir = PathBuf::from(if arg_dir.is_empty() {
             &self.server_config.manually_dump_heap_profile_dir
@@ -177,12 +178,26 @@ impl MonitorService for MonitorServiceImpl {
                 let entry = entry?;
                 Ok::<_, Status>(entry.file_name().to_string_lossy().to_string())
             })
+            .filter(|name| {
+                if let Ok(name) = name {
+                    name.contains(AUTO_DUMP_MID_NAME)
+                } else {
+                    true
+                }
+            })
             .try_collect()?;
         let manually_dump_dir = self.server_config.manually_dump_heap_profile_dir.clone();
         let manually_dump_files_name: Vec<_> = fs::read_dir(manually_dump_dir.clone())?
             .map(|entry| {
                 let entry = entry?;
                 Ok::<_, Status>(entry.file_name().to_string_lossy().to_string())
+            })
+            .filter(|name| {
+                if let Ok(name) = name {
+                    name.contains(MANUALLY_DUMP_MID_NAME)
+                } else {
+                    true
+                }
             })
             .try_collect()?;
 

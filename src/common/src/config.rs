@@ -740,7 +740,6 @@ pub struct BatchDeveloperConfig {
     #[serde(default = "default::developer::batch_chunk_size")]
     pub chunk_size: usize,
 }
-
 /// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
 /// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
 /// documented.

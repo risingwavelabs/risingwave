@@ -78,6 +78,7 @@ pub mod test_utils;
 pub mod types;
 pub mod vnode_mapping;
 
+pub mod heap_profiling;
 pub mod range;
 
 pub mod test_prelude {
