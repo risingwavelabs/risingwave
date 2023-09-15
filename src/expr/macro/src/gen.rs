@@ -133,6 +133,8 @@ impl FunctionAttr {
                     build: FuncBuilder::Scalar(#build_fn),
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
+                    state_type: None,
+                    append_only: false,
                 }) };
             }
         })
@@ -527,8 +529,11 @@ impl FunctionAttr {
         }
         let ret = sig_data_type(&self.ret);
         let state_type = match &self.state {
-            Some(ty) if ty != "ref" => data_type(ty),
-            _ => data_type(&self.ret),
+            Some(ty) if ty != "ref" => {
+                let ty = data_type(ty);
+                quote! { Some(#ty) }
+            }
+            _ => quote! { None },
         };
         let append_only = match build_fn {
             false => !user_fn.has_retract(),
@@ -851,6 +856,8 @@ impl FunctionAttr {
                     build: FuncBuilder::Table(#build_fn),
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
+                    state_type: None,
+                    append_only: false,
                 }) };
             }
         })

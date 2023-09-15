@@ -1132,6 +1132,8 @@ mod tests {
                     build: FuncBuilder::Scalar(|_, _| unreachable!()),
                     type_infer: |_| unreachable!(),
                     deprecated: false,
+                    state_type: None,
+                    append_only: false,
                 });
             }
             let result = infer_type_name(&sig_map, ExprType::Add.into(), inputs);

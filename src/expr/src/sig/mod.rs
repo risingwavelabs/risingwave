@@ -103,7 +103,7 @@ impl FunctionRegistry {
         append_only: bool,
     ) -> Option<&FuncSign> {
         let v = self.0.get(&ty.into())?;
-        let mut iter = v.iter().filter(|d| d.match_type(args, ret));
+        let mut iter = v.iter().filter(|d| d.match_args_ret(args, ret));
         if iter.clone().count() == 2 {
             iter.find(|d| d.append_only == append_only)
         } else {
@@ -156,6 +156,7 @@ pub struct FuncSign {
     pub deprecated: bool,
 
     /// The state type of the aggregate function.
+    /// `None` means equal to the return type.
     pub state_type: Option<DataType>,
 
     /// Whether the aggregate function is append-only.
