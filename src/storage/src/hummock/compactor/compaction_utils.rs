@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
-use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, KeyComparator};
 use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, SstableInfo};
 use tokio::time::Instant;
 
@@ -94,6 +94,11 @@ pub struct CompactionStatistics {
     // to calculate delete ratio
     pub iter_total_key_counts: u64,
     pub iter_drop_key_counts: u64,
+
+    /// Block inheritances for fine-grained cache reill.
+    ///
+    /// { sst obj id => [ (parent sst obj id, parent block idx) ] }
+    pub inheritances: BTreeMap<HummockSstableObjectId, Vec<(HummockSstableObjectId, u64)>>,
 }
 
 impl CompactionStatistics {

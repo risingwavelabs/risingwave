@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::cache::CachePriority;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 
 use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -159,6 +160,10 @@ impl HummockIterator for BackwardSstableIterator {
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats)
+    }
+
+    fn info(&self) -> Option<(HummockSstableObjectId, usize)> {
+        Some((*self.sst.key(), self.cur_idx))
     }
 }
 

@@ -26,6 +26,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, TableKeyRange, UserKey};
+use risingwave_hummock_sdk::HummockSstableObjectId;
 
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{
@@ -829,6 +830,10 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
     }
 
     fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
+
+    fn info(&self) -> Option<(HummockSstableObjectId, usize)> {
+        None
+    }
 }
 
 pub struct SharedBufferDeleteRangeIterator {

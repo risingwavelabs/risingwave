@@ -17,6 +17,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
@@ -190,5 +191,9 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         if let Some(iter) = &self.sstable_iter {
             iter.collect_local_statistic(stats);
         }
+    }
+
+    fn info(&self) -> Option<(HummockSstableObjectId, usize)> {
+        self.sstable_iter.as_ref().expect("no table iter").info()
     }
 }

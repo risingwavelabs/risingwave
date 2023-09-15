@@ -990,6 +990,10 @@ unsafe impl<K: LruKey, T: LruValue> Send for CacheableEntry<K, T> {}
 unsafe impl<K: LruKey, T: LruValue> Sync for CacheableEntry<K, T> {}
 
 impl<K: LruKey, T: LruValue> CacheableEntry<K, T> {
+    pub fn key(&self) -> &K {
+        unsafe { (*self.handle).get_key() }
+    }
+
     pub fn value(&self) -> &T {
         unsafe { (*self.handle).get_value() }
     }

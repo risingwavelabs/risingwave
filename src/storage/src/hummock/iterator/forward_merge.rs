@@ -22,6 +22,7 @@ mod test {
     use futures::{pin_mut, FutureExt};
     use risingwave_common::cache::CachePriority;
     use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+    use risingwave_hummock_sdk::HummockSstableObjectId;
 
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
@@ -370,6 +371,10 @@ mod test {
         }
 
         fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+
+        fn info(&self) -> Option<(HummockSstableObjectId, usize)> {
+            None
+        }
     }
 
     #[tokio::test]
