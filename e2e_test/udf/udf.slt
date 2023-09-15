@@ -231,32 +231,24 @@ statement ok
 create table t (x int);
 
 statement ok
-create materialized view mv1 as select gcd(x, x) from t where x = 1;
+create materialized view mv as select gcd(x, x), series(x) from t where x <> 2;
 
 statement ok
-create materialized view mv2 as select series(x) from t where x = 1;
-
-statement ok
-insert into t values (1), (2);
+insert into t values (1), (2), (3);
 
 statement ok
 flush;
 
-query T
-select * from mv1;
+query II
+select * from mv;
 ----
-1
-
-query T
-select * from mv2;
-----
-0
+1 0
+3 0
+3 1
+3 2
 
 statement ok
-drop materialized view mv1;
-
-statement ok
-drop materialized view mv2;
+drop materialized view mv;
 
 statement ok
 drop table t;
