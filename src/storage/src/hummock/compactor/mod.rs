@@ -58,8 +58,8 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{
 };
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CompactTaskProgress, CompactorWorkload, ReportCompactionTaskRequest,
-    SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
+    CompactTaskProgress, ReportCompactionTaskRequest, SubscribeCompactionEventRequest,
+    SubscribeCompactionEventResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::{compact, merge_imms_in_memory};
@@ -382,7 +382,6 @@ pub fn start_compactor(
 
             let executor = compactor_context.compaction_executor.clone();
             let sstable_object_id_manager = sstable_object_id_manager.clone();
-            let last_workload = CompactorWorkload::default();
 
             // This inner loop is to consume stream or report task progress.
             let mut event_loop_iteration_now = Instant::now();
@@ -452,7 +451,6 @@ pub fn start_compactor(
                         }
 
                         tracing::info!(
-                            cpu = %last_workload.cpu,
                             running_task_count = %running_task_count.load(Ordering::Relaxed),
                             pull_task_ack = %pull_task_ack.load(Ordering::Relaxed),
                             pending_pull_task_count = %pending_pull_task_count

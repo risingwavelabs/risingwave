@@ -106,7 +106,7 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     match opts.compactor_mode.as_str() {
         "shared" => Box::pin(async move {
             tracing::info!("Shared compactor pod options: {:?}", opts);
-            tracing::info!("meta address: {}", opts.meta_address.clone());
+            tracing::info!("Proxy rpc endpoint: {}", opts.proxy_rpc_endpoint.clone());
 
             let listen_addr = opts.listen_addr.parse().unwrap();
             tracing::info!("Server Listening at {}", listen_addr);
