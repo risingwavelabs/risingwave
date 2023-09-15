@@ -39,7 +39,7 @@ impl RegexpContext {
         if options.case_insensitive {
             origin.push_str("(?i:");
             origin.push_str(pattern);
-            origin.push_str(")");
+            origin.push(')');
         } else {
             origin = pattern.to_string();
         };

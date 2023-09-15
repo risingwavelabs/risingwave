@@ -28,6 +28,7 @@ ctor = "0.2"
 downcast-rs = "1.2"
 easy-ext = "1"
 either = "1"
+fancy-regex = "0.11.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
@@ -38,7 +39,6 @@ num-traits = "0.2"
 parse-display = "0.8"
 paste = "1"
 regex = "1"
-fancy-regex = "0.11.0"
 risingwave_common = { workspace = true }
 risingwave_expr_macro = { path = "macro" }
 risingwave_pb = { workspace = true }
