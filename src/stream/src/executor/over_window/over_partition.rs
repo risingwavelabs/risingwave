@@ -456,9 +456,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         tracing::debug!(partition=?self.this_partition_key, "loading the whole partition into cache");
 
         let mut new_cache = PartitionCache::new(); // shouldn't use `new_empty_partition_cache` here because we don't want sentinels
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let table_iter = table
-            .iter_row_with_pk_prefix(
+            .iter_row_with_pk_prefix_sub_range(
                 self.this_partition_key,
+                sub_range,
                 PrefetchOptions::new_for_exhaust_iter(),
             )
             .await?;

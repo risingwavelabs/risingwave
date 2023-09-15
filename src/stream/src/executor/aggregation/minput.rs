@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound::{self};
+
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::row::RowExt;
+use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -182,10 +184,12 @@ impl MaterializedInputState {
     ) -> StreamExecutorResult<Datum> {
         if !self.cache.is_synced() {
             let mut cache_filler = self.cache.begin_syncing();
-
+            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                &(Bound::Unbounded, Bound::Unbounded);
             let all_data_iter = state_table
-                .iter_row_with_pk_prefix(
+                .iter_row_with_pk_prefix_sub_range(
                     group_key.map(GroupKey::table_pk),
+                    sub_range,
                     PrefetchOptions {
                         exhaust_iter: cache_filler.capacity().is_none(),
                     },

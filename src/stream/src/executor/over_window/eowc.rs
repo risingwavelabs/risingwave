@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::marker::PhantomData;
+use std::ops::Bound;
 
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
@@ -195,10 +196,15 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             curr_row_buffer: Default::default(),
         };
 
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         // Recover states from state table.
         let table_iter = this
             .state_table
-            .iter_row_with_pk_prefix(partition_key, PrefetchOptions::new_for_exhaust_iter())
+            .iter_row_with_pk_prefix_sub_range(
+                partition_key,
+                sub_range,
+                PrefetchOptions::new_for_exhaust_iter(),
+            )
             .await?;
 
         #[for_await]
