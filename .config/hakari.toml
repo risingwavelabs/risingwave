@@ -15,9 +15,10 @@ resolver = "2"
 # Add triples corresponding to platforms commonly used by developers here.
 # https://doc.rust-lang.org/rustc/platform-support.html
 platforms = [
-    # "x86_64-unknown-linux-gnu",
-    # "x86_64-apple-darwin",
-    # "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
 ]
 
 # Write out exact versions rather than a semver range. (Defaults to false.)
@@ -35,6 +36,4 @@ third-party = [
     { name = "criterion" },
     { name = "console" },
     { name = "similar" },
-    # FYI: https://github.com/risingwavelabs/risingwave/issues/12315
-    { name = "tikv-jemalloc-sys", git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" },
 ]
