@@ -638,6 +638,19 @@ message ListBranchedObjectResponse {
   repeated BranchedObject branched_objects = 1;
 }
 
+message ListActiveWriteLimitRequest {}
+
+message ListActiveWriteLimitResponse {
+  // < compaction group id, write limit info >
+  map<uint64, WriteLimits.WriteLimit> write_limits = 1;
+}
+
+message ListHummockMetaConfigRequest {}
+
+message ListHummockMetaConfigResponse {
+  map<string, string> configs = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -669,6 +682,8 @@ service HummockManagerService {
   rpc RiseCtlListCompactionStatus(RiseCtlListCompactionStatusRequest) returns (RiseCtlListCompactionStatusResponse);
   rpc SubscribeCompactionEvent(stream SubscribeCompactionEventRequest) returns (stream SubscribeCompactionEventResponse);
   rpc ListBranchedObject(ListBranchedObjectRequest) returns (ListBranchedObjectResponse);
+  rpc ListActiveWriteLimit(ListActiveWriteLimitRequest) returns (ListActiveWriteLimitResponse);
+  rpc ListHummockMetaConfig(ListHummockMetaConfigRequest) returns (ListHummockMetaConfigResponse);
 }
 
 message CompactionConfig {

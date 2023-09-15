@@ -1965,6 +1965,16 @@ impl HummockManager {
         self.compactor_manager.clone()
     }
 
+    #[named]
+    pub async fn compaction_task_from_assignment_for_test(
+        &self,
+        task_id: u64,
+    ) -> Option<CompactTaskAssignment> {
+        let compaction_guard = read_lock!(self, compaction).await;
+        let assignment_ref = &compaction_guard.compact_task_assignment;
+        assignment_ref.get(&task_id).cloned()
+    }
+
     pub fn cluster_manager(&self) -> &ClusterManagerRef {
         &self.cluster_manager
     }
