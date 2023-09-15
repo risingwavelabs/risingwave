@@ -1138,7 +1138,7 @@ pub mod default {
         }
 
         pub fn dir() -> String {
-            "".to_string()
+            "./".to_string()
         }
     }
 
