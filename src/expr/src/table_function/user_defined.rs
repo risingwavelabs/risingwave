@@ -56,7 +56,7 @@ impl UserDefinedTableFunction {
         }
 
         let opts =
-            arrow_array::RecordBatchOptions::default().with_row_count(Some(input.cardinality()));
+            arrow_array::RecordBatchOptions::default().with_row_count(Some(input.capacity()));
         let input =
             arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
                 .expect("failed to build record batch");
