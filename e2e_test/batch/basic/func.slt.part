@@ -570,6 +570,12 @@ select regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不�
 ----
 💩💩💩💩💩foo🤔️bar亲爱的😭这是🥵爱情❤️‍🔥
 
+# Positive Lookahead
+query T
+select regexp_replace('foobarbaz', 'a(?=r)', 'X');
+----
+foobXrbaz
+
 query T
 select regexp_count('ABCABCAXYaxy', 'A.');
 ----
