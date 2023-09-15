@@ -72,7 +72,6 @@ pub mod system_param;
 pub mod telemetry;
 pub mod transaction;
 
-pub mod format;
 pub mod metrics;
 pub mod test_utils;
 pub mod types;
