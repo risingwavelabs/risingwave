@@ -49,7 +49,7 @@ pub use tracing;
 use self::catalog::SinkType;
 use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
 use self::encoder::SerTo;
-use self::formatter::{format_chunk, SinkFormatter};
+use self::formatter::SinkFormatter;
 use self::iceberg::{IcebergSink, ICEBERG_SINK, REMOTE_ICEBERG_SINK};
 use crate::sink::boxed::BoxSink;
 use crate::sink::catalog::{SinkCatalog, SinkId};
@@ -229,7 +229,7 @@ pub trait FormattedSink {
         F::K: SerTo<Self::K>,
         F::V: SerTo<Self::V>,
     {
-        for r in format_chunk(formatter, &chunk) {
+        for r in formatter.format_chunk(&chunk) {
             let (event_key_object, event_object) = r?;
 
             self.write_one(

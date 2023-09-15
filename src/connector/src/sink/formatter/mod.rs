@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::row::Row;
+use risingwave_common::array::StreamChunk;
 
 use crate::sink::Result;
 
@@ -26,27 +24,27 @@ pub use upsert::UpsertFormatter;
 
 /// Transforms a `StreamChunk` into a sequence of key-value pairs according a specific format,
 /// for example append-only, upsert or debezium.
-///
-/// Each row in the `StreamChunk` may emit 0, 1, or more output pairs, which would be concatenated
-/// (flattened) by [`format_chunk`]. This auxiliary function is not included as a provided method
-/// due to some typing issue.
-///
-/// Generator syntax, once available, may make this simpler. Note that we only need an iterator,
-/// and async generator would be an overkill.
 pub trait SinkFormatter {
     type K;
     type V;
-    type I: IntoIterator<Item = (Option<Self::K>, Option<Self::V>)>;
 
-    fn format_row(&mut self, op: Op, row: impl Row + Copy) -> Result<Self::I>;
+    fn format_chunk(
+        &self,
+        chunk: &StreamChunk,
+    ) -> impl Iterator<Item = Result<(Option<Self::K>, Option<Self::V>)>>;
 }
 
-pub fn format_chunk<'a, F: SinkFormatter + 'a>(
-    mut formatter: F,
-    chunk: &'a StreamChunk,
-) -> impl Iterator<Item = Result<<F::I as IntoIterator>::Item>> + 'a {
-    chunk
-        .rows()
-        .map(move |(op, row)| formatter.format_row(op, row))
-        .flatten_ok()
+/// `tri!` in generators yield `Err` and return `()`
+/// `?` in generators return `Err`
+#[macro_export]
+macro_rules! tri {
+    ($expr:expr) => {
+        match $expr {
+            Ok(val) => val,
+            Err(err) => {
+                yield Err(err);
+                return;
+            }
+        }
+    };
 }

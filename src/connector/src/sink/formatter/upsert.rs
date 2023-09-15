@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{Op, Result, Row, SinkFormatter};
+use risingwave_common::array::Op;
+
+use super::{Result, SinkFormatter, StreamChunk};
 use crate::sink::encoder::RowEncoder;
+use crate::tri;
 
 pub struct UpsertFormatter<KE, VE> {
     key_encoder: KE,
@@ -30,23 +33,29 @@ impl<KE, VE> UpsertFormatter<KE, VE> {
 }
 
 impl<KE: RowEncoder, VE: RowEncoder> SinkFormatter for UpsertFormatter<KE, VE> {
-    type I = Option<(Option<Self::K>, Option<Self::V>)>;
     type K = KE::Output;
     type V = VE::Output;
 
-    fn format_row(&mut self, op: Op, row: impl Row + Copy) -> Result<Self::I> {
-        let event_key_object = Some(self.key_encoder.encode(row)?);
+    fn format_chunk(
+        &self,
+        chunk: &StreamChunk,
+    ) -> impl Iterator<Item = Result<(Option<Self::K>, Option<Self::V>)>> {
+        std::iter::from_generator(|| {
+            for (op, row) in chunk.rows() {
+                let event_key_object = Some(tri!(self.key_encoder.encode(row)));
 
-        let event_object = match op {
-            Op::Insert | Op::UpdateInsert => Some(self.val_encoder.encode(row)?),
-            // Empty value with a key
-            Op::Delete => None,
-            Op::UpdateDelete => {
-                // upsert semantic does not require update delete event
-                return Ok(None);
+                let event_object = match op {
+                    Op::Insert | Op::UpdateInsert => Some(tri!(self.val_encoder.encode(row))),
+                    // Empty value with a key
+                    Op::Delete => None,
+                    Op::UpdateDelete => {
+                        // upsert semantic does not require update delete event
+                        continue;
+                    }
+                };
+
+                yield Ok((event_key_object, event_object))
             }
-        };
-
-        Ok(Some((event_key_object, event_object)))
+        })
     }
 }
