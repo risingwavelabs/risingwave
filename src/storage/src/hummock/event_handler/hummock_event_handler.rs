@@ -22,8 +22,11 @@ use await_tree::InstrumentAwait;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    info_in_release, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
+};
 use risingwave_pb::hummock::version_update_payload::Payload;
+use risingwave_pb::hummock::Inheritances;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, trace, warn};
@@ -407,6 +410,7 @@ impl HummockEventHandler {
             .unwrap_or_else(|| self.pinned_version.load().clone());
 
         let mut sst_delta_infos = vec![];
+        let mut inheritances: HashMap<HummockSstableObjectId, Inheritances> = HashMap::default();
         let newly_pinned_version = match version_payload {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = pinned_version.version();
@@ -416,6 +420,12 @@ impl HummockEventHandler {
                         sst_delta_infos = version_to_apply.build_sst_delta_infos(version_delta);
                     }
                     version_to_apply.apply_version_delta(version_delta);
+                    inheritances.extend(
+                        version_delta
+                            .inheritances
+                            .iter()
+                            .map(|(sst_obj_id, infos)| (*sst_obj_id, infos.clone())),
+                    );
                 }
 
                 version_to_apply
@@ -427,8 +437,12 @@ impl HummockEventHandler {
 
         let new_pinned_version = pinned_version.new_pin_version(newly_pinned_version);
 
-        self.refiller
-            .start_cache_refill(sst_delta_infos, pinned_version, new_pinned_version);
+        self.refiller.start_cache_refill(
+            inheritances,
+            sst_delta_infos,
+            pinned_version,
+            new_pinned_version,
+        );
     }
 
     fn apply_version_update(

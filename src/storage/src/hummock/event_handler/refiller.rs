@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
@@ -29,11 +29,13 @@ use prometheus::{
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
+use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_pb::hummock::Inheritances;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::{HummockResult, SstableStoreRef, TableHolder};
+use crate::hummock::{HummockResult, SstableBlockIndex, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 pub static GLOBAL_CACHE_REFILL_METRICS: LazyLock<CacheRefillMetrics> =
@@ -149,11 +151,13 @@ impl CacheRefiller {
 
     pub fn start_cache_refill(
         &mut self,
+        inheritances: HashMap<HummockSstableObjectId, Inheritances>,
         deltas: Vec<SstDeltaInfo>,
         pinned_version: Arc<PinnedVersion>,
         new_pinned_version: PinnedVersion,
     ) {
         let task = CacheRefillTask {
+            inheritances,
             deltas,
             context: self.context.clone(),
         };
@@ -209,6 +213,7 @@ struct CacheRefillContext {
 }
 
 pub struct CacheRefillTask {
+    inheritances: HashMap<HummockSstableObjectId, Inheritances>,
     deltas: Vec<SstDeltaInfo>,
     context: CacheRefillContext,
 }
@@ -220,6 +225,24 @@ impl CacheRefillTask {
             .iter()
             .map(|delta| {
                 let context = self.context.clone();
+
+                let mut inheritances = HashMap::default();
+                for info in &delta.insert_sst_infos {
+                    if let Some(data) = self.inheritances.get(&info.object_id) {
+                        let data = data
+                            .inheritances
+                            .iter()
+                            .map(|inheritance| {
+                                (
+                                    inheritance.parent_sst_obj_id,
+                                    inheritance.parent_sst_blk_idx as usize,
+                                )
+                            })
+                            .collect_vec();
+                        inheritances.insert(info.object_id, data);
+                    }
+                }
+
                 async move {
                     let holders = match Self::meta_cache_refill(&context, delta).await {
                         Ok(holders) => holders,
@@ -228,7 +251,7 @@ impl CacheRefillTask {
                             return;
                         }
                     };
-                    Self::data_cache_refill(&context, delta, holders).await;
+                    Self::data_cache_refill(&context, &inheritances, delta, holders).await;
                 }
             })
             .collect_vec();
@@ -263,6 +286,7 @@ impl CacheRefillTask {
 
     async fn data_cache_refill(
         context: &CacheRefillContext,
+        inheritances: &HashMap<HummockSstableObjectId, Vec<(HummockSstableObjectId, usize)>>,
         delta: &SstDeltaInfo,
         holders: Vec<TableHolder>,
     ) {
@@ -288,34 +312,57 @@ impl CacheRefillTask {
                 .iter()
                 .any(|id| filter.contains(id))
         {
-            GLOBAL_CACHE_REFILL_METRICS.data_refill_filtered_total.inc();
+            let blocks = holders
+                .iter()
+                .map(|sst| sst.value().block_count() as u64)
+                .sum::<u64>();
+            GLOBAL_CACHE_REFILL_METRICS
+                .data_refill_filtered_total
+                .inc_by(blocks);
             return;
         }
 
         let mut tasks = vec![];
         for sst_info in &holders {
-            let task = async move {
-                GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
-
-                let permit = context.concurrency.acquire().await.unwrap();
-
-                GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
-
-                match context
+            for idx in 0..sst_info.value().block_count() {
+                let (parent_sst_obj_id, parent_sst_blk_idx) =
+                    inheritances.get(sst_info.key()).unwrap()[idx];
+                if !context
                     .sstable_store
-                    .fill_data_file_cache(sst_info.value())
+                    .data_file_cache()
+                    .exists(&SstableBlockIndex {
+                        sst_id: parent_sst_obj_id,
+                        block_idx: parent_sst_blk_idx as u64,
+                    })
                     .await
+                    .unwrap_or_default()
                 {
-                    Ok(()) => GLOBAL_CACHE_REFILL_METRICS
-                        .data_refill_success_duration
-                        .observe(now.elapsed().as_secs_f64()),
-                    Err(e) => {
-                        tracing::warn!("data cache refill error: {:?}", e);
-                    }
+                    continue;
                 }
-                drop(permit);
-            };
-            tasks.push(task);
+
+                let task = async move {
+                    GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
+
+                    let permit = context.concurrency.acquire().await.unwrap();
+
+                    GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
+
+                    match context
+                        .sstable_store
+                        .fill_data_file_cache(sst_info.value(), idx)
+                        .await
+                    {
+                        Ok(()) => GLOBAL_CACHE_REFILL_METRICS
+                            .data_refill_success_duration
+                            .observe(now.elapsed().as_secs_f64()),
+                        Err(e) => {
+                            tracing::warn!("data cache refill error: {:?}", e);
+                        }
+                    }
+                    drop(permit);
+                };
+                tasks.push(task);
+            }
         }
 
         join_all(tasks).await;
