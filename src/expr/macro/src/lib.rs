@@ -30,18 +30,19 @@ mod utils;
 ///
 /// # Table of Contents
 ///
-/// - [Function Signature](#function-signature)
+/// - [SQL Function Signature](#sql-function-signature)
 ///     - [Multiple Function Definitions](#multiple-function-definitions)
 ///     - [Type Expansion](#type-expansion)
 ///     - [Automatic Type Inference](#automatic-type-inference)
 ///     - [Custom Type Inference Function](#custom-type-inference-function)
-/// - [Rust Function Requirements](#rust-function-requirements)
+/// - [Rust Function Signature](#rust-function-signature)
 ///     - [Nullable Arguments](#nullable-arguments)
 ///     - [Return Value](#return-value)
 ///     - [Optimization](#optimization)
 ///     - [Functions Returning Strings](#functions-returning-strings)
 ///     - [Preprocessing Constant Arguments](#preprocessing-constant-arguments)
 ///     - [Context](#context)
+///     - [Async Function](#async-function)
 /// - [Table Function](#table-function)
 /// - [Registration and Invocation](#registration-and-invocation)
 /// - [Appendix: Type Matrix](#appendix-type-matrix)
@@ -55,13 +56,13 @@ mod utils;
 /// }
 /// ```
 ///
-/// # Function Signature
+/// # SQL Function Signature
 ///
 /// Each function must have a signature, specified in the `function("...")` part of the macro
 /// invocation. The signature follows this pattern:
 ///
 /// ```text
-/// name([arg_types],*) -> [setof] return_type
+/// name ( [arg_types],* ) [ -> [setof] return_type ]
 /// ```
 ///
 /// Where `name` is the function name, which must match the function name defined in `prost`.
@@ -72,6 +73,9 @@ mod utils;
 /// When `setof` appears before the return type, this indicates that the function is a set-returning
 /// function (table function), meaning it can return multiple values instead of just one. For more
 /// details, see the section on table functions.
+///
+/// If no return type is specified, the function returns `void`. However, the void type is not
+/// supported in our type system, so it now returns a null value of type int.
 ///
 /// ## Multiple Function Definitions
 ///
@@ -154,7 +158,7 @@ mod utils;
 ///
 /// This type inference function will be invoked at the frontend.
 ///
-/// # Rust Function Requirements
+/// # Rust Function Signature
 ///
 /// The `#[function]` macro can handle various types of Rust functions.
 ///
@@ -276,6 +280,19 @@ mod utils;
 ///    // ...
 /// }
 /// ```
+///
+/// ## Async Function
+///
+/// Functions can be asynchronous.
+///
+/// ```ignore
+/// #[function("pg_sleep(float64)")]
+/// async fn pg_sleep(second: F64) {
+///     tokio::time::sleep(Duration::from_secs_f64(second.0)).await;
+/// }
+/// ```
+///
+/// Asynchronous functions will be evaluated on rows sequentially.
 ///
 /// # Table Function
 ///
@@ -460,6 +477,8 @@ struct FunctionAttr {
     prebuild: Option<String>,
     /// Type inference function.
     type_infer: Option<String>,
+    /// Whether the function is volatile.
+    volatile: bool,
     /// Whether the function is deprecated.
     deprecated: bool,
 }
@@ -469,6 +488,8 @@ struct FunctionAttr {
 struct UserFunctionAttr {
     /// Function name
     name: String,
+    /// Whether the function is async.
+    async_: bool,
     /// Whether contains argument `&Context`.
     context: bool,
     /// The last argument type is `&mut dyn Write`.
@@ -556,7 +577,8 @@ impl FunctionAttr {
 impl UserFunctionAttr {
     /// Returns true if the function is like `fn(T1, T2, .., Tn) -> T`.
     fn is_pure(&self) -> bool {
-        !self.write
+        !self.async_
+            && !self.write
             && !self.context
             && !self.arg_option
             && self.return_type_kind == ReturnTypeKind::T
