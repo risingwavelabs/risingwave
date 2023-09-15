@@ -290,9 +290,10 @@ impl CacheRefillTask {
         let mut tasks = vec![];
         for sst_info in &holders {
             let task = async move {
+                GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
+
                 let permit = context.concurrency.acquire().await.unwrap();
 
-                GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
                 match context
                     .sstable_store
                     .fill_data_file_cache(sst_info.value())
