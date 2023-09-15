@@ -447,8 +447,8 @@ mod tests {
     use risingwave_common::util::row_serde::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
-    use risingwave_pb::catalog::table::{PbTableStatus, TableType};
-    use risingwave_pb::catalog::PbTable;
+    use risingwave_pb::catalog::table::TableType;
+    use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
     use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
     use risingwave_pb::plan_common::PbColumnCatalog;
 
@@ -549,7 +549,7 @@ mod tests {
             cardinality: None,
             created_at_epoch: None,
             cleaned_by_watermark: false,
-            create_status: PbTableStatus::Creating.into(),
+            stream_job_status: PbStreamJobStatus::Created.into(),
         }
     }
 
