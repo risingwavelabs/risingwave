@@ -896,7 +896,7 @@ mod tests {
             };
 
             self.catalog_manager
-                .start_create_table_procedure(&table)
+                .start_create_table_procedure(&table, vec![])
                 .await?;
             self.global_stream_manager
                 .create_streaming_job(table_fragments, ctx)

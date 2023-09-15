@@ -629,9 +629,13 @@ impl CatalogManager {
     pub async fn start_create_stream_job_procedure(
         &self,
         stream_job: &StreamingJob,
+        internal_tables: Vec<Table>,
     ) -> MetaResult<()> {
         match stream_job {
-            StreamingJob::MaterializedView(table) => self.start_create_table_procedure(table).await,
+            StreamingJob::MaterializedView(table) => {
+                self.start_create_table_procedure(table, internal_tables)
+                    .await
+            }
             StreamingJob::Sink(sink) => self.start_create_sink_procedure(sink).await,
             StreamingJob::Index(index, index_table) => {
                 self.start_create_index_procedure(index, index_table).await
@@ -641,7 +645,7 @@ impl CatalogManager {
                     self.start_create_table_procedure_with_source(source, table)
                         .await
                 } else {
-                    self.start_create_table_procedure(table).await
+                    self.start_create_table_procedure(table, vec![]).await
                 }
             }
         }
@@ -694,7 +698,13 @@ impl CatalogManager {
     }
 
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
-    pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
+    /// TODO(kwannoel): Should both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`
+    /// commit_meta? Or it doesn't matter?
+    pub async fn start_create_table_procedure(
+        &self,
+        table: &Table,
+        internal_tables: Vec<Table>,
+    ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -712,11 +722,21 @@ impl CatalogManager {
         if database_core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure");
         } else {
-            // commit_meta?
+            let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+            assert!(
+                !tables.contains_key(&table.id),
+                "table must not already exist in meta"
+            );
+            for table in internal_tables {
+                tables.insert(table.id, table);
+            }
+            tables.insert(table.id, table.clone());
+            commit_meta!(self, tables)?;
+            // TODO: commit_meta?
             // also add a status for table and sink catalog.
             // Seems like these will no longer be needed
-            database_core.mark_creating(&key);
-            database_core.mark_creating_streaming_job(table.id, key);
+            // database_core.mark_creating(&key);
+            // database_core.mark_creating_streaming_job(table.id, key);
             for &dependent_relation_id in &table.dependent_relations {
                 database_core.increase_ref_count(dependent_relation_id);
             }

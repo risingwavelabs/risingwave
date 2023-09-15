@@ -564,6 +564,8 @@ impl DdlController {
             StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
                 .await?;
 
+        let internal_tables = fragment_graph.internal_tables().into_values().collect_vec();
+
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
         stream_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
@@ -571,7 +573,7 @@ impl DdlController {
 
         // 3. Mark current relation as "creating" and add reference count to dependent relations.
         self.catalog_manager
-            .start_create_stream_job_procedure(stream_job)
+            .start_create_stream_job_procedure(stream_job, internal_tables)
             .await?;
 
         Ok(fragment_graph)
