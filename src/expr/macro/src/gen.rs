@@ -59,14 +59,14 @@ impl FunctionAttr {
             return self.generate_table_function_descriptor(user_fn, build_fn);
         }
         let name = self.name.clone();
-        let mut args = Vec::with_capacity(self.args.len());
-        for ty in &self.args {
-            if ty == "..." {
-                break;
-            }
-            args.push(data_type_name(ty));
-        }
         let variadic = matches!(self.args.last(), Some(t) if t == "...");
+        let args = match variadic {
+            true => &self.args[..self.args.len() - 1],
+            false => &self.args[..],
+        }
+        .iter()
+        .map(|ty| data_type_name(ty))
+        .collect_vec();
         let ret = data_type_name(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
