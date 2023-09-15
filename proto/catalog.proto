@@ -192,6 +192,7 @@ message Table {
   }
 
   enum TableStatus {
+    UNSPECIFIED = 0;
     CREATING = 0;
     CREATED = 1;
   }
