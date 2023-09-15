@@ -27,7 +27,7 @@ use risingwave_pb::hummock::GetNewSstIdsRequest;
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
 use risingwave_rpc_client::{ExtraInfoSource, HummockMetaClient};
 use sync_point::sync_point;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Mutex as TokioMutux};
 
 use crate::hummock::{HummockError, HummockResult};
 pub type SstableObjectIdManagerRef = Arc<SstableObjectIdManager>;
@@ -200,14 +200,11 @@ impl GetObjectId for Arc<SstableObjectIdManager> {
     }
 }
 
-/// `SharedComapctorObjectIdManager` is used to get output sst id for serverless compaction.
-#[derive(Clone)]
-pub struct SharedComapctorObjectIdManager {
+struct SharedComapctorObjectIdManagerCore {
     output_object_ids: VecDeque<u64>,
     client: HummockManagerServiceClient<tonic::transport::Channel>,
 }
-
-impl SharedComapctorObjectIdManager {
+impl SharedComapctorObjectIdManagerCore {
     pub fn new(
         output_object_ids: VecDeque<u64>,
         client: HummockManagerServiceClient<tonic::transport::Channel>,
@@ -218,24 +215,44 @@ impl SharedComapctorObjectIdManager {
         }
     }
 }
+/// `SharedComapctorObjectIdManager` is used to get output sst id for serverless compaction.
+#[derive(Clone)]
+pub struct SharedComapctorObjectIdManager {
+    core: Arc<TokioMutux<SharedComapctorObjectIdManagerCore>>,
+}
+
+impl SharedComapctorObjectIdManager {
+    pub fn new(
+        output_object_ids: VecDeque<u64>,
+        client: HummockManagerServiceClient<tonic::transport::Channel>,
+    ) -> Self {
+        Self {
+            core: Arc::new(TokioMutux::new(SharedComapctorObjectIdManagerCore::new(
+                output_object_ids,
+                client,
+            ))),
+        }
+    }
+}
 
 #[async_trait::async_trait]
 impl GetObjectId for SharedComapctorObjectIdManager {
     async fn get_new_sst_object_id(&mut self) -> HummockResult<HummockSstableObjectId> {
-        if let Some(first_element) = self.output_object_ids.pop_front() {
+        let mut guard = self.core.lock().await;
+        let core = guard.deref_mut();
+
+        if let Some(first_element) = core.output_object_ids.pop_front() {
             Ok(first_element)
         } else {
             tracing::warn!("The pre-allocated object ids are used up, and new object id are obtained through RPC.");
             let request = GetNewSstIdsRequest { number: 1 };
-            match self.client.get_new_sst_ids(request).await {
-                Ok(reponse) => return Ok(reponse.into_inner().start_id),
-                Err(e) => {
-                    return Err(HummockError::other(format!(
-                        "Fail to get new sst id, {}",
-                        e
-                    )));
-                }
-            };
+            match core.client.get_new_sst_ids(request).await {
+                Ok(reponse) => Ok(reponse.into_inner().start_id),
+                Err(e) => Err(HummockError::other(format!(
+                    "Fail to get new sst id, {}",
+                    e
+                ))),
+            }
         }
     }
 }
