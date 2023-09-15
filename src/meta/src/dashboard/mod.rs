@@ -49,7 +49,6 @@ pub struct DashboardService {
     pub fragment_manager: FragmentManagerRef,
     pub compute_clients: ComputeClientPool,
     pub ui_path: Option<String>,
-    pub binary_path: Option<String>,
     pub meta_store: MetaStoreRef,
 }
 
@@ -290,16 +289,7 @@ pub(super) mod handlers {
         if !collapsed_path.exists() {
             let result = client.download(file_path.clone()).await.map_err(err)?;
             fs::write(cache_file_path.clone(), result.result).map_err(err)?;
-            if let Some(binary_path) = srv.binary_path.clone() {
-                heap_profile::run_jeprof(
-                    cache_file_path_str,
-                    collapsed_path_str.clone(),
-                    binary_path,
-                )
-                .await?;
-            } else {
-                bail!("RisingWave binary path not specified");
-            }
+            heap_profile::run_jeprof(cache_file_path_str, collapsed_path_str.clone()).await?;
         }
 
         let collapsed_str =

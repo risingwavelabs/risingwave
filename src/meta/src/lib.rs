@@ -123,10 +123,6 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    /// The path of `risingwave` binary file.
-    #[clap(long, env = "RW_BINARY_PATH")]
-    binary_path: Option<String>,
-
     #[clap(long, env = "RW_BACKEND", value_enum)]
     #[override_opts(path = meta.backend)]
     backend: Option<MetaBackend>,
@@ -281,7 +277,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 security_group_id: opts.security_group_id,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 privatelink_endpoint_default_tags,
-                rw_binary_path: opts.binary_path,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_space_reclaim_compaction_interval_sec,

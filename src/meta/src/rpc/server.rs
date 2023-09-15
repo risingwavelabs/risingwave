@@ -427,7 +427,6 @@ pub async fn start_service_as_election_leader(
             compute_clients: ComputeClientPool::default(),
             meta_store: env.meta_store_ref(),
             ui_path: address_info.ui_path,
-            binary_path: opts.rw_binary_path,
         };
         let task = tokio::spawn(dashboard_service.serve());
         Some(task)

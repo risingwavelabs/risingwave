@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::{env, fs};
 
 use anyhow::anyhow;
 
@@ -23,12 +23,13 @@ use super::handlers::{err, DashboardError};
 pub async fn run_jeprof(
     profile_path: String,
     collapsed_path: String,
-    binary_path: String,
 ) -> Result<(), DashboardError> {
+    let executable_path = env::current_exe().map_err(err)?;
+
     let prof_cmd = move || {
         Command::new("jeprof")
             .arg("--collapsed")
-            .arg(Path::new(&binary_path))
+            .arg(executable_path)
             .arg(Path::new(&profile_path))
             .output()
     };
