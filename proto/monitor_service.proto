@@ -33,10 +33,9 @@ message HeapProfilingResponse {}
 
 message ListHeapProfilingRequest {}
 message ListHeapProfilingResponse {
-  string dir_manually = 1;
+  string dir = 1;
   repeated string name_manually = 2;
-  string dir_auto = 3;
-  repeated string name_auto = 4;
+  repeated string name_auto = 3;
 }
 
 // Download files

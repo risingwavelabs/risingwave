@@ -116,18 +116,11 @@ impl JemallocMemoryControl {
             let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
             let file_name = format!("{}.{}.{}\0", time_prefix, AUTO_DUMP_MID_NAME, self.dump_seq,);
 
-            let file_path = if !self.heap_profiling_config.dir.is_empty() {
-                Path::new(&self.heap_profiling_config.dir)
-                    .join(Path::new(&file_name))
-                    .to_str()
-                    .unwrap()
-                    .to_string()
-            } else {
-                let prof_prefix = jemalloc_opt::prof_prefix::read().unwrap();
-                let mut file_path = prof_prefix.to_str().unwrap().to_string();
-                file_path.push_str(&file_name);
-                file_path
-            };
+            let file_path = Path::new(&self.heap_profiling_config.dir)
+                .join(Path::new(&file_name))
+                .to_str()
+                .unwrap()
+                .to_string();
 
             let file_path_str = Box::leak(file_path.into_boxed_str());
             let file_path_bytes = unsafe { file_path_str.as_bytes_mut() };

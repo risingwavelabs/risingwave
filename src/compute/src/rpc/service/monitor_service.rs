@@ -172,8 +172,8 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<ListHeapProfilingRequest>,
     ) -> Result<Response<ListHeapProfilingResponse>, Status> {
-        let auto_dump_dir = self.server_config.heap_profiling.dir.clone();
-        let auto_dump_files_name: Vec<_> = fs::read_dir(auto_dump_dir.clone())?
+        let dump_dir = self.server_config.heap_profiling.dir.clone();
+        let auto_dump_files_name: Vec<_> = fs::read_dir(dump_dir.clone())?
             .map(|entry| {
                 let entry = entry?;
                 Ok::<_, Status>(entry.file_name().to_string_lossy().to_string())
@@ -186,8 +186,7 @@ impl MonitorService for MonitorServiceImpl {
                 }
             })
             .try_collect()?;
-        let manually_dump_dir = self.server_config.heap_profiling.dir.clone();
-        let manually_dump_files_name: Vec<_> = fs::read_dir(manually_dump_dir.clone())?
+        let manually_dump_files_name: Vec<_> = fs::read_dir(dump_dir.clone())?
             .map(|entry| {
                 let entry = entry?;
                 Ok::<_, Status>(entry.file_name().to_string_lossy().to_string())
@@ -202,9 +201,8 @@ impl MonitorService for MonitorServiceImpl {
             .try_collect()?;
 
         Ok(Response::new(ListHeapProfilingResponse {
-            dir_auto: auto_dump_dir,
+            dir: dump_dir,
             name_auto: auto_dump_files_name,
-            dir_manually: manually_dump_dir,
             name_manually: manually_dump_files_name,
         }))
     }

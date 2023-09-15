@@ -96,12 +96,12 @@ export default function HeapProfiling() {
     }
     if (profileType === "Auto") {
       setSelectedProfileList({
-        dir: profileList.dirAuto,
+        dir: profileList.dir,
         name: profileList.nameAuto,
       })
     } else if (profileType === "Manually") {
       setSelectedProfileList({
-        dir: profileList.dirManually,
+        dir: profileList.dir,
         name: profileList.nameManually,
       })
     } else {
