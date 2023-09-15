@@ -17,6 +17,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use either::Either;
 use futures::{pin_mut, FutureExt, Stream, StreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
@@ -1205,11 +1206,8 @@ where
     ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
         let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
 
-        let memcomparable_range = prefix_and_sub_range_to_memcomparable(
-            &self.pk_serde,
-            sub_range,
-            pk_prefix.to_owned_row(),
-        );
+        let memcomparable_range =
+            prefix_and_sub_range_to_memcomparable(&self.pk_serde, sub_range, pk_prefix);
 
         let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &vnode);
         Ok(deserialize_keyed_row_stream(
@@ -1326,34 +1324,22 @@ pub fn prefix_range_to_memcomparable(
     )
 }
 
-pub fn prefix_and_sub_range_to_memcomparable(
+fn prefix_and_sub_range_to_memcomparable(
     pk_serde: &OrderedRowSerde,
     sub_range: &(Bound<impl Row>, Bound<impl Row>),
-    pk_prefix: OwnedRow,
+    pk_prefix: impl Row,
 ) -> (Bound<Bytes>, Bound<Bytes>) {
     let (range_start, range_end) = sub_range;
-    let pk_prefix_calculate_start_range = pk_prefix.clone();
-    let pk_prefix_calculate_end_range = pk_prefix.clone();
     let prefix_serializer = pk_serde.prefix(pk_prefix.len());
-    let serialized_pk_prefix = serialize_pk(pk_prefix, &prefix_serializer);
-
+    let serialized_pk_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
     let start_range = match range_start {
-        Included(start_range) => {
-            Bound::Included((pk_prefix_calculate_start_range.chain(start_range)).to_owned_row())
-        }
-        Excluded(start_range) => {
-            Bound::Excluded((pk_prefix_calculate_start_range.chain(start_range)).to_owned_row())
-        }
-        Unbounded => Bound::Included(pk_prefix_calculate_start_range),
+        Included(start_range) => Bound::Included(Either::Left((&pk_prefix).chain(start_range))),
+        Excluded(start_range) => Bound::Excluded(Either::Left((&pk_prefix).chain(start_range))),
+        Unbounded => Bound::Included(Either::Right(&pk_prefix)),
     };
-
     let end_range = match range_end {
-        Included(end_range) => {
-            Bound::Included((pk_prefix_calculate_end_range.chain(end_range)).to_owned_row())
-        }
-        Excluded(end_range) => {
-            Bound::Excluded((pk_prefix_calculate_end_range.chain(end_range)).to_owned_row())
-        }
+        Included(end_range) => Bound::Included((&pk_prefix).chain(end_range)),
+        Excluded(end_range) => Bound::Excluded((&pk_prefix).chain(end_range)),
         Unbounded => Unbounded,
     };
     (
