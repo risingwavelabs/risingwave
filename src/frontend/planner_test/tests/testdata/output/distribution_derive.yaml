@@ -240,7 +240,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(a.v), a.k1] }
         └── StreamHashAgg { group_key: [a.k1], aggs: [max(a.v), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -303,7 +303,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(ak1.v), ak1.k1] }
         └── StreamHashAgg { group_key: [ak1.k1], aggs: [max(ak1.v), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
@@ -362,7 +362,10 @@
     StreamMaterialize { columns: [max_v, ak1k2.k1(hidden)], stream_key: [ak1k2.k1], pk_columns: [ak1k2.k1], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(ak1k2.v), ak1k2.k1] }
-        └── StreamHashAgg { group_key: [ak1k2.k1], aggs: [max(ak1k2.v), count] } { result table: 1, state tables: [ 0 ], distinct tables: [] }
+        └── StreamHashAgg { group_key: [ak1k2.k1], aggs: [max(ak1k2.v), count] }
+            ├── intermediate state table: 1
+            ├── state tables: [ 0 ]
+            ├── distinct tables: []
             └── Chain { table: ak1k2, columns: [ak1k2.k1, ak1k2.v, ak1k2.k2, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
                 ├── state table: 2
                 ├── Upstream
@@ -422,7 +425,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(ak1k2.v), ak1k2.k2] }
         └── StreamHashAgg { group_key: [ak1k2.k2], aggs: [max(ak1k2.v), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -484,7 +487,7 @@
     StreamMaterialize { columns: [sum_v, ak1k2.k1(hidden), ak1k2.k2(hidden)], stream_key: [ak1k2.k1, ak1k2.k2], pk_columns: [ak1k2.k1, ak1k2.k2], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum(ak1k2.v), ak1k2.k1, ak1k2.k2] }
-        └── StreamHashAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [sum(ak1k2.v), count] } { result table: 0, state tables: [], distinct tables: [] }
+        └── StreamHashAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [sum(ak1k2.v), count] } { intermediate state table: 0, state tables: [], distinct tables: [] }
             └── Chain { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1) }
                 ├── state table: 1
                 ├── Upstream
@@ -534,7 +537,7 @@
     StreamMaterialize { columns: [sum_v, ak1.k1(hidden), ak1.k2(hidden)], stream_key: [ak1.k1, ak1.k2], pk_columns: [ak1.k1, ak1.k2], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum(ak1.v), ak1.k1, ak1.k2] }
-        └── StreamHashAgg { group_key: [ak1.k1, ak1.k2], aggs: [sum(ak1.v), count] } { result table: 0, state tables: [], distinct tables: [] }
+        └── StreamHashAgg { group_key: [ak1.k1, ak1.k2], aggs: [sum(ak1.v), count] } { intermediate state table: 0, state tables: [], distinct tables: [] }
             └── Chain { table: ak1, columns: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
                 ├── state table: 1
                 ├── Upstream
@@ -595,11 +598,11 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(count), a.k1] }
         └── StreamHashAgg { group_key: [a.k1], aggs: [max(count), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamHashAgg { group_key: [a.k1], aggs: [count] }
-                ├── result table: 2
+                ├── intermediate state table: 2
                 ├── state tables: []
                 ├── distinct tables: []
                 └── StreamExchange Hash([0]) from 1
@@ -694,13 +697,16 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(count), a.k1] }
         └── StreamHashAgg { group_key: [a.k1], aggs: [max(count), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
-    StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count] } { result table: 2, state tables: [], distinct tables: [] }
+    StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count] }
+    ├── intermediate state table: 2
+    ├── state tables: []
+    ├── distinct tables: []
     └── StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
@@ -793,13 +799,16 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(count), a.k2] }
         └── StreamHashAgg { group_key: [a.k2], aggs: [max(count), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Hash([1]) from 1
 
     Fragment 1
-    StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count] } { result table: 2, state tables: [], distinct tables: [] }
+    StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count] }
+    ├── intermediate state table: 2
+    ├── state tables: []
+    ├── distinct tables: []
     └── StreamExchange Hash([0, 1]) from 2
 
     Fragment 2
@@ -876,8 +885,11 @@
     StreamMaterialize { columns: [max_num, a.k1(hidden), a.k2(hidden)], stream_key: [a.k1, a.k2], pk_columns: [a.k1, a.k2], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(count), a.k1, a.k2] }
-        └── StreamHashAgg { group_key: [a.k1, a.k2], aggs: [max(count), count] } { result table: 1, state tables: [ 0 ], distinct tables: [] }
-            └── StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count] } { result table: 2, state tables: [], distinct tables: [] }
+        └── StreamHashAgg { group_key: [a.k1, a.k2], aggs: [max(count), count] }
+            ├── intermediate state table: 1
+            ├── state tables: [ 0 ]
+            ├── distinct tables: []
+            └── StreamHashAgg { group_key: [a.k1, a.k2], aggs: [count] } { intermediate state table: 2, state tables: [], distinct tables: [] }
                 └── StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
@@ -963,7 +975,7 @@
     ├── materialized table: 4294967294
     └── StreamHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count, ak1.a._row_id, ak1.k1, a.k1] } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
         ├── StreamExchange Hash([0]) from 1
-        └── StreamHashAgg { group_key: [a.k1], aggs: [count] } { result table: 5, state tables: [], distinct tables: [] }
+        └── StreamHashAgg { group_key: [a.k1], aggs: [count] } { intermediate state table: 5, state tables: [], distinct tables: [] }
             └── StreamExchange Hash([0]) from 2
 
     Fragment 1
@@ -1036,7 +1048,7 @@
         ├── right table: 2
         ├── left degree table: 1
         ├── right degree table: 3
-        ├── StreamHashAgg { group_key: [a.k1], aggs: [count] } { result table: 4, state tables: [], distinct tables: [] }
+        ├── StreamHashAgg { group_key: [a.k1], aggs: [count] } { intermediate state table: 4, state tables: [], distinct tables: [] }
         │   └── StreamExchange Hash([0]) from 1
         └── StreamExchange Hash([0]) from 2
 
@@ -1139,9 +1151,9 @@
         ├── right table: 2
         ├── left degree table: 1
         ├── right degree table: 3
-        ├── StreamHashAgg { group_key: [a.k1], aggs: [count] } { result table: 4, state tables: [], distinct tables: [] }
+        ├── StreamHashAgg { group_key: [a.k1], aggs: [count] } { intermediate state table: 4, state tables: [], distinct tables: [] }
         │   └── StreamExchange Hash([0]) from 1
-        └── StreamHashAgg { group_key: [b.k1], aggs: [count] } { result table: 6, state tables: [], distinct tables: [] }
+        └── StreamHashAgg { group_key: [b.k1], aggs: [count] } { intermediate state table: 6, state tables: [], distinct tables: [] }
             └── StreamExchange Hash([0]) from 2
 
     Fragment 1

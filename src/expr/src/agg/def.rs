@@ -314,8 +314,6 @@ pub mod agg_kinds {
         () => {
             AggKind::BitAnd
                 | AggKind::BitOr
-                | AggKind::BoolAnd
-                | AggKind::BoolOr
                 | AggKind::JsonbAgg
                 | AggKind::JsonbObjectAgg
                 | AggKind::PercentileCont
@@ -410,6 +408,10 @@ pub mod agg_kinds {
                 | AggKind::PercentileCont
                 | AggKind::PercentileDisc
                 | AggKind::Mode
+                // FIXME(wrj): move `BoolAnd` and `BoolOr` out
+                //  after we support general merge in stateless_simple_agg
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
         };
     }
     pub use simply_cannot_two_phase;
@@ -423,6 +425,8 @@ pub mod agg_kinds {
                 | AggKind::Sum0
                 | AggKind::Count
                 | AggKind::BitXor
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
                 | AggKind::ApproxCountDistinct
         };
     }
@@ -455,8 +459,6 @@ impl AggKind {
             AggKind::BitAnd
             | AggKind::BitOr
             | AggKind::BitXor
-            | AggKind::BoolAnd
-            | AggKind::BoolOr
             | AggKind::Min
             | AggKind::Max
             | AggKind::Sum => Some(self),

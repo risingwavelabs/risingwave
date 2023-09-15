@@ -237,7 +237,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum0(count)] }
         └── StreamSimpleAgg { aggs: [sum0(count), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -255,7 +255,7 @@
     Fragment 2
     StreamProject { exprs: [t.a] }
     └── StreamHashAgg { group_key: [t.a], aggs: [count] }
-        ├── result table: 5
+        ├── intermediate state table: 5
         ├── state tables: []
         ├── distinct tables: []
         └── StreamExchange Hash([0]) from 3
