@@ -211,9 +211,12 @@ pub fn insert_privatelink_broker_rewrite_map(
     svc: Option<&PrivateLinkService>,
     privatelink_endpoint: Option<String>,
 ) -> anyhow::Result<()> {
-    let mut broker_rewrite_map: HashMap<String, String>;
+    let mut broker_rewrite_map = HashMap::new();
     let servers = get_property_required(properties, kafka_props_broker_key(properties))?;
     let broker_addrs = servers.split(',').collect_vec();
+    let link_target_value = get_property_required(properties, PRIVATE_LINK_TARGETS_KEY)?;
+    let link_targets: Vec<AwsPrivateLinkItem> =
+        serde_json::from_str(link_target_value.as_str()).map_err(|e| anyhow!(e))?;
 
     if let Some(endpoint) = privatelink_endpoint {
         for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
@@ -225,10 +228,6 @@ pub fn insert_privatelink_broker_rewrite_map(
             return Err(anyhow!("Privatelink endpoint not found.",));
         }
         let svc = svc.unwrap();
-        broker_rewrite_map = HashMap::new();
-        let link_target_value = get_property_required(properties, PRIVATE_LINK_TARGETS_KEY)?;
-        let link_targets: Vec<AwsPrivateLinkItem> =
-            serde_json::from_str(link_target_value.as_str()).map_err(|e| anyhow!(e))?;
         if broker_addrs.len() != link_targets.len() {
             return Err(anyhow!(
                 "The number of broker addrs {} does not match the number of private link targets {}",
