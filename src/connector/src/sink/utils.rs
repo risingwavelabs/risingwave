@@ -267,7 +267,7 @@ pub async fn gen_upsert_message_stream<'a>(
         let event_key_object_inner = Value::Object(key_encoder.encode(row)?);
         let event_key_object = if enable_schema {
             json_converter_gen_event_object(
-                key_encoder.schema(),
+                &key_encoder,
                 event_key_object_inner,
                 enable_schema,
                 &schema_name,
@@ -278,7 +278,7 @@ pub async fn gen_upsert_message_stream<'a>(
 
         let event_object = match op {
             Op::Insert => json_converter_gen_event_object(
-                val_encoder.schema(),
+                &val_encoder,
                 Value::Object(val_encoder.encode(row)?),
                 enable_schema,
                 &schema_name,
@@ -289,7 +289,7 @@ pub async fn gen_upsert_message_stream<'a>(
                 continue;
             }
             Op::UpdateInsert => json_converter_gen_event_object(
-                val_encoder.schema(),
+                &key_encoder,
                 Value::Object(val_encoder.encode(row)?),
                 enable_schema,
                 &schema_name,
@@ -322,16 +322,20 @@ pub async fn gen_append_only_message_stream<'a>(
 }
 
 fn json_converter_gen_event_object(
-    schema: &Schema,
+    encoder: &JsonEncoder<'_>,
     object: Value,
     enable_schema: bool,
     name: &Option<String>,
 ) -> Option<Value> {
+    let fields = encoder.schema().fields();
     if enable_schema {
         Some(json!({
             "schema": {
                 "type": "struct",
-                "fields": schema.fields().iter().map(json_converter_field_to_json).collect::<Vec<_>>(),
+                "fields": match encoder.col_indices() {
+                    Some(indices) => indices.iter().map(|i| json_converter_field_to_json(&fields[*i])).collect::<Vec<_>>(),
+                    _ => fields.iter().map(json_converter_field_to_json).collect::<Vec<_>>(),
+                },
                 "optional": "false",
                 "name": name,
             },
