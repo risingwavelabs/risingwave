@@ -294,8 +294,9 @@ pub(crate) mod tests {
             .await;
 
             hummock_manager_ref
-                .report_compact_task(
+                .report_compact_task_for_test(
                     result_task.task_id,
+                    Some(compact_task),
                     result_task.task_status(),
                     result_task.sorted_output_ssts,
                     Some(to_prost_table_stats_map(task_stats)),
@@ -370,8 +371,6 @@ pub(crate) mod tests {
                 },
             )
             .await;
-        println!("ret {:?}", ret);
-
         assert!(ret.is_err());
     }
 

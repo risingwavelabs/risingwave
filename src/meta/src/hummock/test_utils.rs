@@ -116,8 +116,9 @@ pub async fn add_test_tables(
     }
 
     let ret = hummock_manager
-        .report_compact_task(
+        .report_compact_task_for_test(
             compact_task.task_id,
+            Some(compact_task),
             TaskStatus::Success,
             test_tables_2.clone(),
             None,

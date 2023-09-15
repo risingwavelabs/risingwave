@@ -458,7 +458,7 @@ impl HummockManager {
             return Ok(parent_group_id);
         }
         let table_ids = table_ids.iter().cloned().unique().collect_vec();
-        let compaction_guard = write_lock!(self, compaction).await;
+        let mut compaction_guard = write_lock!(self, compaction).await;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
@@ -475,6 +475,7 @@ impl HummockManager {
                 )));
             }
         }
+
         if table_ids.len() == parent_group.member_table_ids.len() {
             return Err(Error::CompactionGroup(format!(
                 "invalid split attempt for group {}: all member tables are moved",
@@ -593,6 +594,7 @@ impl HummockManager {
                 new_compaction_group_id
             }
         };
+
         let mut current_version = versioning.current_version.clone();
         let sst_split_info = current_version.apply_version_delta(&new_version_delta);
 
@@ -653,9 +655,17 @@ impl HummockManager {
                 }
             }
         }
+
         for task in canceled_tasks {
             if !self
-                .report_compact_task(task.task_id, TaskStatus::ManualCanceled, vec![], None)
+                .report_compact_task_impl(
+                    task.task_id,
+                    None,
+                    TaskStatus::ManualCanceled,
+                    vec![],
+                    &mut compaction_guard,
+                    None,
+                )
                 .await
                 .unwrap_or(false)
             {
