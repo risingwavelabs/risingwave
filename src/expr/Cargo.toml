@@ -28,6 +28,7 @@ ctor = "0.2"
 downcast-rs = "1.2"
 easy-ext = "1"
 either = "1"
+enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
@@ -53,7 +54,6 @@ static_assertions = "1"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tracing = "0.1"
-enum-as-inner = "0.6"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

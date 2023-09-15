@@ -262,6 +262,7 @@ impl<K: Ord, V: Clone> WindowBuffer<K, V> {
 /// Calculate range (A - B), the result might be the union of two ranges when B is totally included
 /// in the A.
 fn range_except(a: Range<usize>, b: Range<usize>) -> (Range<usize>, Range<usize>) {
+    #[allow(clippy::if_same_then_else)] // for better readability
     if a.is_empty() {
         (0..0, 0..0)
     } else if b.is_empty() {
@@ -296,23 +297,28 @@ fn range_except(a: Range<usize>, b: Range<usize>) -> (Range<usize>, Range<usize>
 
 /// Calculate the difference of two ranges A and B, return (removed ranges, added ranges).
 /// Note this is quite different from [`range_except`].
+#[allow(clippy::type_complexity)] // looks complex but it's not
 fn range_diff(
     a: Range<usize>,
     b: Range<usize>,
 ) -> (SmallVec<[Range<usize>; 2]>, SmallVec<[Range<usize>; 2]>) {
     if a.start == b.start {
-        if a.end == b.end {
-            // a: [   )
-            // b: [   )
-            (smallvec![], smallvec![])
-        } else if a.end < b.end {
-            // a: [   )
-            // b: [     )
-            (smallvec![], smallvec![a.end..b.end])
-        } else {
-            // a: [     )
-            // b: [   )
-            (smallvec![b.end..a.end], smallvec![])
+        match a.end.cmp(&b.end) {
+            std::cmp::Ordering::Equal => {
+                // a: [   )
+                // b: [   )
+                (smallvec![], smallvec![])
+            }
+            std::cmp::Ordering::Less => {
+                // a: [   )
+                // b: [     )
+                (smallvec![], smallvec![a.end..b.end])
+            }
+            std::cmp::Ordering::Greater => {
+                // a: [     )
+                // b: [   )
+                (smallvec![b.end..a.end], smallvec![])
+            }
         }
     } else if a.end == b.end {
         debug_assert!(a.start != b.start);
@@ -356,6 +362,8 @@ fn range_diff(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use itertools::Itertools;
 
     use super::*;
