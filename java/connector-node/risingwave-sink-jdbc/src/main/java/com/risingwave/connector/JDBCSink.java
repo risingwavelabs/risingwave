@@ -60,8 +60,8 @@ public class JDBCSink extends SinkWriterBase {
         try {
             this.conn = DriverManager.getConnection(config.getJdbcUrl());
             this.conn.setAutoCommit(false);
-            this.pkColumnNames = tableSchema.getPrimaryKeys();
-            // getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
+            this.pkColumnNames =
+                    getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(

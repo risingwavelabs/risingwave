@@ -62,18 +62,17 @@ public class JDBCSinkFactory implements SinkFactory {
                         conn.getMetaData().getTables(null, schemaName, "%", null);
                 ResultSet columnResultSet =
                         conn.getMetaData().getColumns(null, schemaName, tableName, null);
-                // ResultSet pkResultSet =
-                //         conn.getMetaData().getPrimaryKeys(null, schemaName, tableName);
-                ) {
+                ResultSet pkResultSet =
+                        conn.getMetaData().getPrimaryKeys(null, schemaName, tableName);) {
             while (tableNamesResultSet.next()) {
                 jdbcTableNames.add(tableNamesResultSet.getString("TABLE_NAME"));
             }
             while (columnResultSet.next()) {
                 jdbcColumns.add(columnResultSet.getString("COLUMN_NAME"));
             }
-            // while (pkResultSet.next()) {
-            //     jdbcPks.add(pkResultSet.getString("COLUMN_NAME"));
-            // }
+            while (pkResultSet.next()) {
+                jdbcPks.add(pkResultSet.getString("COLUMN_NAME"));
+            }
         } catch (SQLException e) {
             LOG.error("failed to connect to target database. jdbcUrl: {}", jdbcUrl, e);
             throw Status.INVALID_ARGUMENT
