@@ -183,7 +183,7 @@ fn regexp_count_start0(text: &str, regex: &RegexpContext) -> Result<i32> {
 fn regexp_count(text: &str, start: i32, regex: &RegexpContext) -> Result<i32> {
     // First get the start position to count for
     let start = match start {
-        ..=0 => {
+        ..0 => {
             return Err(ExprError::InvalidParam {
                 name: "start",
                 reason: start.to_string().into(),
@@ -267,7 +267,7 @@ fn regexp_replace(
 ) -> Result<Box<str>> {
     // The start position to begin the search
     let start = match start {
-        ..=0 => {
+        ..0 => {
             return Err(ExprError::InvalidParam {
                 name: "start",
                 reason: start.to_string().into(),
