@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::ops::Range;
 
 use risingwave_common::array::Op;
@@ -46,6 +46,10 @@ pub struct CurrWindow<'a, K> {
 impl<K: Ord, V: Clone> WindowBuffer<K, V> {
     pub fn new(frame: Frame, enable_delta: bool) -> Self {
         assert!(frame.bounds.is_valid());
+        if enable_delta {
+            // TODO(rc): currently only support `FrameExclusion::NoOthers` for delta
+            assert!(frame.exclusion.is_no_others());
+        }
         Self {
             frame,
             buffer: Default::default(),
@@ -128,6 +132,7 @@ impl<K: Ord, V: Clone> WindowBuffer<K, V> {
     }
 
     fn curr_window_exclusion(&self) -> Range<usize> {
+        // TODO(rc): should intersect with `curr_window_outer` to be more accurate
         match self.frame.exclusion {
             FrameExclusion::CurrentRow => self.curr_idx..self.curr_idx + 1,
             FrameExclusion::NoOthers => self.curr_idx..self.curr_idx,
@@ -201,62 +206,28 @@ impl<K: Ord, V: Clone> WindowBuffer<K, V> {
         }
     }
 
-    fn recalculate_left_right_and_delta(&mut self) {
-        let old_outer = self.curr_window_outer();
-        let old_exclusion = self.curr_window_exclusion();
-        self.recalculate_left_right();
-        let new_outer = self.curr_window_outer();
-        let new_exclusion = self.curr_window_exclusion();
+    fn maintain_delta(&mut self, old_outer: Range<usize>, new_outer: Range<usize>) {
+        debug_assert!(self.frame.exclusion.is_no_others());
 
         let (outer_removed, outer_added) = range_diff(old_outer.clone(), new_outer.clone());
-
         let delta = self.curr_delta.as_mut().unwrap();
-
         for idx in outer_removed.iter().cloned().flatten() {
-            if old_exclusion.contains(&idx) {
-                // not included in old window
-            } else {
-                delta.push((Op::Delete, self.buffer[idx].value.clone()));
-            }
+            delta.push((Op::Delete, self.buffer[idx].value.clone()));
         }
         for idx in outer_added.iter().cloned().flatten() {
-            if new_exclusion.contains(&idx) {
-                // not included in new window
-            } else {
-                delta.push((Op::Insert, self.buffer[idx].value.clone()));
-            }
-        }
-
-        if self.frame.exclusion.is_no_others() {
-            // no exclusion, we're done
-            return;
-        }
-
-        let outer_removed = outer_removed.into_iter().flatten().collect::<HashSet<_>>();
-        let outer_added = outer_added.into_iter().flatten().collect::<HashSet<_>>();
-        let mut old_exclusion = old_exclusion.into_iter().collect::<HashSet<_>>();
-        let mut new_exclusion = new_exclusion.into_iter().collect::<HashSet<_>>();
-        let still_excluded = old_exclusion
-            .intersection(&new_exclusion)
-            .copied()
-            .collect::<HashSet<_>>();
-        old_exclusion.retain(|idx| !outer_removed.contains(idx) /* already removed */ && !still_excluded.contains(idx));
-        new_exclusion.retain(|idx| !outer_added.contains(idx) /* already excluded */ && !still_excluded.contains(idx));
-        for idx in old_exclusion {
             delta.push((Op::Insert, self.buffer[idx].value.clone()));
-        }
-        for idx in new_exclusion {
-            delta.push((Op::Delete, self.buffer[idx].value.clone()));
         }
     }
 
     /// Append a key-value pair to the buffer.
     pub fn append(&mut self, key: K, value: V) {
+        let old_outer = self.curr_window_outer();
+
         self.buffer.push_back(Entry { key, value });
+        self.recalculate_left_right();
+
         if self.curr_delta.is_some() {
-            self.recalculate_left_right_and_delta();
-        } else {
-            self.recalculate_left_right();
+            self.maintain_delta(old_outer, self.curr_window_outer());
         }
     }
 
@@ -269,13 +240,13 @@ impl<K: Ord, V: Clone> WindowBuffer<K, V> {
     /// Slide the current window forward.
     /// Returns the keys that are removed from the buffer.
     pub fn slide(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
-        self.curr_idx += 1;
+        let old_outer = self.curr_window_outer();
 
-        if let Some(delta) = &mut self.curr_delta {
-            delta.clear();
-            self.recalculate_left_right_and_delta();
-        } else {
-            self.recalculate_left_right();
+        self.curr_idx += 1;
+        self.recalculate_left_right();
+
+        if self.curr_delta.is_some() {
+            self.maintain_delta(old_outer, self.curr_window_outer());
         }
 
         let min_needed_idx = std::cmp::min(self.left_idx, self.curr_idx);

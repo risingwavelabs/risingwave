@@ -71,12 +71,13 @@ impl AggregateState {
             )
             .expect("the agg func must exist");
         let agg_func = (agg_func_sig.build)(&agg_call)?;
-        let (agg_impl, enable_delta) = if !agg_func_sig.append_only {
-            let init_state = agg_func.create_state();
-            (AggImpl::Incremental(init_state), true)
-        } else {
-            (AggImpl::Full, false)
-        };
+        let (agg_impl, enable_delta) =
+            if !agg_func_sig.append_only && call.frame.exclusion.is_no_others() {
+                let init_state = agg_func.create_state();
+                (AggImpl::Incremental(init_state), true)
+            } else {
+                (AggImpl::Full, false)
+            };
         Ok(Self {
             agg_func,
             agg_impl,
