@@ -672,7 +672,7 @@ mod tests {
                 FrameBound::CurrentRow,
                 FrameExclusion::CurrentRow,
             ),
-            true,
+            false,
         );
 
         buffer.append(1, "hello");
