@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::GroupTopNNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{ActorContextRef, AppendOnlyGroupTopNExecutor, GroupTopNExecutor};
+use crate::executor::{ActorContextRef, AppendOnlyGroupTopNExecutor, GroupTopNExecutor, PkIndices};
 use crate::task::AtomicU64Ref;
 
 pub struct GroupTopNExecutorBuilder<const APPEND_ONLY: bool>;
@@ -80,6 +80,7 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEN
             state_table,
             watermark_epoch: stream.get_watermark_epoch(),
             group_key_types,
+            pk_indices: params.pk_indices,
 
             with_ties: node.with_ties,
             append_only: APPEND_ONLY,
@@ -99,6 +100,7 @@ struct GroupTopNExecutorDispatcherArgs<S: StateStore> {
     state_table: StateTable<S>,
     watermark_epoch: AtomicU64Ref,
     group_key_types: Vec<DataType>,
+    pk_indices: PkIndices,
 
     with_ties: bool,
     append_only: bool,
@@ -120,6 +122,7 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
                     self.group_by,
                     self.state_table,
                     self.watermark_epoch,
+                    self.pk_indices,
                 )?
                 .boxed())
             };
