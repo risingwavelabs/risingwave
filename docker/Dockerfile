@@ -61,6 +61,16 @@ RUN mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /rising
   chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib && cargo clean
 
+FROM base AS java-planner
+
+RUN mkdir -p /risingwave
+WORKDIR /risingwave
+
+COPY java /risingwave/java/
+
+# Move java/**/pom.xml to poms/**/pom.xml
+RUN find . -name pom.xml -exec bash -c 'mkdir -p poms/$(dirname {}); mv {} poms/{}' \;
+
 # We use rust-maven-plugin to build java-binding. So it's FROM rust-base
 FROM rust-base AS java-builder
 
@@ -69,27 +79,7 @@ RUN apt-get -y install maven
 RUN mkdir -p /risingwave
 WORKDIR /risingwave/java
 
-# 1. add pom.xml only here
-# generated via: fd pom.xml | xargs -I {} echo 'COPY {} /risingwave/{}'
-COPY java/common-utils/pom.xml /risingwave/java/common-utils/pom.xml
-COPY java/connector-node/assembly/pom.xml /risingwave/java/connector-node/assembly/pom.xml
-COPY java/connector-node/connector-api/pom.xml /risingwave/java/connector-node/connector-api/pom.xml
-COPY java/connector-node/risingwave-connector-service/pom.xml /risingwave/java/connector-node/risingwave-connector-service/pom.xml
-COPY java/connector-node/risingwave-connector-test/pom.xml /risingwave/java/connector-node/risingwave-connector-test/pom.xml
-COPY java/connector-node/risingwave-sink-cassandra/pom.xml /risingwave/java/connector-node/risingwave-sink-cassandra/pom.xml
-COPY java/connector-node/risingwave-sink-deltalake/pom.xml /risingwave/java/connector-node/risingwave-sink-deltalake/pom.xml
-COPY java/connector-node/risingwave-sink-es-7/pom.xml /risingwave/java/connector-node/risingwave-sink-es-7/pom.xml
-COPY java/connector-node/risingwave-sink-iceberg/pom.xml /risingwave/java/connector-node/risingwave-sink-iceberg/pom.xml
-COPY java/connector-node/risingwave-sink-jdbc/pom.xml /risingwave/java/connector-node/risingwave-sink-jdbc/pom.xml
-COPY java/connector-node/risingwave-source-cdc/pom.xml /risingwave/java/connector-node/risingwave-source-cdc/pom.xml
-COPY java/connector-node/s3-common/pom.xml /risingwave/java/connector-node/s3-common/pom.xml
-COPY java/java-binding/pom.xml /risingwave/java/java-binding/pom.xml
-COPY java/java-binding-benchmark/pom.xml /risingwave/java/java-binding-benchmark/pom.xml
-COPY java/java-binding-integration-test/pom.xml /risingwave/java/java-binding-integration-test/pom.xml
-COPY java/pom.xml /risingwave/java/pom.xml
-COPY java/proto/pom.xml /risingwave/java/proto/pom.xml
-COPY java/udf/pom.xml /risingwave/java/udf/pom.xml
-COPY java/udf-example/pom.xml /risingwave/java/udf-example/pom.xml
+COPY --from=java-planner /risingwave/poms /risingwave/java/
 
 # 2. start downloading dependencies
 RUN mvn dependency:go-offline --fail-never
