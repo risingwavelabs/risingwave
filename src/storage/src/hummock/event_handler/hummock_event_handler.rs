@@ -373,7 +373,7 @@ impl HummockEventHandler {
         );
         self.uploader.clear();
 
-        for (epoch, result_sender) in self.pending_sync_requests.drain_filter(|_, _| true) {
+        for (epoch, result_sender) in self.pending_sync_requests.extract_if(|_, _| true) {
             send_sync_result(
                 result_sender,
                 Err(HummockError::other(format!(
@@ -511,7 +511,7 @@ impl HummockEventHandler {
             UploaderEvent::ImmMerged(merge_output) => {
                 // update read version for corresponding table shards
                 let read_guard = self.read_version_mapping.read();
-                read_guard.get(&merge_output.table_id).map_or((), |shards| {
+                if let Some(shards) = read_guard.get(&merge_output.table_id) {
                     shards.get(&merge_output.instance_id).map_or_else(
                         || {
                             warn!(
@@ -525,7 +525,7 @@ impl HummockEventHandler {
                             ));
                         },
                     )
-                });
+                }
             }
         }
     }

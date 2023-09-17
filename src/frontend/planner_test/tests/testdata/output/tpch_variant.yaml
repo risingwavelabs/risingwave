@@ -347,7 +347,7 @@
     └── StreamHashJoin { type: Inner, predicate: p_partkey IS NOT DISTINCT FROM p_partkey AND ps_supplycost = min(ps_supplycost), output: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id, _row_id, r_regionkey, _row_id, _row_id, _row_id, ps_suppkey, n_nationkey, ps_supplycost, p_partkey] } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
         ├── StreamExchange Hash([0]) from 1
         └── StreamProject { exprs: [p_partkey, min(ps_supplycost)] }
-            └── StreamHashAgg { group_key: [p_partkey], aggs: [min(ps_supplycost), count] } { result table: 26, state tables: [ 25 ], distinct tables: [] }
+            └── StreamHashAgg { group_key: [p_partkey], aggs: [min(ps_supplycost), count] } { intermediate state table: 26, state tables: [ 25 ], distinct tables: [] }
                 └── StreamHashJoin { type: LeftOuter, predicate: p_partkey IS NOT DISTINCT FROM ps_partkey, output: [p_partkey, ps_supplycost, _row_id, _row_id, ps_suppkey, _row_id, _row_id, r_regionkey, s_nationkey] } { left table: 27, right table: 29, left degree table: 28, right degree table: 30 }
                     ├── StreamAppendOnlyDedup { dedup_cols: [p_partkey] } { state table: 31 }
                     │   └── StreamExchange Hash([0]) from 15
@@ -664,7 +664,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [n_name, sum($expr1)] }
         └── StreamHashAgg [append_only] { group_key: [n_name], aggs: [sum($expr1), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -937,7 +937,7 @@
     StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], stream_key: [supp_nation, cust_nation, l_year], pk_columns: [supp_nation, cust_nation, l_year], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [n_name, n_name, $expr1, sum($expr2)] }
-        └── StreamHashAgg [append_only] { group_key: [n_name, n_name, $expr1], aggs: [sum($expr2), count] } { result table: 0, state tables: [], distinct tables: [] }
+        └── StreamHashAgg [append_only] { group_key: [n_name, n_name, $expr1], aggs: [sum($expr2), count] } { intermediate state table: 0, state tables: [], distinct tables: [] }
             └── StreamExchange Hash([0, 1, 2]) from 1
 
     Fragment 1
@@ -1243,7 +1243,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [$expr1, RoundDigit((sum($expr3) / sum($expr2)), 6:Int32) as $expr4] }
         └── StreamHashAgg [append_only] { group_key: [$expr1], aggs: [sum($expr3), sum($expr2), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -1559,7 +1559,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [n_name, $expr1, RoundDigit(sum($expr2), 2:Int32) as $expr3] }
         └── StreamHashAgg [append_only] { group_key: [n_name, $expr1], aggs: [sum($expr2), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0, 1]) from 1
@@ -1868,7 +1868,7 @@
         └── StreamHashJoin { type: Inner, predicate: ps_partkey IS NOT DISTINCT FROM ps_partkey AND ps_suppkey IS NOT DISTINCT FROM ps_suppkey, output: all } { left table: 10, right table: 12, left degree table: 11, right degree table: 13 }
             ├── StreamExchange Hash([0, 1]) from 5
             └── StreamProject { exprs: [ps_partkey, ps_suppkey, (0.5:Decimal * sum(l_quantity)) as $expr2] }
-                └── StreamHashAgg { group_key: [ps_partkey, ps_suppkey], aggs: [sum(l_quantity), count] } { result table: 20, state tables: [], distinct tables: [] }
+                └── StreamHashAgg { group_key: [ps_partkey, ps_suppkey], aggs: [sum(l_quantity), count] } { intermediate state table: 20, state tables: [], distinct tables: [] }
                     └── StreamHashJoin { type: LeftOuter, predicate: ps_partkey IS NOT DISTINCT FROM l_partkey AND ps_suppkey IS NOT DISTINCT FROM l_suppkey, output: [ps_partkey, ps_suppkey, l_quantity, _row_id] }
                         ├── left table: 21
                         ├── right table: 23
@@ -1897,7 +1897,7 @@
 
     Fragment 9
     StreamProject { exprs: [ps_partkey, ps_suppkey] }
-    └── StreamHashAgg { group_key: [ps_partkey, ps_suppkey], aggs: [count] } { result table: 25, state tables: [], distinct tables: [] }
+    └── StreamHashAgg { group_key: [ps_partkey, ps_suppkey], aggs: [count] } { intermediate state table: 25, state tables: [], distinct tables: [] }
         └── StreamExchange NoShuffle from 6
 
     Fragment 10
@@ -2113,7 +2113,10 @@
     Fragment 0
     StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [numwait, s_name], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamHashAgg { group_key: [s_name], aggs: [count] } { result table: 0, state tables: [], distinct tables: [] }
+    └── StreamHashAgg { group_key: [s_name], aggs: [count] }
+        ├── intermediate state table: 0
+        ├── state tables: []
+        ├── distinct tables: []
         └── StreamExchange Hash([0]) from 1
 
     Fragment 1

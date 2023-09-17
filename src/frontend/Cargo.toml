@@ -88,3 +88,6 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 tempfile = "3"
+
+[lints]
+workspace = true

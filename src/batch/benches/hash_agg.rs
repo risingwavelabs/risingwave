@@ -142,7 +142,7 @@ fn bench_hash_agg(c: &mut Criterion) {
                                 chunk_num,
                             )
                         },
-                        |e| execute_executor(e),
+                        execute_executor,
                         BatchSize::SmallInput,
                     );
                 },

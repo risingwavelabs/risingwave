@@ -18,7 +18,7 @@ use crate::error::ErrorCode;
 /// `DataType` information extracted from PostgreSQL `pg_type`
 ///
 /// ```sql
-/// select oid, typarray, typname, typlen from pg_type
+/// select oid, typarray, typname, typinput, typlen from pg_type
 /// where oid in (16, 21, 23, 20, 1700, 700, 701, 1043, 17, 1082, 1114, 1184, 1083, 1186, 3802);
 /// ```
 ///
@@ -30,21 +30,21 @@ macro_rules! for_all_base_types {
     ($macro:ident $(, $x:tt)*) => {
         $macro! {
             $($x, )*
-            { Boolean     |   16 |     1000 | bool        |      1 }
-            { Bytea       |   17 |     1001 | bytea       |     -1 }
-            { Int64       |   20 |     1016 | int8        |      8 }
-            { Int16       |   21 |     1005 | int2        |      2 }
-            { Int32       |   23 |     1007 | int4        |      4 }
-            { Float32     |  700 |     1021 | float4      |      4 }
-            { Float64     |  701 |     1022 | float8      |      8 }
-            { Varchar     | 1043 |     1015 | varchar     |     -1 }
-            { Date        | 1082 |     1182 | date        |      4 }
-            { Time        | 1083 |     1183 | time        |      8 }
-            { Timestamp   | 1114 |     1115 | timestamp   |      8 }
-            { Timestamptz | 1184 |     1185 | timestamptz |      8 }
-            { Interval    | 1186 |     1187 | interval    |     16 }
-            { Decimal     | 1700 |     1231 | numeric     |     -1 }
-            { Jsonb       | 3802 |     3807 | jsonb       |     -1 }
+            { Boolean     |   16 |     1000 | bool        | boolin         |      1 }
+            { Bytea       |   17 |     1001 | bytea       | byteain        |     -1 }
+            { Int64       |   20 |     1016 | int8        | int8in         |      8 }
+            { Int16       |   21 |     1005 | int2        | int2in         |      2 }
+            { Int32       |   23 |     1007 | int4        | int4in         |      4 }
+            { Float32     |  700 |     1021 | float4      | float4in       |      4 }
+            { Float64     |  701 |     1022 | float8      | float8in       |      8 }
+            { Varchar     | 1043 |     1015 | varchar     | varcharin      |     -1 }
+            { Date        | 1082 |     1182 | date        | date_in        |      4 }
+            { Time        | 1083 |     1183 | time        | time_in        |      8 }
+            { Timestamp   | 1114 |     1115 | timestamp   | timestamp_in   |      8 }
+            { Timestamptz | 1184 |     1185 | timestamptz | timestamptz_in |      8 }
+            { Interval    | 1186 |     1187 | interval    | interval_in    |     16 }
+            { Decimal     | 1700 |     1231 | numeric     | numeric_in     |     -1 }
+            { Jsonb       | 3802 |     3807 | jsonb       | jsonb_in       |     -1 }
         }
     };
 }
@@ -53,7 +53,7 @@ macro_rules! for_all_base_types {
 impl DataType {
     pub fn type_len(&self) -> i16 {
         macro_rules! impl_type_len {
-            ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $len:literal } )*) => {
+            ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $input:ident | $len:literal } )*) => {
                 match self {
                     $(
                     DataType::$enum => $len,
@@ -75,7 +75,7 @@ impl DataType {
     //  For Numeric(aka Decimal): oid = 1700, array_type_oid = 1231
     pub fn from_oid(oid: i32) -> crate::error::Result<Self> {
         macro_rules! impl_from_oid {
-            ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $len:literal } )*) => {
+            ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $input:ident | $len:literal } )*) => {
                 match oid {
                     $(
                     $oid => Ok(DataType::$enum),
@@ -95,7 +95,7 @@ impl DataType {
 
     pub fn to_oid(&self) -> i32 {
         macro_rules! impl_to_oid {
-            ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $len:literal } )*) => {
+            ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $input:ident | $len:literal } )*) => {
                 match self {
                     $(
                     DataType::$enum => $oid,
@@ -121,7 +121,7 @@ impl DataType {
 
     pub fn pg_name(&self) -> &'static str {
         macro_rules! impl_pg_name {
-            ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $len:literal } )*) => {
+            ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $input:ident | $len:literal } )*) => {
                 match self {
                     $(
                     DataType::$enum => stringify!($name),

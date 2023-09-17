@@ -32,3 +32,6 @@ bench = false
 name = "data-chunk-payload-convert-generator"
 test = false
 bench = false
+
+[lints]
+workspace = true

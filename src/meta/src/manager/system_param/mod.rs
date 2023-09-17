@@ -21,7 +21,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{check_missing_params, set_system_param};
-use risingwave_common::{for_all_undeprecated_params, key_of};
+use risingwave_common::{for_all_params, key_of};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SystemParams;
 use tokio::sync::oneshot::Sender;
@@ -113,9 +113,7 @@ impl SystemParamsManager {
     }
 
     // Periodically sync params to worker nodes.
-    pub async fn start_params_notifier(
-        system_params_manager: Arc<Self>,
-    ) -> (JoinHandle<()>, Sender<()>) {
+    pub fn start_params_notifier(system_params_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         const NOTIFY_INTERVAL: Duration = Duration::from_millis(5000);
 
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -184,4 +182,4 @@ macro_rules! impl_merge_params {
     };
 }
 
-for_all_undeprecated_params!(impl_merge_params);
+for_all_params!(impl_merge_params);

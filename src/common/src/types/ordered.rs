@@ -138,6 +138,7 @@ impl<T: DefaultOrd> From<T> for DefaultOrdered<T> {
     }
 }
 
+#[allow(clippy::incorrect_partial_ord_impl_on_ord_type)]
 impl<T: DefaultOrd> PartialOrd for DefaultOrdered<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.0.default_partial_cmp(other.as_inner())

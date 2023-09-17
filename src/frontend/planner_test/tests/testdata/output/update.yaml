@@ -111,3 +111,8 @@
     create table t(v1 int as v2-1, v2 int, v3 int as v2+1);
     update t set v1 = 3;
   binder_error: 'Bind error: update modifying the generated column is unsupported'
+- name: update columns references by generated pk
+  sql: |
+    create table t(v1 int as v2-1, v2 int, v3 int as v2+1, primary key (v3));
+    update t set v2 = 3;
+  binder_error: 'Bind error: update modifying the column referenced by generated columns that are part of the primary key is not allowed'

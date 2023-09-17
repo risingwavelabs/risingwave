@@ -143,7 +143,7 @@ impl StoreLocalStatistic {
         }
     }
 
-    fn report_bloom_filter_metrics(&self, metrics: &mut BloomFilterLocalMetrics) {
+    fn report_bloom_filter_metrics(&self, metrics: &BloomFilterLocalMetrics) {
         if self.bloom_filter_check_counts == 0 {
             return;
         }
@@ -171,7 +171,7 @@ impl StoreLocalStatistic {
 
     pub fn flush_all() {
         LOCAL_METRICS.with_borrow_mut(|local_metrics| {
-            for (_, metrics) in local_metrics.iter_mut() {
+            for metrics in local_metrics.values_mut() {
                 if metrics.collect_count > 0 {
                     metrics.flush();
                     metrics.collect_count = 0;
@@ -514,7 +514,7 @@ impl Drop for GetLocalMetricsGuard {
                 });
             self.local_stats.report(table_metrics);
             self.local_stats
-                .report_bloom_filter_metrics(&mut table_metrics.get_filter_metrics);
+                .report_bloom_filter_metrics(&table_metrics.get_filter_metrics);
         });
     }
 }
@@ -552,7 +552,7 @@ impl Drop for IterLocalMetricsGuard {
                 });
             self.local_stats.report(table_metrics);
             self.local_stats
-                .report_bloom_filter_metrics(&mut table_metrics.iter_filter_metrics);
+                .report_bloom_filter_metrics(&table_metrics.iter_filter_metrics);
         });
     }
 }
@@ -586,7 +586,7 @@ impl Drop for MayExistLocalMetricsGuard {
                 });
             self.local_stats.report(table_metrics);
             self.local_stats
-                .report_bloom_filter_metrics(&mut table_metrics.may_exist_filter_metrics);
+                .report_bloom_filter_metrics(&table_metrics.may_exist_filter_metrics);
         });
     }
 }
