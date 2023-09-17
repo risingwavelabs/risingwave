@@ -180,6 +180,9 @@ lto = 'off'
 debug = "full"
 split-debuginfo = "packed"
 lto = "thin"
+# To avoid [build-dependencies] being compiled twice
+[profile.release.build-override]
+opt-level = 3
 
 # The profile used for CI in main branch.
 # This profile inherits from the release profile, but turns on some checks and assertions for us to
@@ -216,6 +219,9 @@ inherits = "dev"
 opt-level = 2
 incremental = false
 debug = 1
+# To avoid [build-dependencies] being compiled twice
+[profile.ci-sim.build-override]
+opt-level = 2
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]
