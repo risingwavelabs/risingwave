@@ -54,9 +54,9 @@ ARG GIT_SHA
 ENV GIT_SHA=$GIT_SHA
 
 COPY ./ /risingwave
-RUN cargo fetch
-RUN cargo build -p risingwave_cmd_all --release --features "rw-static-link"
-RUN mkdir -p /risingwave/bin && \
+RUN cargo fetch && \
+  cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
+  mkdir -p /risingwave/bin && \
     mv /risingwave/target/release/risingwave /risingwave/bin/ && \
     mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \
   cp ./target/release/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
@@ -92,8 +92,8 @@ RUN mvn dependency:go-offline --fail-never
 # Besides, rust-maven-plugin sets --target-dir, so the dependencies are built twice. How to dedup?
 COPY ./ /risingwave
 
-RUN mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true
-RUN mkdir -p /risingwave/bin/connector-node && \
+RUN mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true && \
+  mkdir -p /risingwave/bin/connector-node && \
   tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
 FROM base AS risingwave
