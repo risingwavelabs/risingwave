@@ -21,7 +21,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{check_missing_params, set_system_param};
-use risingwave_common::{for_all_undeprecated_params, key_of};
+use risingwave_common::{for_all_params, key_of};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SystemParams;
 use tokio::sync::oneshot::Sender;
@@ -182,4 +182,4 @@ macro_rules! impl_merge_params {
     };
 }
 
-for_all_undeprecated_params!(impl_merge_params);
+for_all_params!(impl_merge_params);

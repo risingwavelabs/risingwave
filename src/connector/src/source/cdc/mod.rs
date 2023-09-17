@@ -26,7 +26,7 @@ pub use source::*;
 pub use split::*;
 
 use crate::impl_cdc_source_type;
-use crate::source::ConnectorProperties;
+use crate::source::{ConnectorProperties, SourceProperties, SplitImpl};
 
 pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
 
@@ -50,6 +50,18 @@ pub struct CdcProperties<T: CdcSourceTypeTrait> {
     pub table_schema: TableSchema,
 
     pub _phantom: PhantomData<T>,
+}
+
+impl<T: CdcSourceTypeTrait> SourceProperties for CdcProperties<T>
+where
+    DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>,
+    DebeziumSplitEnumerator<T>: ListCdcSplits<CdcSourceType = T>,
+{
+    type Split = DebeziumCdcSplit<T>;
+    type SplitEnumerator = DebeziumSplitEnumerator<T>;
+    type SplitReader = CdcSplitReader<T>;
+
+    const SOURCE_NAME: &'static str = T::CDC_CONNECTOR_NAME;
 }
 
 impl<T: CdcSourceTypeTrait> CdcProperties<T> {

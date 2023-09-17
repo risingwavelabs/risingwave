@@ -56,7 +56,9 @@ ENV GIT_SHA=$GIT_SHA
 COPY ./ /risingwave
 RUN cargo fetch
 RUN cargo build -p risingwave_cmd_all --release --features "rw-static-link"
-RUN mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+RUN mkdir -p /risingwave/bin && \
+    mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+    mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \
   cp ./target/release/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
   chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib && cargo clean
@@ -104,6 +106,7 @@ RUN apt-get -y install gdb \
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 
 COPY --from=rust-builder /risingwave/bin/risingwave /risingwave/bin/risingwave
+COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
 COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=rust-builder /risingwave/ui /risingwave/ui
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
@@ -112,6 +115,8 @@ COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 ENV PLAYGROUND_PROFILE docker-playground
 # Set default dashboard UI to local path instead of github proxy
 ENV RW_DASHBOARD_UI_PATH /risingwave/ui
+# Set default connector libs path
+ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
 ENV IN_CONTAINER=1
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
