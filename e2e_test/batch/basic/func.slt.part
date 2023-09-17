@@ -570,6 +570,30 @@ select regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不�
 ----
 💩💩💩💩💩foo🤔️bar亲爱的😭这是🥵爱情❤️‍🔥
 
+# Positive Lookahead
+query T
+select regexp_replace('foobarbaz', 'a(?=r)', 'X');
+----
+foobXrbaz
+
+# Negative Lookahead
+query T
+select regexp_replace('chocolate', 'o(?!c)', 'X');
+----
+chocXlate
+
+# Positive Lookbehind
+query T
+select regexp_replace('foobarXaz', '(?<=X)a', 'X');
+----
+foobarXXz
+
+# Negative Lookbehind
+query T
+select regexp_replace('foobarXaz', '(?<!X)a', 'X');
+----
+foobXrXaz
+
 query T
 select regexp_count('ABCABCAXYaxy', 'A.');
 ----

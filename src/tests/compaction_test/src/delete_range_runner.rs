@@ -36,7 +36,7 @@ use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
-use risingwave_pb::catalog::PbTable;
+use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
@@ -150,6 +150,7 @@ async fn compaction_test(
         cardinality: None,
         created_at_epoch: None,
         cleaned_by_watermark: false,
+        stream_job_status: PbStreamJobStatus::Created.into(),
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;

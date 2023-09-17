@@ -43,16 +43,16 @@ risingwave_sqlparser = { workspace = true }
 risingwave_sqlsmith = { workspace = true }
 serde = "1.0.188"
 serde_derive = "1.0.188"
-serde_json = "1.0.106"
+serde_json = "1.0.107"
 sqllogictest = "0.15.3"
 tempfile = "3"
-tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
-    "profiling",
-], rev = "b7f9f3" }
 tokio = { version = "0.2.23", package = "madsim-tokio" }
 tokio-postgres = "0.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(unix)'.dependencies]
+tikv-jemallocator = { workspace = true }
 
 [lints]
 workspace = true
