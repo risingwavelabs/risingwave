@@ -2501,6 +2501,18 @@ impl Parser {
             None
         };
 
+        let cdc_source = if self.parse_keyword(Keyword::FROM) {
+            Some(self.parse_object_name()?)
+        } else {
+            None
+        };
+
+        let external_table = if self.parse_keyword(Keyword::TABLE) {
+            Some(self.parse_identifier()?)
+        } else {
+            None
+        };
+
         Ok(Statement::CreateTable {
             name: table_name,
             temporary,
@@ -2513,6 +2525,8 @@ impl Parser {
             source_watermarks,
             append_only,
             query,
+            cdc_source_name: cdc_source,
+            external_table_name: external_table,
         })
     }
 

@@ -317,6 +317,7 @@ impl TableCatalog {
 
         TableDesc {
             table_id: self.id,
+            table_name: Some(self.name.clone()),
             pk: self.pk.clone(),
             stream_key: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),

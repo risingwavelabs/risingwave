@@ -85,8 +85,8 @@ pub struct SchemaTableName {
     pub table_name: String,
 }
 
-const TABLE_NAME_KEY: &str = "table.name";
-const SCHEMA_NAME_KEY: &str = "schema.name";
+pub const TABLE_NAME_KEY: &str = "table.name";
+pub const SCHEMA_NAME_KEY: &str = "schema.name";
 
 impl SchemaTableName {
     pub fn new(schema_name: String, table_name: String) -> Self {

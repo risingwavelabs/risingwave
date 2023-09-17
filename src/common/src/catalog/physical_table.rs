@@ -29,6 +29,8 @@ use crate::util::sort_util::ColumnOrder;
 pub struct TableDesc {
     /// Id of the table, to find in storage.
     pub table_id: TableId,
+
+    pub table_name: Option<String>,
     /// The key used to sort in storage.
     pub pk: Vec<ColumnOrder>,
     /// All columns in the table, noticed it is NOT sorted by columnId in the vec.
@@ -109,6 +111,7 @@ impl TableDesc {
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
             versioned: self.versioned,
             stream_key: self.stream_key.iter().map(|&x| x as u32).collect(),
+            table_name: self.table_name.clone(),
         }
     }
 

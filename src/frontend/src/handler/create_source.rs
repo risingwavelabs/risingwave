@@ -21,8 +21,8 @@ use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, DEFAULT_KEY_COLUMN_NAME,
-    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
+    is_column_ids_dedup, offset_column_desc, ColumnCatalog, ColumnDesc, TableId,
+    DEFAULT_KEY_COLUMN_NAME, INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -32,9 +32,10 @@ use risingwave_connector::parser::{
     ProtobufParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::cdc::{
-    CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    CDC_SHARING_MODE_KEY, CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
+use risingwave_connector::source::external::TABLE_NAME_KEY;
 use risingwave_connector::source::filesystem::S3_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::{
@@ -62,7 +63,7 @@ use crate::handler::create_table::{
 };
 use crate::handler::util::{get_connector, is_cdc_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
+use crate::optimizer::plan_node::{LogicalScan, LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::utils::resolve_connection_in_with_option;
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
@@ -99,7 +100,7 @@ fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
         ("ts_ms", DataType::Int64),
         ("transaction", DataType::Jsonb),
     ];
-    debezium_columns
+    let mut columns = debezium_columns
         .into_iter()
         .map(|(name, data_type)| ColumnCatalog {
             column_desc: ColumnDesc {
@@ -112,7 +113,11 @@ fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
             },
             is_hidden: false,
         })
-        .collect_vec()
+        .collect_vec();
+
+    // Add offset column to the end
+    columns.push(ColumnCatalog::offset_column());
+    columns
 }
 
 fn json_schema_infer_use_schema_registry(schema_config: &Option<(AstString, bool)>) -> bool {
@@ -1133,10 +1138,13 @@ pub async fn handle_create_source(
     )
     .await?;
 
-    // TODO: set connector to latest offset mode
-    // if create_cdc_source_job {
-    //     with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_LATEST_OFFSET_MODE.into());
-    // }
+    if create_cdc_source_job {
+        // TODO: set connector to latest offset mode
+        // with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_LATEST_OFFSET_MODE.into());
+        // ignore table name option, default to capture all tables
+        with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
+    }
+
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
     let mut columns = columns_from_resolve_source.unwrap_or(columns_from_sql);

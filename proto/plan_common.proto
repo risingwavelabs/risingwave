@@ -65,6 +65,7 @@ message StorageTableDesc {
   // be used to be compatible with schema changes.
   bool versioned = 8;
   repeated uint32 stream_key = 9;
+  optional string table_name = 10;
 }
 
 enum JoinType {

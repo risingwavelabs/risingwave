@@ -200,6 +200,9 @@ impl StreamNode for StreamTableScan {
 }
 
 impl StreamTableScan {
+    /// In cdc backfill, the upstream and batch scan schema are the same.
+    /// The cdc source stream job will parse the DebeziumJson record into a record
+    /// descriped by the downsream table schema.
     pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
         use risingwave_pb::stream_plan::*;
 

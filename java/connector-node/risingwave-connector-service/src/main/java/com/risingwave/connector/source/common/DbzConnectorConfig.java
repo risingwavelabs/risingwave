@@ -45,14 +45,17 @@ public class DbzConnectorConfig {
 
     public static final String DB_SERVERS = "database.servers";
 
-    /* MySQL specified configs */
+    /* MySQL configs */
     public static final String MYSQL_SERVER_ID = "server.id";
 
-    /* Postgres specified configs */
+    /* Postgres configs */
     public static final String PG_SLOT_NAME = "slot.name";
     public static final String PG_PUB_NAME = "publication.name";
     public static final String PG_PUB_CREATE = "publication.create.enable";
     public static final String PG_SCHEMA_NAME = "schema.name";
+
+    /* RisingWave configs */
+    public static final String CDC_SHARING_MODE = "rw.sharing.mode";
 
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
@@ -125,6 +128,11 @@ public class DbzConnectorConfig {
                 mysqlProps.setProperty("snapshot.mode", "schema_only");
                 // disable snapshot locking at all
                 mysqlProps.setProperty("snapshot.locking.mode", "none");
+            }
+
+            // disable table filtering for the shared cdc stream
+            if (!userProps.containsKey(CDC_SHARING_MODE)) {
+                dbzProps.remove("table.include.list");
             }
 
             dbzProps.putAll(mysqlProps);

@@ -29,9 +29,11 @@ use risingwave_connector::source::cdc::{CDC_LATEST_OFFSET_MODE, CDC_SNAPSHOT_MOD
 use risingwave_connector::source::external::ExternalTableType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
+use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, Format, ObjectName, SourceSchemaV2,
     SourceWatermark, TableConstraint,
@@ -41,14 +43,14 @@ use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, FunctionCall};
 use crate::handler::create_source::{
     bind_source_watermark, check_source_schema, try_bind_columns_from_source,
     validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::LogicalSource;
-use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::plan_node::{LogicalFilter, LogicalScan, LogicalSource};
+use crate::optimizer::property::{Cardinality, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::{CheckRelationError, SessionImpl};
 use crate::stream_fragmenter::build_graph;
@@ -502,6 +504,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
         let upstream_table_desc = TableDesc {
             table_id: TableId::placeholder(),
+            table_name: None,
             pk: table_pk,
             columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: pk_column_indices.clone(),
@@ -550,6 +553,7 @@ pub(crate) fn gen_create_table_plan(
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
     let properties = context.with_options().inner().clone().into_iter().collect();
+    // TOOD: add chain node to the query plan
     gen_create_table_plan_without_bind(
         context,
         table_name,
@@ -715,16 +719,110 @@ fn gen_table_plan_inner(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn gen_create_table_plan_for_cdc_source(
+    context: OptimizerContextRef,
+    source_name: ObjectName,
+    table_name: ObjectName,
+    external_table_name: String,
+    columns: Vec<ColumnCatalog>, // columns defined in the create table from DDL
+    pk_column_ids: Vec<ColumnId>, // will used to derive pk column indices
+    definition: String,
+    version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
+                                    * TABLE` for `CREATE TABLE AS`. */
+) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
+    let session = context.session_ctx().clone();
+    let db_name = session.database();
+    let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let (database_id, schema_id) =
+        session.get_database_and_schema_id_for_create(schema_name.clone())?;
+    // cdc source cannot be append-only
+    let append_only = false;
+
+    let source_name = source_name.real_value();
+    let source = session.get_source_by_name(schema_name, &source_name)?;
+
+    let pk_column_indices = {
+        let mut id_to_idx = HashMap::new();
+        columns.iter().enumerate().for_each(|(idx, c)| {
+            id_to_idx.insert(c.column_id(), idx);
+        });
+        // pk column id must exist in table columns.
+        pk_column_ids
+            .iter()
+            .map(|c| id_to_idx.get(c).copied().unwrap())
+            .collect_vec()
+    };
+    let table_pk = pk_column_indices
+        .iter()
+        .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
+        .collect();
+
+    let external_table_desc = TableDesc {
+        table_id: source.id.into(), // FIXME: which id to use?
+        pk: table_pk,
+        columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
+        distribution_key: pk_column_indices.clone(),
+        stream_key: pk_column_indices,
+        append_only,
+        retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
+        value_indices: (0..columns.len()).collect_vec(),
+        read_prefix_len_hint: 0,
+        watermark_columns: Default::default(),
+        versioned: false,
+        table_name: Some(external_table_name),
+    };
+
+    // TODO: we'll parse the information on Meta to construct the fragment plan
+    let scan_external: PlanRef = LogicalScan::create(
+        source_name,
+        false,
+        Rc::new(external_table_desc),
+        vec![],
+        context.clone(),
+        false,
+        Cardinality::unknown(),
+    )
+    .into();
+
+    let required_cols = FixedBitSet::with_capacity(columns.len());
+    let mut plan_root = PlanRoot::new(
+        scan_external,
+        RequiredDist::Any,
+        Order::any(),
+        required_cols,
+        vec![],
+    );
+
+    let materialize = plan_root.gen_table_plan(
+        context,
+        name,
+        columns,
+        definition,
+        pk_column_ids,
+        None,
+        append_only,
+        vec![], // no watermarks
+        version,
+    )?;
+
+    let mut table = materialize.table().to_prost(schema_id, database_id);
+    table.owner = session.user_id();
+    Ok((materialize.into(), None, table))
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_create_table(
     handler_args: HandlerArgs,
     table_name: ObjectName,
-    columns: Vec<ColumnDef>,
+    column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     if_not_exists: bool,
     source_schema: Option<SourceSchemaV2>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     notice: Option<String>,
+    cdc_source: Option<ObjectName>,
+    external_table: Option<String>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     // TODO(st1page): refactor it
@@ -749,14 +847,14 @@ pub async fn handle_create_table(
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
-        let col_id_gen = ColumnIdGenerator::new_initial();
+        let mut col_id_gen = ColumnIdGenerator::new_initial();
 
-        let (plan, source, table) = match source_schema {
-            Some(source_schema) => {
+        let (plan, source, table) = match (source_schema, cdc_source) {
+            (Some(source_schema), None) => {
                 gen_create_table_plan_with_source(
                     context,
                     table_name.clone(),
-                    columns,
+                    column_defs,
                     constraints,
                     source_schema,
                     source_watermarks,
@@ -765,15 +863,41 @@ pub async fn handle_create_table(
                 )
                 .await?
             }
-            None => gen_create_table_plan(
+            (None, None) => gen_create_table_plan(
                 context,
                 table_name.clone(),
-                columns,
+                column_defs,
                 constraints,
                 col_id_gen,
                 source_watermarks,
                 append_only,
             )?,
+            (None, Some(cdc_source)) => {
+                let definition = context.normalized_sql().to_owned();
+                let mut columns = bind_sql_columns(&column_defs)?;
+                for c in &mut columns {
+                    c.column_desc.column_id = col_id_gen.generate(c.name())
+                }
+
+                let pk_names = bind_pk_names(&column_defs, &constraints)?;
+                let (columns, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names)?;
+                gen_create_table_plan_for_cdc_source(
+                    context.into(),
+                    cdc_source,
+                    table_name.clone(),
+                    external_table.unwrap_or(table_name.real_value()),
+                    columns,
+                    pk_column_ids,
+                    definition,
+                    None,
+                )?
+            }
+            (Some(_), Some(_)) => return Err(ErrorCode::NotSupported(
+                "Data format and encoding format doesn't apply to table created from a CDC source"
+                    .into(),
+                "Remove the FORMAT and ENCODE specification".into(),
+            )
+            .into()),
         };
 
         // TODO: gen stream graph for table

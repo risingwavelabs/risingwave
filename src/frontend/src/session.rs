@@ -64,6 +64,7 @@ use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::{check_schema_writable, CatalogError, DatabaseId, SchemaId};
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
@@ -673,6 +674,30 @@ impl SessionImpl {
                 )))
             })?;
         Ok(connection.clone())
+    }
+
+    pub fn get_source_by_name(
+        &self,
+        schema_name: Option<String>,
+        source_name: &str,
+    ) -> Result<Arc<SourceCatalog>> {
+        let db_name = self.database();
+        let search_path = self.config().get_search_path();
+        let user_name = &self.auth_context().user_name;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
+        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
+        let source = schema.get_source_by_name(source_name).ok_or_else(|| {
+            RwError::from(ErrorCode::ItemNotFound(format!(
+                "source {} not found",
+                source_name
+            )))
+        })?;
+        Ok(source.clone())
     }
 
     pub fn clear_cancel_query_flag(&self) {

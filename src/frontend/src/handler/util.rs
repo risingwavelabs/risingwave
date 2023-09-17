@@ -264,6 +264,7 @@ pub fn get_connection_name(with_properties: &BTreeMap<String, String>) -> Option
         .get(CONNECTION_NAME_KEY)
         .map(|s| s.to_lowercase())
 }
+
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;

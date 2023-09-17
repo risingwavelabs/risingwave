@@ -579,7 +579,7 @@ impl From<TryTypeError> for AccessError {
     fn from(value: TryTypeError) -> Self {
         AccessError::TypeError {
             expected: value.expected.to_string(),
-            got: value.expected.to_string(),
+            got: value.got.to_string(),
             value: Default::default(),
         }
     }

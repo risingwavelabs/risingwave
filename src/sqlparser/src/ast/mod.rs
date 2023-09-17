@@ -1084,6 +1084,10 @@ pub enum Statement {
         append_only: bool,
         /// `AS ( query )`
         query: Option<Box<Query>>,
+
+        cdc_source_name: Option<ObjectName>,
+
+        external_table_name: Option<Ident>,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1512,6 +1516,8 @@ impl fmt::Display for Statement {
                 source_watermarks,
                 append_only,
                 query,
+                cdc_source_name,
+                external_table_name,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1545,6 +1551,12 @@ impl fmt::Display for Statement {
                 }
                 if let Some(query) = query {
                     write!(f, " AS {}", query)?;
+                }
+                if let Some(source) = cdc_source_name {
+                    write!(f, " FROM {}", source)?;
+                }
+                if let Some(table_name) = external_table_name {
+                    write!(f, " TABLE {}", table_name.real_value())?;
                 }
                 Ok(())
             }
