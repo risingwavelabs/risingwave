@@ -21,9 +21,9 @@ pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 pub mod nats;
+pub mod pulsar;
 pub mod redis;
 pub mod remote;
-pub mod pulsar;
 #[cfg(any(test, madsim))]
 pub mod test_sink;
 pub mod utils;

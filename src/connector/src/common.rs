@@ -14,24 +14,24 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::io::Write;
 use std::time::Duration;
 
-use url::Url;
-use std::io::Write;
 use anyhow::{anyhow, Ok};
-use tempfile::NamedTempFile;
 use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
-use pulsar::{Pulsar, Authentication, TokioExecutor};
-use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use aws_sdk_kinesis::Client as KinesisClient;
 use clickhouse::Client;
+use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
+use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
 use risingwave_common::error::ErrorCode::InvalidParameterValue;
 use risingwave_common::error::{anyhow_error, RwError};
 use serde_derive::{Deserialize, Serialize};
 use serde_with::json::JsonString;
 use serde_with::{serde_as, DisplayFromStr};
+use tempfile::NamedTempFile;
+use url::Url;
 
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;

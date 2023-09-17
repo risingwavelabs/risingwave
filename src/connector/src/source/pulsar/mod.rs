@@ -22,8 +22,8 @@ use serde::Deserialize;
 pub use split::*;
 
 use crate::common::PulsarCommon;
-use crate::source::SourceProperties;
 use crate::source::pulsar::source::reader::PulsarSplitReader;
+use crate::source::SourceProperties;
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
 
