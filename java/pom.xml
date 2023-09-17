@@ -25,7 +25,6 @@
         <module>connector-node/risingwave-connector-service</module>
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>
-        <!-- Remember to also update Dockerfile if new modules are added. -->
     </modules>
     <packaging>pom</packaging>
 
