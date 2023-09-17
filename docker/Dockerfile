@@ -81,6 +81,7 @@ RUN apt-get -y install maven
 RUN mkdir -p /risingwave
 WORKDIR /risingwave/java
 
+# 1. copy only poms
 COPY --from=java-planner /risingwave/poms /risingwave/java/
 
 # 2. start downloading dependencies
