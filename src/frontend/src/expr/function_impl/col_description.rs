@@ -19,6 +19,7 @@ use risingwave_expr_macro::function;
 
 #[function("col_description(varchar, int32) -> varchar")]
 fn col_description(_name: &str, _col: i32, writer: &mut impl Write) -> Result<(), ExprError> {
+    // TODO: Currently we don't support `COMMENT` statement, so we just return empty string.
     writer.write_str("").unwrap();
 
     Ok(())
