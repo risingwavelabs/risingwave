@@ -16,8 +16,9 @@ resolver = "2"
 # https://doc.rust-lang.org/rustc/platform-support.html
 platforms = [
     # "x86_64-unknown-linux-gnu",
+    # "aarch64-unknown-linux-gnu",
     # "x86_64-apple-darwin",
-    # "x86_64-pc-windows-msvc",
+    # "aarch64-apple-darwin",
 ]
 
 # Write out exact versions rather than a semver range. (Defaults to false.)

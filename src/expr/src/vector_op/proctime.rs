@@ -19,7 +19,7 @@ use risingwave_expr_macro::function;
 use crate::{ExprError, Result};
 
 /// Get the processing time in Timestamptz scalar from the task-local epoch.
-#[function("proctime() -> timestamptz")]
+#[function("proctime() -> timestamptz", volatile)]
 fn proctime() -> Result<Timestamptz> {
     let epoch = epoch::task_local::curr_epoch().ok_or(ExprError::Context)?;
     Ok(epoch.as_timestamptz())
