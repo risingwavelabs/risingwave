@@ -18,6 +18,7 @@ use risingwave_common::row::Row;
 use crate::sink::Result;
 
 mod json;
+pub mod template;
 
 pub use json::JsonEncoder;
 

@@ -6897,6 +6897,7 @@ dependencies = [
  "pulsar",
  "rand",
  "redis",
+ "regex",
  "reqwest",
  "risingwave_common",
  "risingwave_jni_core",
