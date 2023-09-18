@@ -1,3 +1,5 @@
+control substitution on
+
 system ok
 psql -c "
 CREATE TABLE alter_test (k BIGINT PRIMARY KEY, v CHARACTER VARYING);
@@ -8,11 +10,11 @@ statement ok
 CREATE TABLE alter_test (k BIGINT PRIMARY KEY, v CHARACTER VARYING)
 WITH (
     connector = 'postgres-cdc',
-    hostname = 'db',
-    port = '5432',
-    username = 'postgres',
-    password = 'postgres',
-    database.name = 'cdc_test', -- TODO: pass in with env var
+    hostname = '$PGHOST',
+    port = '${PGPORT:5432}',
+    username = '$PGUSER',
+    password = '$PGPASSWORD',
+    database.name = '$PGDATABASE',
     schema.name = 'public',
     table.name = 'alter_test',
     slot.name = 'alter_test'
