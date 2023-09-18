@@ -572,7 +572,7 @@ pub mod tests {
         // Pick with small max_compaction_bytes results partial sub levels included in input.
         let config = Arc::new(
             CompactionConfigBuilder::new()
-                .max_compaction_bytes(50000)
+                .max_compaction_bytes(100010)
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );

@@ -838,6 +838,9 @@ impl HummockManager {
             return Ok(None);
         }
 
+        let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic)
+            || matches!(selector.task_type(), compact_task::TaskType::Emergency);
+
         let mut stats = LocalSelectorStatistic::default();
         let member_table_ids = &current_version
             .get_compaction_group_levels(compaction_group_id)
@@ -886,7 +889,7 @@ impl HummockManager {
                     .sum::<usize>(),
                 start_time.elapsed()
             );
-        } else if is_trivial_move {
+        } else if is_trivial_move && can_trivial_move {
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
