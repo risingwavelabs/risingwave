@@ -22,7 +22,7 @@ use futures::{pin_mut, FutureExt, Stream, StreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, StreamChunk, Vis};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
@@ -843,45 +843,41 @@ where
             })
             .collect_vec();
 
-        let vis = key_chunk.vis();
-        match vis {
-            Vis::Bitmap(vis) => {
-                for ((op, (key, key_bytes), value), vis) in
-                    izip!(op.iter(), vnode_and_pks, values).zip_eq_debug(vis.iter())
-                {
-                    if vis {
-                        match op {
-                            Op::Insert | Op::UpdateInsert => {
-                                if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                    self.watermark_cache.insert(pk);
-                                }
-                                self.insert_inner(key_bytes, value);
-                            }
-                            Op::Delete | Op::UpdateDelete => {
-                                if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                    self.watermark_cache.delete(pk);
-                                }
-                                self.delete_inner(key_bytes, value);
-                            }
-                        }
-                    }
-                }
-            }
-            Vis::Compact(_) => {
-                for (op, (key, key_bytes), value) in izip!(op.iter(), vnode_and_pks, values) {
+        if !key_chunk.is_compacted() {
+            for ((op, (key, key_bytes), value), vis) in
+                izip!(op.iter(), vnode_and_pks, values).zip_eq_debug(key_chunk.visibility().iter())
+            {
+                if vis {
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                self.watermark_cache.insert(pk);
-                            }
+                                    self.watermark_cache.insert(pk);
+                                }
                             self.insert_inner(key_bytes, value);
                         }
                         Op::Delete | Op::UpdateDelete => {
                             if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                self.watermark_cache.delete(pk);
-                            }
+                                    self.watermark_cache.delete(pk);
+                                }
                             self.delete_inner(key_bytes, value);
                         }
+                    }
+                }
+            }
+        } else {
+            for (op, (key, key_bytes), value) in izip!(op.iter(), vnode_and_pks, values) {
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        if USE_WATERMARK_CACHE && let Some(ref pk) = key {
+                                self.watermark_cache.insert(pk);
+                            }
+                        self.insert_inner(key_bytes, value);
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        if USE_WATERMARK_CACHE && let Some(ref pk) = key {
+                                self.watermark_cache.delete(pk);
+                            }
+                        self.delete_inner(key_bytes, value);
                     }
                 }
             }

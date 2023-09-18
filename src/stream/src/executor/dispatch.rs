@@ -612,7 +612,7 @@ impl Dispatcher for HashDataDispatcher {
             .iter()
             .copied()
             .zip_eq_fast(chunk.ops())
-            .zip_eq_fast(chunk.vis().iter())
+            .zip_eq_fast(chunk.visibility().iter())
         {
             // Build visibility map for every output chunk.
             for (output, vis_map) in self.outputs.iter().zip_eq_fast(vis_maps.iter_mut()) {
@@ -649,7 +649,7 @@ impl Dispatcher for HashDataDispatcher {
             let vis_map = vis_map.finish();
             // columns is not changed in this function
             let new_stream_chunk =
-                StreamChunk::new(ops.clone(), chunk.columns().into(), Some(vis_map));
+                StreamChunk::with_visibility(ops.clone(), chunk.columns().into(), vis_map);
             if new_stream_chunk.cardinality() > 0 {
                 event!(
                     tracing::Level::TRACE,
@@ -1201,7 +1201,7 @@ mod tests {
             })
             .collect();
 
-        let chunk = StreamChunk::new(ops, columns, None);
+        let chunk = StreamChunk::new(ops, columns);
         hash_dispatcher.dispatch_data(chunk).await.unwrap();
 
         for (output_idx, output) in output_data_vecs.into_iter().enumerate() {
@@ -1223,12 +1223,8 @@ mod tests {
                     .for_each(|(real_col, expect_col)| {
                         let real_vals = real_chunk
                             .visibility()
-                            .as_ref()
-                            .unwrap()
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, vis)| *vis)
-                            .map(|(row_idx, _)| real_col.as_int32().value_at(row_idx).unwrap())
+                            .iter_ones()
+                            .map(|row_idx| real_col.as_int32().value_at(row_idx).unwrap())
                             .collect::<Vec<_>>();
                         assert_eq!(real_vals.len(), expect_col.len());
                         assert_eq!(real_vals, *expect_col);

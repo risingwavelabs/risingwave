@@ -47,7 +47,7 @@ impl Expression for UdfExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let vis = input.vis().to_bitmap();
+        let vis = input.visibility();
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
             let array = child.eval_checked(input).await?;
@@ -69,9 +69,7 @@ impl Expression for UdfExpression {
             .iter()
             .map::<Result<_>, _>(|c| Ok(c.as_ref().try_into()?))
             .try_collect()?;
-        let output_array = self
-            .eval_inner(arg_columns, chunk.vis().to_bitmap())
-            .await?;
+        let output_array = self.eval_inner(arg_columns, chunk.visibility()).await?;
         Ok(output_array.to_datum())
     }
 }
@@ -80,7 +78,7 @@ impl UdfExpression {
     async fn eval_inner(
         &self,
         columns: Vec<arrow_array::ArrayRef>,
-        vis: risingwave_common::buffer::Bitmap,
+        vis: &risingwave_common::buffer::Bitmap,
     ) -> Result<ArrayRef> {
         let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(vis.len()));
         let input =

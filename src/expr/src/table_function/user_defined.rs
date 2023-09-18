@@ -57,10 +57,10 @@ impl UserDefinedTableFunction {
             let val = c.eval_checked(input).await?;
             columns.push(val);
         }
-        let direct_input = DataChunk::new(columns, input.vis().clone());
+        let direct_input = DataChunk::new(columns, input.visibility().clone());
 
         // compact the input chunk and record the row mapping
-        let visible_rows = direct_input.vis().iter_ones().collect_vec();
+        let visible_rows = direct_input.visibility().iter_ones().collect_vec();
         let compacted_input = direct_input.compact_cow();
         let arrow_input = RecordBatch::try_from(compacted_input.as_ref())?;
 
@@ -85,7 +85,7 @@ impl UserDefinedTableFunction {
 
             let output = DataChunk::new(
                 vec![origin_indices.into_ref(), output.column_at(1).clone()],
-                output.vis().clone(),
+                output.visibility().clone(),
             );
             yield output;
         }

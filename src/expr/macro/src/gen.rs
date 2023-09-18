@@ -228,7 +228,7 @@ impl FunctionAttr {
                 for child in &self.children[#num_args..] {
                     columns.push(child.eval_checked(input).await?);
                 }
-                let variadic_input = DataChunk::new(columns, input.vis().clone());
+                let variadic_input = DataChunk::new(columns, input.visibility().clone());
             }
         });
         // evaluate variadic arguments in `eval_row`
@@ -382,24 +382,21 @@ impl FunctionAttr {
             quote! {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
 
-                match input.vis() {
-                    Vis::Bitmap(vis) => {
-                        // allow using `zip` for performance
-                        #[allow(clippy::disallowed_methods)]
-                        for (i, ((#(#inputs,)*), visible)) in #array_zip.zip(vis.iter()).enumerate() {
-                            if !visible {
-                                builder.append_null();
-                                continue;
-                            }
-                            #let_variadic
-                            #append_output
-                        }
+                if input.is_compacted() {
+                    for (i, (#(#inputs,)*)) in #array_zip.enumerate() {
+                        #let_variadic
+                        #append_output
                     }
-                    Vis::Compact(_) => {
-                        for (i, (#(#inputs,)*)) in #array_zip.enumerate() {
-                            #let_variadic
-                            #append_output
+                } else {
+                    // allow using `zip` for performance
+                    #[allow(clippy::disallowed_methods)]
+                    for (i, ((#(#inputs,)*), visible)) in #array_zip.zip(input.visibility().iter()).enumerate() {
+                        if !visible {
+                            builder.append_null();
+                            continue;
                         }
+                        #let_variadic
+                        #append_output
                     }
                 }
                 Ok(Arc::new(builder.finish().into()))
@@ -699,21 +696,10 @@ impl FunctionAttr {
                         #(#let_arrays)*
                         let state0 = state0.as_datum_mut();
                         let mut state: Option<#state_type> = #let_state;
-                        match input.vis() {
-                            Vis::Bitmap(bitmap) => {
-                                for row_id in bitmap.iter_ones() {
-                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #(#let_values)*
-                                    state = #next_state;
-                                }
-                            }
-                            Vis::Compact(_) => {
-                                for row_id in 0..input.capacity() {
-                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #(#let_values)*
-                                    state = #next_state;
-                                }
-                            }
+                        for row_id in input.visibility().iter_ones() {
+                            let op = unsafe { *input.ops().get_unchecked(row_id) };
+                            #(#let_values)*
+                            state = #next_state;
                         }
                         *state0 = #assign_state;
                         Ok(())
@@ -724,25 +710,22 @@ impl FunctionAttr {
                         #(#let_arrays)*
                         let state0 = state0.as_datum_mut();
                         let mut state: Option<#state_type> = #let_state;
-                        match input.vis() {
-                            Vis::Bitmap(bitmap) => {
-                                for row_id in bitmap.iter_ones() {
-                                    if row_id < range.start {
-                                        continue;
-                                    } else if row_id >= range.end {
-                                        break;
-                                    }
-                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #(#let_values)*
-                                    state = #next_state;
-                                }
+                        if input.is_compacted() {
+                            for row_id in range {
+                                let op = unsafe { *input.ops().get_unchecked(row_id) };
+                                #(#let_values)*
+                                state = #next_state;
                             }
-                            Vis::Compact(_) => {
-                                for row_id in range {
-                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #(#let_values)*
-                                    state = #next_state;
+                        } else {
+                            for row_id in input.visibility().iter_ones() {
+                                if row_id < range.start {
+                                    continue;
+                                } else if row_id >= range.end {
+                                    break;
                                 }
+                                let op = unsafe { *input.ops().get_unchecked(row_id) };
+                                #(#let_values)*
+                                state = #next_state;
                             }
                         }
                         *state0 = #assign_state;
@@ -949,7 +932,7 @@ impl FunctionAttr {
                         let mut index_builder = I32ArrayBuilder::new(self.chunk_size);
                         #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
 
-                        for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()).enumerate() {
+                        for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.visibility().iter()).enumerate() {
                             if let (#(Some(#inputs),)*) = row && visible {
                                 let iter = #fn_name(#(#inputs,)* #prebuilt_arg);
                                 for output in #iter {
