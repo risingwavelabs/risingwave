@@ -16,7 +16,7 @@ use risingwave_common::array::ListValue;
 use risingwave_expr_macro::function;
 
 use super::*;
-use crate::expr::expr_regexp::RegexpContext;
+use crate::vector_op::regexp::RegexpContext;
 use crate::ExprError;
 
 #[function(
@@ -36,6 +36,7 @@ fn regexp_matches<'a>(
         // ignored in PostgreSQL's behavior.
         let skip_flag = regex.regex.captures_len() > 1;
         let list = capture
+            .unwrap()
             .iter()
             .skip(if skip_flag { 1 } else { 0 })
             .map(|mat| mat.map(|m| m.as_str().into()))

@@ -40,10 +40,11 @@ pub struct NatsSplitReader {
 #[async_trait]
 impl SplitReader for NatsSplitReader {
     type Properties = NatsProperties;
+    type Split = NatsSplit;
 
     async fn new(
         properties: NatsProperties,
-        splits: Vec<SplitImpl>,
+        splits: Vec<NatsSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,

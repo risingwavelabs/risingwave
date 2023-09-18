@@ -40,14 +40,11 @@ const TYPE_MATRIX: &str = "
 /// Maps a data type to its corresponding data type name.
 pub fn data_type(ty: &str) -> &str {
     // XXX:
-    // For functions that contain `any` type, there are special handlings in the frontend,
-    // and the signature won't be accessed. So we simply return a placeholder here.
-    if ty == "any" {
+    // For functions that contain `any` type, or `...` variable arguments,
+    // there are special handlings in the frontend, and the signature won't be accessed.
+    // So we simply return a placeholder here.
+    if ty == "any" || ty == "..." {
         return "Int32";
-    } else if ty.ends_with("[]") {
-        return "List";
-    } else if ty.starts_with("struct") {
-        return "Struct";
     }
     lookup_matrix(ty, 1)
 }
@@ -61,10 +58,6 @@ pub fn variant(ty: &str) -> &str {
 pub fn array_type(ty: &str) -> &str {
     if ty == "any" {
         return "ArrayImpl";
-    } else if ty.ends_with("[]") {
-        return "ListArray";
-    } else if ty.starts_with("struct") {
-        return "StructArray";
     }
     lookup_matrix(ty, 3)
 }
@@ -84,7 +77,16 @@ pub fn is_primitive(ty: &str) -> bool {
     lookup_matrix(ty, 6) == "y"
 }
 
-fn lookup_matrix(ty: &str, idx: usize) -> &str {
+fn lookup_matrix(mut ty: &str, idx: usize) -> &str {
+    if ty.ends_with("[]") {
+        ty = "list";
+    } else if ty.starts_with("struct") {
+        ty = "struct";
+    } else if ty == "void" {
+        // XXX: we don't support void type yet.
+        //      replace it with int32 for now.
+        ty = "int32";
+    }
     let s = TYPE_MATRIX.trim().lines().find_map(|line| {
         let mut parts = line.split_whitespace();
         if parts.next() == Some(ty) {

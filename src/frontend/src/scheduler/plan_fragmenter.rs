@@ -27,8 +27,9 @@ use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
+use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceEnumeratorContext, SplitEnumeratorImpl, SplitImpl,
+    ConnectorProperties, SourceEnumeratorContext, SplitEnumerator, SplitImpl,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
@@ -266,19 +267,17 @@ impl SourceScanInfo {
                 unreachable!("Never call complete when SourceScanInfo is already complete")
             }
         };
-        let mut enumerator = SplitEnumeratorImpl::create(
-            fetch_info.connector,
-            SourceEnumeratorContext::default().into(),
-        )
-        .await?;
-        let kafka_enumerator = match enumerator {
-            SplitEnumeratorImpl::Kafka(ref mut kafka_enumerator) => kafka_enumerator,
+        let kafka_prop = match fetch_info.connector {
+            ConnectorProperties::Kafka(prop) => *prop,
             _ => {
                 return Err(SchedulerError::Internal(anyhow!(
                     "Unsupported to query directly from this source"
                 )))
             }
         };
+        let mut kafka_enumerator =
+            KafkaSplitEnumerator::new(kafka_prop, SourceEnumeratorContext::default().into())
+                .await?;
         let split_info = kafka_enumerator
             .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
             .await?

@@ -2262,16 +2262,12 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('data_refill_duration_count')}[$__rate_interval])) by (op, instance)",
-                            "data file cache refill - {{op}} @ {{instance}}",
+                            f"sum(rate({metric('refill_duration_count')}[$__rate_interval])) by (type, op, instance)",
+                            "{{type}} file cache refill - {{op}} @ {{instance}}",
                         ),
                         panels.target(
-                            f"sum(rate({metric('data_refill_filtered_total')}[$__rate_interval])) by (instance)",
-                            "data file cache refill - filtered @ {{instance}}",
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('meta_refill_duration_count')}[$__rate_interval])) by (op, instance)",
-                            "meta file cache refill - {{op}} @ {{instance}}",
+                            f"sum(rate({metric('refill_total')}[$__rate_interval])) by (type, op, instance)",
+                            "{{type}} file cache refill - {{op}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -2281,17 +2277,9 @@ def section_hummock_tiered_cache(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('data_refill_duration_bucket')}[$__rate_interval])) by (le, op, instance))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('refill_duration_bucket')}[$__rate_interval])) by (le, type, op, instance))",
                                 f"p{legend} - " +
-                                "data file cache refill - {{op}} @ {{instance}}",
-                            ),
-                            [50, 99, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('meta_refill_duration_bucket')}[$__rate_interval])) by (le, instance))",
-                                f"p{legend} - " +
-                                "meta cache refill @ {{instance}}",
+                                "{{type}} file cache refill - {{op}} @ {{instance}}",
                             ),
                             [50, 99, "max"],
                         ),
