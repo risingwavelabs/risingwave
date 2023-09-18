@@ -1237,6 +1237,22 @@ def section_streaming_actors(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
+                    "Aggregation Dirty Group Count",
+                    "Statistics for dirty (unflushed) groups in each hash aggregation executor's executor cache.",
+                    [
+                        panels.target(f"{metric('stream_agg_dirty_group_count')}",
+                                      "stream agg dirty group count | table {{table_id}} actor {{actor_id}}"),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Aggregation Dirty Group Heap Size",
+                    "Statistics for dirty (unflushed) groups in each hash aggregation executor's executor cache.",
+                    [
+                        panels.target(f"{metric('stream_agg_dirty_group_heap_size')}",
+                                      "stream agg dirty group heap size | table {{table_id}} actor {{actor_id}}"),
+                    ],
+                ),
+                panels.timeseries_count(
                     "TopN Cached Keys",
                     "The number of keys cached in each top_n executor's executor cache.",
                     [
