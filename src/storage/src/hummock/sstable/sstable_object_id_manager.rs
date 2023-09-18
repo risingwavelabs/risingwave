@@ -26,7 +26,7 @@ use risingwave_pb::hummock::GetNewSstIdsRequest;
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
 use risingwave_rpc_client::{ExtraInfoSource, GrpcCompactorProxyClient, HummockMetaClient};
 use sync_point::sync_point;
-use tokio::sync::{oneshot, Mutex as TokioMutux};
+use tokio::sync::oneshot;
 
 use crate::hummock::{HummockError, HummockResult};
 pub type SstableObjectIdManagerRef = Arc<SstableObjectIdManager>;
@@ -214,16 +214,15 @@ impl SharedComapctorObjectIdManagerCore {
 /// `SharedComapctorObjectIdManager` is used to get output sst id for serverless compaction.
 #[derive(Clone)]
 pub struct SharedComapctorObjectIdManager {
-    core: Arc<TokioMutux<SharedComapctorObjectIdManagerCore>>,
+    core: Arc<tokio::sync::Mutex<SharedComapctorObjectIdManagerCore>>,
 }
 
 impl SharedComapctorObjectIdManager {
     pub fn new(output_object_ids: VecDeque<u64>, client: GrpcCompactorProxyClient) -> Self {
         Self {
-            core: Arc::new(TokioMutux::new(SharedComapctorObjectIdManagerCore::new(
-                output_object_ids,
-                client,
-            ))),
+            core: Arc::new(tokio::sync::Mutex::new(
+                SharedComapctorObjectIdManagerCore::new(output_object_ids, client),
+            )),
         }
     }
 }
