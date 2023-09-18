@@ -71,7 +71,7 @@ export default function BackPressureTable({
       }
     }
     doFetch()
-    return () => { }
+    return () => {}
   }, [toast])
 
   const isSelected = (fragmentId: string) => selectedFragmentIds.has(fragmentId)
@@ -82,7 +82,7 @@ export default function BackPressureTable({
         <TableCaption>Back Pressures (Last 30 minutes)</TableCaption>
         <Thead>
           <Tr>
-            <Th>Fragment IDs &rarr;	Downstream</Th>
+            <Th>Fragment IDs &rarr; Downstream</Th>
             <Th>Block Rate</Th>
           </Tr>
         </Thead>
@@ -91,7 +91,9 @@ export default function BackPressureTable({
             backPressuresMetrics.outputBufferBlockingDuration
               .filter((m) => isSelected(m.metric.fragment_id))
               .map((m) => (
-                <Tr key={`${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`}>
+                <Tr
+                  key={`${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`}
+                >
                   <Td>{`Fragment ${m.metric.fragment_id} -> ${m.metric.downstream_fragment_id}`}</Td>
                   <Td>
                     <RateBar samples={m.sample} />
