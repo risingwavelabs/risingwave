@@ -1068,7 +1068,10 @@ pub async fn handle_create_source(
         )));
     }
 
-    let source_schema = stmt.source_schema.into_source_schema_v2();
+    let (source_schema, notice) = stmt.source_schema.into_source_schema_v2();
+    if let Some(notice) = notice {
+        session.notice_to_user(notice)
+    };
 
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
     validate_compatibility(&source_schema, &mut with_properties)?;
