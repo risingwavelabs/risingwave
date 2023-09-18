@@ -216,7 +216,9 @@ impl PulsarSinkWriter {
                 }
                 // error upon sending
                 Err(e) => match e {
-                    pulsar::Error::Connection(e) => {
+                    pulsar::Error::Connection(_)
+                    | pulsar::Error::Producer(_)
+                    | pulsar::Error::Consumer(_) => {
                         connection_err = Some(e);
                         tokio::time::sleep(self.config.retry_interval).await;
                         continue;
