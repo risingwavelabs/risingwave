@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::fmt::Display;
 use std::hash::BuildHasher;
 use std::sync::Arc;
 use std::{fmt, usize};
@@ -265,7 +264,8 @@ impl DataChunk {
 
     /// Convert the chunk to compact format.
     ///
-    /// If the chunk is not compacted, return a new compacted chunk, otherwise return a reference to self.
+    /// If the chunk is not compacted, return a new compacted chunk, otherwise return a reference to
+    /// self.
     pub fn compact_cow(&self) -> Cow<'_, Self> {
         match &self.vis2 {
             Vis::Compact(_) => Cow::Borrowed(self),

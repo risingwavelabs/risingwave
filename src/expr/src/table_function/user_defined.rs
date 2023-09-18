@@ -74,7 +74,8 @@ impl UserDefinedTableFunction {
             let output = DataChunk::try_from(&res?)?;
             self.check_output(&output)?;
 
-            // we send the compacted input to UDF, so we need to map the row indices back to the original input
+            // we send the compacted input to UDF, so we need to map the row indices back to the
+            // original input
             let origin_indices = output
                 .column_at(0)
                 .as_int32()
