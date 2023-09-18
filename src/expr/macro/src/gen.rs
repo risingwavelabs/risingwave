@@ -80,7 +80,7 @@ impl FunctionAttr {
         };
         let deprecated = self.deprecated;
         Ok(quote! {
-            #[ctor::ctor]
+            #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { risingwave_expr::sig::func::_register(#descriptor_type {
@@ -505,7 +505,7 @@ impl FunctionAttr {
             self.generate_agg_build_fn(user_fn)?
         };
         Ok(quote! {
-            #[ctor::ctor]
+            #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { risingwave_expr::sig::agg::_register(#descriptor_type {
@@ -800,7 +800,7 @@ impl FunctionAttr {
             quote! { |_| Ok(#ty) }
         };
         Ok(quote! {
-            #[ctor::ctor]
+            #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { risingwave_expr::sig::table_function::_register(#descriptor_type {

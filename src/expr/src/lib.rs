@@ -34,6 +34,7 @@ pub mod table_function;
 pub mod vector_op;
 pub mod window_function;
 
+pub use ctor::ctor;
 pub use error::{ExprError, Result};
 pub use risingwave_common::{bail, ensure};
 pub use risingwave_expr_macro::*;
