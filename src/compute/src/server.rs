@@ -209,7 +209,7 @@ pub async fn compute_node_serve(
     observer_manager.start().await;
 
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
-    if let Some(storage) = state_store.as_hummock_trait() {
+    if let Some(storage) = state_store.as_hummock() {
         extra_info_sources.push(storage.sstable_object_id_manager().clone());
         if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
