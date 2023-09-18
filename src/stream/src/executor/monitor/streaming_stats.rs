@@ -145,9 +145,9 @@ pub struct StreamingMetrics {
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
 
-pub fn global_streaming_metrics(streaming_metric_level: MetricLevel) -> StreamingMetrics {
+pub fn global_streaming_metrics(metric_level: MetricLevel) -> StreamingMetrics {
     GLOBAL_STREAMING_METRICS
-        .get_or_init(|| StreamingMetrics::new(&GLOBAL_METRICS_REGISTRY, streaming_metric_level))
+        .get_or_init(|| StreamingMetrics::new(&GLOBAL_METRICS_REGISTRY, metric_level))
         .clone()
 }
 

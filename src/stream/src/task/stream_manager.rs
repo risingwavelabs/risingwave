@@ -462,6 +462,9 @@ impl LocalStreamManagerCore {
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
+    // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+    // TODO: remove `allow` here after the issued is closed.
+    #[expect(clippy::needless_pass_by_ref_mut)]
     #[allow(clippy::too_many_arguments)]
     #[async_recursion]
     async fn create_nodes_inner(
@@ -692,7 +695,7 @@ impl LocalStreamManagerCore {
             self.handles.insert(actor_id, handle);
 
             if self.streaming_metrics.level >= MetricLevel::Debug {
-                tracing::info!("Tokio metrics are enabled because streaming_metric_level >= DEBUG");
+                tracing::info!("Tokio metrics are enabled because metrics_level >= Debug");
                 let actor_id_str = actor_id.to_string();
                 let metrics = self.streaming_metrics.clone();
                 let actor_monitor_task = self.runtime.spawn(async move {

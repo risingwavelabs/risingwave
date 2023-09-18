@@ -38,7 +38,6 @@ use tokio::task::JoinHandle;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::rpc::server::ElectionClientRef;
-use crate::storage::MetaStore;
 
 #[derive(Clone)]
 pub struct MetaMetrics {
@@ -553,7 +552,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "storage_compact_task_size",
             "Total size of compact that have been issued to state store",
-            exponential_buckets(4096.0, 1.6, 28).unwrap()
+            exponential_buckets(1048576.0, 2.0, 16).unwrap()
         );
 
         let compact_task_size =
@@ -691,8 +690,8 @@ impl Default for MetaMetrics {
     }
 }
 
-pub async fn start_worker_info_monitor<S: MetaStore>(
-    cluster_manager: ClusterManagerRef<S>,
+pub async fn start_worker_info_monitor(
+    cluster_manager: ClusterManagerRef,
     election_client: Option<ElectionClientRef>,
     interval: Duration,
     meta_metrics: Arc<MetaMetrics>,
@@ -739,11 +738,11 @@ pub async fn start_worker_info_monitor<S: MetaStore>(
     (join_handle, shutdown_tx)
 }
 
-pub async fn start_fragment_info_monitor<S: MetaStore>(
-    cluster_manager: ClusterManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
-    hummock_manager: HummockManagerRef<S>,
+pub async fn start_fragment_info_monitor(
+    cluster_manager: ClusterManagerRef,
+    catalog_manager: CatalogManagerRef,
+    fragment_manager: FragmentManagerRef,
+    hummock_manager: HummockManagerRef,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
     const COLLECT_INTERVAL_SECONDS: u64 = 60;

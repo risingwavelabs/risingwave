@@ -28,13 +28,12 @@ use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
-use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::kafka::{
     KafkaProperties, KafkaSplit, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL,
 };
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
-    SplitReader,
+    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
+    SplitId, SplitMetaData, SplitReader,
 };
 
 pub struct KafkaSplitReader {
@@ -49,10 +48,11 @@ pub struct KafkaSplitReader {
 #[async_trait]
 impl SplitReader for KafkaSplitReader {
     type Properties = KafkaProperties;
+    type Split = KafkaSplit;
 
     async fn new(
         properties: KafkaProperties,
-        splits: Vec<SplitImpl>,
+        splits: Vec<KafkaSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
@@ -64,7 +64,8 @@ impl SplitReader for KafkaSplitReader {
 
         // disable partition eof
         config.set("enable.partition.eof", "false");
-        config.set("enable.auto.commit", "false");
+        // change to `RdKafkaPropertiesConsumer::enable_auto_commit` to enable auto commit
+        // config.set("enable.auto.commit", "false");
         config.set("auto.offset.reset", "smallest");
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
@@ -105,11 +106,6 @@ impl SplitReader for KafkaSplitReader {
             .create_with_context(client_ctx)
             .await
             .map_err(|e| anyhow!("failed to create kafka consumer: {}", e))?;
-
-        let splits = splits
-            .into_iter()
-            .map(|split| split.into_kafka().unwrap())
-            .collect::<Vec<KafkaSplit>>();
 
         let mut tpl = TopicPartitionList::with_capacity(splits.len());
 

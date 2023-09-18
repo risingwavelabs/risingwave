@@ -25,62 +25,61 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, ErrorSuppressor, RwError};
+use risingwave_common::error::{ErrorSuppressor, RwError};
 use risingwave_common::types::{JsonbVal, Scalar};
-use risingwave_pb::connector_service::PbTableSchema;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
-use serde::{Deserialize, Serialize};
 
 use super::datagen::DatagenMeta;
-use super::filesystem::{FsSplit, S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR};
+use super::filesystem::{FsSplit, S3Properties, S3_CONNECTOR};
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
-use super::nats::enumerator::NatsSplitEnumerator;
-use super::nats::source::NatsSplitReader;
 use super::nexmark::source::message::NexmarkMeta;
 use crate::parser::ParserConfig;
 use crate::source::cdc::{
-    CdcProperties, CdcSplitReader, DebeziumCdcSplit, DebeziumSplitEnumerator, CITUS_CDC_CONNECTOR,
+    CdcProperties, Citus, DebeziumCdcSplit, Mysql, Postgres, CITUS_CDC_CONNECTOR,
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
-use crate::source::datagen::{
-    DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
-};
-use crate::source::dummy_connector::DummySplitReader;
-use crate::source::google_pubsub::{
-    PubsubProperties, PubsubSplit, PubsubSplitEnumerator, PubsubSplitReader,
-    GOOGLE_PUBSUB_CONNECTOR,
-};
-use crate::source::kafka::enumerator::KafkaSplitEnumerator;
-use crate::source::kafka::source::KafkaSplitReader;
+pub(crate) use crate::source::common::CommonSplitReader;
+use crate::source::datagen::{DatagenProperties, DatagenSplit, DATAGEN_CONNECTOR};
+use crate::source::google_pubsub::{PubsubProperties, PubsubSplit, GOOGLE_PUBSUB_CONNECTOR};
 use crate::source::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
-use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
-use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
 use crate::source::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
 use crate::source::monitor::EnumeratorMetrics;
-use crate::source::nats::split::NatsSplit;
+use crate::source::nats::source::NatsSplit;
 use crate::source::nats::{NatsProperties, NATS_CONNECTOR};
-use crate::source::nexmark::source::reader::NexmarkSplitReader;
-use crate::source::nexmark::{
-    NexmarkProperties, NexmarkSplit, NexmarkSplitEnumerator, NEXMARK_CONNECTOR,
-};
-use crate::source::pulsar::source::reader::PulsarSplitReader;
-use crate::source::pulsar::{
-    PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR,
-};
-use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
+use crate::source::nexmark::{NexmarkProperties, NexmarkSplit, NEXMARK_CONNECTOR};
+use crate::source::pulsar::{PulsarProperties, PulsarSplit, PULSAR_CONNECTOR};
+use crate::{impl_connector_properties, impl_split};
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
+
+pub trait SourceProperties: Clone {
+    const SOURCE_NAME: &'static str;
+    type Split: SplitMetaData + TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>;
+    type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;
+    type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
+}
+
+pub async fn create_split_reader<P: SourceProperties>(
+    prop: P,
+    splits: Vec<SplitImpl>,
+    parser_config: ParserConfig,
+    source_ctx: SourceContextRef,
+    columns: Option<Vec<Column>>,
+) -> Result<P::SplitReader> {
+    let splits = splits.into_iter().map(P::Split::try_from).try_collect()?;
+    P::SplitReader::new(prop, splits, parser_config, source_ctx, columns).await
+}
 
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
 #[async_trait]
 pub trait SplitEnumerator: Sized {
-    type Split: SplitMetaData + Send + Sync;
+    type Split: SplitMetaData + Send;
     type Properties;
 
     async fn new(properties: Self::Properties, context: SourceEnumeratorContextRef)
@@ -275,12 +274,13 @@ impl From<StreamChunk> for StreamChunkWithState {
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
 /// stream of parsed [`StreamChunk`]
 #[async_trait]
-pub trait SplitReader: Sized {
+pub trait SplitReader: Sized + Send {
     type Properties;
+    type Split: SplitMetaData;
 
     async fn new(
         properties: Self::Properties,
-        state: Vec<SplitImpl>,
+        state: Vec<Self::Split>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
@@ -289,7 +289,7 @@ pub trait SplitReader: Sized {
     fn into_stream(self) -> BoxSourceWithStateStream;
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug)]
 pub enum ConnectorProperties {
     Kafka(Box<KafkaProperties>),
     Pulsar(Box<PulsarProperties>),
@@ -297,65 +297,41 @@ pub enum ConnectorProperties {
     Nexmark(Box<NexmarkProperties>),
     Datagen(Box<DatagenProperties>),
     S3(Box<S3Properties>),
-    MySqlCdc(Box<CdcProperties>),
-    PostgresCdc(Box<CdcProperties>),
-    CitusCdc(Box<CdcProperties>),
+    MysqlCdc(Box<CdcProperties<Mysql>>),
+    PostgresCdc(Box<CdcProperties<Postgres>>),
+    CitusCdc(Box<CdcProperties<Citus>>),
     GooglePubsub(Box<PubsubProperties>),
     Nats(Box<NatsProperties>),
-    Dummy(Box<()>),
+}
+
+#[macro_export]
+macro_rules! dispatch_source_prop {
+    ($impl:expr, $source_prop:ident, $body:tt) => {{
+        use $crate::source::base::ConnectorProperties;
+
+        match $impl {
+            ConnectorProperties::Kafka($source_prop) => $body,
+            ConnectorProperties::Pulsar($source_prop) => $body,
+            ConnectorProperties::Kinesis($source_prop) => $body,
+            ConnectorProperties::Nexmark($source_prop) => $body,
+            ConnectorProperties::Datagen($source_prop) => $body,
+            ConnectorProperties::S3($source_prop) => $body,
+            ConnectorProperties::MysqlCdc($source_prop) => $body,
+            ConnectorProperties::PostgresCdc($source_prop) => $body,
+            ConnectorProperties::CitusCdc($source_prop) => $body,
+            ConnectorProperties::GooglePubsub($source_prop) => $body,
+            ConnectorProperties::Nats($source_prop) => $body,
+        }
+    }};
 }
 
 impl ConnectorProperties {
-    fn new_cdc_properties(
-        connector_name: &str,
-        properties: HashMap<String, String>,
-    ) -> Result<Self> {
-        match connector_name {
-            MYSQL_CDC_CONNECTOR => Ok(Self::MySqlCdc(Box::new(CdcProperties {
-                props: properties,
-                source_type: "mysql".to_string(),
-                ..Default::default()
-            }))),
-            POSTGRES_CDC_CONNECTOR => Ok(Self::PostgresCdc(Box::new(CdcProperties {
-                props: properties,
-                source_type: "postgres".to_string(),
-                ..Default::default()
-            }))),
-            CITUS_CDC_CONNECTOR => Ok(Self::CitusCdc(Box::new(CdcProperties {
-                props: properties,
-                source_type: "citus".to_string(),
-                ..Default::default()
-            }))),
-            _ => Err(anyhow!("unexpected cdc connector '{}'", connector_name,)),
-        }
-    }
-
-    pub fn init_cdc_properties(&mut self, table_schema: PbTableSchema) {
-        match self {
-            ConnectorProperties::MySqlCdc(c)
-            | ConnectorProperties::PostgresCdc(c)
-            | ConnectorProperties::CitusCdc(c) => {
-                c.table_schema = table_schema;
-            }
-            _ => {}
-        }
-    }
-
-    pub fn is_cdc_connector(&self) -> bool {
-        matches!(
-            self,
-            ConnectorProperties::MySqlCdc(_)
-                | ConnectorProperties::PostgresCdc(_)
-                | ConnectorProperties::CitusCdc(_)
-        )
-    }
-
     pub fn support_multiple_splits(&self) -> bool {
         matches!(self, ConnectorProperties::Kafka(_))
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner, PartialEq, Hash)]
+#[derive(Debug, Clone, EnumAsInner, PartialEq, Hash)]
 pub enum SplitImpl {
     Kafka(KafkaSplit),
     Pulsar(PulsarSplit),
@@ -363,9 +339,9 @@ pub enum SplitImpl {
     Nexmark(NexmarkSplit),
     Datagen(DatagenSplit),
     GooglePubsub(PubsubSplit),
-    MySqlCdc(DebeziumCdcSplit),
-    PostgresCdc(DebeziumCdcSplit),
-    CitusCdc(DebeziumCdcSplit),
+    MysqlCdc(DebeziumCdcSplit<Mysql>),
+    PostgresCdc(DebeziumCdcSplit<Postgres>),
+    CitusCdc(DebeziumCdcSplit<Citus>),
     Nats(NatsSplit),
     S3(FsSplit),
 }
@@ -388,35 +364,6 @@ impl SplitImpl {
     }
 }
 
-pub enum SplitReaderImpl {
-    S3(Box<S3FileReader>),
-    Dummy(Box<DummySplitReader>),
-    Kinesis(Box<KinesisSplitReader>),
-    Kafka(Box<KafkaSplitReader>),
-    Nexmark(Box<NexmarkSplitReader>),
-    Pulsar(Box<PulsarSplitReader>),
-    Datagen(Box<DatagenSplitReader>),
-    MySqlCdc(Box<CdcSplitReader>),
-    PostgresCdc(Box<CdcSplitReader>),
-    CitusCdc(Box<CdcSplitReader>),
-    GooglePubsub(Box<PubsubSplitReader>),
-    Nats(Box<NatsSplitReader>),
-}
-
-pub enum SplitEnumeratorImpl {
-    Kafka(KafkaSplitEnumerator),
-    Pulsar(PulsarSplitEnumerator),
-    Kinesis(KinesisSplitEnumerator),
-    Nexmark(NexmarkSplitEnumerator),
-    Datagen(DatagenSplitEnumerator),
-    MySqlCdc(DebeziumSplitEnumerator),
-    PostgresCdc(DebeziumSplitEnumerator),
-    CitusCdc(DebeziumSplitEnumerator),
-    GooglePubsub(PubsubSplitEnumerator),
-    S3(S3SplitEnumerator),
-    Nats(NatsSplitEnumerator),
-}
-
 impl_connector_properties! {
     { Kafka, KAFKA_CONNECTOR },
     { Pulsar, PULSAR_CONNECTOR },
@@ -424,25 +371,8 @@ impl_connector_properties! {
     { Nexmark, NEXMARK_CONNECTOR },
     { Datagen, DATAGEN_CONNECTOR },
     { S3, S3_CONNECTOR },
-    { MySqlCdc, MYSQL_CDC_CONNECTOR },
-    { PostgresCdc, POSTGRES_CDC_CONNECTOR },
-    { CitusCdc, CITUS_CDC_CONNECTOR },
     { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR},
     { Nats, NATS_CONNECTOR }
-}
-
-impl_split_enumerator! {
-    { Kafka, KafkaSplitEnumerator },
-    { Pulsar, PulsarSplitEnumerator },
-    { Kinesis, KinesisSplitEnumerator },
-    { Nexmark, NexmarkSplitEnumerator },
-    { Datagen, DatagenSplitEnumerator },
-    { MySqlCdc, DebeziumSplitEnumerator },
-    { PostgresCdc, DebeziumSplitEnumerator },
-    { CitusCdc, DebeziumSplitEnumerator },
-    { GooglePubsub, PubsubSplitEnumerator},
-    { S3, S3SplitEnumerator },
-    { Nats, NatsSplitEnumerator }
 }
 
 impl_split! {
@@ -452,26 +382,11 @@ impl_split! {
     { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
     { Datagen, DATAGEN_CONNECTOR, DatagenSplit },
     { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit },
-    { MySqlCdc, MYSQL_CDC_CONNECTOR, DebeziumCdcSplit },
-    { PostgresCdc, POSTGRES_CDC_CONNECTOR, DebeziumCdcSplit },
-    { CitusCdc, CITUS_CDC_CONNECTOR, DebeziumCdcSplit },
+    { MysqlCdc, MYSQL_CDC_CONNECTOR, DebeziumCdcSplit<Mysql> },
+    { PostgresCdc, POSTGRES_CDC_CONNECTOR, DebeziumCdcSplit<Postgres> },
+    { CitusCdc, CITUS_CDC_CONNECTOR, DebeziumCdcSplit<Citus> },
     { S3, S3_CONNECTOR, FsSplit },
     { Nats, NATS_CONNECTOR, NatsSplit }
-}
-
-impl_split_reader! {
-    { S3, S3FileReader },
-    { Kafka, KafkaSplitReader },
-    { Pulsar, PulsarSplitReader },
-    { Kinesis, KinesisSplitReader },
-    { Nexmark, NexmarkSplitReader },
-    { Datagen, DatagenSplitReader },
-    { MySqlCdc, CdcSplitReader},
-    { PostgresCdc, CdcSplitReader},
-    { CitusCdc, CdcSplitReader },
-    { GooglePubsub, PubsubSplitReader },
-    { Nats, NatsSplitReader },
-    { Dummy, DummySplitReader }
 }
 
 pub type DataType = risingwave_common::types::DataType;
@@ -537,7 +452,7 @@ pub trait SplitMetaData: Sized {
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,
 /// `ConnectorState` cannot be [`None`] and contains one(for mq split readers) or many(for fs
 /// split readers) [`SplitImpl`]. If no split is assigned to source executor, `ConnectorState` is
-/// [`None`] and [`DummySplitReader`] is up instead of other split readers.
+/// [`None`] and the created source stream will be a pending stream.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
 
 #[cfg(test)]
@@ -565,7 +480,7 @@ mod tests {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
         let mysql_split = MySqlCdcSplit::new(1001, offset_str.to_string());
         let split = DebeziumCdcSplit::new(Some(mysql_split), None);
-        let split_impl = SplitImpl::MySqlCdc(split);
+        let split_impl = SplitImpl::MysqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
         assert_eq!(
@@ -653,8 +568,7 @@ mod tests {
         ));
 
         let conn_props = ConnectorProperties::extract(user_props_mysql).unwrap();
-        if let ConnectorProperties::MySqlCdc(c) = conn_props {
-            assert_eq!(c.source_type, "mysql");
+        if let ConnectorProperties::MysqlCdc(c) = conn_props {
             assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
             assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.props.get("database.port").unwrap(), "3306");
@@ -668,7 +582,6 @@ mod tests {
 
         let conn_props = ConnectorProperties::extract(user_props_postgres).unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
-            assert_eq!(c.source_type, "postgres");
             assert_eq!(c.props.get("connector_node_addr").unwrap(), "localhost");
             assert_eq!(c.props.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.props.get("database.port").unwrap(), "5432");

@@ -14,7 +14,6 @@
 
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_rpc_client::ConnectorClient;
 
@@ -58,15 +57,7 @@ impl SinkWriter for RedisSinkWriter {
         todo!()
     }
 
-    async fn abort(&mut self) -> Result<()> {
-        todo!()
-    }
-
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        todo!()
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
         todo!()
     }
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -26,10 +27,9 @@ use serde_json::Value;
 use serde_with::serde_as;
 
 use super::doris_connector::{DorisField, DorisInsert, DorisInsertClient};
-use super::utils::TimestampHandlingMode;
+use super::utils::doris_rows_to_json;
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::common::DorisCommon;
-use crate::sink::utils::{doris_record_to_json, DateHandlingMode};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const DORIS_SINK: &str = "doris";
@@ -249,14 +249,9 @@ impl DorisSinkWriter {
             if op != Op::Insert {
                 continue;
             }
-            let row_json_string = Value::Object(doris_record_to_json(
-                row,
-                &self.schema.fields,
-                TimestampHandlingMode::String,
-                DateHandlingMode::String,
-                &self.decimal_map,
-            )?)
-            .to_string();
+            let row_json_string =
+                Value::Object(doris_rows_to_json(row, &self.schema, &self.decimal_map)?)
+                    .to_string();
             self.insert
                 .as_mut()
                 .ok_or(SinkError::Doris("Can't find doris sink insert".to_string()))?
@@ -270,13 +265,8 @@ impl DorisSinkWriter {
         for (op, row) in chunk.rows() {
             match op {
                 Op::Insert => {
-                    let mut row_json_value = doris_record_to_json(
-                        row,
-                        &self.schema.fields,
-                        TimestampHandlingMode::String,
-                        DateHandlingMode::String,
-                        &self.decimal_map,
-                    )?;
+                    let mut row_json_value =
+                        doris_rows_to_json(row, &self.schema, &self.decimal_map)?;
                     row_json_value.insert(
                         "__DORIS_DELETE_SIGN__".to_string(),
                         Value::String("0".to_string()),
@@ -290,13 +280,8 @@ impl DorisSinkWriter {
                         .await?;
                 }
                 Op::Delete => {
-                    let mut row_json_value = doris_record_to_json(
-                        row,
-                        &self.schema.fields,
-                        TimestampHandlingMode::String,
-                        DateHandlingMode::String,
-                        &self.decimal_map,
-                    )?;
+                    let mut row_json_value =
+                        doris_rows_to_json(row, &self.schema, &self.decimal_map)?;
                     row_json_value.insert(
                         "__DORIS_DELETE_SIGN__".to_string(),
                         Value::String("1".to_string()),
@@ -311,13 +296,8 @@ impl DorisSinkWriter {
                 }
                 Op::UpdateDelete => {}
                 Op::UpdateInsert => {
-                    let mut row_json_value = doris_record_to_json(
-                        row,
-                        &self.schema.fields,
-                        TimestampHandlingMode::String,
-                        DateHandlingMode::String,
-                        &self.decimal_map,
-                    )?;
+                    let mut row_json_value =
+                        doris_rows_to_json(row, &self.schema, &self.decimal_map)?;
                     row_json_value.insert(
                         "__DORIS_DELETE_SIGN__".to_string(),
                         Value::String("0".to_string()),
@@ -368,7 +348,7 @@ impl SinkWriter for DorisSinkWriter {
         Ok(())
     }
 
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
+    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
     }
 }

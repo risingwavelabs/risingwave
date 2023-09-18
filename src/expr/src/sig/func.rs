@@ -89,6 +89,7 @@ impl fmt::Debug for FuncSign {
             ret_type: self.ret_type,
             set_returning: false,
             deprecated: self.deprecated,
+            append_only: false,
         }
         .fmt(f)
     }
@@ -198,6 +199,15 @@ mod tests {
                 ],
                 ArrayAccess: [
                     "array_access(list, int32) -> boolean/int16/int32/int64/int256/float32/float64/decimal/serial/date/time/timestamp/timestamptz/interval/varchar/bytea/jsonb/list/struct",
+                ],
+                ArrayMin: [
+                    "array_min(list) -> bytea/varchar/timestamptz/timestamp/time/date/int256/serial/decimal/float32/float64/int16/int32/int64",
+                ],
+                ArrayMax: [
+                    "array_max(list) -> bytea/varchar/timestamptz/timestamp/time/date/int256/serial/decimal/float32/float64/int16/int32/int64",
+                ],
+                ArraySum: [
+                    "array_sum(list) -> interval/decimal/float64/float32/int64",
                 ],
             }
         "#]];

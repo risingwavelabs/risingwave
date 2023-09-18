@@ -210,3 +210,12 @@
     └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [window_start, t._row_id], output_watermarks: [window_start] }
       └─StreamFilter { predicate: IsNotNull(t.ts) }
         └─StreamTableScan { table: t, columns: [t.ts, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: unnest
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    explain create materialized view mv as select t.ts, unnest(Array[1,2,3]) from t emit on window close;
+  explain_output: |
+    StreamMaterialize { columns: [projected_row_id(hidden), ts, unnest, t._row_id(hidden)], stream_key: [t._row_id, projected_row_id], pk_columns: [t._row_id, projected_row_id], pk_conflict: NoCheck, watermark_columns: [ts] }
+    └─StreamEowcSort { sort_column: t.ts }
+      └─StreamProjectSet { select_list: [$0, Unnest(ARRAY[1, 2, 3]:List(Int32)), $1] }
+        └─StreamTableScan { table: t, columns: [ts, _row_id] }

@@ -53,3 +53,6 @@ path = "src/bin/compaction.rs"
 [[bin]]
 name = "delete-range-test"
 path = "src/bin/delete_range.rs"
+
+[lints]
+workspace = true

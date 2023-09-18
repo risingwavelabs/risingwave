@@ -153,10 +153,14 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Row
             | expr_node::Type::ArrayToString
             | expr_node::Type::ArrayCat
+            | expr_node::Type::ArrayMax
+            | expr_node::Type::ArraySum
+            | expr_node::Type::ArraySort
             | expr_node::Type::ArrayAppend
             | expr_node::Type::ArrayPrepend
             | expr_node::Type::FormatType
             | expr_node::Type::ArrayDistinct
+            | expr_node::Type::ArrayMin
             | expr_node::Type::ArrayDims
             | expr_node::Type::ArrayLength
             | expr_node::Type::Cardinality
@@ -204,7 +208,11 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
                 x
             }
             // expression output is not deterministic
-            expr_node::Type::Vnode | expr_node::Type::Proctime => true,
+            expr_node::Type::Vnode
+            | expr_node::Type::Proctime
+            | expr_node::Type::PgSleep
+            | expr_node::Type::PgSleepFor
+            | expr_node::Type::PgSleepUntil => true,
         }
     }
 }

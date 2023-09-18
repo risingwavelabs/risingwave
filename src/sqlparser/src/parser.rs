@@ -549,7 +549,7 @@ impl Parser {
         }));
 
         let token = self.next_token();
-        let expr = match token.token {
+        let expr = match token.token.clone() {
             Token::Word(w) => match w.keyword {
                 Keyword::TRUE | Keyword::FALSE | Keyword::NULL => {
                     self.prev_token();
@@ -593,7 +593,7 @@ impl Parser {
                     })
                 }
                 k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
-                    parser_err!(format!("syntax error at or near \"{w}\""))
+                    parser_err!(format!("syntax error at or near {token}"))
                 }
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
@@ -1232,7 +1232,7 @@ impl Parser {
                 // for keyword 'array'
                 self.prev_token();
             }
-            parser_err!(format!("syntax error at or near '{}'", self.peek_token()))?
+            parser_err!(format!("syntax error at or near {}", self.peek_token()))?
         } else {
             Ok(())
         }
@@ -3150,7 +3150,11 @@ impl Parser {
     pub fn parse_literal_string(&mut self) -> Result<String, ParserError> {
         let token = self.next_token();
         match token.token {
-            Token::Word(Word { value, keyword, .. }) if keyword == Keyword::NoKeyword => Ok(value),
+            Token::Word(Word {
+                value,
+                keyword: Keyword::NoKeyword,
+                ..
+            }) => Ok(value),
             Token::SingleQuotedString(s) => Ok(s),
             unexpected => self.expected("literal string", unexpected.with_location(token.location)),
         }
@@ -3160,7 +3164,11 @@ impl Parser {
     pub fn parse_map_key(&mut self) -> Result<Expr, ParserError> {
         let token = self.next_token();
         match token.token {
-            Token::Word(Word { value, keyword, .. }) if keyword == Keyword::NoKeyword => {
+            Token::Word(Word {
+                value,
+                keyword: Keyword::NoKeyword,
+                ..
+            }) => {
                 if self.peek_token() == Token::LParen {
                     return self.parse_function(ObjectName(vec![Ident::new_unchecked(value)]));
                 }
@@ -3277,6 +3285,7 @@ impl Parser {
                 // parse_interval_literal for a taste.
                 Keyword::INTERVAL => Ok(DataType::Interval),
                 Keyword::REGCLASS => Ok(DataType::Regclass),
+                Keyword::REGPROC => Ok(DataType::Regproc),
                 Keyword::TEXT => {
                     if self.consume_token(&Token::LBracket) {
                         // Note: this is postgresql-specific
@@ -3435,10 +3444,10 @@ impl Parser {
     /// Parse a simple one-word identifier (possibly quoted, possibly a non-reserved keyword)
     pub fn parse_identifier_non_reserved(&mut self) -> Result<Ident, ParserError> {
         let token = self.next_token();
-        match token.token {
+        match token.token.clone() {
             Token::Word(w) => {
                 match keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&w.keyword) {
-                    true => parser_err!(format!("syntax error at or near \"{w}\"")),
+                    true => parser_err!(format!("syntax error at or near {token}")),
                     false => Ok(w.to_ident()?),
                 }
             }
@@ -4266,8 +4275,15 @@ impl Parser {
                 if !order_by.is_empty() {
                     return parser_err!("Table-valued functions do not support ORDER BY clauses");
                 }
+                let with_ordinality = self.parse_keywords(&[Keyword::WITH, Keyword::ORDINALITY]);
+
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-                Ok(TableFactor::TableFunction { name, alias, args })
+                Ok(TableFactor::TableFunction {
+                    name,
+                    alias,
+                    args,
+                    with_ordinality,
+                })
             } else {
                 let for_system_time_as_of_proctime = self.parse_for_system_time_as_of_proctime()?;
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;

@@ -1083,7 +1083,7 @@ mod find_affected_ranges_tests {
     ) {
         result
             .into_iter()
-            .zip_eq(expected.into_iter())
+            .zip_eq(expected)
             .for_each(|(result, expected)| {
                 assert_eq!(
                     result.0.as_normal_expect().pk.0,

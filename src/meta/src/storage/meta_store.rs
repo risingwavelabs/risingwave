@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use risingwave_common::config::MetaBackend;
 use thiserror::Error;
@@ -27,9 +30,22 @@ pub trait Snapshot: Sync + Send + 'static {
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>>;
 }
 
+pub struct BoxedSnapshot(Box<dyn Snapshot + Send + Sync>);
+
+#[async_trait]
+impl Snapshot for BoxedSnapshot {
+    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<(Vec<u8>, Vec<u8>)>> {
+        self.0.deref().list_cf(cf).await
+    }
+
+    async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>> {
+        self.0.deref().get_cf(cf, key).await
+    }
+}
+
 /// `MetaStore` defines the functions used to operate metadata.
 #[async_trait]
-pub trait MetaStore: Clone + Sync + Send + 'static {
+pub trait MetaStore: Sync + Send + 'static {
     type Snapshot: Snapshot;
 
     async fn snapshot(&self) -> Self::Snapshot;
@@ -47,6 +63,90 @@ pub trait MetaStore: Clone + Sync + Send + 'static {
     }
 
     fn meta_store_type(&self) -> MetaBackend;
+}
+
+#[derive(Clone)]
+pub struct MetaStoreRef(Arc<dyn MetaStore<Snapshot = BoxedSnapshot> + Send + Sync>);
+
+pub struct BoxedSnapshotMetaStore<S: MetaStore> {
+    inner: S,
+}
+
+pub trait MetaStoreBoxExt: MetaStore
+where
+    Self: Sized,
+{
+    fn into_ref(self) -> MetaStoreRef {
+        MetaStoreRef(Arc::new(BoxedSnapshotMetaStore { inner: self }))
+    }
+}
+
+impl<S: MetaStore> MetaStoreBoxExt for S {}
+
+#[async_trait]
+impl<S: MetaStore> MetaStore for BoxedSnapshotMetaStore<S> {
+    type Snapshot = BoxedSnapshot;
+
+    async fn snapshot(&self) -> Self::Snapshot {
+        BoxedSnapshot(Box::new(self.inner.snapshot().await))
+    }
+
+    async fn put_cf(&self, cf: &str, key: Key, value: Value) -> MetaStoreResult<()> {
+        self.inner.put_cf(cf, key, value).await
+    }
+
+    async fn delete_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<()> {
+        self.inner.delete_cf(cf, key).await
+    }
+
+    async fn txn(&self, trx: Transaction) -> MetaStoreResult<()> {
+        self.inner.txn(trx).await
+    }
+
+    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<(Vec<u8>, Vec<u8>)>> {
+        self.inner.list_cf(cf).await
+    }
+
+    async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>> {
+        self.inner.get_cf(cf, key).await
+    }
+
+    fn meta_store_type(&self) -> MetaBackend {
+        self.inner.meta_store_type()
+    }
+}
+
+#[async_trait]
+impl MetaStore for MetaStoreRef {
+    type Snapshot = BoxedSnapshot;
+
+    async fn snapshot(&self) -> BoxedSnapshot {
+        self.0.deref().snapshot().await
+    }
+
+    async fn put_cf(&self, cf: &str, key: Key, value: Value) -> MetaStoreResult<()> {
+        self.0.deref().put_cf(cf, key, value).await
+    }
+
+    async fn delete_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<()> {
+        self.0.deref().delete_cf(cf, key).await
+    }
+
+    async fn txn(&self, trx: Transaction) -> MetaStoreResult<()> {
+        self.0.deref().txn(trx).await
+    }
+
+    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<(Vec<u8>, Vec<u8>)>> {
+        self.0.deref().list_cf(cf).await
+    }
+
+    async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>> {
+        self.0.deref().get_cf(cf, key).await
+    }
+
+    fn meta_store_type(&self) -> MetaBackend {
+        self.0.deref().meta_store_type()
+    }
 }
 
 // Error of metastore

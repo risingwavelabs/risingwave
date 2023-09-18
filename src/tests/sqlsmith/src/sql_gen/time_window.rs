@@ -46,7 +46,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let time_col = time_cols.choose(&mut self.rng).unwrap();
         let time_col = Expr::Identifier(time_col.name.as_str().into());
         let args = create_args(vec![name, time_col, size]);
-        let relation = create_tvf("tumble", alias, args);
+        let relation = create_tvf("tumble", alias, args, false);
 
         let table = Table::new(table_name, schema.clone());
 
@@ -72,7 +72,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let time_col = Expr::Identifier(time_col.name.as_str().into());
         let args = create_args(vec![name, time_col, slide, size]);
 
-        let relation = create_tvf("hop", alias, args);
+        let relation = create_tvf("hop", alias, args, false);
 
         let table = Table::new(table_name, schema.clone());
 
@@ -120,11 +120,17 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 }
 
 /// Create a table view function.
-fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableFactor {
+fn create_tvf(
+    name: &str,
+    alias: TableAlias,
+    args: Vec<FunctionArg>,
+    with_ordinality: bool,
+) -> TableFactor {
     TableFactor::TableFunction {
         name: ObjectName(vec![name.into()]),
         alias: Some(alias),
         args,
+        with_ordinality,
     }
 }
 

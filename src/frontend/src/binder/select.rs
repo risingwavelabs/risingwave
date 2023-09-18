@@ -852,6 +852,7 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         }
         AstDataType::Interval => "interval".to_string(),
         AstDataType::Regclass => "regclass".to_string(),
+        AstDataType::Regproc => "regproc".to_string(),
         AstDataType::Text => "text".to_string(),
         AstDataType::Bytea => "bytea".to_string(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
