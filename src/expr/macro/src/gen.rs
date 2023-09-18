@@ -59,15 +59,19 @@ impl FunctionAttr {
             return self.generate_table_function_descriptor(user_fn, build_fn);
         }
         let name = self.name.clone();
-        let mut args = Vec::with_capacity(self.args.len());
-        for ty in &self.args {
-            args.push(data_type_name(ty));
+        let variadic = matches!(self.args.last(), Some(t) if t == "...");
+        let args = match variadic {
+            true => &self.args[..self.args.len() - 1],
+            false => &self.args[..],
         }
+        .iter()
+        .map(|ty| data_type_name(ty))
+        .collect_vec();
         let ret = data_type_name(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
-        let descriptor_type = quote! { crate::sig::func::FuncSign };
+        let descriptor_type = quote! { risingwave_expr::sig::func::FuncSign };
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
@@ -76,12 +80,13 @@ impl FunctionAttr {
         };
         let deprecated = self.deprecated;
         Ok(quote! {
-            #[ctor::ctor]
+            #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                unsafe { crate::sig::func::_register(#descriptor_type {
+                unsafe { risingwave_expr::sig::func::_register(#descriptor_type {
                     func: risingwave_pb::expr::expr_node::Type::#pb_type,
                     inputs_type: &[#(#args),*],
+                    variadic: #variadic,
                     ret_type: #ret,
                     build: #build_fn,
                     deprecated: #deprecated,
@@ -99,7 +104,8 @@ impl FunctionAttr {
         user_fn: &UserFunctionAttr,
         optimize_const: bool,
     ) -> Result<TokenStream2> {
-        let num_args = self.args.len();
+        let variadic = matches!(self.args.last(), Some(t) if t == "...");
+        let num_args = self.args.len() - if variadic { 1 } else { 0 };
         let fn_name = format_ident!("{}", user_fn.name);
         let struct_name = match optimize_const {
             true => format_ident!("{}OptimizeConst", utils::to_camel_case(&self.ident_name())),
@@ -148,8 +154,6 @@ impl FunctionAttr {
         let inputs = idents("i", &children_indices);
         let prebuilt_inputs = idents("i", &prebuilt_indices);
         let non_prebuilt_inputs = idents("i", &non_prebuilt_indices);
-        let all_child = idents("child", &(0..num_args).collect_vec());
-        let child = idents("child", &children_indices);
         let array_refs = idents("array", &children_indices);
         let arrays = idents("a", &children_indices);
         let datums = idents("v", &children_indices);
@@ -199,7 +203,7 @@ impl FunctionAttr {
                     let #prebuilt_inputs = match &#prebuilt_inputs {
                         Some(s) => s.as_scalar_ref_impl().try_into()?,
                         // the function should always return null if any const argument is null
-                        None => return Ok(Box::new(crate::expr::LiteralExpression::new(
+                        None => return Ok(Box::new(risingwave_expr::expr::LiteralExpression::new(
                             return_type,
                             None,
                         ))),
@@ -210,15 +214,41 @@ impl FunctionAttr {
         } else {
             quote! { () }
         };
-        let generic = if self.ret == "boolean" && user_fn.generic == 3 {
+
+        // ensure the number of children matches the number of arguments
+        let check_children = match variadic {
+            true => quote! { risingwave_expr::ensure!(children.len() >= #num_args); },
+            false => quote! { risingwave_expr::ensure!(children.len() == #num_args); },
+        };
+
+        // evaluate variadic arguments in `eval`
+        let eval_variadic = variadic.then(|| {
+            quote! {
+                let mut columns = Vec::with_capacity(self.children.len() - #num_args);
+                for child in &self.children[#num_args..] {
+                    columns.push(child.eval_checked(input).await?);
+                }
+                let variadic_input = DataChunk::new(columns, input.vis().clone());
+            }
+        });
+        // evaluate variadic arguments in `eval_row`
+        let eval_row_variadic = variadic.then(|| {
+            quote! {
+                let mut row = Vec::with_capacity(self.children.len() - #num_args);
+                for child in &self.children[#num_args..] {
+                    row.push(child.eval_row(input).await?);
+                }
+                let variadic_row = OwnedRow::new(row);
+            }
+        });
+
+        let generic = (self.ret == "boolean" && user_fn.generic == 3).then(|| {
             // XXX: for generic compare functions, we need to specify the compatible type
             let compatible_type = types::ref_type(types::min_compatible_type(&self.args))
                 .parse::<TokenStream2>()
                 .unwrap();
             quote! { ::<_, _, #compatible_type> }
-        } else {
-            quote! {}
-        };
+        });
         let prebuilt_arg = match (&self.prebuild, optimize_const) {
             // use the prebuilt argument
             (Some(_), true) => quote! { &self.prebuilt_arg, },
@@ -227,19 +257,24 @@ impl FunctionAttr {
             // no prebuilt argument
             (None, _) => quote! {},
         };
-        let context = match user_fn.context {
-            true => quote! { &self.context, },
-            false => quote! {},
-        };
-        let writer = match user_fn.write {
-            true => quote! { &mut writer, },
-            false => quote! {},
-        };
+        let variadic_args = variadic.then(|| quote! { variadic_row, });
+        let context = user_fn.context.then(|| quote! { &self.context, });
+        let writer = user_fn.write.then(|| quote! { &mut writer, });
+        let await_ = user_fn.async_.then(|| quote! { .await });
         // call the user defined function
         // inputs: [ Option<impl ScalarRef> ]
-        let mut output =
-            quote! { #fn_name #generic(#(#non_prebuilt_inputs,)* #prebuilt_arg #context #writer) };
+        let mut output = quote! { #fn_name #generic(
+            #(#non_prebuilt_inputs,)*
+            #prebuilt_arg
+            #variadic_args
+            #context
+            #writer
+        ) #await_ };
+        // handle error if the function returns `Result`
+        // wrap a `Some` if the function doesn't return `Option`
         output = match user_fn.return_type_kind {
+            // XXX: we don't support void type yet. return null::int for now.
+            _ if self.ret == "void" => quote! { { #output; Option::<i32>::None } },
             ReturnTypeKind::T => quote! { Some(#output) },
             ReturnTypeKind::Option => output,
             ReturnTypeKind::Result => quote! { Some(#output?) },
@@ -255,7 +290,7 @@ impl FunctionAttr {
                 }
             };
         };
-        // output: Option<impl ScalarRef or Scalar>
+        // now the `output` is: Option<impl ScalarRef or Scalar>
         let append_output = match user_fn.write {
             true => quote! {{
                 let mut writer = builder.writer().begin();
@@ -290,13 +325,20 @@ impl FunctionAttr {
         };
         // the main body in `eval`
         let eval = if let Some(batch_fn) = &self.batch_fn {
+            assert!(
+                !variadic,
+                "customized batch function is not supported for variadic functions"
+            );
             // user defined batch function
             let fn_name = format_ident!("{}", batch_fn);
             quote! {
                 let c = #fn_name(#(#arrays),*);
                 Ok(Arc::new(c.into()))
             }
-        } else if (types::is_primitive(&self.ret) || self.ret == "boolean") && user_fn.is_pure() {
+        } else if (types::is_primitive(&self.ret) || self.ret == "boolean")
+            && user_fn.is_pure()
+            && !variadic
+        {
             // SIMD optimization for primitive types
             match self.args.len() {
                 0 => quote! {
@@ -328,10 +370,15 @@ impl FunctionAttr {
             }
         } else {
             // no optimization
-            let array_zip = match num_args {
+            let array_zip = match children_indices.len() {
                 0 => quote! { std::iter::repeat(()).take(input.capacity()) },
                 _ => quote! { multizip((#(#arrays.iter(),)*)) },
             };
+            let let_variadic = variadic.then(|| {
+                quote! {
+                    let variadic_row = variadic_input.row_at_unchecked_vis(i);
+                }
+            });
             quote! {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
 
@@ -339,16 +386,18 @@ impl FunctionAttr {
                     Vis::Bitmap(vis) => {
                         // allow using `zip` for performance
                         #[allow(clippy::disallowed_methods)]
-                        for ((#(#inputs,)*), visible) in #array_zip.zip(vis.iter()) {
+                        for (i, ((#(#inputs,)*), visible)) in #array_zip.zip(vis.iter()).enumerate() {
                             if !visible {
                                 builder.append_null();
                                 continue;
                             }
+                            #let_variadic
                             #append_output
                         }
                     }
                     Vis::Compact(_) => {
-                        for (#(#inputs,)*) in #array_zip {
+                        for (i, (#(#inputs,)*)) in #array_zip.enumerate() {
+                            #let_variadic
                             #append_output
                         }
                     }
@@ -358,8 +407,8 @@ impl FunctionAttr {
         };
 
         Ok(quote! {
-            |return_type: DataType, children: Vec<crate::expr::BoxedExpression>|
-                -> crate::Result<crate::expr::BoxedExpression>
+            |return_type: DataType, children: Vec<risingwave_expr::expr::BoxedExpression>|
+                -> risingwave_expr::Result<risingwave_expr::expr::BoxedExpression>
             {
                 use std::sync::Arc;
                 use risingwave_common::array::*;
@@ -369,49 +418,48 @@ impl FunctionAttr {
                 use risingwave_common::util::iter_util::ZipEqFast;
                 use itertools::multizip;
 
-                use crate::expr::{Context, BoxedExpression};
-                use crate::Result;
+                use risingwave_expr::expr::{Context, BoxedExpression};
+                use risingwave_expr::Result;
 
-                crate::ensure!(children.len() == #num_args);
+                #check_children
                 let prebuilt_arg = #prebuild_const;
                 let context = Context {
                     return_type,
                     arg_types: children.iter().map(|c| c.return_type()).collect(),
                 };
-                let mut iter = children.into_iter();
-                #(let #all_child = iter.next().unwrap();)*
 
                 #[derive(Debug)]
                 struct #struct_name {
                     context: Context,
-                    #(#child: BoxedExpression,)*
+                    children: Vec<BoxedExpression>,
                     prebuilt_arg: #prebuilt_arg_type,
                 }
                 #[async_trait::async_trait]
-                impl crate::expr::Expression for #struct_name {
+                impl risingwave_expr::expr::Expression for #struct_name {
                     fn return_type(&self) -> DataType {
                         self.context.return_type.clone()
                     }
                     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-                        // evaluate children and downcast arrays
                         #(
-                            let #array_refs = self.#child.eval_checked(input).await?;
+                            let #array_refs = self.children[#children_indices].eval_checked(input).await?;
                             let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
+                        #eval_variadic
                         #eval
                     }
                     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
                         #(
-                            let #datums = self.#child.eval_row(input).await?;
+                            let #datums = self.children[#children_indices].eval_row(input).await?;
                             let #inputs: Option<#arg_types> = #datums.as_ref().map(|s| s.as_scalar_ref_impl().try_into().unwrap());
                         )*
+                        #eval_row_variadic
                         Ok(#row_output)
                     }
                 }
 
                 Ok(Box::new(#struct_name {
                     context,
-                    #(#child,)*
+                    children,
                     prebuilt_arg,
                 }))
             }
@@ -449,7 +497,7 @@ impl FunctionAttr {
             false => format_ident!("{}", self.ident_name()),
             true => format_ident!("{}_append_only", self.ident_name()),
         };
-        let descriptor_type = quote! { crate::sig::agg::AggFuncSig };
+        let descriptor_type = quote! { risingwave_expr::sig::agg::AggFuncSig };
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.as_fn().name);
             quote! { #name }
@@ -457,11 +505,11 @@ impl FunctionAttr {
             self.generate_agg_build_fn(user_fn)?
         };
         Ok(quote! {
-            #[ctor::ctor]
+            #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                unsafe { crate::sig::agg::_register(#descriptor_type {
-                    func: crate::agg::AggKind::#pb_type,
+                unsafe { risingwave_expr::sig::agg::_register(#descriptor_type {
+                    func: risingwave_expr::agg::AggKind::#pb_type,
                     inputs_type: &[#(#args),*],
                     state_type: #state_type,
                     ret_type: #ret,
@@ -630,8 +678,8 @@ impl FunctionAttr {
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::estimate_size::EstimateSize;
 
-                use crate::Result;
-                use crate::agg::AggregateState;
+                use risingwave_expr::Result;
+                use risingwave_expr::agg::AggregateState;
 
                 #[derive(Clone)]
                 struct Agg {
@@ -640,7 +688,7 @@ impl FunctionAttr {
                 }
 
                 #[async_trait::async_trait]
-                impl crate::agg::AggregateFunction for Agg {
+                impl risingwave_expr::agg::AggregateFunction for Agg {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }
@@ -732,7 +780,7 @@ impl FunctionAttr {
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
-        let descriptor_type = quote! { crate::sig::table_function::FuncSign };
+        let descriptor_type = quote! { risingwave_expr::sig::table_function::FuncSign };
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
@@ -752,10 +800,10 @@ impl FunctionAttr {
             quote! { |_| Ok(#ty) }
         };
         Ok(quote! {
-            #[ctor::ctor]
+            #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                unsafe { crate::sig::table_function::_register(#descriptor_type {
+                unsafe { risingwave_expr::sig::table_function::_register(#descriptor_type {
                     func: risingwave_pb::expr::table_function::Type::#pb_type,
                     inputs_type: &[#(#args),*],
                     ret_type: #ret,
@@ -862,7 +910,7 @@ impl FunctionAttr {
                 use risingwave_common::util::iter_util::ZipEqFast;
                 use itertools::multizip;
 
-                crate::ensure!(children.len() == #num_args);
+                risingwave_expr::ensure!(children.len() == #num_args);
                 let mut iter = children.into_iter();
                 #(let #all_child = iter.next().unwrap();)*
                 #(
@@ -870,7 +918,7 @@ impl FunctionAttr {
                     let #const_child = match &#const_child {
                         Some(s) => s.as_scalar_ref_impl().try_into()?,
                         // the function should always return empty if any const argument is null
-                        None => return Ok(crate::table_function::empty(return_type)),
+                        None => return Ok(risingwave_expr::table_function::empty(return_type)),
                     };
                 )*
 
@@ -882,7 +930,7 @@ impl FunctionAttr {
                     prebuilt_arg: #prebuilt_arg_type,
                 }
                 #[async_trait::async_trait]
-                impl crate::table_function::TableFunction for #struct_name {
+                impl risingwave_expr::table_function::TableFunction for #struct_name {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }

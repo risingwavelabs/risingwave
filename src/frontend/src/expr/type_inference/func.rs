@@ -342,6 +342,21 @@ fn infer_type_for_special(
                 .try_collect()?;
             Ok(Some(DataType::Varchar))
         }
+        ExprType::Format => {
+            ensure_arity!("format", 1 <= | inputs |);
+            let inputs_owned = std::mem::take(inputs);
+            *inputs = inputs_owned
+                .into_iter()
+                .enumerate()
+                .map(|(i, input)| match i {
+                    // 0-th arg must be string
+                    0 => input.cast_implicit(DataType::Varchar).map_err(Into::into),
+                    // subsequent can be any type, using the output format
+                    _ => input.cast_output(),
+                })
+                .try_collect()?;
+            Ok(Some(DataType::Varchar))
+        }
         ExprType::IsNotNull => {
             ensure_arity!("is_not_null", | inputs | == 1);
             match inputs[0].return_type() {
@@ -577,6 +592,21 @@ fn infer_type_for_special(
             inputs[0].ensure_array_type()?;
 
             Ok(Some(inputs[0].return_type().as_list().clone()))
+        }
+        ExprType::ArraySum => {
+            ensure_arity!("array_sum", | inputs | == 1);
+            inputs[0].ensure_array_type()?;
+
+            let return_type = match inputs[0].return_type().as_list().clone() {
+                DataType::Int16 | DataType::Int32 => DataType::Int64,
+                DataType::Int64 | DataType::Decimal => DataType::Decimal,
+                DataType::Float32 => DataType::Float32,
+                DataType::Float64 => DataType::Float64,
+                DataType::Interval => DataType::Interval,
+                _ => return Err(ErrorCode::InvalidParameterValue("".to_string()).into()),
+            };
+
+            Ok(Some(return_type))
         }
         ExprType::StringToArray => {
             ensure_arity!("string_to_array", 2 <= | inputs | <= 3);
@@ -1188,6 +1218,7 @@ mod tests {
                 sig_map.insert(FuncSign {
                     func: DUMMY_FUNC,
                     inputs_type: formals,
+                    variadic: false,
                     ret_type: DUMMY_RET,
                     build: |_, _| unreachable!(),
                     deprecated: false,

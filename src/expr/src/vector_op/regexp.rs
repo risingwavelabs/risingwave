@@ -16,7 +16,7 @@
 
 use std::str::FromStr;
 
-use regex::{Regex, RegexBuilder};
+use fancy_regex::{Regex, RegexBuilder};
 use risingwave_common::array::ListValue;
 use risingwave_expr_macro::function;
 
@@ -32,10 +32,17 @@ pub struct RegexpContext {
 impl RegexpContext {
     fn new(pattern: &str, flags: &str, replacement: &str) -> Result<Self> {
         let options = RegexpOptions::from_str(flags)?;
+
+        let origin = if options.case_insensitive {
+            format!("(?i:{})", pattern)
+        } else {
+            pattern.to_string()
+        };
+
         Ok(Self {
-            regex: RegexBuilder::new(pattern)
-                .case_insensitive(options.case_insensitive)
-                .build()?,
+            regex: RegexBuilder::new(&origin)
+                .build()
+                .map_err(|e| ExprError::Parse(e.to_string().into()))?,
             global: options.global,
             replacement: make_replacement(replacement),
         })
@@ -142,7 +149,7 @@ fn regexp_match(text: &str, regex: &RegexpContext) -> Option<ListValue> {
     // If there are multiple captures, then the first one is the whole match, and should be
     // ignored in PostgreSQL's behavior.
     let skip_first = regex.regex.captures_len() > 1;
-    let capture = regex.regex.captures(text)?;
+    let capture = regex.regex.captures(text).unwrap()?;
     let list = capture
         .iter()
         .skip(if skip_first { 1 } else { 0 })
@@ -173,7 +180,7 @@ fn regexp_count_start0(text: &str, regex: &RegexpContext) -> Result<i32> {
 fn regexp_count(text: &str, start: i32, regex: &RegexpContext) -> Result<i32> {
     // First get the start position to count for
     let start = match start {
-        ..0 => {
+        ..=0 => {
             return Err(ExprError::InvalidParam {
                 name: "start",
                 reason: start.to_string().into(),
@@ -190,7 +197,7 @@ fn regexp_count(text: &str, start: i32, regex: &RegexpContext) -> Result<i32> {
     };
 
     let mut count = 0;
-    while let Some(captures) = regex.regex.captures(&text[start..]) {
+    while let Ok(Some(captures)) = regex.regex.captures(&text[start..]) {
         count += 1;
         start += captures.get(0).unwrap().end();
     }
@@ -257,7 +264,7 @@ fn regexp_replace(
 ) -> Result<Box<str>> {
     // The start position to begin the search
     let start = match start {
-        ..0 => {
+        ..=0 => {
             return Err(ExprError::InvalidParam {
                 name: "start",
                 reason: start.to_string().into(),
@@ -297,7 +304,7 @@ fn regexp_replace(
             let mut ret = text[..search_start].to_string();
 
             // Begin the actual replace logic
-            while let Some(capture) = ctx.regex.captures(&text[search_start..]) {
+            while let Ok(Some(capture)) = ctx.regex.captures(&text[search_start..]) {
                 let match_start = capture.get(0).unwrap().start();
                 let match_end = capture.get(0).unwrap().end();
 
@@ -344,7 +351,7 @@ fn regexp_replace(
                 let mut count = 1;
                 // The absolute index for the start of searching
                 let mut search_start = start;
-                while let Some(capture) = ctx.regex.captures(&text[search_start..]) {
+                while let Ok(Some(capture)) = ctx.regex.captures(&text[search_start..]) {
                     // Get the current start & end index
                     let match_start = capture.get(0).unwrap().start();
                     let match_end = capture.get(0).unwrap().end();
@@ -378,7 +385,7 @@ fn regexp_replace(
             if let Some(n) = n {
                 // Replace only the N-th match
                 let mut count = 1;
-                while let Some(capture) = ctx.regex.captures(&text[start..]) {
+                while let Ok(Some(capture)) = ctx.regex.captures(&text[start..]) {
                     if count == n {
                         // We've reached the pattern to replace
                         let match_start = capture.get(0).unwrap().start();
@@ -406,12 +413,13 @@ fn regexp_replace(
                 }
             } else {
                 // `N` is not specified
-                if ctx.regex.captures(&text[start..]).is_none() {
+                if let Ok(None) = ctx.regex.captures(&text[start..]) {
                     // No match
                     return Ok(text.into());
                 }
+
                 // Otherwise replace the source text
-                if let Some(capture) = ctx.regex.captures(&text[start..]) {
+                if let Ok(Some(capture)) = ctx.regex.captures(&text[start..]) {
                     let match_start = capture.get(0).unwrap().start();
                     let match_end = capture.get(0).unwrap().end();
 

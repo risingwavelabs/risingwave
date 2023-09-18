@@ -239,7 +239,11 @@ static PUSH_CALC_OF_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
 static CONVERT_DISTINCT_AGG_FOR_STREAM: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Convert Distinct Aggregation",
-        vec![UnionToDistinctRule::create(), DistinctAggRule::create(true)],
+        vec![
+            UnionToDistinctRule::create(),
+            DistinctAggRule::create(true),
+            AggGroupBySimplifyRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });
@@ -250,6 +254,7 @@ static CONVERT_DISTINCT_AGG_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::n
         vec![
             UnionToDistinctRule::create(),
             DistinctAggRule::create(false),
+            AggGroupBySimplifyRule::create(),
         ],
         ApplyOrder::TopDown,
     )

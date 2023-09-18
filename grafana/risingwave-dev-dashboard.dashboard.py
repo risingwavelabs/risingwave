@@ -900,14 +900,14 @@ def section_streaming_actors(outer_panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Actor Backpressure",
+                    "Actor Output Blocking Time Ratio (Backpressure)",
                     "We first record the total blocking duration(ns) of output buffer of each actor. It shows how "
                     "much time it takes an actor to process a message, i.e. a barrier, a watermark or rows of data, "
                     "on average. Then we divide this duration by 1 second and show it as a percentage.",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval]) / 1000000000",
-                            "{{actor_id}}",
+                            f"avg(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) / 1000000000",
+                            "fragment {{fragment_id}}->{{downstream_fragment_id}}",
                         ),
                     ],
                 ),
@@ -947,8 +947,8 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_input_buffer_blocking_duration_ns')}[$__rate_interval]) / 1000000000",
-                            "{{actor_id}}->{{upstream_fragment_id}}",
+                            f"avg(rate({metric('stream_actor_input_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, upstream_fragment_id) / 1000000000",
+                            "fragment {{fragment_id}}<-{{upstream_fragment_id}}",
                         ),
                     ],
                 ),
@@ -2262,16 +2262,12 @@ def section_hummock_tiered_cache(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('data_refill_duration_count')}[$__rate_interval])) by (op, instance)",
-                            "data file cache refill - {{op}} @ {{instance}}",
+                            f"sum(rate({metric('refill_duration_count')}[$__rate_interval])) by (type, op, instance)",
+                            "{{type}} file cache refill - {{op}} @ {{instance}}",
                         ),
                         panels.target(
-                            f"sum(rate({metric('data_refill_filtered_total')}[$__rate_interval])) by (instance)",
-                            "data file cache refill - filtered @ {{instance}}",
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('meta_refill_duration_count')}[$__rate_interval])) by (op, instance)",
-                            "meta file cache refill - {{op}} @ {{instance}}",
+                            f"sum(rate({metric('refill_total')}[$__rate_interval])) by (type, op, instance)",
+                            "{{type}} file cache refill - {{op}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -2281,17 +2277,9 @@ def section_hummock_tiered_cache(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('data_refill_duration_bucket')}[$__rate_interval])) by (le, op, instance))",
+                                f"histogram_quantile({quantile}, sum(rate({metric('refill_duration_bucket')}[$__rate_interval])) by (le, type, op, instance))",
                                 f"p{legend} - " +
-                                "data file cache refill - {{op}} @ {{instance}}",
-                            ),
-                            [50, 99, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('meta_refill_duration_bucket')}[$__rate_interval])) by (le, instance))",
-                                f"p{legend} - " +
-                                "meta cache refill @ {{instance}}",
+                                "{{type}} file cache refill - {{op}} @ {{instance}}",
                             ),
                             [50, 99, "max"],
                         ),

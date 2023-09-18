@@ -466,7 +466,7 @@ pub enum ProfileCommands {
     Heap {
         /// The output directory of the dumped file
         #[clap(long = "dir")]
-        dir: String,
+        dir: Option<String>,
     },
 }
 
