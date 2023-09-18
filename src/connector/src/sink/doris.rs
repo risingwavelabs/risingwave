@@ -91,7 +91,7 @@ impl DorisSink {
 
         let rw_fields_name = self.schema.fields();
         if rw_fields_name.len().ne(&doris_columns_desc.len()) {
-            return Err(SinkError::Doris("The length of the RisingWave column must be equal to the length of the Clickhouse column".to_string()));
+            return Err(SinkError::Doris("The length of the RisingWave column must be equal to the length of the doris column".to_string()));
         }
 
         for i in rw_fields_name {
@@ -148,7 +148,7 @@ impl DorisSink {
             }
             risingwave_common::types::DataType::Serial => Ok(doris_data_type.contains("BIGINT")),
             risingwave_common::types::DataType::Int256 => Err(SinkError::Doris(
-                "doris can not support Interval".to_string(),
+                "doris can not support Int256".to_string(),
             )),
         }
     }

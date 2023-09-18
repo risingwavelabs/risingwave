@@ -261,7 +261,7 @@ impl DorisInsert {
                 Ok(res) => res.map_err(|err| SinkError::Http(err.into()))??,
                 Err(err) => return Err(SinkError::Http(err.into())),
             };
-        if !vec!["Success".to_string(), "Publish Timeout".to_string()].contains(&res.status) {
+        if !["Success".to_string(), "Publish Timeout".to_string()].contains(&res.status) {
             return Err(SinkError::Http(anyhow::anyhow!(
                 "Insert error: {:?}, error url: {:?}",
                 res.message,

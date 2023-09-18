@@ -242,7 +242,7 @@ mod tests {
             },
             Some(ScalarImpl::Bool(false).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
-            CustomJsonType::NoSPecial,
+            &CustomJsonType::NoSPecial,
         )
         .unwrap();
         assert_eq!(boolean_value, json!(false));
@@ -254,7 +254,7 @@ mod tests {
             },
             Some(ScalarImpl::Int16(16).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
-            CustomJsonType::NoSPecial,
+            &CustomJsonType::NoSPecial,
         )
         .unwrap();
         assert_eq!(int16_value, json!(16));
@@ -266,7 +266,7 @@ mod tests {
             },
             Some(ScalarImpl::Int64(std::i64::MAX).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
-            CustomJsonType::NoSPecial,
+            &CustomJsonType::NoSPecial,
         )
         .unwrap();
         assert_eq!(
@@ -283,7 +283,7 @@ mod tests {
             },
             Some(ScalarImpl::Timestamptz(tstz_inner).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
-            CustomJsonType::NoSPecial,
+            &CustomJsonType::NoSPecial,
         )
         .unwrap();
         assert_eq!(tstz_value, "2018-01-26 18:30:09.453000");
@@ -298,7 +298,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::Milli,
-            CustomJsonType::NoSPecial,
+            &CustomJsonType::NoSPecial,
         )
         .unwrap();
         assert_eq!(ts_value, json!(1000 * 1000));
@@ -313,7 +313,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
-            CustomJsonType::NoSPecial,
+            &CustomJsonType::NoSPecial,
         )
         .unwrap();
         assert_eq!(ts_value, json!("1970-01-01 00:16:40.000000".to_string()));
@@ -329,7 +329,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
-            CustomJsonType::NoSPecial,
+            &CustomJsonType::NoSPecial,
         )
         .unwrap();
         assert_eq!(time_value, json!(1000 * 1000));
@@ -344,7 +344,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
-            CustomJsonType::NoSPecial,
+            &CustomJsonType::NoSPecial,
         )
         .unwrap();
         assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));

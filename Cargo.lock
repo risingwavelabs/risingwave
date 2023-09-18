@@ -29,7 +29,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fcb51a0695d8f838b1ee009b3fbf66bda078cd64590202a864a8f3e8c4315c47"
 dependencies = [
- "getran`m",
+ "getrandom",
  "once_cell",
  "version_check",
 ]
@@ -10089,13 +10089,8 @@ dependencies = [
  "aws-credential-types",
  "aws-sdk-s3",
  "aws-smithy-client",
-<<<<<<< HEAD
- "axum",
  "base64 0.21.4",
-=======
- "base64 0.21.3",
  "bit-vec",
->>>>>>> main
  "bitflags 2.4.0",
  "byteorder",
  "bytes",
@@ -10162,11 +10157,6 @@ dependencies = [
  "reqwest",
  "ring",
  "rust_decimal",
-<<<<<<< HEAD
- "rustix 0.38.13",
- "rustls 0.21.7",
-=======
->>>>>>> main
  "scopeguard",
  "serde",
  "serde_json",

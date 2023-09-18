@@ -63,7 +63,7 @@ public class JDBCSinkFactory implements SinkFactory {
                 ResultSet columnResultSet =
                         conn.getMetaData().getColumns(null, schemaName, tableName, null);
                 ResultSet pkResultSet =
-                        conn.getMetaData().getPrimaryKeys(null, schemaName, tableName);) {
+                        conn.getMetaData().getPrimaryKeys(null, schemaName, tableName); ) {
             while (tableNamesResultSet.next()) {
                 jdbcTableNames.add(tableNamesResultSet.getString("TABLE_NAME"));
             }
