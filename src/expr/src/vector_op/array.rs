@@ -12,4 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use crate::window_function::*;
+use risingwave_common::array::{ListValue, StructValue};
+use risingwave_common::row::Row;
+use risingwave_common::types::ToOwnedDatum;
+use risingwave_expr_macro::function;
+
+#[function("array(...) -> list")]
+fn array(row: impl Row) -> ListValue {
+    ListValue::new(row.iter().map(|d| d.to_owned_datum()).collect())
+}
+
+#[function("row(...) -> struct")]
+fn row_(row: impl Row) -> StructValue {
+    StructValue::new(row.iter().map(|d| d.to_owned_datum()).collect())
+}

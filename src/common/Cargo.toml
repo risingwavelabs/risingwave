@@ -84,6 +84,7 @@ strum = "0.25"
 strum_macros = "0.25"
 sysinfo = { version = "0.29", default-features = false }
 thiserror = "1"
+tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
