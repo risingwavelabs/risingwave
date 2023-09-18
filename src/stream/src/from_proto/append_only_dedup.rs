@@ -24,10 +24,10 @@ use crate::error::StreamResult;
 use crate::executor::{AppendOnlyDedupExecutor, BoxedExecutor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
-pub struct AppendOnlyDedupExecutorBuilder;
+pub struct DedupExecutorBuilder<const APPEND_ONLY: bool>;
 
 #[async_trait::async_trait]
-impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
+impl<const APPEND_ONLY: bool> ExecutorBuilder for DedupExecutorBuilder<APPEND_ONLY> {
     type Node = DedupNode;
 
     async fn new_boxed_executor(
@@ -45,14 +45,18 @@ impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
             .iter()
             .map(|idx| *idx as _)
             .collect_vec();
-        Ok(Box::new(AppendOnlyDedupExecutor::new(
-            input,
-            state_table,
-            pk_indices,
-            params.executor_id,
-            params.actor_context,
-            stream.get_watermark_epoch(),
-            stream.streaming_metrics.clone(),
-        )))
+        if APPEND_ONLY {
+            Ok(Box::new(AppendOnlyDedupExecutor::new(
+                input,
+                state_table,
+                pk_indices,
+                params.executor_id,
+                params.actor_context,
+                stream.get_watermark_epoch(),
+                stream.streaming_metrics.clone(),
+            )))
+        } else {
+            todo!()
+        }
     }
 }

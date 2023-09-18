@@ -651,10 +651,12 @@ message StreamNode {
     TemporalJoinNode temporal_join = 131;
     BarrierRecvNode barrier_recv = 132;
     ValuesNode values = 133;
+    // deprecated: dedup also accept non-append-only input, use 138 instead
     DedupNode append_only_dedup = 134;
     NoOpNode no_op = 135;
     EowcOverWindowNode eowc_over_window = 136;
     OverWindowNode over_window = 137;
+    DedupNode dedup = 138;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

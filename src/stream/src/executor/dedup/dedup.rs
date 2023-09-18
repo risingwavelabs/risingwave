@@ -17,15 +17,15 @@ use std::sync::Arc;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_storage::StateStore;
 
-use super::append_only_cache::AppendOnlyDedupCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
+use crate::executor::dedup::dedup_cache::DedupCache;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -34,12 +34,12 @@ use crate::executor::{
 };
 use crate::task::AtomicU64Ref;
 
-/// [`AppendOnlyDedupExecutor`] drops any message that has duplicate pk columns with previous
-/// messages. It only accepts append-only input, and its output will be append-only as well.
-pub struct AppendOnlyDedupExecutor<S: StateStore> {
+/// [`DedupExecutor`] drops any message that has duplicate pk columns with previous
+/// messages. It accepts append-only and non-append-only input.
+pub struct DedupExecutor<S: StateStore> {
     input: Option<BoxedExecutor>,
     state_table: StateTable<S>,
-    cache: AppendOnlyDedupCache<OwnedRow>,
+    cache: DedupCache<OwnedRow>,
 
     pk_indices: PkIndices,
     identity: String,
@@ -47,7 +47,7 @@ pub struct AppendOnlyDedupExecutor<S: StateStore> {
     ctx: ActorContextRef,
 }
 
-impl<S: StateStore> AppendOnlyDedupExecutor<S> {
+impl<S: StateStore> DedupExecutor<S> {
     pub fn new(
         input: BoxedExecutor,
         state_table: StateTable<S>,
@@ -58,14 +58,13 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let schema = input.schema().clone();
-        let metrics_info =
-            MetricsInfo::new(metrics, state_table.table_id(), ctx.id, "AppendOnly Dedup");
+        let metrics_info = MetricsInfo::new(metrics, state_table.table_id(), ctx.id, "Dedup");
         Self {
             input: Some(input),
             state_table,
-            cache: AppendOnlyDedupCache::new(watermark_epoch, metrics_info),
+            cache: DedupCache::new(watermark_epoch, metrics_info),
             pk_indices,
-            identity: format!("AppendOnlyDedupExecutor {:X}", executor_id),
+            identity: format!("DedupExecutor {:X}", executor_id),
             schema,
             ctx,
         }
@@ -77,12 +76,14 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
         // Consume the first barrier message and initialize state table.
         let barrier = expect_first_barrier(&mut input).await?;
+
+        #[cfg(test)]
+        self.state_table.commit_no_data_expected(barrier.epoch);
+        #[cfg(not(test))]
         self.state_table.init_epoch(barrier.epoch);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
-
-        let mut commit_data = false;
 
         #[for_await]
         for msg in input {
@@ -90,9 +91,6 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
             match msg? {
                 Message::Chunk(chunk) => {
-                    // Append-only dedup executor only receives INSERT messages.
-                    debug_assert!(chunk.ops().iter().all(|&op| op == Op::Insert));
-
                     // Extract pk for all rows (regardless of visibility) in the chunk.
                     let keys = chunk
                         .data_chunk()
@@ -101,6 +99,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                             row_ref.map(|row| row.project(self.pk_indices()).to_owned_row())
                         })
                         .collect_vec();
+                    let ops = chunk.ops();
 
                     // Ensure that if a key for a visible row exists before, then it is in the
                     // cache, by querying the storage.
@@ -108,45 +107,46 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
                     // Now check for duplication and insert new keys into the cache.
                     let mut vis_builder = BitmapBuilder::with_capacity(chunk.capacity());
-                    for key in keys {
+                    let mut cnt_builder = I64ArrayBuilder::new(chunk.capacity());
+
+                    for (key, op) in keys.into_iter().zip(ops.iter()) {
                         match key {
                             Some(key) => {
-                                if self.cache.dedup_insert(key) {
+                                let (is_vis, cnt) = self.cache.dedup_insert(op, key);
+                                if is_vis {
                                     // The key doesn't exist before. The row should be visible.
                                     vis_builder.append(true);
+                                    cnt_builder.append(Some(cnt));
                                 } else {
                                     // The key exists before. The row shouldn't be visible.
                                     vis_builder.append(false);
+                                    cnt_builder.append(Some(cnt));
                                 }
                             }
                             None => {
                                 // The row is originally invisible.
                                 vis_builder.append(false);
+                                cnt_builder.append(Some(0));
                             }
                         }
                     }
 
                     let vis = vis_builder.finish();
-                    if vis.count_ones() > 0 {
-                        // Construct the new chunk and write the data to state table.
-                        let (ops, columns, _) = chunk.into_inner();
-                        let chunk = StreamChunk::new(ops, columns, Some(vis));
-                        self.state_table.write_chunk(chunk.clone());
+                    let cnt = cnt_builder.finish();
 
-                        commit_data = true;
+                    let (ops, mut columns, _) = chunk.into_inner();
+                    let chunk = StreamChunk::new(ops.clone(), columns.clone(), Some(vis.clone()));
 
-                        yield Message::Chunk(chunk);
-                    }
+                    // Construct the new chunk and write the data to state table.
+                    columns.push(Arc::new(cnt.into()));
+                    let state_chunk = StreamChunk::new(ops, columns, None);
+                    self.state_table.write_chunk(state_chunk);
+
+                    yield Message::Chunk(chunk);
                 }
 
                 Message::Barrier(barrier) => {
-                    if commit_data {
-                        // Only commit when we have new data in this epoch.
-                        self.state_table.commit(barrier.epoch).await?;
-                        commit_data = false;
-                    } else {
-                        self.state_table.commit_no_data_expected(barrier.epoch);
-                    }
+                    self.state_table.commit(barrier.epoch).await?;
 
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         let (_prev_vnode_bitmap, cache_may_stale) =
@@ -182,16 +182,17 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
             read_from_storage = true;
 
             let table = &self.state_table;
-            futures.push(async move { (key, table.get_encoded_row(key).await) });
+            futures.push(async move { (key, table.get_row(key).await) });
         }
 
         if read_from_storage {
             let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
             while let Some(result) = buffered.next().await {
                 let (key, value) = result;
-                if value?.is_some() {
-                    // Only insert into the cache when we have this key in storage.
-                    self.cache.insert(key.to_owned());
+                if let Some(v) = value? {
+                    // load row and its count into memory
+                    let dup_cnt = v.last().unwrap().into_int64();
+                    self.cache.insert(key.to_owned(), dup_cnt);
                 }
             }
         }
@@ -200,7 +201,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for AppendOnlyDedupExecutor<S> {
+impl<S: StateStore> Executor for DedupExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.executor_inner().boxed()
     }
@@ -223,9 +224,12 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
 
+    use risingwave_common::array::{I64Array, Op, Utf8Array};
+    use risingwave_common::buffer::Bitmap;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -234,22 +238,19 @@ mod tests {
     use crate::executor::test_utils::MockSource;
     use crate::executor::ActorContext;
 
+    // dedup executor will see the whole line as pk and the value is number of duplication
     #[tokio::test]
-    async fn test_dedup_executor() {
+    async fn test_dedup_load_memory() {
         let table_id = TableId::new(1);
         let column_descs = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
-            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar),
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // duplication count
         ];
-        let schema = Schema::new(vec![
-            Field::unnamed(DataType::Int64),
-            Field::unnamed(DataType::Int64),
-        ]);
-        let pk_indices = vec![0];
-        let order_types = vec![OrderType::ascending()];
-
+        let pk_indices = vec![0, 1];
+        let order_types = vec![OrderType::ascending(), OrderType::ascending()];
         let state_store = MemoryStateStore::new();
-        let state_table = StateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution_inconsistent_op(
             state_store,
             table_id,
             column_descs,
@@ -258,8 +259,33 @@ mod tests {
         )
         .await;
 
-        let (mut tx, input) = MockSource::channel(schema, pk_indices.clone());
-        let mut dedup_executor = Box::new(AppendOnlyDedupExecutor::new(
+        // preset state table
+        // (1, "a") -> 2
+        // (2, "b") -> 4
+        let chunk = StreamChunk::new(
+            vec![Op::Insert, Op::Insert],
+            vec![
+                Arc::new(I64Array::from_iter(vec![1, 2]).into()),
+                Arc::new(Utf8Array::from_iter(vec!["a", "b"]).into()),
+                Arc::new(I64Array::from_iter(vec![2, 4]).into()), // dup_count
+            ],
+            Some(Bitmap::from_iter(vec![true, true])),
+        );
+        state_table.init_epoch(EpochPair::new_test_epoch(1));
+        state_table.write_chunk(chunk);
+        state_table
+            .commit(EpochPair::new_test_epoch(2))
+            .await
+            .unwrap();
+
+        // input schema has fewer columns than state table
+        let input_schema = Schema::new(vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Varchar),
+        ]);
+
+        let (mut tx, input) = MockSource::channel(input_schema, pk_indices.clone());
+        let mut dedup_executor = Box::new(DedupExecutor::new(
             Box::new(input),
             state_table,
             pk_indices,
@@ -270,46 +296,48 @@ mod tests {
         ))
         .execute();
 
-        tx.push_barrier(1, false);
+        tx.push_barrier(3, false);
         dedup_executor.next().await.unwrap().unwrap();
 
-        let chunk = StreamChunk::from_pretty(
-            " I I
-            + 1 1
-            + 2 2 D
-            + 1 7",
-        );
-        tx.push_chunk(chunk);
+        let chunk1: StreamChunk = {
+            StreamChunk::new(
+                vec![Op::Delete, Op::Delete],
+                vec![
+                    Arc::new(I64Array::from_iter(vec![1, 2]).into()),
+                    Arc::new(Utf8Array::from_iter(vec!["a", "b"]).into()),
+                ],
+                Some(Bitmap::from_iter(vec![true, true])),
+            )
+        };
+        tx.push_chunk(chunk1.clone());
         let msg = dedup_executor.next().await.unwrap().unwrap();
         assert_eq!(
             msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
-                " I I
-                + 1 1
-                + 2 2 D
-                + 1 7 D",
+                " I T
+               - 1 a D
+               - 2 b D
+            "
             )
         );
 
-        tx.push_barrier(2, false);
+        tx.push_barrier(4, false);
         dedup_executor.next().await.unwrap().unwrap();
 
-        let chunk = StreamChunk::from_pretty(
-            " I I
-            + 3 9
-            + 2 5
-            + 1 20",
-        );
-        tx.push_chunk(chunk);
+        tx.push_chunk(chunk1.clone());
         let msg = dedup_executor.next().await.unwrap().unwrap();
+
         assert_eq!(
             msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
-                " I I
-                + 3 9
-                + 2 5
-                + 1 20 D",
+                " I T
+               - 1 a
+               - 2 b D
+            "
             )
         );
+
+        tx.push_barrier(5, false);
+        dedup_executor.next().await.unwrap().unwrap();
     }
 }
