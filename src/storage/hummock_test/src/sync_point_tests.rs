@@ -45,6 +45,7 @@ use risingwave_storage::StateStore;
 use serial_test::serial;
 
 use super::compactor_tests::tests::{get_hummock_storage, prepare_compactor_and_filter};
+use crate::compactor_tests::tests::flush_and_commit;
 use crate::get_notification_client_for_test;
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 
