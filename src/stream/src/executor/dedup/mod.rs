@@ -14,8 +14,8 @@
 
 mod append_only_cache;
 mod append_only_dedup;
-mod dedup;
 mod dedup_cache;
+mod dedup_exec;
 
 pub use append_only_dedup::AppendOnlyDedupExecutor;
-pub use dedup::DedupExecutor;
+pub use dedup_exec::DedupExecutor;

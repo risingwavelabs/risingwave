@@ -110,7 +110,7 @@ pub use backfill::upstream_table::*;
 pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
-pub use dedup::AppendOnlyDedupExecutor;
+pub use dedup::{AppendOnlyDedupExecutor, DedupExecutor};
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};

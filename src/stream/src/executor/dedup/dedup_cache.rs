@@ -34,7 +34,7 @@ impl<K: Hash + Eq + EstimateSize + Debug> DedupCache<K> {
 
     /// insert a `key` into the cache and return whether the key is duplicated.
     /// If duplicated, the cache will update the row count. If row count is 0, will return true.
-    /// Also, returns the dup_count of the key as i64 after inserting the record.
+    /// Also, returns the `dup_count` of the key as i64 after inserting the record.
     pub fn dedup_insert(&mut self, op: &Op, key: K) -> (bool, i64) {
         let row_cnt = self.inner.get(&key);
         match (row_cnt.cloned(), op) {

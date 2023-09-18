@@ -109,7 +109,7 @@ impl<S: StateStore> DedupExecutor<S> {
                     let mut vis_builder = BitmapBuilder::with_capacity(chunk.capacity());
                     let mut cnt_builder = I64ArrayBuilder::new(chunk.capacity());
 
-                    for (key, op) in keys.into_iter().zip(ops.iter()) {
+                    for (key, op) in keys.into_iter().zip_eq(ops.iter()) {
                         match key {
                             Some(key) => {
                                 let (is_vis, cnt) = self.cache.dedup_insert(op, key);

@@ -21,7 +21,7 @@ use risingwave_storage::StateStore;
 use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::{AppendOnlyDedupExecutor, BoxedExecutor};
+use crate::executor::{AppendOnlyDedupExecutor, BoxedExecutor, DedupExecutor};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct DedupExecutorBuilder<const APPEND_ONLY: bool>;
@@ -56,7 +56,15 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for DedupExecutorBuilder<APPEND_ON
                 stream.streaming_metrics.clone(),
             )))
         } else {
-            todo!()
+            Ok(Box::new(DedupExecutor::new(
+                input,
+                state_table,
+                pk_indices,
+                params.executor_id,
+                params.actor_context,
+                stream.get_watermark_epoch(),
+                stream.streaming_metrics.clone(),
+            )))
         }
     }
 }
