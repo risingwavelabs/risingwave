@@ -17,6 +17,7 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
+mod emergency_selector;
 mod level_selector;
 mod manual_selector;
 mod space_reclaim_selector;
@@ -25,6 +26,7 @@ mod ttl_selector;
 
 use std::collections::HashMap;
 
+pub use emergency_selector::EmergencySelector;
 pub use level_selector::{DynamicLevelSelector, DynamicLevelSelectorCore};
 pub use manual_selector::{ManualCompactionOption, ManualCompactionSelector};
 use risingwave_common::catalog::TableOption;

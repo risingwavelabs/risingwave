@@ -26,8 +26,9 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{compact_task, CompactionConfig, LevelType};
 
 use super::picker::{
-    CompactionTaskValidator, IntraCompactionPicker, SpaceReclaimCompactionPicker,
-    SpaceReclaimPickerState, TtlPickerState, TtlReclaimCompactionPicker,
+    CompactionTaskValidator, EmergencyCompactionPicker, IntraCompactionPicker,
+    SpaceReclaimCompactionPicker, SpaceReclaimPickerState, TtlPickerState,
+    TtlReclaimCompactionPicker,
 };
 use super::{
     create_compaction_task, CompactionSelector, LevelCompactionPicker, ManualCompactionOption,
