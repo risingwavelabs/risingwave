@@ -62,6 +62,7 @@ postgres-types = { version = "0.2.6", features = [
     "with-chrono-0_4",
     "with-serde_json-1",
 ] }
+prehash = "1"
 prometheus = { version = "0.13" }
 prost = "0.11"
 rand = "0.8"
@@ -95,11 +96,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 toml = "0.7"
 tonic = { workspace = true }
 tracing = "0.1"
-tracing-opentelemetry = "0.20"
+tracing-opentelemetry = "0.21"
 tracing-subscriber = "0.3.17"
 twox-hash = "1"
 url = "2"
-uuid = "1.4.1"
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
@@ -113,7 +114,7 @@ libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
-libc = "0.2.147"
+libc = "0.2.148"
 mach2 = "0.4"
 
 [dev-dependencies]
@@ -151,3 +152,6 @@ harness = false
 [[bin]]
 name = "example-config"
 path = "src/bin/default_config.rs"
+
+[lints]
+workspace = true

@@ -253,7 +253,8 @@ fn parse_select_all() {
 #[test]
 fn parse_select_all_distinct() {
     let result = parse_sql_statements("SELECT ALL DISTINCT name FROM customer");
-    assert!(format!("{}", result.unwrap_err()).contains("syntax error at or near \"DISTINCT\""));
+    assert!(format!("{}", result.unwrap_err())
+        .contains("syntax error at or near DISTINCT at line:1, column:20"));
 }
 
 #[test]

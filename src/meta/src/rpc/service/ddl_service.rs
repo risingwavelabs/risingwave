@@ -25,11 +25,12 @@ use risingwave_pb::catalog::connection::private_link_service::{
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Connection};
+use risingwave_pb::catalog::{connection, Connection, PbSource, PbTable};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
@@ -40,34 +41,30 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::ddl_controller::{DdlCommand, DdlController, DropMode, StreamingJobId};
-use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 #[derive(Clone)]
-pub struct DdlServiceImpl<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct DdlServiceImpl {
+    env: MetaSrvEnv,
 
-    catalog_manager: CatalogManagerRef<S>,
+    catalog_manager: CatalogManagerRef,
     sink_manager: SinkCoordinatorManager,
-    ddl_controller: DdlController<S>,
+    ddl_controller: DdlController,
     aws_client: Arc<Option<AwsEc2Client>>,
 }
 
-impl<S> DdlServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl DdlServiceImpl {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        env: MetaSrvEnv<S>,
+        env: MetaSrvEnv,
         aws_client: Option<AwsEc2Client>,
-        catalog_manager: CatalogManagerRef<S>,
-        stream_manager: GlobalStreamManagerRef<S>,
-        source_manager: SourceManagerRef<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        catalog_manager: CatalogManagerRef,
+        stream_manager: GlobalStreamManagerRef,
+        source_manager: SourceManagerRef,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
+        barrier_manager: BarrierManagerRef,
         sink_manager: SinkCoordinatorManager,
     ) -> Self {
         let aws_cli_ref = Arc::new(aws_client);
@@ -93,10 +90,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> DdlService for DdlServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl DdlService for DdlServiceImpl {
     async fn create_database(
         &self,
         request: Request<CreateDatabaseRequest>,
@@ -420,30 +414,7 @@ where
         if let Some(source) = &mut source {
             // Generate source id.
             let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: Use source category
-            source.id = source_id;
-
-            let mut source_count = 0;
-            for fragment in fragment_graph.fragments.values_mut() {
-                visit_fragment(fragment, |node_body| {
-                    if let NodeBody::Source(source_node) = node_body {
-                        // TODO: Refactor using source id.
-                        source_node.source_inner.as_mut().unwrap().source_id = source_id;
-                        source_count += 1;
-                    }
-                });
-            }
-            assert_eq!(
-                source_count, 1,
-                "require exactly 1 external stream source when creating table with a connector"
-            );
-
-            // Fill in the correct table id for source.
-            source.optional_associated_table_id =
-                Some(OptionalAssociatedTableId::AssociatedTableId(table_id));
-
-            // Fill in the correct source id for mview.
-            mview.optional_associated_source_id =
-                Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+            fill_table_source(source, source_id, &mut mview, table_id, &mut fragment_graph);
         }
 
         let mut stream_job = StreamingJob::Table(source, mview);
@@ -537,10 +508,19 @@ where
     ) -> Result<Response<ReplaceTablePlanResponse>, Status> {
         let req = request.into_inner();
 
-        let stream_job = StreamingJob::Table(None, req.table.unwrap());
-        let fragment_graph = req.fragment_graph.unwrap();
+        let mut source = req.source;
+        let mut fragment_graph = req.fragment_graph.unwrap();
+        let mut table = req.table.unwrap();
+        if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
+            table.optional_associated_source_id
+        {
+            let source = source.as_mut().unwrap();
+            let table_id = table.id;
+            fill_table_source(source, source_id, &mut table, table_id, &mut fragment_graph);
+        }
         let table_col_index_mapping =
             ColIndexMapping::from_protobuf(&req.table_col_index_mapping.unwrap());
+        let stream_job = StreamingJob::Table(source, table);
 
         let version = self
             .ddl_controller
@@ -737,10 +717,7 @@ where
     }
 }
 
-impl<S> DdlServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl DdlServiceImpl {
     async fn gen_unique_id<const C: IdCategoryType>(&self) -> MetaResult<u32> {
         let id = self.env.id_gen_manager().generate::<C>().await? as u32;
         Ok(id)
@@ -769,4 +746,38 @@ where
         }
         Ok(())
     }
+}
+
+fn fill_table_source(
+    source: &mut PbSource,
+    source_id: u32,
+    table: &mut PbTable,
+    table_id: u32,
+    fragment_graph: &mut PbStreamFragmentGraph,
+) {
+    // If we're creating a table with connector, we should additionally fill its ID first.
+    source.id = source_id;
+
+    let mut source_count = 0;
+    for fragment in fragment_graph.fragments.values_mut() {
+        visit_fragment(fragment, |node_body| {
+            if let NodeBody::Source(source_node) = node_body {
+                // TODO: Refactor using source id.
+                source_node.source_inner.as_mut().unwrap().source_id = source_id;
+                source_count += 1;
+            }
+        });
+    }
+    assert_eq!(
+        source_count, 1,
+        "require exactly 1 external stream source when creating table with a connector"
+    );
+
+    // Fill in the correct table id for source.
+    source.optional_associated_table_id =
+        Some(OptionalAssociatedTableId::AssociatedTableId(table_id));
+
+    // Fill in the correct source id for mview.
+    table.optional_associated_source_id =
+        Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
 }

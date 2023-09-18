@@ -606,7 +606,6 @@ pub mod test_utils {
         #[must_use]
         fn from_ymd(year: i32, month: i32, days: i32) -> Self {
             let months = year * 12 + month;
-            let days = days;
             let usecs = 0;
             Interval {
                 months,
@@ -1263,7 +1262,7 @@ fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
         convert_digit(&mut num_buf, &mut tokens)?;
     }
     convert_unit(&mut char_buf, &mut tokens)?;
-    convert_hms(&mut hour_min_sec, &mut tokens).ok_or_else(|| {
+    convert_hms(&hour_min_sec, &mut tokens).ok_or_else(|| {
         ErrorCode::InvalidInputSyntax(format!("Invalid interval: {:?}", hour_min_sec))
     })?;
 
@@ -1301,7 +1300,7 @@ fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
 /// [`TimeStrToken::Num(1)`, `TimeStrToken::TimeUnit(DateTimeField::Hour)`,
 ///  `TimeStrToken::Num(2)`, `TimeStrToken::TimeUnit(DateTimeField::Minute)`,
 ///  `TimeStrToken::Second("3")`, `TimeStrToken::TimeUnit(DateTimeField::Second)`]
-fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
+fn convert_hms(c: &Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
     if c.len() > 3 {
         return None;
     }

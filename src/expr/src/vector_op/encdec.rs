@@ -38,7 +38,7 @@ const PARSE_BASE64_ALPHABET_DECODE_TABLE: [u8; 123] = [
 ];
 
 #[function("encode(bytea, varchar) -> varchar")]
-pub fn encode(data: &[u8], format: &str, writer: &mut dyn Write) -> Result<()> {
+pub fn encode(data: &[u8], format: &str, writer: &mut impl Write) -> Result<()> {
     match format {
         "base64" => {
             encode_bytes_base64(data, writer)?;
@@ -78,7 +78,7 @@ pub fn decode(data: &str, format: &str) -> Result<Box<[u8]>> {
 
 // According to https://www.postgresql.org/docs/current/functions-binarystring.html#ENCODE-FORMAT-BASE64
 // We need to split newlines when the output length is greater than or equal to 76
-fn encode_bytes_base64(data: &[u8], writer: &mut dyn Write) -> Result<()> {
+fn encode_bytes_base64(data: &[u8], writer: &mut impl Write) -> Result<()> {
     let mut idx: usize = 0;
     let len = data.len();
     let mut written = 0;
@@ -251,7 +251,7 @@ fn next(idx: &mut usize, data: &[u8]) -> Option<u8> {
 // According to https://www.postgresql.org/docs/current/functions-binarystring.html#ENCODE-FORMAT-ESCAPE
 // The escape format converts \0 and bytes with the high bit set into octal escape sequences (\nnn).
 // And doubles backslashes.
-fn encode_bytes_escape(data: &[u8], writer: &mut dyn Write) -> std::fmt::Result {
+fn encode_bytes_escape(data: &[u8], writer: &mut impl Write) -> std::fmt::Result {
     for b in data {
         match b {
             b'\0' | (b'\x80'..=b'\xff') => {
@@ -273,11 +273,7 @@ mod tests {
         let cases = [
             (r#"ABCDE"#.as_bytes(), "base64", r#"QUJDREU="#.as_bytes()),
             (r#"\""#.as_bytes(), "escape", r#"\\""#.as_bytes()),
-            (
-                b"\x00\x40\x41\x42\xff",
-                "escape",
-                r#"\000@AB\377"#.as_bytes(),
-            ),
+            (b"\x00\x40\x41\x42\xff", "escape", r"\000@AB\377".as_bytes()),
             (
                 "aaaaaaaaaabbbbbbbbbbccccccccccddddddddddeeeeeeeeeefffffff".as_bytes(),
                 "base64",

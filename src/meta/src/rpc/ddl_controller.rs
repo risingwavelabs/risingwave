@@ -40,7 +40,6 @@ use crate::manager::{
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
-use crate::storage::MetaStore;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
     CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef,
@@ -103,32 +102,28 @@ pub enum DdlCommand {
 }
 
 #[derive(Clone)]
-pub struct DdlController<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct DdlController {
+    env: MetaSrvEnv,
 
-    catalog_manager: CatalogManagerRef<S>,
-    stream_manager: GlobalStreamManagerRef<S>,
-    source_manager: SourceManagerRef<S>,
-    cluster_manager: ClusterManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
-    barrier_manager: BarrierManagerRef<S>,
+    catalog_manager: CatalogManagerRef,
+    stream_manager: GlobalStreamManagerRef,
+    source_manager: SourceManagerRef,
+    cluster_manager: ClusterManagerRef,
+    fragment_manager: FragmentManagerRef,
+    barrier_manager: BarrierManagerRef,
 
     aws_client: Arc<Option<AwsEc2Client>>,
     // The semaphore is used to limit the number of concurrent streaming job creation.
-    creating_streaming_job_permits: Arc<CreatingStreamingJobPermit<S>>,
+    creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
 }
 
 #[derive(Clone)]
-pub struct CreatingStreamingJobPermit<S: MetaStore> {
+pub struct CreatingStreamingJobPermit {
     semaphore: Arc<Semaphore>,
-    _phantom: std::marker::PhantomData<S>,
 }
 
-impl<S> CreatingStreamingJobPermit<S>
-where
-    S: MetaStore,
-{
-    async fn new(env: &MetaSrvEnv<S>) -> Self {
+impl CreatingStreamingJobPermit {
+    async fn new(env: &MetaSrvEnv) -> Self {
         let mut permits = env
             .system_params_manager()
             .get_params()
@@ -177,25 +172,19 @@ where
             }
         });
 
-        Self {
-            semaphore,
-            _phantom: std::marker::PhantomData,
-        }
+        Self { semaphore }
     }
 }
 
-impl<S> DdlController<S>
-where
-    S: MetaStore,
-{
+impl DdlController {
     pub(crate) async fn new(
-        env: MetaSrvEnv<S>,
-        catalog_manager: CatalogManagerRef<S>,
-        stream_manager: GlobalStreamManagerRef<S>,
-        source_manager: SourceManagerRef<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        env: MetaSrvEnv,
+        catalog_manager: CatalogManagerRef,
+        stream_manager: GlobalStreamManagerRef,
+        source_manager: SourceManagerRef,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
+        barrier_manager: BarrierManagerRef,
         aws_client: Arc<Option<AwsEc2Client>>,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
@@ -758,7 +747,7 @@ where
         &self,
         source_id: Option<SourceId>,
         table_id: TableId,
-        fragment_manager: FragmentManagerRef<S>,
+        fragment_manager: FragmentManagerRef,
         drop_mode: DropMode,
     ) -> MetaResult<(
         NotificationVersion,
@@ -847,7 +836,7 @@ where
 
         // 3. Mark current relation as "updating".
         self.catalog_manager
-            .start_replace_table_procedure(stream_job.table().unwrap())
+            .start_replace_table_procedure(stream_job)
             .await?;
 
         Ok(fragment_graph)
@@ -958,22 +947,18 @@ where
         stream_job: &StreamingJob,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
-        let StreamingJob::Table(None, table) = stream_job else {
+        let StreamingJob::Table(source, table) = stream_job else {
             unreachable!("unexpected job: {stream_job:?}")
         };
 
         self.catalog_manager
-            .finish_replace_table_procedure(table, table_col_index_mapping)
+            .finish_replace_table_procedure(source, table, table_col_index_mapping)
             .await
     }
 
     async fn cancel_replace_table(&self, stream_job: &StreamingJob) -> MetaResult<()> {
-        let StreamingJob::Table(None, table) = stream_job else {
-            unreachable!("unexpected job: {stream_job:?}")
-        };
-
         self.catalog_manager
-            .cancel_replace_table_procedure(table)
+            .cancel_replace_table_procedure(stream_job)
             .await
     }
 

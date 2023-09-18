@@ -19,7 +19,6 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use redis::{Connection, Pipeline};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::ToText;
@@ -70,7 +69,7 @@ pub struct RedisSink {
 
 impl RedisSink {
     pub fn new(config: RedisConfig, param: SinkParam) -> Result<Self> {
-        if param.pk_indices.is_empty() {
+        if param.downstream_pk.is_empty() {
             return Err(SinkError::Config(anyhow!(
                 "Redis Sink Primary Key must be specified."
             )));
@@ -79,7 +78,7 @@ impl RedisSink {
             config,
             schema: param.schema(),
             is_append_only: param.sink_type.is_append_only(),
-            pk_indices: param.pk_indices,
+            pk_indices: param.downstream_pk,
         })
     }
 }
@@ -248,10 +247,6 @@ impl SinkWriter for RedisSinkWriter {
             self.pipe.clear();
         }
         Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
-        todo!()
     }
 }
 

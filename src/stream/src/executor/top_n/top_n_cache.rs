@@ -527,8 +527,7 @@ impl TopNCacheTrait for TopNCache<true> {
 
                 // We need to trigger insert for all rows with prefix `high_first_order_by`
                 // in high cache.
-                for (ordered_pk_row, row) in
-                    self.high.drain_filter(|k, _| k.0 == high_first_order_by)
+                for (ordered_pk_row, row) in self.high.extract_if(|k, _| k.0 == high_first_order_by)
                 {
                     if ordered_pk_row.0 != high_first_order_by {
                         break;

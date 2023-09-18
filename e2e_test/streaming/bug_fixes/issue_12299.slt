@@ -1,0 +1,31 @@
+# https://github.com/risingwavelabs/risingwave/issues/12299
+# TL;DR When upstream's stream key is not pk and the stream scan does not contain whole pk.
+
+statement ok
+create table t1(
+  id bigint primary key,
+  i bigint
+);
+
+statement ok
+create materialized view mv1 as select id, i from t1 order by id, i;
+
+statement ok
+insert into t1 values(1, 1);
+
+statement ok
+create materialized view mv2 as select id from mv1;
+
+query I
+select * from mv2;
+----
+1
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop table t1;

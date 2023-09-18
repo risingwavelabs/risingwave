@@ -83,7 +83,7 @@ use crate::model::{
     VarTransaction,
 };
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::{MetaStore, MetaStoreRef, Transaction};
 
 mod compaction_group_manager;
 mod context;
@@ -107,12 +107,12 @@ const HISTORY_TABLE_INFO_STATISTIC_TIME: usize = 240;
 // - Make changes on the ValTransaction.
 // - Call `commit_multi_var` to commit the changes via meta store transaction. If transaction
 //   succeeds, the in-mem state will be updated by the way.
-pub struct HummockManager<S: MetaStore> {
-    pub env: MetaSrvEnv<S>,
-    pub cluster_manager: ClusterManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
+pub struct HummockManager {
+    pub env: MetaSrvEnv,
+    pub cluster_manager: ClusterManagerRef,
+    catalog_manager: CatalogManagerRef,
 
-    fragment_manager: FragmentManagerRef<S>,
+    fragment_manager: FragmentManagerRef,
     // `CompactionGroupManager` manages `CompactionGroup`'s members.
     // Note that all hummock state store user should register to `CompactionGroupManager`. It
     // includes all state tables of streaming jobs except sink.
@@ -143,7 +143,7 @@ pub struct HummockManager<S: MetaStore> {
     pub compaction_state: CompactionState,
 }
 
-pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
+pub type HummockManagerRef = Arc<HummockManager>;
 
 /// Commit multiple `ValTransaction`s to state store and upon success update the local in-mem state
 /// by the way
@@ -252,22 +252,19 @@ pub enum CompactionResumeTrigger {
     TaskReport { original_task_num: usize },
 }
 
-impl<S> HummockManager<S>
-where
-    S: MetaStore,
-{
+impl HummockManager {
     pub(crate) async fn new(
-        env: MetaSrvEnv<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        env: MetaSrvEnv,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
-        catalog_manager: CatalogManagerRef<S>,
+        catalog_manager: CatalogManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
-    ) -> Result<HummockManagerRef<S>> {
+    ) -> Result<HummockManagerRef> {
         let compaction_group_manager = Self::build_compaction_group_manager(&env).await?;
         Self::new_impl(
             env,
@@ -284,9 +281,9 @@ where
 
     #[cfg(any(test, feature = "test"))]
     pub(super) async fn with_config(
-        env: MetaSrvEnv<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        env: MetaSrvEnv,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         config: CompactionConfig,
@@ -294,7 +291,7 @@ where
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
-    ) -> HummockManagerRef<S> {
+    ) -> HummockManagerRef {
         use crate::manager::CatalogManager;
         let compaction_group_manager =
             Self::build_compaction_group_manager_with_config(&env, config)
@@ -316,18 +313,18 @@ where
     }
 
     async fn new_impl(
-        env: MetaSrvEnv<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        env: MetaSrvEnv,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
-        catalog_manager: CatalogManagerRef<S>,
+        catalog_manager: CatalogManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
             u32,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
-    ) -> Result<HummockManagerRef<S>> {
+    ) -> Result<HummockManagerRef> {
         let sys_params_manager = env.system_params_manager();
         let sys_params = sys_params_manager.get_params().await;
         let state_store_url = sys_params.state_store();
@@ -540,7 +537,7 @@ where
     /// call `release_contexts` even if it has removed `context_id` from cluster manager.
     async fn commit_trx(
         &self,
-        meta_store: &S,
+        meta_store: &MetaStoreRef,
         trx: Transaction,
         context_id: Option<HummockContextId>,
     ) -> Result<()> {
@@ -1926,7 +1923,7 @@ where
         assignment_ref.get(&task_id).cloned()
     }
 
-    pub fn cluster_manager(&self) -> &ClusterManagerRef<S> {
+    pub fn cluster_manager(&self) -> &ClusterManagerRef {
         &self.cluster_manager
     }
 
@@ -1953,7 +1950,7 @@ where
     }
 
     #[named]
-    pub async fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+    pub fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         use futures::{FutureExt, StreamExt};
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -2472,7 +2469,7 @@ where
         }
     }
 
-    pub async fn compaction_event_loop(
+    pub fn compaction_event_loop(
         hummock_manager: Arc<Self>,
         mut compactor_streams_change_rx: UnboundedReceiver<(
             u32,
@@ -2775,34 +2772,47 @@ fn gen_version_delta<'a>(
         .or_default()
         .group_deltas;
     let mut gc_object_ids = vec![];
+    let mut removed_table_ids_map: BTreeMap<u32, Vec<u64>> = BTreeMap::default();
+
     for level in &compact_task.input_ssts {
+        let level_idx = level.level_idx;
+        let mut removed_table_ids = level
+            .table_infos
+            .iter()
+            .map(|sst| {
+                let object_id = sst.get_object_id();
+                let sst_id = sst.get_sst_id();
+                if !trivial_move
+                    && drop_sst(
+                        branched_ssts,
+                        compact_task.compaction_group_id,
+                        object_id,
+                        sst_id,
+                    )
+                {
+                    gc_object_ids.push(object_id);
+                }
+                sst_id
+            })
+            .collect_vec();
+
+        removed_table_ids_map
+            .entry(level_idx)
+            .or_default()
+            .append(&mut removed_table_ids);
+    }
+
+    for (level_idx, removed_table_ids) in removed_table_ids_map {
         let group_delta = GroupDelta {
             delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                level_idx: level.level_idx,
-                removed_table_ids: level
-                    .table_infos
-                    .iter()
-                    .map(|sst| {
-                        let object_id = sst.get_object_id();
-                        let sst_id = sst.get_sst_id();
-                        if !trivial_move
-                            && drop_sst(
-                                branched_ssts,
-                                compact_task.compaction_group_id,
-                                object_id,
-                                sst_id,
-                            )
-                        {
-                            gc_object_ids.push(object_id);
-                        }
-                        sst_id
-                    })
-                    .collect_vec(),
+                level_idx,
+                removed_table_ids,
                 ..Default::default()
             })),
         };
         group_deltas.push(group_delta);
     }
+
     let group_delta = GroupDelta {
         delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
             level_idx: compact_task.target_level,
@@ -2833,7 +2843,7 @@ async fn write_exclusive_cluster_id(
     const CLUSTER_ID_NAME: &str = "0";
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
-    match object_store.read(&cluster_id_full_path, None).await {
+    match object_store.read(&cluster_id_full_path, ..).await {
         Ok(cluster_id) => Err(ObjectError::internal(format!(
             "Data directory is already used by another cluster with id {:?}, path {}.",
             String::from_utf8(cluster_id.to_vec()).unwrap(),

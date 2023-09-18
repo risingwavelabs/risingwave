@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{ChainNode, ChainType};
@@ -40,15 +40,10 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [mview, snapshot]: [_; 2] = params.input.try_into().unwrap();
-
         // For reporting the progress.
         let progress = stream
             .context
             .register_create_mview_progress(params.actor_context.id);
-
-        // The batch query executor scans on a mapped adhoc mview table, thus we should directly use
-        // its schema.
-        let schema = snapshot.schema().clone();
 
         let output_indices = node
             .output_indices
@@ -56,12 +51,20 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             .map(|&i| i as usize)
             .collect_vec();
 
-        // For `Chain`s other than `Backfill`, there should be no extra mapping required. We can
-        // directly output the columns received from the upstream or snapshot.
-        if !matches!(node.chain_type(), ChainType::Backfill) {
-            let all_indices = (0..schema.len()).collect_vec();
+        let schema = if matches!(node.chain_type(), ChainType::Backfill) {
+            Schema::new(
+                output_indices
+                    .iter()
+                    .map(|i| snapshot.schema().fields()[*i].clone())
+                    .collect_vec(),
+            )
+        } else {
+            // For `Chain`s other than `Backfill`, there should be no extra mapping required. We can
+            // directly output the columns received from the upstream or snapshot.
+            let all_indices = (0..snapshot.schema().len()).collect_vec();
             assert_eq!(output_indices, all_indices);
-        }
+            snapshot.schema().clone()
+        };
 
         let executor = match node.chain_type() {
             ChainType::Chain | ChainType::UpstreamOnly => {

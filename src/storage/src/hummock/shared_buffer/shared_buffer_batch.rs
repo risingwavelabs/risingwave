@@ -590,7 +590,7 @@ impl SharedBufferBatch {
         SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
-            instance_id: instance_id.unwrap_or(LocalInstanceId::default()),
+            instance_id: instance_id.unwrap_or_default(),
         }
     }
 
