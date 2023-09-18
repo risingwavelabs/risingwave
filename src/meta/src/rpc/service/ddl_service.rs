@@ -229,7 +229,11 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(
+                stream_job,
+                fragment_graph,
+                false,
+            ))
             .await?;
 
         Ok(Response::new(CreateSinkResponse {
@@ -280,7 +284,11 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(
+                stream_job,
+                fragment_graph,
+                req.run_in_background,
+            ))
             .await?;
 
         Ok(Response::new(CreateMaterializedViewResponse {
@@ -331,7 +339,11 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(
+                stream_job,
+                fragment_graph,
+                false,
+            ))
             .await?;
 
         Ok(Response::new(CreateIndexResponse {
@@ -423,7 +435,11 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(
+                stream_job,
+                fragment_graph,
+                false,
+            ))
             .await?;
 
         Ok(Response::new(CreateTableResponse {

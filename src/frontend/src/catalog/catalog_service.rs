@@ -195,7 +195,7 @@ impl CatalogWriter for CatalogWriterImpl {
     ) -> Result<()> {
         let (_, version) = self
             .meta_client
-            .create_materialized_view(table, graph)
+            .create_materialized_view(table, graph, run_in_background)
             .await?;
         if !run_in_background {
             self.wait_version(version).await?

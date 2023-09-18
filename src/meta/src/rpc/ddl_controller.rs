@@ -37,6 +37,7 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
     IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
     SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId,
+    IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -81,6 +82,7 @@ impl StreamingJobId {
     }
 }
 
+pub type RunInBackground = bool;
 pub enum DdlCommand {
     CreateDatabase(Database),
     DropDatabase(DatabaseId),
@@ -92,7 +94,7 @@ pub enum DdlCommand {
     DropFunction(FunctionId),
     CreateView(View),
     DropView(ViewId, DropMode),
-    CreateStreamingJob(StreamingJob, StreamFragmentGraphProto),
+    CreateStreamingJob(StreamingJob, StreamFragmentGraphProto, RunInBackground),
     DropStreamingJob(StreamingJobId, DropMode),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
@@ -235,8 +237,9 @@ impl DdlController {
                 DdlCommand::DropView(view_id, drop_mode) => {
                     ctrl.drop_view(view_id, drop_mode).await
                 }
-                DdlCommand::CreateStreamingJob(stream_job, fragment_graph) => {
-                    ctrl.create_streaming_job(stream_job, fragment_graph).await
+                DdlCommand::CreateStreamingJob(stream_job, fragment_graph, run_in_background) => {
+                    ctrl.create_streaming_job(stream_job, fragment_graph, run_in_background)
+                        .await
                 }
                 DdlCommand::DropStreamingJob(job_id, drop_mode) => {
                     ctrl.drop_streaming_job(job_id, drop_mode).await
@@ -401,6 +404,26 @@ impl DdlController {
     }
 
     async fn create_streaming_job(
+        &self,
+        stream_job: StreamingJob,
+        fragment_graph: StreamFragmentGraphProto,
+        run_in_background: bool,
+    ) -> MetaResult<NotificationVersion> {
+        if run_in_background {
+            let ctrl: DdlController = self.clone();
+            let fut = async move {
+                ctrl.create_streaming_job_inner(stream_job, fragment_graph)
+                    .await
+            };
+            tokio::spawn(fut);
+            Ok(IGNORED_NOTIFICATION_VERSION)
+        } else {
+            self.create_streaming_job_inner(stream_job, fragment_graph)
+                .await
+        }
+    }
+
+    async fn create_streaming_job_inner(
         &self,
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,

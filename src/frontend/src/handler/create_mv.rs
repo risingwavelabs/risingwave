@@ -188,6 +188,7 @@ It only indicates the physical clustering of the data, which may improve the per
         (table, graph)
     };
 
+    // Ensure writes to `StreamJobTracker` are atomic.
     let _job_guard =
         session
             .env()
@@ -200,19 +201,12 @@ It only indicates the physical clustering of the data, which may improve the per
             ));
 
     let run_in_background = session.config().get_background_ddl();
-    {
-        let session = session.clone();
-        tokio::spawn(async move {
-            let result: Result<()> = {
-                let catalog_writer = session.catalog_writer_unsafe();
-                catalog_writer
-                    .create_materialized_view(table, graph, run_in_background)
-                    .await?;
-                Ok(())
-            };
-            result
-        });
-    }
+
+    let session = session.clone();
+    let catalog_writer = session.catalog_writer()?;
+    catalog_writer
+        .create_materialized_view(table, graph, run_in_background)
+        .await?;
 
     Ok(PgResponse::empty_result(
         StatementType::CREATE_MATERIALIZED_VIEW,
