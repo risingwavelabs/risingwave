@@ -51,7 +51,7 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
     /// # Contract of the output
     ///
     /// The returned `DataChunk` contains exact two columns:
-    /// - The first column is an I32Array containing row indexes of input chunk. It should be
+    /// - The first column is an I32Array containing row indices of input chunk. It should be
     ///   monotonically increasing.
     /// - The second column is the output values. The data type of the column is `return_type`.
     ///
@@ -82,7 +82,7 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
     /// (You don't need to understand this section to implement a `TableFunction`)
     ///
     /// The output of the `TableFunction` is different from the output of the `ProjectSet` executor.
-    /// `ProjectSet` executor uses the row indexes to stitch multiple table functions and produces
+    /// `ProjectSet` executor uses the row indices to stitch multiple table functions and produces
     /// `projected_row_id`.
     ///
     /// ## Example
