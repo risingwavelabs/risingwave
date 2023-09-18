@@ -24,7 +24,6 @@ auto_enums = { version = "0.8", features = ["futures03"] }
 bk-tree = "0.5.0"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
-ctor = "0.2"
 downcast-rs = "1.2"
 dyn-clone = "1.0.13"
 easy-ext = "1"
@@ -55,7 +54,6 @@ risingwave_common = { workspace = true }
 risingwave_common_service = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_expr = { workspace = true }
-risingwave_expr_macro = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_source = { workspace = true }
