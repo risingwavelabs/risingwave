@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -28,10 +28,10 @@ use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::inheritances::Inheritance;
-use risingwave_pb::hummock::{CompactTask, Inheritances, LevelType, SstableInfo};
+use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 use tokio::sync::oneshot::Receiver;
 
+use super::inheritance::{BlockInheritance, Parent, SstableInheritance};
 use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
@@ -575,19 +575,9 @@ fn compact_done(
             compaction_write_bytes += sst_info.file_size();
             compact_task.sorted_output_ssts.push(sst_info.sst_info);
 
-            let mut inheritances_pb = Inheritances::default();
-            for parents in inheritance {
-                for (parent_sst_obj_id, parent_sst_blk_idx) in parents {
-                    let inheritance_pb = Inheritance {
-                        parent_sst_obj_id,
-                        parent_sst_blk_idx: parent_sst_blk_idx as u64,
-                    };
-                    inheritances_pb.inheritances.push(inheritance_pb);
-                }
-            }
             compact_task
                 .inheritances
-                .insert(new_sst_obj_id, inheritances_pb);
+                .insert(new_sst_obj_id, inheritance.to_proto());
         }
     }
 
@@ -846,29 +836,23 @@ fn record_compaction_inheritance(
     new_sst_idx: usize,
     new_blk_idx: usize,
 ) {
-    let Some((sst_obj_id, blk_idx)) = info else {
+    let Some((sst_obj_id, sst_blk_idx)) = info else {
         return;
     };
 
     if statistics.inheritances.len() == new_sst_idx {
-        statistics.inheritances.push(vec![]);
+        statistics.inheritances.push(SstableInheritance::default());
     }
 
-    if statistics.inheritances.last().unwrap().len() == new_blk_idx {
-        statistics
-            .inheritances
-            .last_mut()
-            .unwrap()
-            .push(BTreeSet::default());
+    let blocks = &mut statistics.inheritances.last_mut().unwrap().blocks;
+    if blocks.len() == new_blk_idx {
+        blocks.push(BlockInheritance::default());
     }
 
-    statistics
-        .inheritances
-        .last_mut()
-        .unwrap()
-        .last_mut()
-        .unwrap()
-        .insert((*sst_obj_id, *blk_idx));
+    blocks.last_mut().unwrap().parents.insert(Parent {
+        sst_obj_id: *sst_obj_id,
+        sst_blk_idx: *sst_blk_idx,
+    });
 }
 
 #[cfg(test)]

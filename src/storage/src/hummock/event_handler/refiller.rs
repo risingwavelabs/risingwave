@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
@@ -30,10 +30,10 @@ use prometheus::{
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_pb::hummock::Inheritances;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
+use crate::hummock::compactor::inheritance::{Parent, SstableInheritance};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::{HummockResult, SstableBlockIndex, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
@@ -151,7 +151,7 @@ impl CacheRefiller {
 
     pub fn start_cache_refill(
         &mut self,
-        inheritances: HashMap<HummockSstableObjectId, Inheritances>,
+        inheritances: BTreeMap<HummockSstableObjectId, SstableInheritance>,
         deltas: Vec<SstDeltaInfo>,
         pinned_version: Arc<PinnedVersion>,
         new_pinned_version: PinnedVersion,
@@ -213,46 +213,30 @@ struct CacheRefillContext {
 }
 
 pub struct CacheRefillTask {
-    inheritances: HashMap<HummockSstableObjectId, Inheritances>,
+    inheritances: BTreeMap<HummockSstableObjectId, SstableInheritance>,
     deltas: Vec<SstDeltaInfo>,
     context: CacheRefillContext,
 }
 
 impl CacheRefillTask {
     async fn run(self) {
+        let inheritances = &self.inheritances;
+        let context = &self.context;
         let tasks = self
             .deltas
             .iter()
-            .map(|delta| {
-                let context = self.context.clone();
-
-                let mut inheritances = HashMap::default();
-                for info in &delta.insert_sst_infos {
-                    if let Some(data) = self.inheritances.get(&info.object_id) {
-                        let data = data
-                            .inheritances
-                            .iter()
-                            .map(|inheritance| {
-                                (
-                                    inheritance.parent_sst_obj_id,
-                                    inheritance.parent_sst_blk_idx as usize,
-                                )
-                            })
-                            .collect_vec();
-                        inheritances.insert(info.object_id, data);
+            .map(|delta| async move {
+                let holders = match Self::meta_cache_refill(context, delta).await {
+                    Ok(holders) => holders,
+                    Err(e) => {
+                        tracing::warn!("meta cache refill error: {:?}", e);
+                        return;
                     }
+                };
+                if inheritances.is_empty() {
+                    return;
                 }
-
-                async move {
-                    let holders = match Self::meta_cache_refill(&context, delta).await {
-                        Ok(holders) => holders,
-                        Err(e) => {
-                            tracing::warn!("meta cache refill error: {:?}", e);
-                            return;
-                        }
-                    };
-                    Self::data_cache_refill(&context, &inheritances, delta, holders).await;
-                }
+                Self::data_cache_refill(context, inheritances, delta, holders).await;
             })
             .collect_vec();
         let future = join_all(tasks);
@@ -286,7 +270,7 @@ impl CacheRefillTask {
 
     async fn data_cache_refill(
         context: &CacheRefillContext,
-        inheritances: &HashMap<HummockSstableObjectId, Vec<(HummockSstableObjectId, usize)>>,
+        inheritances: &BTreeMap<HummockSstableObjectId, SstableInheritance>,
         delta: &SstDeltaInfo,
         holders: Vec<TableHolder>,
     ) {
@@ -324,19 +308,41 @@ impl CacheRefillTask {
 
         let mut tasks = vec![];
         for sst_info in &holders {
+            let Some(sstable_inheritance) = inheritances.get(sst_info.key()) else {
+                GLOBAL_CACHE_REFILL_METRICS
+                    .data_refill_filtered_total
+                    .inc_by(sst_info.value().block_count() as u64);
+                continue;
+            };
+
             for idx in 0..sst_info.value().block_count() {
-                let (parent_sst_obj_id, parent_sst_blk_idx) =
-                    inheritances.get(sst_info.key()).unwrap()[idx];
-                if !context
-                    .sstable_store
-                    .data_file_cache()
-                    .exists(&SstableBlockIndex {
-                        sst_id: parent_sst_obj_id,
-                        block_idx: parent_sst_blk_idx as u64,
-                    })
-                    .await
-                    .unwrap_or_default()
+                let Some(block_inheritance) = sstable_inheritance.blocks.get(idx) else {
+                    GLOBAL_CACHE_REFILL_METRICS.data_refill_filtered_total.inc();
+                    continue;
+                };
+
+                let mut refill = false;
+                'refill: for Parent {
+                    sst_obj_id,
+                    sst_blk_idx,
+                } in &block_inheritance.parents
                 {
+                    if context
+                        .sstable_store
+                        .data_file_cache()
+                        .exists(&SstableBlockIndex {
+                            sst_id: *sst_obj_id,
+                            block_idx: *sst_blk_idx as u64,
+                        })
+                        .await
+                        .unwrap_or_default()
+                    {
+                        refill = true;
+                        break 'refill;
+                    }
+                }
+                if !refill {
+                    GLOBAL_CACHE_REFILL_METRICS.data_refill_filtered_total.inc();
                     continue;
                 }
 

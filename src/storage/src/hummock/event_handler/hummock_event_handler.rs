@@ -22,17 +22,15 @@ use await_tree::InstrumentAwait;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_hummock_sdk::{
-    info_in_release, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
-};
+use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
-use risingwave_pb::hummock::Inheritances;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, trace, warn};
 
 use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
+use crate::hummock::compactor::inheritance::SstableInheritance;
 use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::CacheRefillerEvent;
@@ -410,22 +408,24 @@ impl HummockEventHandler {
             .unwrap_or_else(|| self.pinned_version.load().clone());
 
         let mut sst_delta_infos = vec![];
-        let mut inheritances: HashMap<HummockSstableObjectId, Inheritances> = HashMap::default();
+        let mut inheritances = BTreeMap::new();
+
         let newly_pinned_version = match version_payload {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = pinned_version.version();
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
+
                     if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
-                        sst_delta_infos = version_to_apply.build_sst_delta_infos(version_delta);
+                        sst_delta_infos
+                            .append(&mut version_to_apply.build_sst_delta_infos(version_delta));
+                        inheritances.extend(version_delta.inheritances.iter().map(
+                            |(sst_obj_id, proto)| {
+                                (*sst_obj_id, SstableInheritance::from_proto(proto))
+                            },
+                        ));
                     }
                     version_to_apply.apply_version_delta(version_delta);
-                    inheritances.extend(
-                        version_delta
-                            .inheritances
-                            .iter()
-                            .map(|(sst_obj_id, infos)| (*sst_obj_id, infos.clone())),
-                    );
                 }
 
                 version_to_apply
