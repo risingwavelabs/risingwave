@@ -924,10 +924,6 @@ pub mod default {
         pub fn telemetry_enabled() -> bool {
             true
         }
-
-        pub fn manually_dump_heap_profile_dir() -> String {
-            "".to_string()
-        }
     }
 
     pub mod storage {
