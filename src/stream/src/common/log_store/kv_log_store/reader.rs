@@ -28,7 +28,7 @@ use tokio_stream::StreamExt;
 
 use crate::common::log_store::kv_log_store::buffer::{LogStoreBufferItem, LogStoreBufferReceiver};
 use crate::common::log_store::kv_log_store::serde::{
-    new_log_store_item_stream, LogStoreItemStream, LogStoreRowSerde,
+    merge_log_store_item_stream, LogStoreItemMergeStream, LogStoreRowSerde,
 };
 use crate::common::log_store::{LogReader, LogStoreError, LogStoreReadItem, LogStoreResult};
 
@@ -38,7 +38,7 @@ enum ReaderState<S: StateStore> {
     /// Consuming data previously written to state store before the reader was initialized.
     ConsumingStateStore {
         first_write_epoch: u64,
-        state_store_stream: Pin<Box<LogStoreItemStream<S::IterStream>>>,
+        state_store_stream: Pin<Box<LogStoreItemMergeStream<S::IterStream>>>,
     },
     /// Consuming newly written data after the reader was initialized.
     ConsumingStream { epoch: u64 },
@@ -98,8 +98,11 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         }))
         .await?;
         // TODO: set chunk size by config
-        let state_store_stream =
-            Box::pin(new_log_store_item_stream(streams, self.serde.clone(), 1024));
+        let state_store_stream = Box::pin(merge_log_store_item_stream(
+            streams,
+            self.serde.clone(),
+            1024,
+        ));
         self.reader_state = ReaderState::ConsumingStateStore {
             first_write_epoch,
             state_store_stream,

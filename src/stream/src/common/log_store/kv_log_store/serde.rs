@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::mem::replace;
+use std::mem::{replace, swap};
 use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use bytes::Bytes;
-use futures::stream::{FuturesUnordered, StreamFuture};
+use futures::stream::{FuturesUnordered, Peekable, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -40,6 +40,7 @@ use risingwave_common::util::value_encoding::{
 };
 use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::Table;
+use risingwave_storage::error::StorageError;
 use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::StateStoreReadIterStream;
@@ -367,14 +368,16 @@ enum StreamState {
     BarrierEmitted { prev_epoch: u64 },
 }
 
+type BoxPeekableLogStoreItemStream<S> = Pin<Box<Peekable<LogStoreItemStream<S>>>>;
+
 struct LogStoreRowOpStream<S: StateStoreReadIterStream> {
     serde: LogStoreRowSerde,
 
     /// Streams that have not reached a barrier
-    row_streams: FuturesUnordered<StreamFuture<Pin<Box<S>>>>,
+    row_streams: FuturesUnordered<StreamFuture<BoxPeekableLogStoreItemStream<S>>>,
 
     /// Streams that have reached a barrier
-    barrier_streams: Vec<Pin<Box<S>>>,
+    barrier_streams: Vec<BoxPeekableLogStoreItemStream<S>>,
 
     stream_state: StreamState,
 }
@@ -383,12 +386,12 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
     pub(crate) fn new(streams: Vec<S>, serde: LogStoreRowSerde) -> Self {
         assert!(!streams.is_empty());
         Self {
-            serde,
-            barrier_streams: Vec::with_capacity(streams.len()),
-            row_streams: streams
+            serde: serde.clone(),
+            barrier_streams: streams
                 .into_iter()
-                .map(|s| Box::pin(s).into_future())
+                .map(|s| Box::pin(deserialize_stream(s, serde.clone()).peekable()))
                 .collect(),
+            row_streams: FuturesUnordered::new(),
             stream_state: StreamState::Uninitialized,
         }
     }
@@ -479,17 +482,100 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
     }
 }
 
-pub(crate) type LogStoreItemStream<S> = impl Stream<Item = LogStoreResult<(u64, LogStoreReadItem)>>;
-pub(crate) fn new_log_store_item_stream<S: StateStoreReadIterStream>(
+pub(crate) type LogStoreItemMergeStream<S> =
+    impl Stream<Item = LogStoreResult<(u64, LogStoreReadItem)>>;
+pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIterStream>(
     streams: Vec<S>,
     serde: LogStoreRowSerde,
     chunk_size: usize,
-) -> LogStoreItemStream<S> {
+) -> LogStoreItemMergeStream<S> {
     LogStoreRowOpStream::new(streams, serde).into_log_store_item_stream(chunk_size)
 }
 
+type LogStoreItemStream<S: StateStoreReadIterStream> =
+    impl Stream<Item = LogStoreResult<(u64, LogStoreRowOp)>> + Send;
+fn deserialize_stream<S: StateStoreReadIterStream>(
+    stream: S,
+    serde: LogStoreRowSerde,
+) -> LogStoreItemStream<S> {
+    stream.map(
+        move |result: Result<_, StorageError>| -> LogStoreResult<(u64, LogStoreRowOp)> {
+            match result {
+                Ok((_key, value)) => serde.deserialize(value),
+                Err(e) => Err(e.into()),
+            }
+        },
+    )
+}
+
 impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
+    // Return Ok(false) means all streams have reach the end.
+    async fn may_init_epoch(&mut self) -> LogStoreResult<bool> {
+        let prev_epoch = match &self.stream_state {
+            StreamState::Uninitialized => 0,
+            StreamState::BarrierEmitted { prev_epoch } => *prev_epoch,
+            StreamState::AllConsumingRow { .. } | StreamState::BarrierAligning { .. } => {
+                return Ok(true);
+            }
+        };
+        assert!(
+            self.row_streams.is_empty(),
+            "when uninitialized or barrier emitted, row_streams should be empty"
+        );
+
+        // Use peek to see the current epoch of each stream, and find out the min_epoch
+        let mut barrier_streams = Vec::with_capacity(self.barrier_streams.len());
+        swap(&mut barrier_streams, &mut self.barrier_streams);
+        let mut barrier_streams_with_epoch = Vec::with_capacity(barrier_streams.len());
+        for mut stream in barrier_streams {
+            match stream.as_mut().peek().await {
+                Some(Ok((epoch, _))) => {
+                    barrier_streams_with_epoch.push((*epoch, stream));
+                }
+                Some(Err(_)) => match stream.next().await {
+                    Some(Err(e)) => {
+                        return Err(e);
+                    }
+                    _ => unreachable!("on peek we have checked it's Some(Err(_))"),
+                },
+                None => {
+                    continue;
+                }
+            }
+        }
+
+        let min_epoch = barrier_streams_with_epoch
+            .iter()
+            .map(|(epoch, _)| *epoch)
+            .min();
+        let Some(min_epoch) = min_epoch else {
+            // No epoch is set. Return false to indicate the end.
+            return Ok(false);
+        };
+
+        if min_epoch <= prev_epoch {
+            return Err(LogStoreError::Internal(anyhow!(
+                "next epoch {} should be greater than prev epoch {}",
+                min_epoch,
+                prev_epoch
+            )));
+        }
+
+        for (epoch, stream) in barrier_streams_with_epoch {
+            if epoch == min_epoch {
+                self.row_streams.push(stream.into_future());
+            } else {
+                self.barrier_streams.push(stream);
+            }
+        }
+
+        Ok(true)
+    }
+
     async fn next_op(&mut self) -> LogStoreResult<Option<(u64, LogStoreRowOp)>> {
+        if !self.may_init_epoch().await? {
+            return Ok(None);
+        }
         assert!(!self.row_streams.is_empty());
         while let (Some(result), stream) = self
             .row_streams
@@ -497,8 +583,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
             .await
             .expect("row stream should not be empty when polled")
         {
-            let (_key, value): (_, Bytes) = result?;
-            let (decoded_epoch, op) = self.serde.deserialize(value)?;
+            let (decoded_epoch, op) = result?;
             self.check_epoch(decoded_epoch)?;
             match op {
                 LogStoreRowOp::Row { op, row } => {
@@ -522,9 +607,6 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
                         self.stream_state = StreamState::BarrierEmitted {
                             prev_epoch: decoded_epoch,
                         };
-                        while let Some(stream) = self.barrier_streams.pop() {
-                            self.row_streams.push(stream.into_future());
-                        }
                         return Ok(Some((
                             decoded_epoch,
                             LogStoreRowOp::Barrier { is_checkpoint },
@@ -587,7 +669,7 @@ mod tests {
     use tokio::sync::oneshot::Sender;
 
     use crate::common::log_store::kv_log_store::serde::{
-        new_log_store_item_stream, LogStoreRowOp, LogStoreRowOpStream, LogStoreRowSerde,
+        merge_log_store_item_stream, LogStoreRowOp, LogStoreRowOpStream, LogStoreRowSerde,
     };
     use crate::common::log_store::kv_log_store::test_utils::{
         gen_test_data, gen_test_log_store_table, TEST_TABLE_ID,
@@ -924,7 +1006,7 @@ mod tests {
 
         const CHUNK_SIZE: usize = 3;
 
-        let stream = new_log_store_item_stream(vec![stream], serde, CHUNK_SIZE);
+        let stream = merge_log_store_item_stream(vec![stream], serde, CHUNK_SIZE);
 
         pin_mut!(stream);
 
@@ -1023,7 +1105,7 @@ mod tests {
 
         const CHUNK_SIZE: usize = 3;
 
-        let stream = new_log_store_item_stream(vec![empty(), empty()], serde, CHUNK_SIZE);
+        let stream = merge_log_store_item_stream(vec![empty(), empty()], serde, CHUNK_SIZE);
 
         pin_mut!(stream);
 
