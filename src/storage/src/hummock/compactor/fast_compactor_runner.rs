@@ -399,7 +399,6 @@ impl CompactorRunner {
                     let algorithm = Block::get_algorithm(&block)?;
                     if algorithm == CompressionAlgorithm::None
                         && algorithm != self.compression_algorithm
-                        && self.executor.task_config.gc_delete_keys
                     {
                         first
                             .current_sstable()

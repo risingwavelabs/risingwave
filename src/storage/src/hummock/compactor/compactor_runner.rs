@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
-use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
 use tokio::sync::oneshot::Receiver;
 
@@ -380,8 +380,7 @@ pub async fn compact(
         && single_table
         && compact_task.target_level > 0
         && compact_task.input_ssts.len() == 2
-        && !compact_task.input_ssts[1].table_infos.is_empty()
-        && compact_task.compression_algorithm > 0;
+        && compact_task.task_type() == TaskType::Dynamic;
     if !optimize_by_copy_block {
         match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
             Ok(splits) => {
