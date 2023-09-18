@@ -417,14 +417,18 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .with_label_values(&[&table_id_str, &actor_id_str]);
             let new_group_size = agg_group.estimated_size();
             if let Some(old_group_size) = old_group_size {
-                if new_group_size > old_group_size {
-                    let inc_size = new_group_size - old_group_size;
-                    vars.dirty_groups_heap_size.add_size(inc_size);
-                    metric_dirty_heap_size.add(inc_size as i64);
-                } else if new_group_size < old_group_size {
-                    let dec_size = old_group_size - new_group_size;
-                    vars.dirty_groups_heap_size.sub_size(dec_size);
-                    metric_dirty_heap_size.sub(dec_size as i64);
+                match new_group_size.cmp(&old_group_size) {
+                    std::cmp::Ordering::Greater => {
+                        let inc_size = new_group_size - old_group_size;
+                        vars.dirty_groups_heap_size.add_size(inc_size);
+                        metric_dirty_heap_size.add(inc_size as i64);
+                    }
+                    std::cmp::Ordering::Less => {
+                        let dec_size = old_group_size - new_group_size;
+                        vars.dirty_groups_heap_size.sub_size(dec_size);
+                        metric_dirty_heap_size.sub(dec_size as i64);
+                    }
+                    std::cmp::Ordering::Equal => {}
                 }
             } else {
                 let inc_size = key_size * 2 + new_group_size;
