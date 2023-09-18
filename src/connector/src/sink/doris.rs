@@ -147,9 +147,9 @@ impl DorisSink {
                 Err(SinkError::Doris("Don't support Jsonb".to_string()))
             }
             risingwave_common::types::DataType::Serial => Ok(doris_data_type.contains("BIGINT")),
-            risingwave_common::types::DataType::Int256 => Err(SinkError::Doris(
-                "doris can not support Int256".to_string(),
-            )),
+            risingwave_common::types::DataType::Int256 => {
+                Err(SinkError::Doris("doris can not support Int256".to_string()))
+            }
         }
     }
 }
