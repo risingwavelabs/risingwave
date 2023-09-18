@@ -662,7 +662,7 @@ pub fn start_shared_compactor(
                     let context = context.clone();
                     let shutdown = shutdown_map.clone();
 
-                    let mut cloned_grpc_proxy_client = grpc_proxy_client.clone();
+                    let mut report_task_client = grpc_proxy_client.clone();
                     let get_sst_id_client = grpc_proxy_client.clone();
                     executor.spawn(async move {
                         let DispatchCompactionTaskRequest {
@@ -709,7 +709,7 @@ pub fn start_shared_compactor(
                                         })),
                                     };
 
-                                    match cloned_grpc_proxy_client
+                                    match report_task_client
                                         .report_compaction_task(report_compaction_task_request)
                                         .await
                                     {
@@ -728,7 +728,7 @@ pub fn start_shared_compactor(
                                             let report_vacuum_task_request = ReportVacuumTaskRequest {
                                                 vacuum_task: Some(vacuum_task),
                                             };
-                                            match cloned_grpc_proxy_client.report_vacuum_task(report_vacuum_task_request).await {
+                                            match report_task_client.report_vacuum_task(report_vacuum_task_request).await {
                                                 Ok(_) => tracing::info!("Finished vacuuming SSTs"),
                                                 Err(e) => tracing::warn!("Failed to report vacuum task: {:#?}", e),
                                             }
@@ -748,7 +748,7 @@ pub fn start_shared_compactor(
                                                 total_object_count,
                                                 total_object_size,
                                             };
-                                            match cloned_grpc_proxy_client
+                                            match report_task_client
                                                 .report_full_scan_task(report_full_scan_task_request)
                                                 .await
                                             {

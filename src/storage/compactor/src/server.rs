@@ -334,9 +334,8 @@ pub async fn shared_compactor_serve(
         .connect()
         .await
         .expect("Failed to create channel via proxy rpc endpoint.");
-    let grpc_proxy_client = GrpcCompactorProxyClient::new(channel);
-    let mut system_params_client = grpc_proxy_client.clone();
-    let system_params_response = system_params_client
+    let mut grpc_proxy_client = GrpcCompactorProxyClient::new(channel);
+    let system_params_response = grpc_proxy_client
         .get_system_params()
         .await
         .expect("Fail to get system params, the compactor pod cannot be started.");
