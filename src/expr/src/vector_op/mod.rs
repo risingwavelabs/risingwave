@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod arithmetic_op;
+pub mod array;
 pub mod array_access;
 pub mod array_concat;
 pub mod array_distinct;
@@ -23,6 +24,7 @@ pub mod array_range_access;
 pub mod array_remove;
 pub mod array_replace;
 pub mod array_sort;
+pub mod array_sum;
 pub mod array_to_string;
 pub mod ascii;
 pub mod bitwise_op;
@@ -30,11 +32,14 @@ pub mod cardinality;
 pub mod cast;
 pub mod cmp;
 pub mod concat_op;
+pub mod concat_ws;
 pub mod conjunction;
 pub mod date_trunc;
+pub mod delay;
 pub mod encdec;
 pub mod exp;
 pub mod extract;
+pub mod format;
 pub mod format_type;
 pub mod int256;
 pub mod jsonb_access;

@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 use chrono;
 use risingwave_batch::task::BatchManager;
-use risingwave_common::config::AutoDumpHeapProfileConfig;
+use risingwave_common::config::HeapProfilingConfig;
+use risingwave_common::heap_profiling::AUTO_DUMP_MID_NAME;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::task::LocalStreamManager;
 use tikv_jemalloc_ctl::{
@@ -43,7 +44,7 @@ pub struct JemallocMemoryControl {
     jemalloc_dump_mib: jemalloc_prof::dump_mib,
 
     dump_seq: u64,
-    auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
+    heap_profiling_config: HeapProfilingConfig,
 }
 
 impl JemallocMemoryControl {
@@ -51,15 +52,12 @@ impl JemallocMemoryControl {
     const THRESHOLD_GRACEFUL: f64 = 0.8;
     const THRESHOLD_STABLE: f64 = 0.7;
 
-    pub fn new(
-        total_memory: usize,
-        auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
-    ) -> Self {
+    pub fn new(total_memory: usize, heap_profiling_config: HeapProfilingConfig) -> Self {
         let threshold_stable = (total_memory as f64 * Self::THRESHOLD_STABLE) as usize;
         let threshold_graceful = (total_memory as f64 * Self::THRESHOLD_GRACEFUL) as usize;
         let threshold_aggressive = (total_memory as f64 * Self::THRESHOLD_AGGRESSIVE) as usize;
         let threshold_auto_dump_heap_profile =
-            (total_memory as f64 * auto_dump_heap_profile_config.threshold as f64) as usize;
+            (total_memory as f64 * heap_profiling_config.threshold_auto as f64) as usize;
 
         let jemalloc_epoch_mib = jemalloc_epoch::mib().unwrap();
         let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
@@ -76,7 +74,7 @@ impl JemallocMemoryControl {
             jemalloc_active_mib,
             jemalloc_dump_mib,
             dump_seq: 0,
-            auto_dump_heap_profile_config,
+            heap_profiling_config,
         }
     }
 
@@ -102,7 +100,7 @@ impl JemallocMemoryControl {
     }
 
     fn dump_heap_prof(&self, cur_used_memory_bytes: usize, prev_used_memory_bytes: usize) {
-        if !self.auto_dump_heap_profile_config.enabled {
+        if !self.heap_profiling_config.enable_auto {
             return;
         }
 
@@ -116,24 +114,13 @@ impl JemallocMemoryControl {
             }
 
             let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-            let file_name = format!(
-                "{}.exceed-threshold-aggressive-heap-prof.compute.dump.{}\0",
-                time_prefix, self.dump_seq,
-            );
+            let file_name = format!("{}.{}.{}\0", time_prefix, AUTO_DUMP_MID_NAME, self.dump_seq,);
 
-            let file_path = if !self.auto_dump_heap_profile_config.dir.is_empty() {
-                Path::new(&self.auto_dump_heap_profile_config.dir)
-                    .join(Path::new(&file_name))
-                    .to_str()
-                    .unwrap()
-                    .to_string()
-            } else {
-                let prof_prefix_mib = jemalloc_prof::prefix::mib().unwrap();
-                let prof_prefix = prof_prefix_mib.read().unwrap();
-                let mut file_path = prof_prefix.to_string_lossy().to_string();
-                file_path.push_str(&file_name);
-                file_path
-            };
+            let file_path = Path::new(&self.heap_profiling_config.dir)
+                .join(Path::new(&file_name))
+                .to_str()
+                .unwrap()
+                .to_string();
 
             let file_path_str = Box::leak(file_path.into_boxed_str());
             let file_path_bytes = unsafe { file_path_str.as_bytes_mut() };

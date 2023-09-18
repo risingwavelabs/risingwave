@@ -108,69 +108,105 @@
     create table t2 (a int, b numeric, c bigint, primary key(a));
     select * from t1 except select * from t2;
   optimized_logical_plan_for_batch: |-
-    LogicalAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
+    LogicalAgg { group_key: [t1.a], aggs: [first_value(t1.b order_by(t1.b ASC)), first_value(t1.c order_by(t1.c ASC))] }
     └─LogicalJoin { type: LeftAnti, on: IsNotDistinctFrom(t1.a, t2.a) AND IsNotDistinctFrom(t1.b, t2.b) AND IsNotDistinctFrom(t1.c, t2.c), output: all }
       ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
       └─LogicalScan { table: t2, columns: [t2.a, t2.b, t2.c] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
+    └─BatchHashAgg { group_key: [t1.a], aggs: [first_value(t1.b order_by(t1.b ASC)), first_value(t1.c order_by(t1.c ASC))] }
       └─BatchLookupJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
         └─BatchExchange { order: [], dist: UpstreamHashShard(t1.a) }
           └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: UpstreamHashShard(t1.a) }
   stream_plan: |-
-    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t1.a, t1.b, t1.c] }
-      └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
-        └─StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
-          ├─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
-          │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
-          └─StreamExchange { dist: HashShard(t2.a, t2.b, t2.c) }
-            └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
+    StreamMaterialize { columns: [a, b, c], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t1.a, first_value(t1.b order_by(t1.b ASC)), first_value(t1.c order_by(t1.c ASC))] }
+      └─StreamHashAgg { group_key: [t1.a], aggs: [first_value(t1.b order_by(t1.b ASC)), first_value(t1.c order_by(t1.c ASC)), count] }
+        └─StreamExchange { dist: HashShard(t1.a) }
+          └─StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
+            ├─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
+            │ └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
+            └─StreamExchange { dist: HashShard(t2.a, t2.b, t2.c) }
+              └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck } { materialized table: 4294967294 }
-    └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
-        └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { intermediate state table: 0, state tables: [], distinct tables: [] }
-            └── StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
-                ├── left table: 1
-                ├── right table: 3
-                ├── left degree table: 2
-                ├── right degree table: 4
-                ├── StreamExchange Hash([0, 1, 2]) from 1
-                └── StreamExchange Hash([0, 1, 2]) from 2
+    StreamMaterialize { columns: [a, b, c], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck } { materialized table: 4294967294 }
+    └── StreamProject { exprs: [t1.a, first_value(t1.b order_by(t1.b ASC)), first_value(t1.c order_by(t1.c ASC))] }
+        └── StreamHashAgg { group_key: [t1.a], aggs: [first_value(t1.b order_by(t1.b ASC)), first_value(t1.c order_by(t1.c ASC)), count] }
+            ├── intermediate state table: 2
+            ├── state tables: [ 0, 1 ]
+            ├── distinct tables: []
+            └── StreamExchange Hash([0]) from 1
 
     Fragment 1
-    Chain { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) } { state table: 5 }
-    ├── Upstream
-    └── BatchPlanNode
+    StreamHashJoin { type: LeftAnti, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
+    ├── left table: 3
+    ├── right table: 5
+    ├── left degree table: 4
+    ├── right degree table: 6
+    ├── StreamExchange Hash([0, 1, 2]) from 2
+    └── StreamExchange Hash([0, 1, 2]) from 3
 
     Fragment 2
-    Chain { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) } { state table: 6 }
+    Chain { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) } { state table: 7 }
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ t1_a, t1_b, t1_c, count ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Fragment 3
+    Chain { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) } { state table: 8 }
+    ├── Upstream
+    └── BatchPlanNode
 
-    Table 1 { columns: [ t1_a, t1_b, t1_c ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 0
+    ├── columns: [ t1_a, t1_b, t1_c ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 1
+    ├── columns: [ t1_a, t1_c, t1_b ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
     Table 2
+    ├── columns: [ t1_a, first_value(t1_b order_by(t1_b ASC)), first_value(t1_c order_by(t1_c ASC)), count ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
+
+    Table 3
+    ├── columns: [ t1_a, t1_b, t1_c ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 0, 1, 2 ]
+    └── read pk prefix len hint: 3
+
+    Table 4
     ├── columns: [ t1_a, t1_b, t1_c, _degree ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 
-    Table 3 { columns: [ t2_a, t2_b, t2_c ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 5
+    ├── columns: [ t2_a, t2_b, t2_c ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 0, 1, 2 ]
+    └── read pk prefix len hint: 3
 
-    Table 4
+    Table 6
     ├── columns: [ t2_a, t2_b, t2_c, _degree ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 
-    Table 5
+    Table 7
     ├── columns: [ vnode, a, t1_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
@@ -178,7 +214,7 @@
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 6
+    Table 8
     ├── columns: [ vnode, a, t2_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
@@ -186,7 +222,7 @@
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a, b, c ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 4294967294 { columns: [ a, b, c ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
 - sql: |
     create table t1 (a int, b numeric, c bigint);

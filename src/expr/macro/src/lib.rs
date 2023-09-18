@@ -30,18 +30,20 @@ mod utils;
 ///
 /// # Table of Contents
 ///
-/// - [Function Signature](#function-signature)
+/// - [SQL Function Signature](#sql-function-signature)
 ///     - [Multiple Function Definitions](#multiple-function-definitions)
 ///     - [Type Expansion](#type-expansion)
 ///     - [Automatic Type Inference](#automatic-type-inference)
 ///     - [Custom Type Inference Function](#custom-type-inference-function)
-/// - [Rust Function Requirements](#rust-function-requirements)
+/// - [Rust Function Signature](#rust-function-signature)
 ///     - [Nullable Arguments](#nullable-arguments)
 ///     - [Return Value](#return-value)
+///     - [Variadic Function](#variadic-function)
 ///     - [Optimization](#optimization)
 ///     - [Functions Returning Strings](#functions-returning-strings)
 ///     - [Preprocessing Constant Arguments](#preprocessing-constant-arguments)
 ///     - [Context](#context)
+///     - [Async Function](#async-function)
 /// - [Table Function](#table-function)
 /// - [Registration and Invocation](#registration-and-invocation)
 /// - [Appendix: Type Matrix](#appendix-type-matrix)
@@ -55,23 +57,28 @@ mod utils;
 /// }
 /// ```
 ///
-/// # Function Signature
+/// # SQL Function Signature
 ///
 /// Each function must have a signature, specified in the `function("...")` part of the macro
 /// invocation. The signature follows this pattern:
 ///
 /// ```text
-/// name([arg_types],*) -> [setof] return_type
+/// name ( [arg_types],* [...] ) [ -> [setof] return_type ]
 /// ```
 ///
-/// Where `name` is the function name, which must match the function name defined in `prost`.
+/// Where `name` is the function name in `snake_case`, which must match the function name defined
+/// in `prost`.
 ///
-/// The allowed data types are listed in the `name` column of the appendix's [type matrix].
-/// Wildcards or `auto` can also be used, as explained below.
+/// `arg_types` is a comma-separated list of argument types. The allowed data types are listed in
+/// in the `name` column of the appendix's [type matrix]. Wildcards or `auto` can also be used, as
+/// explained below. If the function is variadic, the last argument can be denoted as `...`.
 ///
 /// When `setof` appears before the return type, this indicates that the function is a set-returning
 /// function (table function), meaning it can return multiple values instead of just one. For more
 /// details, see the section on table functions.
+///
+/// If no return type is specified, the function returns `void`. However, the void type is not
+/// supported in our type system, so it now returns a null value of type int.
 ///
 /// ## Multiple Function Definitions
 ///
@@ -154,7 +161,7 @@ mod utils;
 ///
 /// This type inference function will be invoked at the frontend.
 ///
-/// # Rust Function Requirements
+/// # Rust Function Signature
 ///
 /// The `#[function]` macro can handle various types of Rust functions.
 ///
@@ -198,6 +205,21 @@ mod utils;
 /// generate SIMD vectorized execution code.
 ///
 /// Therefore, try to avoid returning `Option` and `Result` whenever possible.
+///
+/// ## Variadic Function
+///
+/// Variadic functions accept a `impl Row` input to represent tailing arguments.
+/// For example:
+///
+/// ```ignore
+/// #[function("concat_ws(varchar, ...) -> varchar")]
+/// fn concat_ws(sep: &str, vals: impl Row) -> Option<Box<str>> {
+///     let mut string_iter = vals.iter().flatten();
+///     // ...
+/// }
+/// ```
+///
+/// See `risingwave_common::row::Row` for more details.
 ///
 /// ## Functions Returning Strings
 ///
@@ -276,6 +298,19 @@ mod utils;
 ///    // ...
 /// }
 /// ```
+///
+/// ## Async Function
+///
+/// Functions can be asynchronous.
+///
+/// ```ignore
+/// #[function("pg_sleep(float64)")]
+/// async fn pg_sleep(second: F64) {
+///     tokio::time::sleep(Duration::from_secs_f64(second.0)).await;
+/// }
+/// ```
+///
+/// Asynchronous functions will be evaluated on rows sequentially.
 ///
 /// # Table Function
 ///
@@ -460,6 +495,8 @@ struct FunctionAttr {
     prebuild: Option<String>,
     /// Type inference function.
     type_infer: Option<String>,
+    /// Whether the function is volatile.
+    volatile: bool,
     /// Whether the function is deprecated.
     deprecated: bool,
 }
@@ -469,6 +506,8 @@ struct FunctionAttr {
 struct UserFunctionAttr {
     /// Function name
     name: String,
+    /// Whether the function is async.
+    async_: bool,
     /// Whether contains argument `&Context`.
     context: bool,
     /// The last argument type is `&mut dyn Write`.
@@ -548,6 +587,7 @@ impl FunctionAttr {
     fn ident_name(&self) -> String {
         format!("{}_{}_{}", self.name, self.args.join("_"), self.ret)
             .replace("[]", "list")
+            .replace("...", "variadic")
             .replace(['<', '>', ' ', ','], "_")
             .replace("__", "_")
     }
@@ -556,7 +596,8 @@ impl FunctionAttr {
 impl UserFunctionAttr {
     /// Returns true if the function is like `fn(T1, T2, .., Tn) -> T`.
     fn is_pure(&self) -> bool {
-        !self.write
+        !self.async_
+            && !self.write
             && !self.context
             && !self.arg_option
             && self.return_type_kind == ReturnTypeKind::T

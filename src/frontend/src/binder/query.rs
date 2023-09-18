@@ -92,9 +92,17 @@ impl BoundQuery {
         depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
-        // TODO: collect `correlated_input_ref` in `extra_order_exprs`.
-        self.body
-            .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+        let mut correlated_indices = vec![];
+
+        correlated_indices.extend(
+            self.body
+                .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+        );
+
+        correlated_indices.extend(self.extra_order_exprs.iter_mut().flat_map(|expr| {
+            expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+        }));
+        correlated_indices
     }
 
     /// Simple `VALUES` without other clauses.
