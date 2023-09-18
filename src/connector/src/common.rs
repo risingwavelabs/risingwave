@@ -343,33 +343,33 @@ pub struct UpsertMessage<'a> {
 #[serde_as]
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct NatsCommon {
-    #[serde(rename = "nats.server_url")]
+    #[serde(rename = "server_url")]
     pub server_url: String,
-    #[serde(rename = "nats.subject")]
+    #[serde(rename = "subject")]
     pub subject: String,
-    #[serde(rename = "nats.connect_mode")]
+    #[serde(rename = "connect_mode")]
     pub connect_mode: Option<String>,
     #[serde(rename = "username")]
     pub user: Option<String>,
     #[serde(rename = "password")]
     pub password: Option<String>,
-    #[serde(rename = "nats.jwt")]
+    #[serde(rename = "jwt")]
     pub jwt: Option<String>,
-    #[serde(rename = "nats.nkey")]
+    #[serde(rename = "nkey")]
     pub nkey: Option<String>,
-    #[serde(rename = "nats.max_bytes")]
+    #[serde(rename = "max_bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_bytes: Option<i64>,
-    #[serde(rename = "nats.max_messages")]
+    #[serde(rename = "max_messages")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_messages: Option<i64>,
-    #[serde(rename = "nats.max_messages_per_subject")]
+    #[serde(rename = "max_messages_per_subject")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_messages_per_subject: Option<i64>,
-    #[serde(rename = "nats.max_consumers")]
+    #[serde(rename = "max_consumers")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_consumers: Option<i32>,
-    #[serde(rename = "nats.max_message_size")]
+    #[serde(rename = "max_message_size")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_message_size: Option<i32>,
 }

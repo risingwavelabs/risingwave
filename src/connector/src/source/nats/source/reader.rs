@@ -19,7 +19,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 
 use super::message::NatsMessage;
-use super::NatsOffset;
+use super::{NatsOffset, NatsSplit};
 use crate::parser::ParserConfig;
 use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::nats::NatsProperties;
@@ -51,7 +51,7 @@ impl SplitReader for NatsSplitReader {
     ) -> Result<Self> {
         // TODO: to simplify the logic, return 1 split for first version
         assert!(splits.len() == 1);
-        let split = splits.into_iter().next().unwrap().into_nats().unwrap();
+        let split = splits.into_iter().next().unwrap();
         let split_id = split.split_id;
         let start_position = match &split.start_sequence {
             NatsOffset::None => match &properties.scan_startup_mode {
