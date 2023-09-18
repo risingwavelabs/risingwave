@@ -22,7 +22,7 @@ use futures::future::try_join_all;
 use futures::TryFutureExt;
 use futures_async_stream::for_await;
 use pulsar::producer::{Message, SendFuture};
-use pulsar::{Producer, Pulsar, TokioExecutor};
+use pulsar::{Producer, ProducerOptions, Pulsar, TokioExecutor};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_rpc_client::ConnectorClient;
@@ -57,6 +57,14 @@ const fn _default_retry_backoff() -> Duration {
     Duration::from_millis(100)
 }
 
+const fn _default_batch_size() -> u32 {
+    10000
+}
+
+const fn _default_batch_byte_size() -> usize {
+    1 << 20
+}
+
 fn pulsar_to_sink_err(e: pulsar::Error) -> SinkError {
     SinkError::Pulsar(anyhow!(e))
 }
@@ -67,10 +75,30 @@ async fn build_pulsar_producer(
 ) -> Result<Producer<TokioExecutor>> {
     pulsar
         .producer()
+        .with_options(ProducerOptions {
+            batch_size: Some(config.producer_properties.batch_size),
+            batch_byte_size: Some(config.producer_properties.batch_byte_size),
+            ..Default::default()
+        })
         .with_topic(&config.common.topic)
         .build()
         .map_err(pulsar_to_sink_err)
         .await
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Deserialize)]
+pub struct PulsarPropertiesProducer {
+    #[serde(rename = "properties.batch.size", default = "_default_batch_size")]
+    #[serde_as(as = "DisplayFromStr")]
+    batch_size: u32,
+
+    #[serde(
+        rename = "properties.batch.byte.size",
+        default = "_default_batch_byte_size"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    batch_byte_size: usize,
 }
 
 #[serde_as]
@@ -89,6 +117,9 @@ pub struct PulsarConfig {
 
     #[serde(flatten)]
     pub common: PulsarCommon,
+
+    #[serde(flatten)]
+    pub producer_properties: PulsarPropertiesProducer,
 
     pub r#type: String, // accept "append-only" or "upsert"
 }
@@ -300,6 +331,10 @@ impl PulsarSinkWriter {
     }
 
     async fn commit_inner(&mut self) -> Result<()> {
+        self.producer
+            .send_batch()
+            .map_err(pulsar_to_sink_err)
+            .await?;
         try_join_all(
             self.send_future_buffer
                 .drain(..)
