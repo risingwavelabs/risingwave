@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
 use arc_swap::ArcSwap;
-use itertools::Itertools;
 use risingwave_backup::error::BackupError;
 use risingwave_backup::storage::{BoxedMetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
 use risingwave_backup::{MetaBackupJobId, MetaSnapshotId, MetaSnapshotManifest};
@@ -307,7 +307,7 @@ impl BackupManager {
     }
 
     /// List all `SSTables` required by backups.
-    pub fn list_pinned_ssts(&self) -> Vec<HummockSstableObjectId> {
+    pub fn list_pinned_ssts(&self) -> HashSet<HummockSstableObjectId> {
         self.backup_store
             .load()
             .0
@@ -315,8 +315,7 @@ impl BackupManager {
             .snapshot_metadata
             .iter()
             .flat_map(|s| s.ssts.clone())
-            .dedup()
-            .collect_vec()
+            .collect()
     }
 
     pub fn manifest(&self) -> Arc<MetaSnapshotManifest> {

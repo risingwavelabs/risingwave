@@ -946,7 +946,18 @@ set -e
 
 cargo check \
   --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
-  -p risingwave_simulation --all-targets "$@"
+  -p risingwave_batch \
+  -p risingwave_common \
+  -p risingwave_compute \
+  -p risingwave_connector \
+  -p risingwave_frontend \
+  -p risingwave_meta \
+  -p risingwave_object_store \
+  -p risingwave_source \
+  -p risingwave_storage \
+  -p risingwave_stream \
+  -p pgwire \
+  -p risingwave_simulation --tests "$@"
 """
 
 [tasks.sslt]

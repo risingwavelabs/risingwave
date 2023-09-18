@@ -12,6 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod window;
-
-// TODO(rc): this module is to be removed
+mod col_description;
