@@ -411,9 +411,17 @@ impl DdlController {
     ) -> MetaResult<NotificationVersion> {
         if run_in_background {
             let ctrl: DdlController = self.clone();
+            let definition = stream_job.definition();
             let fut = async move {
-                ctrl.create_streaming_job_inner(stream_job, fragment_graph)
-                    .await
+                let result = ctrl
+                    .create_streaming_job_inner(stream_job, fragment_graph)
+                    .await;
+                match result {
+                    Err(e) => tracing::error!(definition, error = ?e, "stream_job_error"),
+                    Ok(_) => {
+                        tracing::info!(definition, "stream_job_ok")
+                    }
+                }
             };
             tokio::spawn(fut);
             Ok(IGNORED_NOTIFICATION_VERSION)
