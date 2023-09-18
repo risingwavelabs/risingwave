@@ -1160,6 +1160,27 @@ where
         ))
     }
 
+    /// This function scans rows from the relational table with specific `prefix` and `pk_sub_range` under the same
+    /// `vnode`.
+    pub async fn iter_row_with_pk_prefix_sub_range(
+        &self,
+        pk_prefix: impl Row,
+        sub_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+        let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
+
+        let memcomparable_range =
+            prefix_and_sub_range_to_memcomparable(&self.pk_serde, sub_range, pk_prefix);
+
+        let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &vnode);
+        Ok(deserialize_keyed_row_stream(
+            self.iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
+                .await?,
+            &self.row_serde,
+        ))
+    }
+
     /// This function scans raw key-values from the relational table with specific `pk_range` under
     /// the same `vnode`.
     async fn iter_kv_with_pk_range(

@@ -51,6 +51,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
+        pk_indices: PkIndices,
     ) -> StreamResult<Self> {
         let info = input.info();
         Ok(TopNExecutorWrapper {
@@ -66,6 +67,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
                 state_table,
                 watermark_epoch,
                 ctx,
+                pk_indices,
             )?,
         })
     }
@@ -109,9 +111,11 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
         ctx: ActorContextRef,
+        pk_indices: PkIndices,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
-            pk_indices, schema, ..
+            schema: input_schema,
+            ..
         } = input_info;
 
         let metrics_info = MetricsInfo::new(
@@ -121,12 +125,13 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K,
             "GroupTopN",
         );
 
-        let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &group_by);
+        let cache_key_serde =
+            create_cache_key_serde(&storage_key, &input_schema, &order_by, &group_by);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
         Ok(Self {
             info: ExecutorInfo {
-                schema,
+                schema: input_schema,
                 pk_indices,
                 identity: format!("GroupTopNExecutor {:X}", executor_id),
             },
@@ -408,6 +413,7 @@ mod tests {
             vec![1],
             state_table,
             Arc::new(AtomicU64::new(0)),
+            pk_indices(),
         )
         .unwrap();
         let top_n_executor = Box::new(a);
@@ -505,6 +511,7 @@ mod tests {
                 vec![1],
                 state_table,
                 Arc::new(AtomicU64::new(0)),
+                pk_indices(),
             )
             .unwrap(),
         );
@@ -595,6 +602,7 @@ mod tests {
                 vec![1, 2],
                 state_table,
                 Arc::new(AtomicU64::new(0)),
+                pk_indices(),
             )
             .unwrap(),
         );

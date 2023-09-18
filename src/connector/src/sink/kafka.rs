@@ -30,19 +30,16 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_rpc_client::ConnectorClient;
 use serde_derive::{Deserialize, Serialize};
-use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
 
 use super::encoder::{JsonEncoder, TimestampHandlingMode};
+use super::formatter::{AppendOnlyFormatter, UpsertFormatter};
 use super::{
-    Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
+    FormattedSink, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM,
+    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
-use crate::sink::utils::{
-    gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
-    AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
-};
+use crate::sink::utils::{gen_debezium_message_stream, DebeziumAdapterOpts};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
 };
@@ -434,7 +431,14 @@ impl KafkaSinkWriter {
                 Err((e, rec)) => {
                     record = rec;
                     match e {
-                        KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
+                        err @ KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull)
+                        | err @ KafkaError::MessageProduction(RDKafkaErrorCode::MessageTimedOut) => {
+                            tracing::warn!(
+                                "producing message (key {:?}) to topic {} failed, err {:?}, retrying",
+                                record.key.map(|k| k.to_bytes()),
+                                record.topic,
+                                err
+                            );
                             tokio::time::sleep(self.config.retry_interval).await;
                             continue;
                         }
@@ -453,20 +457,20 @@ impl KafkaSinkWriter {
         ret
     }
 
-    async fn write_json_objects(
+    async fn write_inner(
         &mut self,
-        event_key_object: Option<Value>,
-        event_object: Option<Value>,
+        event_key_object: Option<Vec<u8>>,
+        event_object: Option<Vec<u8>>,
     ) -> Result<()> {
         let topic = self.config.common.topic.clone();
         // here we assume the key part always exists and value part is optional.
         // if value is None, we will skip the payload part.
-        let key_str = event_key_object.unwrap().to_string();
-        let mut record = FutureRecord::<[u8], [u8]>::to(topic.as_str()).key(key_str.as_bytes());
+        let key_str = event_key_object.unwrap();
+        let mut record = FutureRecord::<[u8], [u8]>::to(topic.as_str()).key(&key_str);
         let payload;
         if let Some(value) = event_object {
-            payload = value.to_string();
-            record = record.payload(payload.as_bytes());
+            payload = value;
+            record = record.payload(&payload);
         }
         // Send the data but not wait it to finish sinking
         // Will join all `DeliveryFuture` during commit
@@ -537,8 +541,11 @@ impl KafkaSinkWriter {
         #[for_await]
         for msg in dbz_stream {
             let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
+            self.write_inner(
+                event_key_object.map(|j| j.to_string().into_bytes()),
+                event_object.map(|j| j.to_string().into_bytes()),
+            )
+            .await?;
         }
         Ok(())
     }
@@ -552,20 +559,9 @@ impl KafkaSinkWriter {
         let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
         // Initialize the upsert_stream
-        let upsert_stream = gen_upsert_message_stream(
-            chunk,
-            UpsertAdapterOpts::default(),
-            key_encoder,
-            val_encoder,
-        );
+        let f = UpsertFormatter::new(key_encoder, val_encoder);
 
-        #[for_await]
-        for msg in upsert_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
-        }
-        Ok(())
+        self.write_chunk(chunk, f).await
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -577,20 +573,18 @@ impl KafkaSinkWriter {
         let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
         // Initialize the append_only_stream
-        let append_only_stream = gen_append_only_message_stream(
-            chunk,
-            AppendOnlyAdapterOpts::default(),
-            key_encoder,
-            val_encoder,
-        );
+        let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
 
-        #[for_await]
-        for msg in append_only_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
-        }
-        Ok(())
+        self.write_chunk(chunk, f).await
+    }
+}
+
+impl FormattedSink for KafkaSinkWriter {
+    type K = Vec<u8>;
+    type V = Vec<u8>;
+
+    async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
+        self.write_inner(k, v).await
     }
 }
 
@@ -645,6 +639,7 @@ mod test {
     use risingwave_common::catalog::Field;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
+    use serde_json::Value;
 
     use super::*;
     use crate::sink::utils::*;

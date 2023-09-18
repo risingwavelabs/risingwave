@@ -14,9 +14,10 @@
 
 use std::sync::Arc;
 
+use arrow_array::RecordBatch;
 use arrow_schema::{Field, Fields, Schema, SchemaRef};
 use futures_util::stream;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, I32Array};
 use risingwave_common::bail;
 use risingwave_udf::ArrowFlightUdfClient;
 
@@ -25,6 +26,7 @@ use super::*;
 #[derive(Debug)]
 pub struct UserDefinedTableFunction {
     children: Vec<BoxedExpression>,
+    #[allow(dead_code)]
     arg_schema: SchemaRef,
     return_type: DataType,
     client: Arc<ArrowFlightUdfClient>,
@@ -49,25 +51,42 @@ impl TableFunction for UserDefinedTableFunction {
 impl UserDefinedTableFunction {
     #[try_stream(boxed, ok = DataChunk, error = ExprError)]
     async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
+        // evaluate children expressions
         let mut columns = Vec::with_capacity(self.children.len());
         for c in &self.children {
-            let val = c.eval_checked(input).await?.as_ref().try_into()?;
+            let val = c.eval_checked(input).await?;
             columns.push(val);
         }
+        let direct_input = DataChunk::new(columns, input.vis().clone());
 
-        let opts =
-            arrow_array::RecordBatchOptions::default().with_row_count(Some(input.cardinality()));
-        let input =
-            arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
-                .expect("failed to build record batch");
+        // compact the input chunk and record the row mapping
+        let visible_rows = direct_input.vis().iter_ones().collect_vec();
+        let compacted_input = direct_input.compact_cow();
+        let arrow_input = RecordBatch::try_from(compacted_input.as_ref())?;
+
+        // call UDTF
         #[for_await]
         for res in self
             .client
-            .call_stream(&self.identifier, stream::once(async { input }))
+            .call_stream(&self.identifier, stream::once(async { arrow_input }))
             .await?
         {
             let output = DataChunk::try_from(&res?)?;
             self.check_output(&output)?;
+
+            // we send the compacted input to UDF, so we need to map the row indices back to the original input
+            let origin_indices = output
+                .column_at(0)
+                .as_int32()
+                .raw_iter()
+                // we have checked all indices are non-negative
+                .map(|idx| visible_rows[idx as usize] as i32)
+                .collect::<I32Array>();
+
+            let output = DataChunk::new(
+                vec![origin_indices.into_ref(), output.column_at(1).clone()],
+                output.vis().clone(),
+            );
             yield output;
         }
     }
@@ -86,6 +105,9 @@ impl UserDefinedTableFunction {
                 output.column_at(0).data_type(),
                 DataType::Int32,
             );
+        }
+        if output.column_at(0).as_int32().raw_iter().any(|i| i < 0) {
+            bail!("UDF returned negative row index");
         }
         if !output
             .column_at(1)

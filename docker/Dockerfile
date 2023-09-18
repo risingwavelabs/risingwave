@@ -37,7 +37,9 @@ RUN rustup self update \
 
 RUN cargo fetch && \
   cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
-  mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+  mkdir -p /risingwave/bin && \
+    mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+    mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \
   cp ./target/release/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
   chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib && cargo clean
@@ -56,6 +58,7 @@ RUN apt-get -y install gdb \
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 
 COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
+COPY --from=builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
 COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=builder /risingwave/ui /risingwave/ui
 COPY --from=builder /risingwave/bin/jeprof /usr/local/bin/jeprof

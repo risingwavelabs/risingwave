@@ -29,13 +29,11 @@ use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
-use super::SinkParam;
+use super::formatter::{AppendOnlyFormatter, UpsertFormatter};
+use super::{FormattedSink, SinkParam};
 use crate::common::KinesisCommon;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
-use crate::sink::utils::{
-    gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
-    AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
-};
+use crate::sink::utils::{gen_debezium_message_stream, DebeziumAdapterOpts};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterParam,
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -173,7 +171,8 @@ impl KinesisSinkWriter {
         })
     }
 
-    async fn put_record(&self, key: &str, payload: Blob) -> Result<PutRecordOutput> {
+    async fn put_record(&self, key: &str, payload: Vec<u8>) -> Result<PutRecordOutput> {
+        let payload = Blob::new(payload);
         // todo: switch to put_records() for batching
         Retry::spawn(
             ExponentialBackoff::from_millis(100).map(jitter).take(3),
@@ -202,40 +201,28 @@ impl KinesisSinkWriter {
         })
     }
 
-    async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
+    async fn upsert(mut self: &Self, chunk: StreamChunk) -> Result<()> {
         let key_encoder = JsonEncoder::new(
             &self.schema,
             Some(&self.pk_indices),
             TimestampHandlingMode::Milli,
         );
         let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
-        let upsert_stream = gen_upsert_message_stream(
-            chunk,
-            UpsertAdapterOpts::default(),
-            key_encoder,
-            val_encoder,
-        );
+        let f = UpsertFormatter::new(key_encoder, val_encoder);
 
-        crate::impl_load_stream_write_record!(upsert_stream, self.put_record);
-        Ok(())
+        self.write_chunk(chunk, f).await
     }
 
-    async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
+    async fn append_only(mut self: &Self, chunk: StreamChunk) -> Result<()> {
         let key_encoder = JsonEncoder::new(
             &self.schema,
             Some(&self.pk_indices),
             TimestampHandlingMode::Milli,
         );
         let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
-        let append_only_stream = gen_append_only_message_stream(
-            chunk,
-            AppendOnlyAdapterOpts::default(),
-            key_encoder,
-            val_encoder,
-        );
+        let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
 
-        crate::impl_load_stream_write_record!(append_only_stream, self.put_record);
-        Ok(())
+        self.write_chunk(chunk, f).await
     }
 
     async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
@@ -249,9 +236,33 @@ impl KinesisSinkWriter {
             &self.sink_from_name,
         );
 
-        crate::impl_load_stream_write_record!(dbz_stream, self.put_record);
+        #[for_await]
+        for msg in dbz_stream {
+            let (event_key_object, event_object) = msg?;
+            let key_str = event_key_object.unwrap().to_string();
+            self.put_record(
+                &key_str,
+                if let Some(value) = event_object {
+                    value.to_string().into_bytes()
+                } else {
+                    vec![]
+                },
+            )
+            .await?;
+        }
 
         Ok(())
+    }
+}
+
+impl FormattedSink for &KinesisSinkWriter {
+    type K = String;
+    type V = Vec<u8>;
+
+    async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
+        self.put_record(&k.unwrap(), v.unwrap_or_default())
+            .await
+            .map(|_| ())
     }
 }
 
@@ -284,24 +295,4 @@ impl SinkWriter for KinesisSinkWriter {
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
         Ok(())
     }
-}
-
-#[macro_export]
-macro_rules! impl_load_stream_write_record {
-    ($stream:ident, $op_fn:stmt) => {
-        #[for_await]
-        for msg in $stream {
-            let (event_key_object, event_object) = msg?;
-            let key_str = event_key_object.unwrap().to_string();
-            $op_fn(
-                &key_str,
-                Blob::new(if let Some(value) = event_object {
-                    value.to_string().into_bytes()
-                } else {
-                    vec![]
-                }),
-            )
-            .await?;
-        }
-    };
 }
