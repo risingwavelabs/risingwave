@@ -90,7 +90,7 @@ pub async fn handle_alter_table_column(
     };
     let source_schema = source_schema
         .clone()
-        .map(|source_schema| source_schema.into_source_schema_v2());
+        .map(|source_schema| source_schema.into_source_schema_v2().0);
 
     if let Some(source_schema) = &source_schema {
         if schema_has_schema_registry(source_schema) {
