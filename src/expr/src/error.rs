@@ -71,8 +71,8 @@ pub enum ExprError {
     #[error("not a constant")]
     NotConstant,
 
-    #[error("Context not found")]
-    Context,
+    #[error("Context {0} not found")]
+    Context(&'static str),
 
     #[error("field name must not be null")]
     FieldNameNull,

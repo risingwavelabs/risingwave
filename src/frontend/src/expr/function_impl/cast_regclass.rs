@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod cast_regclass;
-mod col_description;
-mod context;
+use risingwave_expr::{function, ExprError};
+
+use super::context::CATALOG_READER;
+
+fn cast_regclass(_s: &str) -> Result<i32, ExprError> {
+    CATALOG_READER::try_with(|catalog_reader| {})?;
+
+    Ok(1)
+}
