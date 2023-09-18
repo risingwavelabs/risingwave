@@ -446,6 +446,7 @@ impl LocalStreamManagerCore {
         input: BoxedExecutor,
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
+        fragment_id: FragmentId,
     ) -> StreamResult<DispatchExecutor> {
         let dispatcher_impls = dispatchers
             .iter()
@@ -456,6 +457,7 @@ impl LocalStreamManagerCore {
             input,
             dispatcher_impls,
             actor_id,
+            fragment_id,
             self.context.clone(),
             self.streaming_metrics.clone(),
         ))
@@ -638,7 +640,8 @@ impl LocalStreamManagerCore {
                 .may_trace_hummock()
                 .await?;
 
-            let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
+            let dispatcher =
+                self.create_dispatcher(executor, &actor.dispatcher, actor_id, actor.fragment_id)?;
             let actor = Actor::new(
                 dispatcher,
                 subtasks,
