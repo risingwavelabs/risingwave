@@ -948,7 +948,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"avg(rate({metric('stream_actor_input_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, upstream_fragment_id) / 1000000000",
-                            "fragment {{fragment_id}}->{{upstream_fragment_id}}",
+                            "fragment {{fragment_id}}<-{{upstream_fragment_id}}",
                         ),
                     ],
                 ),
