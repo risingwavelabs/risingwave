@@ -605,7 +605,7 @@ impl Parser {
         if connector.contains("-cdc") {
             let expected = SourceSchemaV2::debezium_json();
             if self.peek_source_schema_format() {
-                let schema = parse_source_schema(self)?.into_source_schema_v2();
+                let schema = parse_source_schema(self)?.into_source_schema_v2().0;
                 if schema != expected {
                     return Err(ParserError::ParserError(format!(
                         "Row format for CDC connectors should be \
@@ -617,7 +617,7 @@ impl Parser {
         } else if connector.contains("nexmark") {
             let expected = SourceSchemaV2::native();
             if self.peek_source_schema_format() {
-                let schema = parse_source_schema(self)?.into_source_schema_v2();
+                let schema = parse_source_schema(self)?.into_source_schema_v2().0;
                 if schema != expected {
                     return Err(ParserError::ParserError(format!(
                         "Row format for nexmark connectors should be \
