@@ -17,9 +17,11 @@ use risingwave_common::array::StreamChunk;
 use crate::sink::Result;
 
 mod append_only;
+mod debezium_json;
 mod upsert;
 
 pub use append_only::AppendOnlyFormatter;
+pub use debezium_json::{DebeziumAdapterOpts, DebeziumJsonFormatter};
 pub use upsert::UpsertFormatter;
 
 /// Transforms a `StreamChunk` into a sequence of key-value pairs according a specific format,
