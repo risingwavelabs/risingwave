@@ -22,17 +22,17 @@ CREATE MATERIALIZED VIEW m2 as SELECT * FROM t;
 statement ok
 CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
 
-# Meta should always reject duplicate mview.
-statement error
-CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
-
-statement error
-SELECT * FROM m1;
-
 query I
 select count(*) from rw_catalog.rw_ddl_progress;
 ----
 3
+
+statement error
+SELECT * FROM m1;
+
+# Meta should always reject duplicate mview.
+statement error
+CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
 
 # Wait for background ddl to finish
 sleep 30s
