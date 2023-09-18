@@ -271,6 +271,12 @@ impl HummockManager {
         let guard = read_lock!(self, versioning).await;
         guard.write_limit.clone()
     }
+
+    #[named]
+    pub async fn list_branched_objects(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
+        let guard = read_lock!(self, versioning).await;
+        guard.branched_ssts.clone()
+    }
 }
 
 /// Calculates write limits for `target_groups`.

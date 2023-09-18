@@ -16,15 +16,13 @@ pub mod memory_manager;
 
 // Only enable the non-trivial policies on Linux as it relies on statistics from `jemalloc-ctl`
 // which might be inaccurate on other platforms.
-#[cfg(target_os = "linux")]
 pub mod policy;
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use risingwave_batch::task::BatchManager;
-use risingwave_common::config::{AutoDumpHeapProfileConfig, StorageConfig, StorageMemoryConfig};
-use risingwave_common::error::Result;
+use risingwave_common::config::{HeapProfilingConfig, StorageConfig, StorageMemoryConfig};
 use risingwave_common::util::pretty_bytes::convert;
 use risingwave_stream::task::LocalStreamManager;
 
@@ -69,28 +67,23 @@ pub trait MemoryControl: Send + Sync + std::fmt::Debug {
     ) -> MemoryControlStats;
 }
 
-#[cfg(target_os = "linux")]
 pub fn build_memory_control_policy(
     total_memory_bytes: usize,
-    auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
-) -> Result<MemoryControlRef> {
+    heap_profiling_config: HeapProfilingConfig,
+) -> MemoryControlRef {
     use self::policy::JemallocMemoryControl;
 
-    Ok(Box::new(JemallocMemoryControl::new(
-        total_memory_bytes,
-        auto_dump_heap_profile_config,
-    )))
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn build_memory_control_policy(
-    _total_memory_bytes: usize,
-    _auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
-) -> Result<MemoryControlRef> {
-    // We disable memory control on operating systems other than Linux now because jemalloc
-    // stats do not work well.
-    tracing::warn!("memory control is only enabled on Linux now");
-    Ok(Box::new(DummyPolicy))
+    if cfg!(target_os = "linux") {
+        Box::new(JemallocMemoryControl::new(
+            total_memory_bytes,
+            heap_profiling_config,
+        ))
+    } else {
+        // We disable memory control on operating systems other than Linux now because jemalloc
+        // stats do not work well.
+        tracing::warn!("memory control is only enabled on Linux now");
+        Box::new(DummyPolicy)
+    }
 }
 
 /// `DummyPolicy` is used for operarting systems other than Linux. It does nothing as memory control

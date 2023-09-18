@@ -30,18 +30,20 @@ mod utils;
 ///
 /// # Table of Contents
 ///
-/// - [Function Signature](#function-signature)
+/// - [SQL Function Signature](#sql-function-signature)
 ///     - [Multiple Function Definitions](#multiple-function-definitions)
 ///     - [Type Expansion](#type-expansion)
 ///     - [Automatic Type Inference](#automatic-type-inference)
 ///     - [Custom Type Inference Function](#custom-type-inference-function)
-/// - [Rust Function Requirements](#rust-function-requirements)
+/// - [Rust Function Signature](#rust-function-signature)
 ///     - [Nullable Arguments](#nullable-arguments)
 ///     - [Return Value](#return-value)
+///     - [Variadic Function](#variadic-function)
 ///     - [Optimization](#optimization)
 ///     - [Functions Returning Strings](#functions-returning-strings)
 ///     - [Preprocessing Constant Arguments](#preprocessing-constant-arguments)
 ///     - [Context](#context)
+///     - [Async Function](#async-function)
 /// - [Table Function](#table-function)
 /// - [Registration and Invocation](#registration-and-invocation)
 /// - [Appendix: Type Matrix](#appendix-type-matrix)
@@ -55,23 +57,28 @@ mod utils;
 /// }
 /// ```
 ///
-/// # Function Signature
+/// # SQL Function Signature
 ///
 /// Each function must have a signature, specified in the `function("...")` part of the macro
 /// invocation. The signature follows this pattern:
 ///
 /// ```text
-/// name([arg_types],*) -> [setof] return_type
+/// name ( [arg_types],* [...] ) [ -> [setof] return_type ]
 /// ```
 ///
-/// Where `name` is the function name, which must match the function name defined in `prost`.
+/// Where `name` is the function name in `snake_case`, which must match the function name defined
+/// in `prost`.
 ///
-/// The allowed data types are listed in the `name` column of the appendix's [type matrix].
-/// Wildcards or `auto` can also be used, as explained below.
+/// `arg_types` is a comma-separated list of argument types. The allowed data types are listed in
+/// in the `name` column of the appendix's [type matrix]. Wildcards or `auto` can also be used, as
+/// explained below. If the function is variadic, the last argument can be denoted as `...`.
 ///
 /// When `setof` appears before the return type, this indicates that the function is a set-returning
 /// function (table function), meaning it can return multiple values instead of just one. For more
 /// details, see the section on table functions.
+///
+/// If no return type is specified, the function returns `void`. However, the void type is not
+/// supported in our type system, so it now returns a null value of type int.
 ///
 /// ## Multiple Function Definitions
 ///
@@ -154,7 +161,7 @@ mod utils;
 ///
 /// This type inference function will be invoked at the frontend.
 ///
-/// # Rust Function Requirements
+/// # Rust Function Signature
 ///
 /// The `#[function]` macro can handle various types of Rust functions.
 ///
@@ -198,6 +205,21 @@ mod utils;
 /// generate SIMD vectorized execution code.
 ///
 /// Therefore, try to avoid returning `Option` and `Result` whenever possible.
+///
+/// ## Variadic Function
+///
+/// Variadic functions accept a `impl Row` input to represent tailing arguments.
+/// For example:
+///
+/// ```ignore
+/// #[function("concat_ws(varchar, ...) -> varchar")]
+/// fn concat_ws(sep: &str, vals: impl Row) -> Option<Box<str>> {
+///     let mut string_iter = vals.iter().flatten();
+///     // ...
+/// }
+/// ```
+///
+/// See `risingwave_common::row::Row` for more details.
 ///
 /// ## Functions Returning Strings
 ///
@@ -276,6 +298,19 @@ mod utils;
 ///    // ...
 /// }
 /// ```
+///
+/// ## Async Function
+///
+/// Functions can be asynchronous.
+///
+/// ```ignore
+/// #[function("pg_sleep(float64)")]
+/// async fn pg_sleep(second: F64) {
+///     tokio::time::sleep(Duration::from_secs_f64(second.0)).await;
+/// }
+/// ```
+///
+/// Asynchronous functions will be evaluated on rows sequentially.
 ///
 /// # Table Function
 ///
@@ -403,7 +438,7 @@ pub fn build_function(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
     fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
         let fn_attr: FunctionAttr = syn::parse(attr)?;
-        let user_fn: UserFunctionAttr = syn::parse(item.clone())?;
+        let user_fn: AggregateFnOrImpl = syn::parse(item.clone())?;
 
         let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
@@ -421,7 +456,7 @@ pub fn aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn build_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
     fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
         let fn_attr: FunctionAttr = syn::parse(attr)?;
-        let user_fn: UserFunctionAttr = syn::parse(item.clone())?;
+        let user_fn: AggregateFnOrImpl = syn::parse(item.clone())?;
 
         let mut tokens: TokenStream2 = item.into();
         for attr in fn_attr.expand() {
@@ -437,15 +472,32 @@ pub fn build_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[derive(Debug, Clone, Default)]
 struct FunctionAttr {
+    /// Function name
     name: String,
+    /// Input argument types
     args: Vec<String>,
+    /// Return type
     ret: String,
+    /// Whether it is a table function
     is_table_function: bool,
+    /// Whether it is an append-only aggregate function
+    append_only: bool,
+    /// Optional function for batch evaluation.
     batch_fn: Option<String>,
+    /// State type for aggregate function.
+    /// If not specified, it will be the same as return type.
     state: Option<String>,
+    /// Initial state value for aggregate function.
+    /// If not specified, it will be NULL.
     init_state: Option<String>,
+    /// Prebuild function for arguments.
+    /// This could be any Rust expression.
     prebuild: Option<String>,
+    /// Type inference function.
     type_infer: Option<String>,
+    /// Whether the function is volatile.
+    volatile: bool,
+    /// Whether the function is deprecated.
     deprecated: bool,
 }
 
@@ -454,6 +506,8 @@ struct FunctionAttr {
 struct UserFunctionAttr {
     /// Function name
     name: String,
+    /// Whether the function is async.
+    async_: bool,
     /// Whether contains argument `&Context`.
     context: bool,
     /// The last argument type is `&mut dyn Write`.
@@ -474,6 +528,52 @@ struct UserFunctionAttr {
     return_type_span: proc_macro2::Span,
 }
 
+#[derive(Debug, Clone)]
+struct AggregateImpl {
+    struct_name: String,
+    accumulate: UserFunctionAttr,
+    retract: Option<UserFunctionAttr>,
+    #[allow(dead_code)] // TODO(wrj): add merge to trait
+    merge: Option<UserFunctionAttr>,
+    finalize: Option<UserFunctionAttr>,
+    #[allow(dead_code)] // TODO(wrj): support encode
+    encode_state: Option<UserFunctionAttr>,
+    #[allow(dead_code)] // TODO(wrj): support decode
+    decode_state: Option<UserFunctionAttr>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
+enum AggregateFnOrImpl {
+    /// A simple accumulate/retract function.
+    Fn(UserFunctionAttr),
+    /// A full impl block.
+    Impl(AggregateImpl),
+}
+
+impl AggregateFnOrImpl {
+    fn as_fn(&self) -> &UserFunctionAttr {
+        match self {
+            AggregateFnOrImpl::Fn(attr) => attr,
+            _ => panic!("expect fn"),
+        }
+    }
+
+    fn accumulate(&self) -> &UserFunctionAttr {
+        match self {
+            AggregateFnOrImpl::Fn(attr) => attr,
+            AggregateFnOrImpl::Impl(impl_) => &impl_.accumulate,
+        }
+    }
+
+    fn has_retract(&self) -> bool {
+        match self {
+            AggregateFnOrImpl::Fn(fn_) => fn_.retract,
+            AggregateFnOrImpl::Impl(impl_) => impl_.retract.is_some(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum ReturnTypeKind {
     T,
@@ -487,6 +587,7 @@ impl FunctionAttr {
     fn ident_name(&self) -> String {
         format!("{}_{}_{}", self.name, self.args.join("_"), self.ret)
             .replace("[]", "list")
+            .replace("...", "variadic")
             .replace(['<', '>', ' ', ','], "_")
             .replace("__", "_")
     }
@@ -495,7 +596,8 @@ impl FunctionAttr {
 impl UserFunctionAttr {
     /// Returns true if the function is like `fn(T1, T2, .., Tn) -> T`.
     fn is_pure(&self) -> bool {
-        !self.write
+        !self.async_
+            && !self.write
             && !self.context
             && !self.arg_option
             && self.return_type_kind == ReturnTypeKind::T

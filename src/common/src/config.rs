@@ -366,12 +366,12 @@ pub struct ServerConfig {
     #[serde(default = "default::server::telemetry_enabled")]
     pub telemetry_enabled: bool,
 
-    #[serde(default, flatten)]
-    pub unrecognized: Unrecognized<Self>,
-
     /// Enable heap profile dump when memory usage is high.
     #[serde(default)]
-    pub auto_dump_heap_profile: AutoDumpHeapProfileConfig,
+    pub heap_profiling: HeapProfilingConfig,
+
+    #[serde(default, flatten)]
+    pub unrecognized: Unrecognized<Self>,
 }
 
 /// The section `[batch]` in `risingwave.toml`.
@@ -657,18 +657,18 @@ impl AsyncStackTraceOption {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
-pub struct AutoDumpHeapProfileConfig {
+pub struct HeapProfilingConfig {
     /// Enable to auto dump heap profile when memory usage is high
-    #[serde(default = "default::auto_dump_heap_profile::enabled")]
-    pub enabled: bool,
-
-    /// The directory to dump heap profile. If empty, the prefix in `MALLOC_CONF` will be used
-    #[serde(default = "default::auto_dump_heap_profile::dir")]
-    pub dir: String,
+    #[serde(default = "default::heap_profiling::enable_auto")]
+    pub enable_auto: bool,
 
     /// The proportion (number between 0 and 1) of memory usage to trigger heap profile dump
-    #[serde(default = "default::auto_dump_heap_profile::threshold")]
-    pub threshold: f32,
+    #[serde(default = "default::heap_profiling::threshold_auto")]
+    pub threshold_auto: f32,
+
+    /// The directory to dump heap profile. If empty, the prefix in `MALLOC_CONF` will be used
+    #[serde(default = "default::heap_profiling::dir")]
+    pub dir: String,
 }
 
 serde_with::with_prefix!(streaming_prefix "stream_");
@@ -736,7 +736,6 @@ pub struct BatchDeveloperConfig {
     #[serde(default = "default::developer::batch_chunk_size")]
     pub chunk_size: usize,
 }
-
 /// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
 /// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
 /// documented.
@@ -1121,21 +1120,21 @@ pub mod default {
         }
 
         pub fn concurrency() -> usize {
-            100
+            10
         }
     }
 
-    pub mod auto_dump_heap_profile {
-        pub fn enabled() -> bool {
+    pub mod heap_profiling {
+        pub fn enable_auto() -> bool {
             true
         }
 
-        pub fn dir() -> String {
-            "".to_string()
+        pub fn threshold_auto() -> f32 {
+            0.9
         }
 
-        pub fn threshold() -> f32 {
-            0.9
+        pub fn dir() -> String {
+            "./".to_string()
         }
     }
 

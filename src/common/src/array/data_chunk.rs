@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::fmt::Display;
 use std::hash::BuildHasher;
 use std::sync::Arc;
@@ -261,6 +262,27 @@ impl DataChunk {
                     })
                     .collect::<Vec<_>>();
                 Self::new(columns, cardinality)
+            }
+        }
+    }
+
+    /// Convert the chunk to compact format.
+    ///
+    /// If the chunk is not compacted, return a new compacted chunk, otherwise return a reference to self.
+    pub fn compact_cow(&self) -> Cow<'_, Self> {
+        match &self.vis2 {
+            Vis::Compact(_) => Cow::Borrowed(self),
+            Vis::Bitmap(visibility) => {
+                let cardinality = visibility.count_ones();
+                let columns = self
+                    .columns
+                    .iter()
+                    .map(|col| {
+                        let array = col;
+                        array.compact(visibility, cardinality).into()
+                    })
+                    .collect::<Vec<_>>();
+                Cow::Owned(Self::new(columns, cardinality))
             }
         }
     }
@@ -779,6 +801,7 @@ impl DataChunkTestExt for DataChunk {
                     "." => None,
                     "t" => Some(true.into()),
                     "f" => Some(false.into()),
+                    "(empty)" => Some("".into()),
                     _ => Some(ScalarImpl::from_text(val_str.as_bytes(), ty).unwrap()),
                 };
                 builder.append(datum);

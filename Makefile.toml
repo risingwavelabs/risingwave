@@ -281,6 +281,23 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/standalone"
 '''
 
+[tasks.codesign-playground]
+private = true
+category = "RiseDev - Build"
+description = "Codesign playground binary to support coredump"
+# If core dump is enabled by RiseDev and we're on an Apple Silicon platform,
+# codesign the binary before running.
+# https://developer.apple.com/forums/thread/694233?answerId=695943022#695943022
+condition = { env_set = [
+  "ENABLE_COREDUMP",
+], env = { "SYSTEM" = "darwin-arm64" } }
+script = '''
+#!/usr/bin/env bash
+
+set -ex
+codesign -s - -f --entitlements scripts/coredump/coredump.entitlements "target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave"
+'''
+
 [tasks.codesign-binaries]
 private = true
 category = "RiseDev - Build"
@@ -303,6 +320,7 @@ else
   binaries=("meta-node" "compute-node" "frontend" "compactor")
 fi
 
+set -ex
 echo -n "${binaries[*]}" | parallel -d ' ' \
   "codesign -s - -f --entitlements scripts/coredump/coredump.entitlements \"target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/{}\""
 '''
@@ -391,6 +409,24 @@ ${BUILD_HUMMOCK_TRACE_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
             ${RISINGWAVE_FEATURE_FLAGS} \
             ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
+'''
+
+[tasks.build-risingwave-playground]
+category = "RiseDev - Build"
+description = "Build RisingWave playground"
+condition = { env_true = ["ENABLE_BUILD_RUST"] }
+script = '''
+#!/usr/bin/env bash
+
+set -e
+[[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
+echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
+set -xe
+
+cargo build -p risingwave_cmd_all \
+          --profile "${RISINGWAVE_BUILD_PROFILE}" \
+          ${RISINGWAVE_FEATURE_FLAGS} \
+          ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
 '''
 
 [tasks.clean]
@@ -508,7 +544,11 @@ dependencies = [
 [tasks.pre-start-playground]
 category = "RiseDev - Prepare"
 description = "Preparation steps for playground"
-dependencies = ["build-connector-node"]
+dependencies = [
+  "build-risingwave-playground",
+  "codesign-playground",
+  "build-connector-node",
+]
 
 [tasks.check-risedev-env-file]
 private = true
@@ -557,35 +597,31 @@ dependencies = ["pre-start-playground"]
 script = '''
 #!/usr/bin/env bash
 
-set -ex
-
+set -e
 if [[ $ENABLE_COREDUMP == "true" ]]; then
+  echo "+ ulimit -c unlimited"
   ulimit -c unlimited
 fi
 
-cargo run -p risingwave_cmd_all \
-          --profile "${RISINGWAVE_BUILD_PROFILE}" \
-          ${RISINGWAVE_FEATURE_FLAGS} \
-          -- playground
+set -x
+target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave playground $@
 '''
 
 [tasks.standalone]
 category = "RiseDev - Start/Stop"
 description = "🌟 Start a RisingWave standalone instance"
-dependencies = ["build"]
+dependencies = ["pre-start-playground"]
 script = '''
 #!/usr/bin/env bash
 
-set -euo pipefail
-
+set -e
 if [[ $ENABLE_COREDUMP == "true" ]]; then
+  echo "+ ulimit -c unlimited"
   ulimit -c unlimited
 fi
 
-cargo run -p risingwave_cmd_all \
-          --profile "${RISINGWAVE_BUILD_PROFILE}" \
-          ${RISINGWAVE_FEATURE_FLAGS} \
-          -- standalone $@
+set -x
+target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave standalone $@
 '''
 
 # TODO(kwannoel): Support `tasks.standalone-dev` as well.
@@ -612,12 +648,13 @@ description = "🌟 Start a full RisingWave dev cluster using risedev-dev"
 script = '''
 #!/usr/bin/env bash
 
-set -ex
-
+set -e
 if [[ $ENABLE_COREDUMP == "true" ]]; then
+  echo "+ ulimit -c unlimited"
   ulimit -c unlimited
 fi
 
+set -x
 target/${BUILD_MODE_DIR}/risedev-dev ${@}
 '''
 
@@ -909,7 +946,18 @@ set -e
 
 cargo check \
   --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
-  -p risingwave_simulation --all-targets "$@"
+  -p risingwave_batch \
+  -p risingwave_common \
+  -p risingwave_compute \
+  -p risingwave_connector \
+  -p risingwave_frontend \
+  -p risingwave_meta \
+  -p risingwave_object_store \
+  -p risingwave_source \
+  -p risingwave_storage \
+  -p risingwave_stream \
+  -p pgwire \
+  -p risingwave_simulation --tests "$@"
 """
 
 [tasks.sslt]

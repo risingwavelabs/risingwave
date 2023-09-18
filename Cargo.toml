@@ -52,7 +52,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "1.1.0-alpha"
+version = "1.3.0-alpha"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -112,6 +112,10 @@ arrow-schema = "46"
 arrow-buffer = "46"
 arrow-flight = "46"
 arrow-select = "46"
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
+  "profiling",
+  "stats",
+], rev = "64a2d9" }
 
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
@@ -173,8 +177,9 @@ redundant_explicit_links = "allow"
 lto = 'off'
 
 [profile.release]
-debug = 1
-lto = 'thin'
+debug = "full"
+split-debuginfo = "packed"
+lto = "thin"
 
 # The profile used for CI in main branch.
 # This profile inherits from the release profile, but turns on some checks and assertions for us to
@@ -183,6 +188,7 @@ lto = 'thin'
 inherits = "release"
 incremental = false
 debug = "line-tables-only"
+split-debuginfo = "off"
 debug-assertions = true
 overflow-checks = true
 

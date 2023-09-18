@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::IndexId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::PbIndex;
+use risingwave_pb::catalog::{PbIndex, PbStreamJobStatus};
 
 use super::ColumnId;
 use crate::catalog::{DatabaseId, OwnedByUserCatalog, SchemaId, TableCatalog};
@@ -184,6 +184,7 @@ impl IndexCatalog {
             original_columns: self.original_columns.iter().map(Into::into).collect_vec(),
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
+            stream_job_status: PbStreamJobStatus::Creating.into(),
         }
     }
 

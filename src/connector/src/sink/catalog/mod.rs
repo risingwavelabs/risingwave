@@ -22,7 +22,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbSink, PbSinkType};
+use risingwave_pb::catalog::{PbSink, PbSinkType, PbStreamJobStatus};
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct SinkId {
@@ -191,6 +191,7 @@ impl SinkCatalog {
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
+            stream_job_status: PbStreamJobStatus::Creating.into(),
         }
     }
 

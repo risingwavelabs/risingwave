@@ -109,7 +109,7 @@ func (impl *deviceNicsMonitor) newMetrics(
 		MetricName:  metricName,
 		Aggregation: aggregation,
 		NicName:     "eth" + strconv.Itoa(NicId),
-		ReportTime:  reportTime.Format(gen.RwTimestampLayout),
+		ReportTime:  reportTime.Format(gen.RwTimestamptzLayout),
 		Bandwidth:   maxBandwidth,
 		Value:       float64(value),
 	}
