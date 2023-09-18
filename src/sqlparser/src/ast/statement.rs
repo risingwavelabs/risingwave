@@ -215,6 +215,7 @@ impl SourceSchema {
 
 impl fmt::Display for SourceSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ROW FORMAT ")?;
         match self {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
