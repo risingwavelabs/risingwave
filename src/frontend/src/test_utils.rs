@@ -34,7 +34,7 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
-use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
+use risingwave_pb::ddl_service::{create_connection_request, DdlProgress, StreamJobExecutionMode};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactionGroupInfo, HummockSnapshot, HummockVersion, HummockVersionDelta,
@@ -235,7 +235,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         mut table: PbTable,
         _graph: StreamFragmentGraph,
-        _run_in_background: bool,
+        _stream_job_execution_mode: StreamJobExecutionMode,
     ) -> Result<()> {
         table.id = self.gen_id();
         self.catalog.write().create_table(&table);
@@ -261,7 +261,8 @@ impl CatalogWriter for MockCatalogWriter {
             table.optional_associated_source_id =
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
-        self.create_materialized_view(table, graph, false).await?;
+        self.create_materialized_view(table, graph, StreamJobExecutionMode::Foreground)
+            .await?;
         Ok(())
     }
 

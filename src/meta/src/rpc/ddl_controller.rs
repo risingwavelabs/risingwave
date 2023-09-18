@@ -26,7 +26,7 @@ use risingwave_pb::catalog::{
     connection, Connection, Database, Function, Schema, Source, Table, View,
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
-use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::ddl_service::{DdlProgress, StreamJobExecutionMode};
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tokio::sync::Semaphore;
 use tracing::log::warn;
@@ -82,7 +82,6 @@ impl StreamingJobId {
     }
 }
 
-pub type RunInBackground = bool;
 pub enum DdlCommand {
     CreateDatabase(Database),
     DropDatabase(DatabaseId),
@@ -94,7 +93,11 @@ pub enum DdlCommand {
     DropFunction(FunctionId),
     CreateView(View),
     DropView(ViewId, DropMode),
-    CreateStreamingJob(StreamingJob, StreamFragmentGraphProto, RunInBackground),
+    CreateStreamingJob(
+        StreamingJob,
+        StreamFragmentGraphProto,
+        StreamJobExecutionMode,
+    ),
     DropStreamingJob(StreamingJobId, DropMode),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
@@ -237,8 +240,12 @@ impl DdlController {
                 DdlCommand::DropView(view_id, drop_mode) => {
                     ctrl.drop_view(view_id, drop_mode).await
                 }
-                DdlCommand::CreateStreamingJob(stream_job, fragment_graph, run_in_background) => {
-                    ctrl.create_streaming_job(stream_job, fragment_graph, run_in_background)
+                DdlCommand::CreateStreamingJob(
+                    stream_job,
+                    fragment_graph,
+                    stream_job_execution_mode,
+                ) => {
+                    ctrl.create_streaming_job(stream_job, fragment_graph, stream_job_execution_mode)
                         .await
                 }
                 DdlCommand::DropStreamingJob(job_id, drop_mode) => {
@@ -407,7 +414,7 @@ impl DdlController {
         &self,
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        run_in_background: bool,
+        stream_job_execution_mode: StreamJobExecutionMode,
     ) -> MetaResult<NotificationVersion> {
         let _permit = self
             .creating_streaming_job_permits
@@ -441,25 +448,28 @@ impl DdlController {
             _ => {}
         }
 
-        if run_in_background {
-            let ctrl: DdlController = self.clone();
-            let definition = stream_job.definition();
-            let fut = async move {
-                let result = ctrl
-                    .create_streaming_job_inner(stream_job, table_fragments, ctx)
-                    .await;
-                match result {
-                    Err(e) => tracing::error!(definition, error = ?e, "stream_job_error"),
-                    Ok(_) => {
-                        tracing::info!(definition, "stream_job_ok")
+        match stream_job_execution_mode {
+            StreamJobExecutionMode::Foreground | StreamJobExecutionMode::Unspecified => {
+                self.create_streaming_job_inner(stream_job, table_fragments, ctx)
+                    .await
+            }
+            StreamJobExecutionMode::Background => {
+                let ctrl: DdlController = self.clone();
+                let definition = stream_job.definition();
+                let fut = async move {
+                    let result = ctrl
+                        .create_streaming_job_inner(stream_job, table_fragments, ctx)
+                        .await;
+                    match result {
+                        Err(e) => tracing::error!(definition, error = ?e, "stream_job_error"),
+                        Ok(_) => {
+                            tracing::info!(definition, "stream_job_ok")
+                        }
                     }
-                }
-            };
-            tokio::spawn(fut);
-            Ok(IGNORED_NOTIFICATION_VERSION)
-        } else {
-            self.create_streaming_job_inner(stream_job, table_fragments, ctx)
-                .await
+                };
+                tokio::spawn(fut);
+                Ok(IGNORED_NOTIFICATION_VERSION)
+            }
         }
     }
 

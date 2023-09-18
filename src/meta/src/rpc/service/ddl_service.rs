@@ -232,7 +232,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob(
                 stream_job,
                 fragment_graph,
-                false,
+                StreamJobExecutionMode::Foreground,
             ))
             .await?;
 
@@ -287,7 +287,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob(
                 stream_job,
                 fragment_graph,
-                req.run_in_background,
+                req.stream_job_execution_mode(),
             ))
             .await?;
 
@@ -342,7 +342,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob(
                 stream_job,
                 fragment_graph,
-                false,
+                StreamJobExecutionMode::Foreground,
             ))
             .await?;
 
@@ -438,7 +438,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob(
                 stream_job,
                 fragment_graph,
-                false,
+                StreamJobExecutionMode::Foreground,
             ))
             .await?;
 

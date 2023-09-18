@@ -332,12 +332,12 @@ impl MetaClient {
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
-        run_in_background: bool,
+        stream_job_execution_mode: StreamJobExecutionMode,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
-            run_in_background,
+            stream_job_execution_mode: stream_job_execution_mode as i32,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
