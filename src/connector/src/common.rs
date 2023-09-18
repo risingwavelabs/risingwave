@@ -469,6 +469,7 @@ impl NatsCommon {
         let mut config = jetstream::stream::Config {
             // the subject default use name value
             name: self.subject.clone(),
+            max_bytes: 1000000,
             ..Default::default()
         };
         if let Some(v) = self.max_bytes {
