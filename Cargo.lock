@@ -7251,6 +7251,7 @@ dependencies = [
  "thiserror",
  "tokio-retry",
  "tokio-stream",
+ "tokio-util",
  "tower",
  "tower-http",
  "tracing",
