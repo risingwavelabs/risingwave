@@ -402,7 +402,12 @@ impl NatsCommon {
                     ));
                 }
             }
-            _ => {}
+            Some("plain") => {}
+            _ => {
+                return Err(anyhow_error!(
+                    "nats connect mode only accept user_and_password/credential/plain"
+                ));
+            }
         };
 
         let servers = self.server_url.split(',').collect::<Vec<&str>>();
