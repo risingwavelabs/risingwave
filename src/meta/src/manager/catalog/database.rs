@@ -144,6 +144,18 @@ impl DatabaseManager {
     }
 
     pub fn get_catalog(&self) -> Catalog {
+        debug_assert!(self
+            .tables
+            .values()
+            .all(|t| t.stream_job_status == PbStreamJobStatus::Created as i32));
+        debug_assert!(self
+            .sinks
+            .values()
+            .all(|t| t.stream_job_status == PbStreamJobStatus::Created as i32));
+        debug_assert!(self
+            .indexes
+            .values()
+            .all(|t| t.stream_job_status == PbStreamJobStatus::Created as i32));
         (
             self.databases.values().cloned().collect_vec(),
             self.schemas.values().cloned().collect_vec(),
