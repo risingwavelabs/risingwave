@@ -32,7 +32,8 @@ use risingwave_pb::hummock::{
     HummockVersionCheckpoint, HummockVersionStats, LevelType,
 };
 
-use super::compaction::{get_compression_algorithm, DynamicLevelSelectorCore};
+use super::compaction::get_compression_algorithm;
+use super::compaction::selector::DynamicLevelSelectorCore;
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
 

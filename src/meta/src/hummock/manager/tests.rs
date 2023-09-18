@@ -39,10 +39,11 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction::{
-    default_level_selector, CompactStatus, LevelSelector, ManualCompactionOption,
+use crate::hummock::compaction::selector::{
+    default_compaction_selector, CompactionSelector, ManualCompactionOption,
     SpaceReclaimCompactionSelector,
 };
+use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
 use crate::hummock::{HummockManager, HummockManagerRef};
@@ -161,7 +162,7 @@ async fn test_hummock_compaction_task() {
     assert!(hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
-            &mut default_level_selector(),
+            &mut default_compaction_selector(),
         )
         .await
         .unwrap()
@@ -192,7 +193,7 @@ async fn test_hummock_compaction_task() {
     let mut compact_task = hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
-            &mut default_level_selector(),
+            &mut default_compaction_selector(),
         )
         .await
         .unwrap()
@@ -217,7 +218,7 @@ async fn test_hummock_compaction_task() {
     let mut compact_task = hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
-            &mut default_level_selector(),
+            &mut default_compaction_selector(),
         )
         .await
         .unwrap()
@@ -731,7 +732,7 @@ async fn test_print_compact_task() {
     let compact_task = hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
-            &mut default_level_selector(),
+            &mut default_compaction_selector(),
         )
         .await
         .unwrap()
@@ -887,7 +888,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     assert!(hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
-            &mut default_level_selector(),
+            &mut default_compaction_selector(),
         )
         .await
         .unwrap()
@@ -918,7 +919,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     let mut compact_task = hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
-            &mut default_level_selector(),
+            &mut default_compaction_selector(),
         )
         .await
         .unwrap()
@@ -956,7 +957,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     let mut compact_task = hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
-            &mut default_level_selector(),
+            &mut default_compaction_selector(),
         )
         .await
         .unwrap()
@@ -999,7 +1000,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     assert!(hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
-            &mut default_level_selector(),
+            &mut default_compaction_selector(),
         )
         .await
         .unwrap()
@@ -1030,7 +1031,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     let compact_task = hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
-            &mut default_level_selector(),
+            &mut default_compaction_selector(),
         )
         .await
         .unwrap()
@@ -1196,7 +1197,7 @@ async fn test_version_stats() {
     let mut compact_task = hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
-            &mut default_level_selector(),
+            &mut default_compaction_selector(),
         )
         .await
         .unwrap()
@@ -1633,7 +1634,7 @@ async fn test_split_compaction_group_trivial_expired() {
         .await
         .unwrap();
     let mut task = hummock_manager
-        .get_compact_task(2, &mut default_level_selector())
+        .get_compact_task(2, &mut default_compaction_selector())
         .await
         .unwrap()
         .unwrap();
@@ -1641,7 +1642,8 @@ async fn test_split_compaction_group_trivial_expired() {
         .split_compaction_group(2, &[100])
         .await
         .unwrap();
-    let mut selector: Box<dyn LevelSelector> = Box::<SpaceReclaimCompactionSelector>::default();
+    let mut selector: Box<dyn CompactionSelector> =
+        Box::<SpaceReclaimCompactionSelector>::default();
     let reclaim_task = hummock_manager
         .get_compact_task_impl(2, &mut selector)
         .await
@@ -1667,7 +1669,7 @@ async fn test_split_compaction_group_trivial_expired() {
     );
 
     let mut task2 = hummock_manager
-        .get_compact_task(new_group_id, &mut default_level_selector())
+        .get_compact_task(new_group_id, &mut default_compaction_selector())
         .await
         .unwrap()
         .unwrap();
@@ -2021,7 +2023,8 @@ async fn test_move_tables_between_compaction_group() {
     let groups = info.keys().sorted().cloned().collect_vec();
     assert_eq!(groups, vec![2, new_group_id]);
 
-    let mut selector: Box<dyn LevelSelector> = Box::<SpaceReclaimCompactionSelector>::default();
+    let mut selector: Box<dyn CompactionSelector> =
+        Box::<SpaceReclaimCompactionSelector>::default();
 
     let mut compaction_task = hummock_manager
         .get_compact_task(2, &mut selector)

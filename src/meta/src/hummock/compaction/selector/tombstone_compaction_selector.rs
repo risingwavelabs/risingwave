@@ -19,12 +19,12 @@ use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task;
 use risingwave_pb::hummock::hummock_version::Levels;
 
+use super::{CompactionSelector, DynamicLevelSelectorCore};
 use crate::hummock::compaction::picker::{
     TombstoneReclaimCompactionPicker, TombstoneReclaimPickerState,
 };
 use crate::hummock::compaction::{
-    create_compaction_task, create_overlap_strategy, CompactionTask, DynamicLevelSelectorCore,
-    LevelSelector, LocalSelectorStatistic,
+    create_compaction_task, create_overlap_strategy, CompactionTask, LocalSelectorStatistic,
 };
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
@@ -34,7 +34,7 @@ pub struct TombstoneCompactionSelector {
     state: HashMap<u64, TombstoneReclaimPickerState>,
 }
 
-impl LevelSelector for TombstoneCompactionSelector {
+impl CompactionSelector for TombstoneCompactionSelector {
     fn pick_compaction(
         &mut self,
         task_id: HummockCompactionTaskId,

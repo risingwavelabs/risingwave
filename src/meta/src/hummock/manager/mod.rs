@@ -65,9 +65,11 @@ use tokio_stream::wrappers::IntervalStream;
 use tonic::Streaming;
 use tracing::warn;
 
-use crate::hummock::compaction::{
-    CompactStatus, LocalSelectorStatistic, ManualCompactionOption, TombstoneCompactionSelector,
+use crate::hummock::compaction::selector::{
+    DynamicLevelSelector, LocalSelectorStatistic, ManualCompactionOption, ManualCompactionSelector,
+    SpaceReclaimCompactionSelector, TombstoneCompactionSelector, TtlCompactionSelector,
 };
+use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     trigger_delta_log_stats, trigger_lsm_stat, trigger_mv_stat, trigger_pin_unpin_snapshot_state,
@@ -224,10 +226,6 @@ macro_rules! start_measure_real_process_timer {
 }
 pub(crate) use start_measure_real_process_timer;
 
-use super::compaction::{
-    DynamicLevelSelector, LevelSelector, ManualCompactionSelector, SpaceReclaimCompactionSelector,
-    TtlCompactionSelector,
-};
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
 
@@ -776,7 +774,7 @@ impl HummockManager {
     pub async fn get_compact_task_impl(
         &self,
         compaction_group_id: CompactionGroupId,
-        selector: &mut Box<dyn LevelSelector>,
+        selector: &mut Box<dyn CompactionSelector>,
     ) -> Result<Option<CompactTask>> {
         // TODO: `get_all_table_options` will hold catalog_manager async lock, to avoid holding the
         // lock in compaction_guard, take out all table_options in advance there may be a
@@ -1055,7 +1053,7 @@ impl HummockManager {
     pub async fn get_compact_task(
         &self,
         compaction_group_id: CompactionGroupId,
-        selector: &mut Box<dyn LevelSelector>,
+        selector: &mut Box<dyn CompactionSelector>,
     ) -> Result<Option<CompactTask>> {
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
@@ -1082,7 +1080,7 @@ impl HummockManager {
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<Option<CompactTask>> {
-        let mut selector: Box<dyn LevelSelector> =
+        let mut selector: Box<dyn CompactionSelector> =
             Box::new(ManualCompactionSelector::new(manual_compaction_option));
         self.get_compact_task(compaction_group_id, &mut selector)
             .await
@@ -2558,7 +2556,7 @@ impl HummockManager {
                                 assert_ne!(0, pull_task_count);
                                 if let Some(compactor) = hummock_manager.compactor_manager.get_compactor(context_id) {
                                     if let Some((group, task_type)) = hummock_manager.auto_pick_compaction_group_and_type().await {
-                                        let selector: &mut Box<dyn LevelSelector> = compaction_selectors.get_mut(&task_type).unwrap();
+                                        let selector: &mut Box<dyn CompactionSelector> = compaction_selectors.get_mut(&task_type).unwrap();
                                         for _ in 0..pull_task_count {
                                             let compact_task =
                                                 hummock_manager
@@ -2862,8 +2860,8 @@ async fn write_exclusive_cluster_id(
     }
 }
 
-fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn LevelSelector>> {
-    let mut compaction_selectors: HashMap<compact_task::TaskType, Box<dyn LevelSelector>> =
+fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelector>> {
+    let mut compaction_selectors: HashMap<compact_task::TaskType, Box<dyn CompactionSelector>> =
         HashMap::default();
     compaction_selectors.insert(
         compact_task::TaskType::Dynamic,
@@ -2886,6 +2884,8 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn LevelSelector>> {
 
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
 use tokio::sync::mpsc::error::SendError;
+
+use super::compaction::CompactionSelector;
 
 #[derive(Debug, Default)]
 pub struct CompactionState {
