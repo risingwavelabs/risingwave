@@ -26,7 +26,7 @@ unsafe fn read_u64(ptr: *const u8) -> u64 {
     ptr::read_unaligned(ptr as *const u64)
 }
 
-unsafe fn u32(ptr: *const u8) -> u32 {
+unsafe fn read_u32(ptr: *const u8) -> u32 {
     ptr::read_unaligned(ptr as *const u32)
 }
 
@@ -41,7 +41,7 @@ pub fn bytes_diff_below_max_key_length<'a>(base: &[u8], target: &'a [u8]) -> &'a
             }
             i += 8;
         }
-        if i + 4 <= end && u32(base.as_ptr().add(i)) == u32(target.as_ptr().add(i)) {
+        if i + 4 <= end && read_u32(base.as_ptr().add(i)) == read_u32(target.as_ptr().add(i)) {
             i += 4;
         }
         while i < end {
@@ -109,6 +109,16 @@ impl CompressionAlgorithm {
             _ => Err(HummockError::decode_error(
                 "not valid compression algorithm",
             )),
+        }
+    }
+}
+
+impl From<u32> for CompressionAlgorithm {
+    fn from(ca: u32) -> Self {
+        match ca {
+            0 => CompressionAlgorithm::None,
+            1 => CompressionAlgorithm::Lz4,
+            _ => CompressionAlgorithm::Zstd,
         }
     }
 }

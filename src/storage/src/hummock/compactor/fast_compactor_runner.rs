@@ -291,11 +291,7 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
-        let compression_algorithm = match task.compression_algorithm {
-            0 => CompressionAlgorithm::None,
-            1 => CompressionAlgorithm::Lz4,
-            _ => CompressionAlgorithm::Zstd,
-        };
+        let compression_algorithm: CompressionAlgorithm = task.compression_algorithm.into();
         options.compression_algorithm = compression_algorithm;
         options.capacity = task.target_file_size as usize;
         let get_id_time = Arc::new(AtomicU64::new(0));
@@ -493,7 +489,6 @@ impl CompactorRunner {
 pub struct CompactTaskExecutor<F: TableBuilderFactory> {
     last_key: FullKey<Vec<u8>>,
     watermark_can_see_last_key: bool,
-    user_key_last_delete_epoch: HummockEpoch,
     builder: CapacitySplitTableBuilder<F>,
     task_config: TaskConfig,
     last_key_is_delete: bool,
@@ -507,7 +502,6 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             last_key: FullKey::default(),
             watermark_can_see_last_key: false,
             last_key_is_delete: false,
-            user_key_last_delete_epoch: HummockEpoch::MAX,
         }
     }
 
@@ -516,7 +510,6 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             self.last_key = FullKey::default();
         }
         self.watermark_can_see_last_key = false;
-        self.user_key_last_delete_epoch = HummockEpoch::MAX;
         self.last_key_is_delete = false;
     }
 
@@ -534,7 +527,6 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             if is_new_user_key || self.last_key.is_empty() {
                 self.last_key.set(iter.key());
                 self.watermark_can_see_last_key = false;
-                self.user_key_last_delete_epoch = HummockEpoch::MAX;
                 self.last_key_is_delete = false;
             }
             if epoch <= self.task_config.watermark
@@ -554,9 +546,6 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             if drop {
                 iter.next();
                 continue;
-            }
-            if value.is_delete() {
-                self.user_key_last_delete_epoch = iter.key().epoch;
             }
             self.builder
                 .add_full_key(iter.key(), value, is_new_user_key)
