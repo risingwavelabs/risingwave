@@ -11,7 +11,7 @@ statement ok
 CREATE TABLE t (v1 int);
 
 statement ok
-INSERT INTO t select * from generate_series(1, 150000);
+INSERT INTO t select * from generate_series(1, 300000);
 
 statement ok
 CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
@@ -35,7 +35,7 @@ select count(*) from rw_catalog.rw_ddl_progress;
 3
 
 # Wait for background ddl to finish
-sleep 5s
+sleep 15s
 
 query I
 select count(*) from m1;
