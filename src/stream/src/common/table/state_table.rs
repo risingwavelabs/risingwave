@@ -17,6 +17,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use either::Either;
 use futures::{pin_mut, FutureExt, Stream, StreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
@@ -1195,6 +1196,27 @@ where
             .await
     }
 
+    /// This function scans rows from the relational table with specific `prefix` and `pk_sub_range` under the same
+    /// `vnode`.
+    pub async fn iter_row_with_pk_prefix_sub_range(
+        &self,
+        pk_prefix: impl Row,
+        sub_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
+        let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
+
+        let memcomparable_range =
+            prefix_and_sub_range_to_memcomparable(&self.pk_serde, sub_range, pk_prefix);
+
+        let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &vnode);
+        Ok(deserialize_keyed_row_stream(
+            self.iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
+                .await?,
+            &self.row_serde,
+        ))
+    }
+
     /// This function scans raw key-values from the relational table with specific `pk_range` under
     /// the same `vnode`.
     async fn iter_kv_with_pk_range(
@@ -1297,15 +1319,38 @@ pub fn prefix_range_to_memcomparable(
     range: &(Bound<impl Row>, Bound<impl Row>),
 ) -> (Bound<Bytes>, Bound<Bytes>) {
     (
-        to_memcomparable(pk_serde, &range.0, false),
-        to_memcomparable(pk_serde, &range.1, true),
+        start_range_to_memcomparable(pk_serde, &range.0),
+        end_range_to_memcomparable(pk_serde, &range.1, None),
     )
 }
 
-fn to_memcomparable<R: Row>(
+fn prefix_and_sub_range_to_memcomparable(
+    pk_serde: &OrderedRowSerde,
+    sub_range: &(Bound<impl Row>, Bound<impl Row>),
+    pk_prefix: impl Row,
+) -> (Bound<Bytes>, Bound<Bytes>) {
+    let (range_start, range_end) = sub_range;
+    let prefix_serializer = pk_serde.prefix(pk_prefix.len());
+    let serialized_pk_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
+    let start_range = match range_start {
+        Included(start_range) => Bound::Included(Either::Left((&pk_prefix).chain(start_range))),
+        Excluded(start_range) => Bound::Excluded(Either::Left((&pk_prefix).chain(start_range))),
+        Unbounded => Bound::Included(Either::Right(&pk_prefix)),
+    };
+    let end_range = match range_end {
+        Included(end_range) => Bound::Included((&pk_prefix).chain(end_range)),
+        Excluded(end_range) => Bound::Excluded((&pk_prefix).chain(end_range)),
+        Unbounded => Unbounded,
+    };
+    (
+        start_range_to_memcomparable(pk_serde, &start_range),
+        end_range_to_memcomparable(pk_serde, &end_range, Some(serialized_pk_prefix)),
+    )
+}
+
+fn start_range_to_memcomparable<R: Row>(
     pk_serde: &OrderedRowSerde,
     bound: &Bound<R>,
-    is_upper: bool,
 ) -> Bound<Bytes> {
     let serialize_pk_prefix = |pk_prefix: &R| {
         let prefix_serializer = pk_serde.prefix(pk_prefix.len());
@@ -1315,20 +1360,39 @@ fn to_memcomparable<R: Row>(
         Unbounded => Unbounded,
         Included(r) => {
             let serialized = serialize_pk_prefix(r);
-            if is_upper {
-                end_bound_of_prefix(&serialized)
-            } else {
-                Included(serialized)
-            }
+
+            Included(serialized)
         }
         Excluded(r) => {
             let serialized = serialize_pk_prefix(r);
-            if !is_upper {
-                // if lower
-                start_bound_of_excluded_prefix(&serialized)
-            } else {
-                Excluded(serialized)
-            }
+
+            start_bound_of_excluded_prefix(&serialized)
+        }
+    }
+}
+
+fn end_range_to_memcomparable<R: Row>(
+    pk_serde: &OrderedRowSerde,
+    bound: &Bound<R>,
+    serialized_pk_prefix: Option<Bytes>,
+) -> Bound<Bytes> {
+    let serialize_pk_prefix = |pk_prefix: &R| {
+        let prefix_serializer = pk_serde.prefix(pk_prefix.len());
+        serialize_pk(pk_prefix, &prefix_serializer)
+    };
+    match bound {
+        Unbounded => match serialized_pk_prefix {
+            Some(serialized_pk_prefix) => end_bound_of_prefix(&serialized_pk_prefix),
+            None => Unbounded,
+        },
+        Included(r) => {
+            let serialized = serialize_pk_prefix(r);
+
+            end_bound_of_prefix(&serialized)
+        }
+        Excluded(r) => {
+            let serialized = serialize_pk_prefix(r);
+            Excluded(serialized)
         }
     }
 }
