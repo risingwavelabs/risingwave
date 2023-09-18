@@ -36,6 +36,7 @@ fn regexp_matches<'a>(
         // ignored in PostgreSQL's behavior.
         let skip_flag = regex.regex.captures_len() > 1;
         let list = capture
+            .unwrap()
             .iter()
             .skip(if skip_flag { 1 } else { 0 })
             .map(|mat| mat.map(|m| m.as_str().into()))
