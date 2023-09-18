@@ -405,36 +405,9 @@ impl DdlController {
 
     async fn create_streaming_job(
         &self,
-        stream_job: StreamingJob,
-        fragment_graph: StreamFragmentGraphProto,
-        run_in_background: bool,
-    ) -> MetaResult<NotificationVersion> {
-        if run_in_background {
-            let ctrl: DdlController = self.clone();
-            let definition = stream_job.definition();
-            let fut = async move {
-                let result = ctrl
-                    .create_streaming_job_inner(stream_job, fragment_graph)
-                    .await;
-                match result {
-                    Err(e) => tracing::error!(definition, error = ?e, "stream_job_error"),
-                    Ok(_) => {
-                        tracing::info!(definition, "stream_job_ok")
-                    }
-                }
-            };
-            tokio::spawn(fut);
-            Ok(IGNORED_NOTIFICATION_VERSION)
-        } else {
-            self.create_streaming_job_inner(stream_job, fragment_graph)
-                .await
-        }
-    }
-
-    async fn create_streaming_job_inner(
-        &self,
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
+        run_in_background: bool,
     ) -> MetaResult<NotificationVersion> {
         let _permit = self
             .creating_streaming_job_permits
@@ -452,38 +425,61 @@ impl DdlController {
         // Update the corresponding 'initiated_at' field.
         stream_job.mark_initialized();
 
-        let mut internal_tables = vec![];
-        let result = try {
-            let (ctx, table_fragments) = self
-                .build_stream_job(env, &stream_job, fragment_graph)
-                .await?;
+        let (ctx, table_fragments) = self
+            .build_stream_job(env, &stream_job, fragment_graph)
+            .await?;
 
-            internal_tables = ctx.internal_tables();
-
-            match &stream_job {
-                StreamingJob::Table(Some(source), _) => {
-                    // Register the source on the connector node.
-                    self.source_manager.register_source(source).await?;
-                }
-                StreamingJob::Sink(sink) => {
-                    // Validate the sink on the connector node.
-                    validate_sink(sink, self.env.connector_client()).await?;
-                }
-                _ => {}
+        match stream_job {
+            StreamingJob::Table(Some(ref source), _) => {
+                // Register the source on the connector node.
+                self.source_manager.register_source(source).await?;
             }
-
-            self.stream_manager
-                .create_streaming_job(table_fragments, ctx)
-                .await?;
-        };
-
-        match result {
-            Ok(_) => self.finish_stream_job(stream_job, internal_tables).await,
-            Err(err) => {
-                self.cancel_stream_job(&stream_job, internal_tables).await;
-                Err(err)
+            StreamingJob::Sink(ref sink) => {
+                // Validate the sink on the connector node.
+                validate_sink(sink, self.env.connector_client()).await?;
             }
+            _ => {}
         }
+
+        if run_in_background {
+            let ctrl: DdlController = self.clone();
+            let definition = stream_job.definition();
+            let fut = async move {
+                let result = ctrl
+                    .create_streaming_job_inner(stream_job, table_fragments, ctx)
+                    .await;
+                match result {
+                    Err(e) => tracing::error!(definition, error = ?e, "stream_job_error"),
+                    Ok(_) => {
+                        tracing::info!(definition, "stream_job_ok")
+                    }
+                }
+            };
+            tokio::spawn(fut);
+            Ok(IGNORED_NOTIFICATION_VERSION)
+        } else {
+            self.create_streaming_job_inner(stream_job, table_fragments, ctx)
+                .await
+        }
+    }
+
+    async fn create_streaming_job_inner(
+        &self,
+        stream_job: StreamingJob,
+        table_fragments: TableFragments,
+        ctx: CreateStreamingJobContext,
+    ) -> MetaResult<NotificationVersion> {
+        let internal_tables = ctx.internal_tables();
+
+        let result = self
+            .stream_manager
+            .create_streaming_job(table_fragments, ctx)
+            .await;
+        if let Err(e) = result {
+            self.cancel_stream_job(&stream_job, internal_tables).await;
+            return Err(e);
+        };
+        self.finish_stream_job(stream_job, internal_tables).await
     }
 
     async fn drop_streaming_job(
