@@ -579,6 +579,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 level0_overlapping_sub_level_compact_level_count = 12;
       uint64 max_space_reclaim_bytes = 13;
       uint64 level0_max_compact_file_number = 14;
+      bool enable_emergency_picker = 15;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -710,6 +711,7 @@ message CompactionConfig {
   // for tier compaction pick overlapping level
   uint32 level0_overlapping_sub_level_compact_level_count = 18;
   uint32 tombstone_reclaim_ratio = 19;
+  bool enable_emergency_picker = 20;
 }
 
 message TableStats {

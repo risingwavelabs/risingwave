@@ -55,6 +55,7 @@ level0_overlapping_sub_level_compact_level_count = 6
 max_space_reclaim_bytes = 536870912
 level0_max_compact_file_number = 96
 tombstone_reclaim_ratio = 40
+enable_emergency_picker = true
 
 [batch]
 enable_barrier_read = false

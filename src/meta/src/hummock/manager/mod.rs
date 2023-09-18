@@ -2565,7 +2565,21 @@ impl HummockManager {
                                             let versioning = versioning_guard.deref();
 
                                             if versioning.write_limit.contains_key(&group) {
-                                                compaction_selectors.get_mut(&TaskType::Emergency).unwrap()
+                                                let enable_emergency_picker = match hummock_manager
+                                                    .compaction_group_manager
+                                                    .read()
+                                                    .await
+                                                    .try_get_compaction_group_config(group)
+                                                {
+                                                    Some(config) =>{ config.compaction_config.enable_emergency_picker },
+                                                    None => { unreachable!("compaction-group {} not exist", group) }
+                                                };
+
+                                                if enable_emergency_picker {
+                                                    compaction_selectors.get_mut(&TaskType::Emergency).unwrap()
+                                                } else {
+                                                    compaction_selectors.get_mut(&task_type).unwrap()
+                                                }
                                             } else {
                                                 compaction_selectors.get_mut(&task_type).unwrap()
                                             }
