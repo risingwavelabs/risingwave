@@ -53,7 +53,7 @@ export default function BackPressureTable({
           let metrics: BackPressuresMetrics = await getActorBackPressures()
           metrics.outputBufferBlockingDuration = sortBy(
             metrics.outputBufferBlockingDuration,
-            (m) => m.metric.fragment_id
+            (m) => (m.metric.fragment_id, m.metric.downstream_fragment_id)
           )
           setBackPressuresMetrics(metrics)
           await new Promise((resolve) => setTimeout(resolve, 5000)) // refresh every 5 secs
@@ -81,18 +81,18 @@ export default function BackPressureTable({
       <Table variant="simple">
         <TableCaption>Back Pressures (Last 30 minutes)</TableCaption>
         <Thead>
-          <Th>Fragment IDs</Th>
-          <Th>Instance</Th>
-          <Th>Block Rate</Th>
+          <Tr>
+            <Th>Fragment IDs &rarr;	Downstream</Th>
+            <Th>Block Rate</Th>
+          </Tr>
         </Thead>
         <Tbody>
           {backPressuresMetrics &&
             backPressuresMetrics.outputBufferBlockingDuration
               .filter((m) => isSelected(m.metric.fragment_id))
               .map((m) => (
-                <Tr key={m.metric.fragment_id}>
+                <Tr key={`${m.metric.fragment_id}_${m.metric.downstream_fragment_id}`}>
                   <Td>{`Fragment ${m.metric.fragment_id} -> ${m.metric.downstream_fragment_id}`}</Td>
-                  <Td>{m.metric.instance}</Td>
                   <Td>
                     <RateBar samples={m.sample} />
                   </Td>
