@@ -548,7 +548,7 @@ where
             let range_bounds = range_bounds.unwrap();
 
             let vnode_row_iter = upstream_table
-                .iter_row_with_pk_range(&range_bounds, vnode, Default::default())
+                .vnode_iter_row(&range_bounds, vnode, Default::default())
                 .await?;
 
             // TODO: Is there some way to avoid double-pin here?

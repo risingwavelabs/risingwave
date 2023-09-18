@@ -200,7 +200,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         // Recover states from state table.
         let table_iter = this
             .state_table
-            .iter_row_with_pk_prefix_sub_range(
+            .prefix_iter_row(
                 partition_key,
                 sub_range,
                 PrefetchOptions::new_for_exhaust_iter(),

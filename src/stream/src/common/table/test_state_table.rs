@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::ops::Bound;
-use std::ops::Bound::Unbounded;
 
 use futures::{pin_mut, StreamExt};
 use risingwave_common::array::{Op, StreamChunk};
@@ -283,9 +282,9 @@ async fn test_state_table_iter_with_prefix() {
     ]));
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
-    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
     let iter = state_table
-        .iter_row_with_pk_prefix_sub_range(&pk_prefix, sub_range, Default::default())
+        .prefix_iter_row(&pk_prefix, sub_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -416,7 +415,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::Included(OwnedRow::new(vec![Some(4_i32.into())])),
     );
     let iter = state_table
-        .iter_row_with_pk_range(&pk_range, DEFAULT_VNODE, Default::default())
+        .vnode_iter_row(&pk_range, DEFAULT_VNODE, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -441,7 +440,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::<row::Empty>::Unbounded,
     );
     let iter = state_table
-        .iter_row_with_pk_range(&pk_range, DEFAULT_VNODE, Default::default())
+        .vnode_iter_row(&pk_range, DEFAULT_VNODE, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -1900,7 +1899,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
     );
 
     let iter = state_table
-        .iter_row_with_pk_prefix_sub_range(pk_prefix, &sub_range1, Default::default())
+        .prefix_iter_row(pk_prefix, &sub_range1, Default::default())
         .await
         .unwrap();
 
@@ -1938,7 +1937,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
     let iter = state_table
-        .iter_row_with_pk_prefix_sub_range(pk_prefix, &sub_range2, Default::default())
+        .prefix_iter_row(pk_prefix, &sub_range2, Default::default())
         .await
         .unwrap();
 
@@ -1976,7 +1975,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
     let iter = state_table
-        .iter_row_with_pk_prefix_sub_range(pk_prefix, &sub_range3, Default::default())
+        .prefix_iter_row(pk_prefix, &sub_range3, Default::default())
         .await
         .unwrap();
 

@@ -187,7 +187,7 @@ impl MaterializedInputState {
             let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
                 &(Bound::Unbounded, Bound::Unbounded);
             let all_data_iter = state_table
-                .iter_row_with_pk_prefix_sub_range(
+                .prefix_iter_row(
                     group_key.map(GroupKey::table_pk),
                     sub_range,
                     PrefetchOptions {
