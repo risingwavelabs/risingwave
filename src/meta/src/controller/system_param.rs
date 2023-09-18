@@ -29,6 +29,7 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tracing::info;
 
+use crate::controller::SqlMetaStore;
 use crate::manager::{LocalNotification, NotificationManagerRef};
 use crate::model_v2::prelude::SystemParameter;
 use crate::model_v2::system_parameter;
@@ -130,22 +131,13 @@ for_all_params!(impl_system_params_to_models);
 
 impl SystemParamsController {
     pub async fn new(
-        db: DatabaseConnection,
+        sql_meta_store: SqlMetaStore,
         notification_manager: NotificationManagerRef,
         init_params: PbSystemParams,
-        cluster_first_launch: bool,
     ) -> MetaResult<Self> {
-        let params = if cluster_first_launch {
-            init_params
-        } else {
-            let params = SystemParameter::find().all(&db).await?;
-            if params.is_empty() {
-                return Err(MetaError::system_param(
-                    "cluster is not newly created but no system parameters can be found",
-                ));
-            }
-            merge_params(system_params_from_db(params)?, init_params)
-        };
+        let db = sql_meta_store.conn;
+        let params = SystemParameter::find().all(&db).await?;
+        let params = merge_params(system_params_from_db(params)?, init_params);
 
         info!("system parameters: {:?}", params);
         check_missing_params(&params).map_err(|e| anyhow!(e))?;
@@ -266,21 +258,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_system_params() {
-        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
-        let builder = db.get_database_backend();
+        let meta_store = SqlMetaStore::for_test().await;
+        let builder = meta_store.conn.get_database_backend();
         let schema = Schema::new(builder);
         let stmt = schema.create_table_from_entity(SystemParameter);
-        db.execute(builder.build(&stmt)).await.unwrap();
+        meta_store.conn.execute(builder.build(&stmt)).await.unwrap();
 
         let env = MetaSrvEnv::for_test().await;
         let init_params = system_params_for_test();
 
         // init system parameter controller as first launch.
         let system_param_ctl = SystemParamsController::new(
-            db,
+            meta_store.clone(),
             env.notification_manager_ref(),
             init_params.clone(),
-            true,
         )
         .await
         .unwrap();
@@ -304,10 +295,9 @@ mod tests {
 
         // init system parameter controller as not first launch.
         let system_param_ctl = SystemParamsController::new(
-            system_param_ctl.db,
+            meta_store,
             env.notification_manager_ref(),
             init_params.clone(),
-            false,
         )
         .await
         .unwrap();

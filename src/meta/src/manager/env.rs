@@ -18,13 +18,17 @@ use std::sync::Arc;
 use risingwave_common::config::{CompactionConfig, DefaultParallelism};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
+use sea_orm::EntityTrait;
 
 use super::{SystemParamsManager, SystemParamsManagerRef};
+use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
+use crate::controller::SqlMetaStore;
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
 };
 use crate::model::ClusterId;
+use crate::model_v2::prelude::Cluster;
 use crate::storage::MetaStoreRef;
 #[cfg(any(test, feature = "test"))]
 use crate::storage::{MemStore, MetaStoreBoxExt};
@@ -40,6 +44,9 @@ pub struct MetaSrvEnv {
     /// meta store.
     meta_store: MetaStoreRef,
 
+    /// sql meta store.
+    meta_store_sql: Option<SqlMetaStore>,
+
     /// notification manager.
     notification_manager: NotificationManagerRef,
 
@@ -51,6 +58,9 @@ pub struct MetaSrvEnv {
 
     /// system param manager.
     system_params_manager: SystemParamsManagerRef,
+
+    /// system param controller.
+    system_params_controller: Option<SystemParamsControllerRef>,
 
     /// Unique identifier of the cluster.
     cluster_id: ClusterId,
@@ -205,13 +215,14 @@ impl MetaSrvEnv {
         opts: MetaOpts,
         init_system_params: SystemParams,
         meta_store: MetaStoreRef,
+        meta_store_sql: Option<SqlMetaStore>,
     ) -> MetaResult<Self> {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
-        let (cluster_id, cluster_first_launch) =
+        let (mut cluster_id, cluster_first_launch) =
             if let Some(id) = ClusterId::from_meta_store(&meta_store).await? {
                 (id, false)
             } else {
@@ -221,21 +232,41 @@ impl MetaSrvEnv {
             SystemParamsManager::new(
                 meta_store.clone(),
                 notification_manager.clone(),
-                init_system_params,
+                init_system_params.clone(),
                 cluster_first_launch,
             )
             .await?,
         );
+        let system_params_controller = match &meta_store_sql {
+            Some(store) => {
+                cluster_id = Cluster::find()
+                    .one(&store.conn)
+                    .await?
+                    .map(|c| c.cluster_id.to_string().into())
+                    .unwrap();
+                Some(Arc::new(
+                    SystemParamsController::new(
+                        store.clone(),
+                        notification_manager.clone(),
+                        init_system_params,
+                    )
+                    .await?,
+                ))
+            }
+            None => None,
+        };
 
         let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
 
         Ok(Self {
             id_gen_manager,
             meta_store,
+            meta_store_sql,
             notification_manager,
             stream_client_pool,
             idle_manager,
             system_params_manager,
+            system_params_controller,
             cluster_id,
             cluster_first_launch,
             connector_client,
@@ -249,6 +280,10 @@ impl MetaSrvEnv {
 
     pub fn meta_store(&self) -> &MetaStoreRef {
         &self.meta_store
+    }
+
+    pub fn sql_meta_store(&self) -> Option<SqlMetaStore> {
+        self.meta_store_sql.clone()
     }
 
     pub fn id_gen_manager_ref(&self) -> IdGeneratorManagerRef {
@@ -283,6 +318,14 @@ impl MetaSrvEnv {
         self.system_params_manager.deref()
     }
 
+    pub fn system_params_controller_ref(&self) -> Option<SystemParamsControllerRef> {
+        self.system_params_controller.clone()
+    }
+
+    pub fn system_params_controller(&self) -> Option<&SystemParamsControllerRef> {
+        self.system_params_controller.as_ref()
+    }
+
     pub fn stream_client_pool_ref(&self) -> StreamClientPoolRef {
         self.stream_client_pool.clone()
     }
@@ -314,6 +357,7 @@ impl MetaSrvEnv {
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store = MemStore::default().into_ref();
+        let sql_meta_store = SqlMetaStore::for_test().await;
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -329,14 +373,25 @@ impl MetaSrvEnv {
             .await
             .unwrap(),
         );
+        let system_params_controller = Some(Arc::new(
+            SystemParamsController::new(
+                sql_meta_store.clone(),
+                notification_manager.clone(),
+                risingwave_common::system_param::system_params_for_test(),
+            )
+            .await
+            .unwrap(),
+        ));
 
         Self {
             id_gen_manager,
             meta_store,
+            meta_store_sql: Some(sql_meta_store),
             notification_manager,
             stream_client_pool,
             idle_manager,
             system_params_manager,
+            system_params_controller,
             cluster_id,
             cluster_first_launch,
             connector_client: None,

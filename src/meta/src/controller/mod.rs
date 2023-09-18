@@ -15,20 +15,35 @@
 use anyhow::anyhow;
 use parse_display::Display;
 use risingwave_pb::catalog::{PbDatabase, PbSchema};
-use sea_orm::{ActiveValue, ModelTrait};
+use sea_orm::{ActiveValue, DatabaseConnection, ModelTrait};
 
 use crate::model_v2::{database, object, schema};
 use crate::MetaError;
 
 #[allow(dead_code)]
 mod catalog;
-#[allow(dead_code)]
-mod system_param;
+pub mod system_param;
 
 // todo: refine the error transform.
 impl From<sea_orm::DbErr> for MetaError {
     fn from(err: sea_orm::DbErr) -> Self {
         anyhow!(err).into()
+    }
+}
+
+#[derive(Clone)]
+pub struct SqlMetaStore {
+    pub(crate) conn: DatabaseConnection,
+}
+
+impl SqlMetaStore {
+    pub fn new(conn: DatabaseConnection) -> Self {
+        Self { conn }
+    }
+
+    pub async fn for_test() -> Self {
+        let conn = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        Self { conn }
     }
 }
 
@@ -47,10 +62,10 @@ enum ObjectType {
     Connection,
 }
 
-pub struct ModelWithObj<M: ModelTrait>(M, object::Model);
+pub struct ObjectModel<M: ModelTrait>(M, object::Model);
 
-impl From<ModelWithObj<database::Model>> for PbDatabase {
-    fn from(value: ModelWithObj<database::Model>) -> Self {
+impl From<ObjectModel<database::Model>> for PbDatabase {
+    fn from(value: ObjectModel<database::Model>) -> Self {
         Self {
             id: value.0.database_id as _,
             name: value.0.name,
@@ -68,8 +83,8 @@ impl From<PbDatabase> for database::ActiveModel {
     }
 }
 
-impl From<ModelWithObj<schema::Model>> for PbSchema {
-    fn from(value: ModelWithObj<schema::Model>) -> Self {
+impl From<ObjectModel<schema::Model>> for PbSchema {
+    fn from(value: ObjectModel<schema::Model>) -> Self {
         Self {
             id: value.0.schema_id as _,
             name: value.0.name,

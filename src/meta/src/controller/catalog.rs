@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::iter;
-use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
@@ -26,13 +25,13 @@ use sea_orm::sea_query::{
     WithClause,
 };
 use sea_orm::{
-    ActiveModelBehavior, ActiveModelTrait, ActiveValue, ColumnTrait, ConnectOptions,
-    ConnectionTrait, Database as SeaDB, DatabaseConnection, DatabaseTransaction, EntityTrait, Iden,
-    JoinType, ModelTrait, Order, QueryFilter, Statement, TransactionTrait,
+    ActiveModelBehavior, ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait,
+    DatabaseConnection, DatabaseTransaction, EntityTrait, Iden, JoinType, ModelTrait, Order,
+    QueryFilter, Statement, TransactionTrait,
 };
 use tokio::sync::RwLock;
 
-use crate::controller::{ModelWithObj, ObjectType};
+use crate::controller::{ObjectModel, ObjectType};
 use crate::manager::{DatabaseId, MetaSrvEnv, NotificationVersion, UserId};
 use crate::model_v2::prelude::*;
 use crate::model_v2::{
@@ -54,15 +53,15 @@ pub struct ReleaseContext {
 }
 
 impl CatalogController {
-    pub async fn new(env: MetaSrvEnv, url: &str) -> MetaResult<Self> {
-        let mut opts = ConnectOptions::new(url);
-        opts.max_connections(20)
-            .connect_timeout(Duration::from_secs(10));
-
-        let db = SeaDB::connect(opts).await?;
+    pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
+        let meta_store = env
+            .sql_meta_store()
+            .expect("sql meta store is not initialized");
         Ok(Self {
             env,
-            inner: RwLock::new(CatalogControllerInner { db }),
+            inner: RwLock::new(CatalogControllerInner {
+                db: meta_store.conn,
+            }),
         })
     }
 }
@@ -98,7 +97,7 @@ impl CatalogController {
 
         Ok(dbs
             .into_iter()
-            .map(|(db, obj)| ModelWithObj(db, obj.unwrap()).into())
+            .map(|(db, obj)| ObjectModel(db, obj.unwrap()).into())
             .collect())
     }
 
@@ -132,14 +131,14 @@ impl CatalogController {
             schema.name = ActiveValue::Set(schema_name.into());
             let schema = schema.insert(&txn).await?;
 
-            schemas.push(ModelWithObj(schema, schema_obj).into());
+            schemas.push(ObjectModel(schema, schema_obj).into());
         }
         txn.commit().await?;
 
         let mut version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::Database(ModelWithObj(db, db_obj).into()),
+                NotificationInfo::Database(ObjectModel(db, db_obj).into()),
             )
             .await;
         for schema in schemas {
@@ -244,7 +243,7 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;
         let db_obj = db.find_related(Object).one(&txn).await?;
-        let pb_db = ModelWithObj(db.clone(), db_obj.unwrap()).into();
+        let pb_db = ObjectModel(db.clone(), db_obj.unwrap()).into();
 
         let tables = db.find_related(Table).all(&txn).await?;
         let sinks = db.find_related(Sink).all(&txn).await?;
@@ -359,13 +358,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_create_database() {
-        // let conn = MockDatabase::new(DbBackend::Postgres).into_connection();
-        let mgr = CatalogController::new(
-            MetaSrvEnv::for_test().await,
-            "postgres://postgres:@localhost:5432/postgres",
-        )
-        .await
-        .unwrap();
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)
+            .await
+            .unwrap();
         let db = PbDatabase {
             name: "test".to_string(),
             owner: DEFAULT_SUPER_USER_ID,
