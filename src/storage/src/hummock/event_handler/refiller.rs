@@ -120,6 +120,7 @@ pub struct CacheRefillConfig {
     pub timeout: Duration,
     pub data_refill_levels: HashSet<u32>,
     pub concurrency: usize,
+    pub group: usize,
 }
 
 struct Item {
@@ -315,47 +316,59 @@ impl CacheRefillTask {
                 continue;
             };
 
-            for idx in 0..sst_info.value().block_count() {
-                let Some(block_inheritance) = sstable_inheritance.blocks.get(idx) else {
-                    GLOBAL_CACHE_REFILL_METRICS.data_refill_filtered_total.inc();
-                    continue;
-                };
+            for idx_start in (0..sst_info.value().block_count()).step_by(context.config.group) {
+                let idx_end = std::cmp::min(
+                    idx_start + context.config.group,
+                    sst_info.value().block_count(),
+                );
+                let count = idx_end - idx_start;
 
                 let mut refill = false;
-                'refill: for Parent {
-                    sst_obj_id,
-                    sst_blk_idx,
-                } in &block_inheritance.parents
-                {
-                    if context
-                        .sstable_store
-                        .data_file_cache()
-                        .exists(&SstableBlockIndex {
-                            sst_id: *sst_obj_id,
-                            block_idx: *sst_blk_idx as u64,
-                        })
-                        .await
-                        .unwrap_or_default()
+                'refill: for idx in idx_start..idx_end {
+                    let Some(block_inheritance) = sstable_inheritance.blocks.get(idx) else {
+                        continue;
+                    };
+                    for Parent {
+                        sst_obj_id,
+                        sst_blk_idx,
+                    } in &block_inheritance.parents
                     {
-                        refill = true;
-                        break 'refill;
+                        if context
+                            .sstable_store
+                            .data_file_cache()
+                            .exists(&SstableBlockIndex {
+                                sst_id: *sst_obj_id,
+                                block_idx: *sst_blk_idx as u64,
+                            })
+                            .await
+                            .unwrap_or_default()
+                        {
+                            refill = true;
+                            break 'refill;
+                        }
                     }
                 }
                 if !refill {
-                    GLOBAL_CACHE_REFILL_METRICS.data_refill_filtered_total.inc();
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_filtered_total
+                        .inc_by(count as u64);
                     continue;
                 }
 
                 let task = async move {
-                    GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_attempts_total
+                        .inc_by(count as u64);
 
                     let permit = context.concurrency.acquire().await.unwrap();
 
-                    GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_started_total
+                        .inc_by(count as u64);
 
                     match context
                         .sstable_store
-                        .fill_data_file_cache(sst_info.value(), idx)
+                        .fill_data_file_cache(sst_info.value(), idx_start..idx_end)
                         .await
                     {
                         Ok(()) => GLOBAL_CACHE_REFILL_METRICS

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::clone::Clone;
+use std::ops::RangeBounds;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -547,26 +548,48 @@ impl SstableStore {
         &self.data_file_cache
     }
 
-    pub async fn fill_data_file_cache(&self, sst: &Sstable, idx: usize) -> HummockResult<()> {
+    pub async fn fill_data_file_cache(
+        &self,
+        sst: &Sstable,
+        indices: impl RangeBounds<usize>,
+    ) -> HummockResult<()> {
         let object_id = sst.id;
 
-        let key = SstableBlockIndex {
-            sst_id: object_id,
-            block_idx: idx as u64,
+        let idx_start = match indices.start_bound() {
+            std::ops::Bound::Included(i) => *i,
+            std::ops::Bound::Excluded(i) => *i + 1,
+            std::ops::Bound::Unbounded => 0,
+        };
+        let idx_end = match indices.end_bound() {
+            std::ops::Bound::Included(i) => *i + 1,
+            std::ops::Bound::Excluded(i) => *i,
+            std::ops::Bound::Unbounded => sst.block_count(),
         };
 
-        let (range, uncompressed_capacity) = sst.calculate_block_info(idx);
+        let bytes_start = sst.calculate_block_info(idx_start).0.start;
+        let bytes_end = sst.calculate_block_info(idx_end - 1).0.end;
+
         let data = self
             .store
-            .read(&self.get_sst_data_path(object_id), range)
+            .read(&self.get_sst_data_path(object_id), bytes_start..bytes_end)
             .await?;
-        let block = Block::decode(data, uncompressed_capacity)?;
-        let block = Box::new(block);
 
-        self.data_file_cache
-            .insert_force(key, block)
-            .await
-            .map_err(HummockError::file_cache)?;
+        for idx in idx_start..idx_end {
+            let (range, uncompressed_capacity) = sst.calculate_block_info(idx);
+            let bytes = data.slice(range.start - bytes_start..range.end - bytes_start);
+            let block = Block::decode(bytes, uncompressed_capacity)?;
+            let block = Box::new(block);
+            self.data_file_cache
+                .insert_force(
+                    SstableBlockIndex {
+                        sst_id: object_id,
+                        block_idx: idx as u64,
+                    },
+                    block,
+                )
+                .await
+                .map_err(HummockError::file_cache)?;
+        }
 
         Ok(())
     }

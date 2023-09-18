@@ -142,6 +142,7 @@ reclaim_rate_limit_mb = 0
 data_refill_levels = []
 timeout_ms = 6000
 concurrency = 100
+group = 64
 
 [system]
 barrier_interval_ms = 1000
