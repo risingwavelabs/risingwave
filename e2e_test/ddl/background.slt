@@ -1,0 +1,65 @@
+statement ok
+SET RW_IMPLICIT_FLUSH=true;
+
+statement ok
+SET BACKGROUND_DDL=true;
+
+statement ok
+ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 4;
+
+statement ok
+CREATE TABLE t (v1 int);
+
+statement ok
+INSERT INTO t select * from generate_series(1, 150000);
+
+statement ok
+CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
+
+statement ok
+CREATE MATERIALIZED VIEW m2 as SELECT * FROM t;
+
+statement ok
+CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
+
+# Meta should always reject duplicate mview.
+statement error
+CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
+
+statement error
+SELECT * FROM m1;
+
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+3
+
+# Wait for background ddl to finish
+sleep 5s
+
+query I
+select count(*) from m1;
+----
+150000
+
+query I
+select count(*) from m2;
+----
+150000
+
+query I
+select count(*) from m3;
+----
+150000
+
+statement ok
+DROP MATERIALIZED VIEW m1;
+
+statement ok
+DROP MATERIALIZED VIEW m2;
+
+statement ok
+DROP MATERIALIZED VIEW m3;
+
+statement ok
+DROP TABLE t;
