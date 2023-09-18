@@ -12,20 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Display;
 use std::mem::size_of;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::{fmt, mem};
 
+use either::Either;
 use itertools::Itertools;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use risingwave_pb::data::{PbOp, PbStreamChunk};
 
 use super::vis::VisMut;
-use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt};
+use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt, RowRef};
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
+use crate::catalog::Schema;
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
 use crate::row::Row;
@@ -65,6 +68,16 @@ impl Op {
             None => bail!("No such op type"),
         };
         Ok(op)
+    }
+
+    /// convert `UpdateDelete` to `Delete` and `UpdateInsert` to Insert
+    pub fn normalize_update(self) -> Op {
+        match self {
+            Op::Insert => Op::Insert,
+            Op::Delete => Op::Delete,
+            Op::UpdateDelete => Op::Delete,
+            Op::UpdateInsert => Op::Insert,
+        }
     }
 }
 
@@ -199,16 +212,34 @@ impl StreamChunk {
         &self.ops
     }
 
-    /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
-    pub fn to_pretty_string(&self) -> String {
+    /// Returns a table-like text representation of the `StreamChunk`.
+    pub fn to_pretty(&self) -> impl Display {
+        self.to_pretty_inner(None)
+    }
+
+    /// Returns a table-like text representation of the `StreamChunk` with a header of column names
+    /// from the given `schema`.
+    pub fn to_pretty_with_schema(&self, schema: &Schema) -> impl Display {
+        self.to_pretty_inner(Some(schema))
+    }
+
+    fn to_pretty_inner(&self, schema: Option<&Schema>) -> impl Display {
         use comfy_table::{Cell, CellAlignment, Table};
 
         if self.cardinality() == 0 {
-            return "(empty)".to_owned();
+            return Either::Left("(empty)");
         }
 
         let mut table = Table::new();
-        table.load_preset("||--+-++|    ++++++");
+        table.load_preset(DataChunk::PRETTY_TABLE_PRESET);
+
+        if let Some(schema) = schema {
+            assert_eq!(self.dimension(), schema.len());
+            let cells = std::iter::once(String::new())
+                .chain(schema.fields().iter().map(|f| f.name.clone()));
+            table.set_header(cells);
+        }
+
         for (op, row_ref) in self.rows() {
             let mut cells = Vec::with_capacity(row_ref.len() + 1);
             cells.push(
@@ -229,7 +260,8 @@ impl StreamChunk {
             }
             table.add_row(cells);
         }
-        table.to_string()
+
+        Either::Right(table)
     }
 
     /// Reorder (and possibly remove) columns.
@@ -290,7 +322,7 @@ impl fmt::Debug for StreamChunk {
                 "StreamChunk {{ cardinality: {}, capacity: {}, data: \n{}\n }}",
                 self.cardinality(),
                 self.capacity(),
-                self.to_pretty_string()
+                self.to_pretty()
             )
         } else {
             f.debug_struct("StreamChunk")
@@ -327,7 +359,19 @@ impl OpsMut {
         }
     }
 
+    pub fn len(&self) -> usize {
+        match &self.state {
+            OpsMutState::ArcRef(v) => v.len(),
+            OpsMutState::Mut(v) => v.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn set(&mut self, n: usize, val: Op) {
+        debug_assert!(n < self.len());
         if let OpsMutState::Mut(v) = &mut self.state {
             v[n] = val;
         } else {
@@ -338,6 +382,14 @@ impl OpsMut {
             };
             v[n] = val;
             self.state = OpsMutState::Mut(v);
+        }
+    }
+
+    pub fn get(&self, n: usize) -> Op {
+        debug_assert!(n < self.len());
+        match &self.state {
+            OpsMutState::ArcRef(v) => v[n],
+            OpsMutState::Mut(v) => v[n],
         }
     }
 }
@@ -352,7 +404,7 @@ impl From<OpsMut> for Arc<[Op]> {
 
 /// A mutable wrapper for `StreamChunk`. can only set the visibilities and ops in place, can not
 /// change the length.
-struct StreamChunkMut {
+pub struct StreamChunkMut {
     columns: Arc<[ArrayRef]>,
     ops: OpsMut,
     vis: VisMut,
@@ -375,18 +427,40 @@ impl From<StreamChunkMut> for StreamChunk {
         StreamChunk::from_parts(c.ops, DataChunk::from_parts(c.columns, c.vis.into()))
     }
 }
+
 pub struct OpRowMutRef<'a> {
     c: &'a mut StreamChunkMut,
     i: usize,
 }
 
 impl OpRowMutRef<'_> {
+    pub fn index(&self) -> usize {
+        self.i
+    }
+
+    pub fn vis(&self) -> bool {
+        self.c.vis.is_set(self.i)
+    }
+
+    pub fn op(&self) -> Op {
+        self.c.ops.get(self.i)
+    }
+
     pub fn set_vis(&mut self, val: bool) {
         self.c.set_vis(self.i, val);
     }
 
     pub fn set_op(&mut self, val: Op) {
         self.c.set_op(self.i, val);
+    }
+
+    pub fn row_ref(&self) -> RowRef<'_> {
+        RowRef::with_columns(self.c.columns(), self.i)
+    }
+
+    /// return if the two row ref is in the same chunk
+    pub fn same_chunk(&self, other: &Self) -> bool {
+        std::ptr::eq(self.c, other.c)
     }
 }
 
@@ -399,13 +473,20 @@ impl StreamChunkMut {
         self.ops.set(n, val);
     }
 
+    pub fn columns(&self) -> &[ArrayRef] {
+        &self.columns
+    }
+
     /// get the mut reference of the stream chunk.
-    pub fn to_mut_rows(&self) -> impl Iterator<Item = OpRowMutRef<'_>> {
+    pub fn to_rows_mut(&mut self) -> impl Iterator<Item = (RowRef<'_>, OpRowMutRef<'_>)> {
         unsafe {
             (0..self.vis.len()).map(|i| {
                 let p = self as *const StreamChunkMut;
                 let p = p as *mut StreamChunkMut;
-                OpRowMutRef { c: &mut *p, i }
+                (
+                    RowRef::with_columns(self.columns(), i),
+                    OpRowMutRef { c: &mut *p, i },
+                )
             })
         }
     }
@@ -636,7 +717,7 @@ mod tests {
             U+ 4 .",
         );
         assert_eq!(
-            chunk.to_pretty_string(),
+            chunk.to_pretty().to_string(),
             "\
 +----+---+---+
 |  + | 1 | 6 |

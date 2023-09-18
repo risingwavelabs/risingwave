@@ -22,7 +22,8 @@ use risingwave_pb::compactor::{
 };
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    HeapProfilingRequest, HeapProfilingResponse, ProfilingRequest, ProfilingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
+    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
 use tokio::sync::mpsc;
@@ -111,6 +112,24 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<HeapProfilingRequest>,
     ) -> Result<Response<HeapProfilingResponse>, Status> {
+        Err(Status::unimplemented(
+            "Heap profiling unimplemented in compactor",
+        ))
+    }
+
+    async fn list_heap_profiling(
+        &self,
+        _request: Request<ListHeapProfilingRequest>,
+    ) -> Result<Response<ListHeapProfilingResponse>, Status> {
+        Err(Status::unimplemented(
+            "Heap profiling unimplemented in compactor",
+        ))
+    }
+
+    async fn analyze_heap(
+        &self,
+        _request: Request<AnalyzeHeapRequest>,
+    ) -> Result<Response<AnalyzeHeapResponse>, Status> {
         Err(Status::unimplemented(
             "Heap profiling unimplemented in compactor",
         ))

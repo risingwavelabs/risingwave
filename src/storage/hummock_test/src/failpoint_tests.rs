@@ -33,6 +33,7 @@ use risingwave_storage::store::{
 use risingwave_storage::StateStore;
 
 use crate::get_notification_client_for_test;
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::TestIngestBatch;
 
 #[tokio::test]
@@ -74,7 +75,7 @@ async fn test_failpoints_state_store_read_upload() {
     ];
     // Make sure the batch is sorted.
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    local.init(1);
+    local.init_for_test(1).await.unwrap();
     local
         .ingest_batch(
             batch1,

@@ -781,7 +781,7 @@ impl StageRunner {
         //     *state = StageState::Failed
         // }
 
-        for (task, task_status) in self.tasks.iter() {
+        for (task, task_status) in &*self.tasks {
             // 1. Collect task info and client.
             let loc = &task_status.get_status().location;
             let addr = loc.as_ref().expect("Get address should not fail");

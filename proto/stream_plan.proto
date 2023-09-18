@@ -24,6 +24,9 @@ message AddMutation {
   // We may embed a source change split mutation here.
   // TODO: we may allow multiple mutations in a single barrier.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
+  // We may embed a pause mutation here.
+  // TODO: we may allow multiple mutations in a single barrier.
+  bool pause = 4;
 }
 
 message StopMutation {
@@ -147,6 +150,8 @@ message StreamSource {
   map<string, string> properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
+  // Streaming rate limit
+  optional uint32 rate_limit = 9;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves
@@ -171,6 +176,10 @@ message SinkDesc {
   map<string, string> properties = 8;
   catalog.SinkType sink_type = 9;
   repeated plan_common.ColumnCatalog column_catalogs = 10;
+  string db_name = 11;
+  // If the sink is from table or mv, this is name of the table/mv. Otherwise
+  // it is the name of the sink itself.
+  string sink_from_name = 12;
 }
 
 enum SinkLogStoreType {
@@ -244,7 +253,7 @@ message SimpleAggNode {
   // Only used for stateless simple agg.
   repeated uint32 distribution_key = 2;
   repeated AggCallState agg_call_states = 3;
-  catalog.Table result_table = 4;
+  catalog.Table intermediate_state_table = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
@@ -256,7 +265,7 @@ message HashAggNode {
   repeated uint32 group_key = 1;
   repeated expr.AggCall agg_calls = 2;
   repeated AggCallState agg_call_states = 3;
-  catalog.Table result_table = 4;
+  catalog.Table intermediate_state_table = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
@@ -533,6 +542,12 @@ message ExpandNode {
 
 message ProjectSetNode {
   repeated expr.ProjectSetSelectItem select_list = 1;
+  // this two field is expressing a list of usize pair, which means when project receives a
+  // watermark with `watermark_input_cols[i]` column index, it should derive a new watermark
+  // with `watermark_output_cols[i]`th expression
+  repeated uint32 watermark_input_cols = 2;
+  repeated uint32 watermark_expr_indices = 3;
+  repeated uint32 nondecreasing_exprs = 4;
 }
 
 // Sorts inputs and outputs ordered data based on watermark.
@@ -584,12 +599,20 @@ message EowcOverWindowNode {
   catalog.Table state_table = 4;
 }
 
-// Note this is not exactly the same as EowcOverWindowNode in terms of future extension, so better to split as 2 different nodes.
+enum OverWindowCachePolicy {
+  OVER_WINDOW_CACHE_POLICY_UNSPECIFIED = 0;
+  OVER_WINDOW_CACHE_POLICY_FULL = 1;
+  OVER_WINDOW_CACHE_POLICY_RECENT = 2;
+  OVER_WINDOW_CACHE_POLICY_RECENT_FIRST_N = 3;
+  OVER_WINDOW_CACHE_POLICY_RECENT_LAST_N = 4;
+}
+
 message OverWindowNode {
   repeated expr.WindowFunction calls = 1;
   repeated uint32 partition_by = 2;
   repeated common.ColumnOrder order_by = 3;
   catalog.Table state_table = 4;
+  OverWindowCachePolicy cache_policy = 5;
 }
 
 message StreamNode {

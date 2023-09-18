@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use parking_lot::RwLock;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, AsyncStackTraceOption, RwConfig,
+    extract_storage_memory_config, load_config, AsyncStackTraceOption, MetricLevel, RwConfig,
 };
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -151,9 +151,9 @@ pub async fn prepare_start_parameters(
             .build()
             .ok(),
     };
-    let await_tree_reg: Option<
-        Arc<parking_lot::lock_api::RwLock<parking_lot::RawRwLock, await_tree::Registry<_>>>,
-    > = await_tree_config.map(|c| Arc::new(RwLock::new(await_tree::Registry::new(c))));
+    let await_tree_reg =
+        await_tree_config.map(|c| Arc::new(RwLock::new(await_tree::Registry::new(c))));
+
     (
         sstable_store,
         memory_limiter,
@@ -201,8 +201,6 @@ pub async fn compactor_serve(
 
     let (sstable_store, memory_limiter, await_tree_reg, storage_opts, compactor_metrics) =
         prepare_start_parameters(config.clone(), system_params_reader.clone()).await;
-
-    let telemetry_enabled = system_params_reader.telemetry_enabled();
 
     let filter_key_extractor_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
         RemoteTableAccessor::new(meta_client.clone()),
@@ -255,17 +253,13 @@ pub async fn compactor_serve(
     ];
 
     let telemetry_manager = TelemetryManager::new(
-        system_params_manager.watch_params(),
         Arc::new(meta_client.clone()),
         Arc::new(CompactorTelemetryCreator::new()),
     );
     // if the toml config file or env variable disables telemetry, do not watch system params change
     // because if any of configs disable telemetry, we should never start it
     if config.server.telemetry_enabled && telemetry_env_enabled() {
-        if telemetry_enabled {
-            telemetry_manager.start_telemetry_reporting().await;
-        }
-        sub_tasks.push(telemetry_manager.watch_params_change());
+        sub_tasks.push(telemetry_manager.start().await);
     } else {
         tracing::info!("Telemetry didn't start due to config");
     }
@@ -305,7 +299,7 @@ pub async fn compactor_serve(
     });
 
     // Boot metrics service.
-    if config.server.metrics_level > 0 {
+    if config.server.metrics_level > MetricLevel::Disabled {
         MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 
@@ -396,7 +390,7 @@ pub async fn shared_compactor_serve(
     });
 
     // Boot metrics service.
-    if config.server.metrics_level > 0 {
+    if config.server.metrics_level > MetricLevel::Disabled {
         MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 

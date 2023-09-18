@@ -456,8 +456,6 @@ pub fn start_compactor(
 
                         continue;
                     }
-
-
                     event = response_event_stream.next() => {
                         event
                     }
@@ -799,7 +797,7 @@ fn get_task_progress(
     >,
 ) -> Vec<CompactTaskProgress> {
     let mut progress_list = Vec::new();
-    for (&task_id, progress) in task_progress.lock().iter() {
+    for (&task_id, progress) in &*task_progress.lock() {
         progress_list.push(CompactTaskProgress {
             task_id,
             num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),

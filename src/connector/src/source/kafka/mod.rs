@@ -27,6 +27,8 @@ pub use source::*;
 pub use split::*;
 
 use crate::common::KafkaCommon;
+use crate::source::SourceProperties;
+
 pub const KAFKA_CONNECTOR: &str = "kafka";
 pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
 pub const KAFKA_PROPS_BROKER_KEY_ALIAS: &str = "kafka.brokers";
@@ -75,6 +77,14 @@ pub struct RdKafkaPropertiesConsumer {
     #[serde(rename = "properties.fetch.max.bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub fetch_max_bytes: Option<usize>,
+
+    /// Automatically and periodically commit offsets in the background.
+    /// Note: setting this to false does not prevent the consumer from fetching previously committed start offsets.
+    /// To circumvent this behaviour set specific start offsets per partition in the call to assign().
+    /// default: true
+    #[serde(rename = "properties.enable.auto.commit")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub enable_auto_commit: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -115,6 +125,14 @@ pub struct KafkaProperties {
     pub rdkafka_properties: RdKafkaPropertiesConsumer,
 }
 
+impl SourceProperties for KafkaProperties {
+    type Split = KafkaSplit;
+    type SplitEnumerator = KafkaSplitEnumerator;
+    type SplitReader = KafkaSplitReader;
+
+    const SOURCE_NAME: &'static str = KAFKA_CONNECTOR;
+}
+
 impl KafkaProperties {
     pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {
         self.common.set_client(c);
@@ -143,6 +161,9 @@ impl RdKafkaPropertiesConsumer {
         if let Some(v) = &self.fetch_max_bytes {
             c.set("fetch.max.bytes", v.to_string());
         }
+        if let Some(v) = &self.enable_auto_commit {
+            c.set("enable.auto.commit", v.to_string());
+        }
     }
 }
 
@@ -170,6 +191,7 @@ mod test {
             "properties.queued.max.messages.kbytes".to_string() => "114514".to_string(),
             "properties.fetch.wait.max.ms".to_string() => "114514".to_string(),
             "properties.fetch.max.bytes".to_string() => "114514".to_string(),
+            "properties.enable.auto.commit".to_string() => "true".to_string(),
         };
 
         let props: KafkaProperties =
@@ -191,5 +213,6 @@ mod test {
         );
         assert_eq!(props.rdkafka_properties.fetch_wait_max_ms, Some(114514));
         assert_eq!(props.rdkafka_properties.fetch_max_bytes, Some(114514));
+        assert_eq!(props.rdkafka_properties.enable_auto_commit, Some(true));
     }
 }

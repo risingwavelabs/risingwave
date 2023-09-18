@@ -72,8 +72,8 @@ message AllTypes {
     EnumType oneof_enum = 21;
   }
 
-  // map field
-  map<string, int32> map_field = 22;
+  // // map field
+  // map<string, int32> map_field = 22;
 
   // timestamp
   google.protobuf.Timestamp timestamp_field = 23;

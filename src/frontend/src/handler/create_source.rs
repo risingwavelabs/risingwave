@@ -38,7 +38,7 @@ use risingwave_connector::source::filesystem::S3_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::{
     SourceEncode, SourceFormat, SourceStruct, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
-    KINESIS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR,
+    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
@@ -252,7 +252,7 @@ fn consume_string_from_options(
     ))))
 }
 
-fn get_json_schema_location(
+pub fn get_json_schema_location(
     row_options: &mut BTreeMap<String, String>,
 ) -> Result<Option<(AstString, bool)>> {
     let schema_location = try_consume_string_from_options(row_options, "schema.location");
@@ -904,6 +904,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
                 ),
+                NATS_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Json],
+                ),
         ))
     });
 
@@ -1104,7 +1107,13 @@ pub async fn handle_create_source(
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
 
-    bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
+    bind_sql_column_constraints(
+        &session,
+        name.clone(),
+        &mut columns,
+        stmt.columns,
+        &pk_column_ids,
+    )?;
 
     check_source_schema(&with_properties, row_id_index, &columns)?;
 

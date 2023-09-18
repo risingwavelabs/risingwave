@@ -217,30 +217,27 @@ fn mark_cdc_chunk_inner(
 
     // `_rw_offset` must be placed at the last column right now
     let offset_col_idx = data.dimension() - 1;
-    for v in data.rows_with_holes().map(|row| {
+    for v in data.rows().map(|row| {
         let offset_datum = row.datum_at(offset_col_idx).unwrap();
         let event_offset = table_reader.parse_binlog_offset(offset_datum.into_utf8())?;
-        let visible = match row {
-            None => false,
-            Some(row) => {
-                // filter changelog events with binlog range
-                let in_binlog_range = if let Some(binlog_low) = &last_cdc_offset {
-                    binlog_low <= &event_offset
-                } else {
-                    true
-                };
+        let visible = {
+            // filter changelog events with binlog range
+            let in_binlog_range = if let Some(binlog_low) = &last_cdc_offset {
+                binlog_low <= &event_offset
+            } else {
+                true
+            };
 
-                if in_binlog_range {
-                    let lhs = row.project(pk_in_output_indices);
-                    let rhs = current_pos.project(pk_in_output_indices);
-                    let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
-                    match order {
-                        Ordering::Less | Ordering::Equal => true,
-                        Ordering::Greater => false,
-                    }
-                } else {
-                    false
+            if in_binlog_range {
+                let lhs = row.project(pk_in_output_indices);
+                let rhs = current_pos;
+                let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
+                match order {
+                    Ordering::Less | Ordering::Equal => true,
+                    Ordering::Greater => false,
                 }
+            } else {
+                false
             }
         };
         Ok::<_, ConnectorError>(visible)
@@ -338,6 +335,9 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
 }
 
 /// Flush the data
+// This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+// TODO: remove `allow` here after the issued is closed.
+#[expect(clippy::needless_pass_by_ref_mut)]
 pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     epoch: EpochPair,
@@ -477,18 +477,14 @@ where
 }
 
 #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-pub(crate) async fn iter_chunks<'a, S, E>(
-    mut iter: S,
-    chunk_size: usize,
-    builder: &'a mut DataChunkBuilder,
-) where
+pub(crate) async fn iter_chunks<'a, S, E>(mut iter: S, builder: &'a mut DataChunkBuilder)
+where
     StreamExecutorError: From<E>,
     S: Stream<Item = Result<OwnedRow, E>> + Unpin + 'a,
 {
-    while let Some(data_chunk) =
-        collect_data_chunk_with_builder(&mut iter, Some(chunk_size), builder)
-            .instrument_await("backfill_snapshot_read")
-            .await?
+    while let Some(data_chunk) = collect_data_chunk_with_builder(&mut iter, builder)
+        .instrument_await("backfill_snapshot_read")
+        .await?
     {
         debug_assert!(data_chunk.cardinality() > 0);
         let ops = vec![Op::Insert; data_chunk.capacity()];
@@ -509,7 +505,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     epoch: EpochPair,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     is_finished: bool,
-    backfill_state: &mut BackfillState,
+    backfill_state: &BackfillState,
     committed_progress: &mut HashMap<VirtualNode, Vec<Datum>>,
     temporary_state: &mut [Datum],
 ) -> StreamExecutorResult<()> {

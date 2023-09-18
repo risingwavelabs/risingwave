@@ -27,6 +27,7 @@ use crate::util::iter_util::ZipEqDebug;
 
 // Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
 
+// note: DataChunk -> arrow RecordBatch will IGNORE the visibilities.
 impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
     type Error = ArrayError;
 
@@ -47,8 +48,9 @@ impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
             .collect();
 
         let schema = Arc::new(Schema::new(fields));
-
-        arrow_array::RecordBatch::try_new(schema, columns)
+        let opts =
+            arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
+        arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
             .map_err(|err| ArrayError::ToArrow(err.to_string()))
     }
 }

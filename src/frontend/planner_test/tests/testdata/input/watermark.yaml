@@ -96,3 +96,9 @@
     select window_start from hop(t, ts, interval '1' minute, interval '3' minute);
   expected_outputs:
   - stream_plan
+- name: unnest
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    explain create materialized view mv as select t.ts, unnest(Array[1,2,3]) from t emit on window close;
+  expected_outputs:
+    - explain_output

@@ -18,7 +18,7 @@ pub mod server;
 mod telemetry;
 
 use clap::Parser;
-use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
+use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
 
 use crate::server::{compactor_serve, shared_compactor_serve};
 
@@ -66,11 +66,9 @@ pub struct CompactorOpts {
     pub config_path: String,
 
     /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
     #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
-    pub metrics_level: Option<u32>,
+    pub metrics_level: Option<MetricLevel>,
 
     /// Enable async stack tracing through `await-tree` for risectl.
     #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]

@@ -112,12 +112,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
             None,
             self.actor_ctx.error_suppressor.clone(),
         );
-        let stream_reader = source_desc
+        source_desc
             .source
             .stream_reader(state, column_ids, Arc::new(source_ctx))
             .await
-            .map_err(StreamExecutorError::connector_error)?;
-        Ok(stream_reader.into_stream())
+            .map_err(StreamExecutorError::connector_error)
     }
 
     async fn apply_split_change<const BIASED: bool>(
@@ -279,9 +278,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .build_fs_source_desc()
             .map_err(StreamExecutorError::connector_error)?;
 
-        // If the first barrier is configuration change, then the source executor must be newly
-        // created, and we should start with the paused state.
-        let start_with_paused = barrier.is_update();
+        // If the first barrier requires us to pause on startup, pause the stream.
+        let start_with_paused = barrier.is_pause_on_startup();
 
         let mut boot_state = Vec::default();
         if let Some(mutation) = barrier.mutation.as_deref() {

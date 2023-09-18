@@ -17,6 +17,7 @@
 use std::ops::{Bound, Deref};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
@@ -70,6 +71,7 @@ use risingwave_common_service::observer_manager::{NotificationClient, ObserverMa
 pub use validator::*;
 use value::*;
 
+use self::event_handler::refiller::CacheRefillConfig;
 use self::event_handler::ReadVersionMappingType;
 use self::iterator::HummockIterator;
 pub use self::sstable_store::*;
@@ -200,11 +202,15 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
             sstable_object_id_manager.clone(),
             state_store_metrics.clone(),
-            options
-                .data_file_cache_refill_levels
-                .iter()
-                .copied()
-                .collect(),
+            CacheRefillConfig {
+                timeout: Duration::from_millis(options.cache_refill_timeout_ms),
+                data_refill_levels: options
+                    .cache_refill_data_refill_levels
+                    .iter()
+                    .copied()
+                    .collect(),
+                concurrency: options.cache_refill_concurrency,
+            },
         );
 
         let instance = Self {
@@ -245,6 +251,7 @@ impl HummockStorage {
             .unwrap();
 
         let (basic_read_version, instance_guard) = rx.await.unwrap();
+        let version_update_notifier_tx = self.version_update_notifier_tx.clone();
         LocalHummockStorage::new(
             instance_guard,
             basic_read_version,
@@ -253,6 +260,7 @@ impl HummockStorage {
             self.buffer_tracker.get_memory_limiter().clone(),
             self.write_limiter.clone(),
             option,
+            version_update_notifier_tx,
         )
     }
 

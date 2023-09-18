@@ -34,7 +34,6 @@ use risingwave_meta::hummock::test_utils::{
 };
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::LocalNotification;
-use risingwave_meta::storage::MemStore;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::filter_key_extractor::FilterKeyExtractorManager;
@@ -45,10 +44,9 @@ use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
 use risingwave_storage::StateStore;
 use serial_test::serial;
 
-use super::compactor_tests::tests::{
-    flush_and_commit, get_hummock_storage, prepare_compactor_and_filter,
-};
+use super::compactor_tests::tests::{get_hummock_storage, prepare_compactor_and_filter};
 use crate::get_notification_client_for_test;
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 
 #[tokio::test]
 #[cfg(feature = "sync_point")]
@@ -229,7 +227,7 @@ async fn test_syncpoints_test_local_notification_receiver() {
 }
 
 pub async fn compact_once(
-    hummock_manager_ref: HummockManagerRef<MemStore>,
+    hummock_manager_ref: HummockManagerRef,
     compact_ctx: CompactorContext,
     filter_key_extractor_manager: FilterKeyExtractorManager,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
@@ -311,7 +309,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let val0 = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
     let val1 = Bytes::from(b"1"[..].repeat(1 << 10)); // 1024 Byte value
 
-    local.init(100);
+    local.init_for_test(100).await.unwrap();
     let mut start_key = b"\0\0aaa".to_vec();
     for _ in 0..10 {
         local

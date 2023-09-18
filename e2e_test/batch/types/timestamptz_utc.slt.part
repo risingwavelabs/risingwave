@@ -43,6 +43,19 @@ select '2022-10-01T12:00:00Z'::timestamp with time zone;
 2022-10-01 12:00:00+00:00
 
 query T
+select '2023-11-05 01:40-07:00'::timestamptz;
+----
+2023-11-05 08:40:00+00:00
+
+query T
+select '2023-11-05 01:40-08:00'::timestamptz;
+----
+2023-11-05 09:40:00+00:00
+
+statement error
+select '0'::timestamptz;
+
+query T
 select '2022-10-01 12:00:00+01:00'::timestamp with time zone BETWEEN '2022-10-01T10:59:59Z' AND '2022-10-01T11:00:01Z';
 ----
 t

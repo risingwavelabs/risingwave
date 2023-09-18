@@ -23,9 +23,9 @@ use foyer::common::code::{Key, Value};
 use foyer::storage::admission::rated_random::RatedRandomAdmissionPolicy;
 use foyer::storage::admission::AdmissionPolicy;
 use foyer::storage::event::EventListener;
-use foyer::storage::store::{FetchValueFuture, PrometheusConfig};
+pub use foyer::storage::metrics::set_metrics_registry as set_foyer_metrics_registry;
+use foyer::storage::store::FetchValueFuture;
 use foyer::storage::LfuFsStoreConfig;
-use prometheus::Registry;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 
@@ -59,6 +59,7 @@ where
     K: Key,
     V: Value,
 {
+    pub name: String,
     pub dir: PathBuf,
     pub capacity: usize,
     pub file_capacity: usize,
@@ -73,8 +74,6 @@ where
     pub lfu_window_to_cache_size_ratio: usize,
     pub lfu_tiny_lru_capacity_ratio: f64,
     pub rated_random_rate: usize,
-    pub prometheus_registry: Option<Registry>,
-    pub prometheus_namespace: Option<String>,
     pub event_listener: Vec<Arc<dyn EventListener<K = K, V = V>>>,
     pub enable_filter: bool,
 }
@@ -142,7 +141,7 @@ impl Value for Box<Sstable> {
 
     fn read(mut buf: &[u8]) -> Self {
         let id = buf.get_u64();
-        let meta = SstableMeta::decode(&mut buf).unwrap();
+        let meta = SstableMeta::decode(buf).unwrap();
         Box::new(Sstable::new(id, meta))
     }
 }
@@ -201,6 +200,7 @@ where
                 }
 
                 let c = LfuFsStoreConfig {
+                    name: foyer_store_config.name,
                     eviction_config: EvictionConfig {
                         window_to_cache_size_ratio: foyer_store_config
                             .lfu_window_to_cache_size_ratio,
@@ -222,10 +222,6 @@ where
                     reclaim_rate_limit: foyer_store_config.reclaim_rate_limit,
                     recover_concurrency: foyer_store_config.recover_concurrency,
                     event_listeners: foyer_store_config.event_listener,
-                    prometheus_config: PrometheusConfig {
-                        registry: foyer_store_config.prometheus_registry,
-                        namespace: foyer_store_config.prometheus_namespace,
-                    },
                     clean_region_threshold: foyer_store_config.reclaimers
                         + foyer_store_config.reclaimers / 2,
                 };
@@ -264,6 +260,21 @@ where
             FileCache::FoyerRuntime { runtime, store, .. } => {
                 let store = store.clone();
                 runtime.spawn(async move { store.insert_if_not_exists(key, value).await });
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self, value))]
+    pub async fn insert_force(&self, key: K, value: V) -> Result<bool> {
+        match self {
+            FileCache::None => Ok(false),
+            FileCache::FoyerRuntime { runtime, store, .. } => {
+                let store = store.clone();
+                runtime
+                    .spawn(async move { store.insert_force(key, value).await })
+                    .await
+                    .unwrap()
+                    .map_err(FileCacheError::foyer)
             }
         }
     }

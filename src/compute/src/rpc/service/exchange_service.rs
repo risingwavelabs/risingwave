@@ -42,8 +42,8 @@ pub struct ExchangeServiceImpl {
     metrics: Arc<ExchangeServiceMetrics>,
 }
 
-type BatchDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
-type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
+pub type BatchDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+pub type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
 
 #[async_trait::async_trait]
 impl ExchangeService for ExchangeServiceImpl {

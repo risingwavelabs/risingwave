@@ -38,6 +38,7 @@ memcomparable = "0.2"
 multimap = "0.8"
 num-traits = "0.2"
 parking_lot = "0.12"
+parse-display = "0.8"
 pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
@@ -94,3 +95,6 @@ harness = false
 [[bench]]
 name = "bench_state_table"
 harness = false
+
+[lints]
+workspace = true

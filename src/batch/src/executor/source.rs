@@ -66,7 +66,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
 
         // prepare connector source
         let source_props: HashMap<String, String> =
-            HashMap::from_iter(source_node.properties.clone().into_iter());
+            HashMap::from_iter(source_node.properties.clone());
         let config = ConnectorProperties::extract(source_props)
             .map_err(|e| RwError::from(ConnectorError(e.into())))?;
 

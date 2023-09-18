@@ -438,7 +438,8 @@ impl PlanRoot {
             append_only,
             columns
                 .iter()
-                .filter_map(|c| (!c.is_generated()).then(|| c.column_desc.clone()))
+                .filter(|&c| (!c.is_generated()))
+                .map(|c| c.column_desc.clone())
                 .collect(),
         )
         .into();
@@ -447,6 +448,7 @@ impl PlanRoot {
         let exprs = LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
         if let Some(exprs) = exprs {
             let logical_project = generic::Project::new(exprs, stream_plan);
+            // The project node merges a chunk if it has an ungenerated row id as stream key.
             stream_plan = StreamProject::new(logical_project).into();
         }
 
@@ -553,12 +555,16 @@ impl PlanRoot {
         definition: String,
         properties: WithOptions,
         emit_on_window_close: bool,
+        db_name: String,
+        sink_from_table_name: String,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
         StreamSink::create(
             stream_plan,
             sink_name,
+            db_name,
+            sink_from_table_name,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),

@@ -19,6 +19,7 @@ use std::time::Duration;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
+use futures::future::try_join_all;
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
@@ -26,7 +27,7 @@ use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
-    BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadataIter, ObjectStoreRef,
+    MonitoredStreamingReader, ObjectError, ObjectMetadataIter, ObjectStoreRef,
     ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::SstableInfo;
@@ -259,7 +260,7 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockResponse> {
         let object_id = sst.id;
-        let (block_loc, uncompressed_capacity) = sst.calculate_block_info(block_index);
+        let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
 
         stats.cache_data_block_total += 1;
         let mut fetch_block = || {
@@ -268,6 +269,7 @@ impl SstableStore {
             let data_path = self.get_sst_data_path(object_id);
             let store = self.store.clone();
             let use_file_cache = !matches!(policy, CachePolicy::Disable);
+            let range = range.clone();
 
             async move {
                 let key = SstableBlockIndex {
@@ -283,7 +285,7 @@ impl SstableStore {
                     return Ok(block);
                 }
 
-                let block_data = store.read(&data_path, Some(block_loc)).await?;
+                let block_data = store.read(&data_path, range).await?;
                 let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
 
                 Ok(block)
@@ -408,10 +410,7 @@ impl SstableStore {
                     let meta_path = self.get_sst_data_path(object_id);
                     local_cache_meta_block_miss += 1;
                     let stats_ptr = stats.remote_io_time.clone();
-                    let loc = BlockLocation {
-                        offset: sst.meta_offset as usize,
-                        size: (sst.file_size - sst.meta_offset) as usize,
-                    };
+                    let range = sst.meta_offset as usize..sst.file_size as usize;
                     async move {
                         if let Some(sst) = meta_file_cache
                             .lookup(&object_id)
@@ -424,10 +423,10 @@ impl SstableStore {
 
                         let now = Instant::now();
                         let buf = store
-                            .read(&meta_path, Some(loc))
+                            .read(&meta_path, range)
                             .await
                             .map_err(HummockError::object_io_error)?;
-                        let meta = SstableMeta::decode(&mut &buf[..])?;
+                        let meta = SstableMeta::decode(&buf[..])?;
                         let sst = Sstable::new(object_id, meta);
                         let charge = sst.estimate_size();
                         let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
@@ -451,6 +450,9 @@ impl SstableStore {
         })
     }
 
+    // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+    // TODO: remove `allow` here after the issued is closed.
+    #[expect(clippy::needless_pass_by_ref_mut)]
     pub async fn sstable(
         &self,
         sst: &SstableInfo,
@@ -546,43 +548,43 @@ impl SstableStore {
         &self.data_file_cache
     }
 
-    pub async fn may_fill_data_file_cache(
-        &self,
-        sst: &Sstable,
-        block_index: usize,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<bool> {
+    pub async fn fill_data_file_cache(&self, sst: &Sstable) -> HummockResult<()> {
         let object_id = sst.id;
-        let (block_loc, uncompressed_capacity) = sst.calculate_block_info(block_index);
-
-        stats.cache_data_block_total += 1;
-        let fetch_block = move || {
-            stats.cache_data_block_miss += 1;
-            let data_path = self.get_sst_data_path(object_id);
-            let store = self.store.clone();
-
-            async move {
-                let data = store.read(&data_path, Some(block_loc)).await?;
-                let block = Block::decode(data, uncompressed_capacity)?;
-                let block = Box::new(block);
-
-                Ok(block)
-            }
-        };
 
         if let Some(filter) = self.data_file_cache_refill_filter.as_ref() {
             filter.insert(object_id);
         }
 
-        let key = SstableBlockIndex {
-            sst_id: object_id,
-            block_idx: block_index as u64,
-        };
+        let data = self
+            .store
+            .read(&self.get_sst_data_path(object_id), ..)
+            .await?;
 
-        self.data_file_cache
-            .insert_with(key, fetch_block, uncompressed_capacity)
-            .await
-            .map_err(HummockError::file_cache)
+        let mut tasks = vec![];
+        for block_index in 0..sst.block_count() {
+            let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
+            let bytes = data.slice(range);
+            let block = Block::decode(bytes, uncompressed_capacity)?;
+            let block = Box::new(block);
+
+            let key = SstableBlockIndex {
+                sst_id: object_id,
+                block_idx: block_index as u64,
+            };
+
+            let cache = self.data_file_cache.clone();
+            let task = async move {
+                cache
+                    .insert_force(key, block)
+                    .await
+                    .map_err(HummockError::file_cache)
+            };
+            tasks.push(task);
+        }
+
+        try_join_all(tasks).await?;
+
+        Ok(())
     }
 }
 

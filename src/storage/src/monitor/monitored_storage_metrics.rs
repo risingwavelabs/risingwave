@@ -18,10 +18,9 @@ use prometheus::{
     exponential_buckets, histogram_opts, linear_buckets, register_histogram_vec_with_registry,
     register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram, Registry,
 };
-use risingwave_common::config::StorageMetricLevel;
+use risingwave_common::config::MetricLevel;
+use risingwave_common::metrics::{RelabeledCounterVec, RelabeledHistogramVec};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-
-use crate::monitor::relabeled_metric::{RelabeledCounterVec, RelabeledHistogramVec};
 
 /// [`MonitoredStorageMetrics`] stores the performance and IO metrics of Storage.
 #[derive(Debug, Clone)]
@@ -44,16 +43,14 @@ pub struct MonitoredStorageMetrics {
 
 pub static GLOBAL_STORAGE_METRICS: OnceLock<MonitoredStorageMetrics> = OnceLock::new();
 
-pub fn global_storage_metrics(storage_metric_level: StorageMetricLevel) -> MonitoredStorageMetrics {
+pub fn global_storage_metrics(metric_level: MetricLevel) -> MonitoredStorageMetrics {
     GLOBAL_STORAGE_METRICS
-        .get_or_init(|| {
-            MonitoredStorageMetrics::new(&GLOBAL_METRICS_REGISTRY, storage_metric_level)
-        })
+        .get_or_init(|| MonitoredStorageMetrics::new(&GLOBAL_METRICS_REGISTRY, metric_level))
         .clone()
 }
 
 impl MonitoredStorageMetrics {
-    pub fn new(registry: &Registry, storage_metric_level: StorageMetricLevel) -> Self {
+    pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
         // 256B ~ max 4GB
         let size_buckets = exponential_buckets(256.0, 16.0, 7).unwrap();
         // 10ms ~ max 2.7h
@@ -67,9 +64,9 @@ impl MonitoredStorageMetrics {
         let get_key_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
         let get_key_size = RelabeledHistogramVec::with_metric_level(
-            StorageMetricLevel::Debug,
+            MetricLevel::Debug,
             get_key_size,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(
@@ -80,9 +77,9 @@ impl MonitoredStorageMetrics {
         let get_value_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
         let get_value_size = RelabeledHistogramVec::with_metric_level(
-            StorageMetricLevel::Debug,
+            MetricLevel::Debug,
             get_value_size,
-            storage_metric_level,
+            metric_level,
         );
 
         let mut buckets = exponential_buckets(0.000004, 2.0, 4).unwrap(); // 4 ~ 32us
@@ -100,9 +97,9 @@ impl MonitoredStorageMetrics {
             register_histogram_vec_with_registry!(get_duration_opts, &["table_id"], registry)
                 .unwrap();
         let get_duration = RelabeledHistogramVec::with_metric_level(
-            StorageMetricLevel::Critical,
+            MetricLevel::Critical,
             get_duration,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(
@@ -112,11 +109,8 @@ impl MonitoredStorageMetrics {
         );
         let iter_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let iter_size = RelabeledHistogramVec::with_metric_level(
-            StorageMetricLevel::Debug,
-            iter_size,
-            storage_metric_level,
-        );
+        let iter_size =
+            RelabeledHistogramVec::with_metric_level(MetricLevel::Debug, iter_size, metric_level);
 
         let opts = histogram_opts!(
             "state_store_iter_item",
@@ -125,11 +119,8 @@ impl MonitoredStorageMetrics {
         );
         let iter_item =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let iter_item = RelabeledHistogramVec::with_metric_level(
-            StorageMetricLevel::Debug,
-            iter_item,
-            storage_metric_level,
-        );
+        let iter_item =
+            RelabeledHistogramVec::with_metric_level(MetricLevel::Debug, iter_item, metric_level);
 
         let opts = histogram_opts!(
             "state_store_iter_init_duration",
@@ -139,9 +130,9 @@ impl MonitoredStorageMetrics {
         let iter_init_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
         let iter_init_duration = RelabeledHistogramVec::with_metric_level(
-            StorageMetricLevel::Critical,
+            MetricLevel::Critical,
             iter_init_duration,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(
@@ -152,9 +143,9 @@ impl MonitoredStorageMetrics {
         let iter_scan_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
         let iter_scan_duration = RelabeledHistogramVec::with_metric_level(
-            StorageMetricLevel::Critical,
+            MetricLevel::Critical,
             iter_scan_duration,
-            storage_metric_level,
+            metric_level,
         );
 
         let iter_in_process_counts = register_int_counter_vec_with_registry!(
@@ -165,9 +156,9 @@ impl MonitoredStorageMetrics {
         )
         .unwrap();
         let iter_in_process_counts = RelabeledCounterVec::with_metric_level(
-            StorageMetricLevel::Debug,
+            MetricLevel::Debug,
             iter_in_process_counts,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(
@@ -178,9 +169,9 @@ impl MonitoredStorageMetrics {
         let may_exist_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
         let may_exist_duration = RelabeledHistogramVec::with_metric_level(
-            StorageMetricLevel::Debug,
+            MetricLevel::Debug,
             may_exist_duration,
-            storage_metric_level,
+            metric_level,
         );
 
         let opts = histogram_opts!(
@@ -213,6 +204,6 @@ impl MonitoredStorageMetrics {
     }
 
     pub fn unused() -> Self {
-        global_storage_metrics(StorageMetricLevel::Disabled)
+        global_storage_metrics(MetricLevel::Disabled)
     }
 }
