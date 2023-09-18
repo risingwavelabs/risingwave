@@ -239,8 +239,8 @@ impl GetObjectId for SharedComapctorObjectIdManager {
             tracing::warn!("The pre-allocated object ids are used up, and new object id are obtained through RPC.");
             let request = GetNewSstIdsRequest { number: 10 };
             match core.client.get_new_sst_ids(request).await {
-                Ok(reponse) => {
-                    let resp = reponse.into_inner();
+                Ok(response) => {
+                    let resp = response.into_inner();
                     let start_id = resp.start_id;
                     core.output_object_ids.extend((start_id + 1)..resp.end_id);
                     Ok(start_id)
