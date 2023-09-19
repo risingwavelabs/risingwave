@@ -603,6 +603,14 @@ if [[ $ENABLE_COREDUMP == "true" ]]; then
   ulimit -c unlimited
 fi
 
+if [[ -z "$RW_QUERY_LOG_PATH" ]]; then
+  export RW_QUERY_LOG_PATH="${PREFIX_LOG}"
+fi
+
+if [[ -z "$RUST_LOG" ]]; then
+  export RUST_LOG="pgwire_query_log=info"
+fi
+
 set -x
 target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave playground $@
 '''
@@ -618,6 +626,14 @@ set -e
 if [[ $ENABLE_COREDUMP == "true" ]]; then
   echo "+ ulimit -c unlimited"
   ulimit -c unlimited
+fi
+
+if [[ -z "$RW_QUERY_LOG_PATH" ]]; then
+  export RW_QUERY_LOG_PATH="${PREFIX_LOG}"
+fi
+
+if [[ -z "$RUST_LOG" ]]; then
+  export RUST_LOG="pgwire_query_log=info"
 fi
 
 set -x
@@ -652,6 +668,14 @@ set -e
 if [[ $ENABLE_COREDUMP == "true" ]]; then
   echo "+ ulimit -c unlimited"
   ulimit -c unlimited
+fi
+
+if [[ -z "$RW_QUERY_LOG_PATH" ]]; then
+  export RW_QUERY_LOG_PATH="${PREFIX_LOG}"
+fi
+
+if [[ -z "$RUST_LOG" ]]; then
+  export RUST_LOG="pgwire_query_log=info"
 fi
 
 set -x
