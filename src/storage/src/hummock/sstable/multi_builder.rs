@@ -158,7 +158,7 @@ where
         smallest_key: FullKey<Vec<u8>>,
         largest_key: Vec<u8>,
         block_meta: BlockMeta,
-    ) -> HummockResult<()> {
+    ) -> HummockResult<bool> {
         if self.current_builder.is_none() {
             if let Some(progress) = &self.task_progress {
                 progress
@@ -249,7 +249,7 @@ where
         }
 
         let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key, value, is_new_user_key).await
+        builder.add(full_key, value).await
     }
 
     pub fn check_table_and_vnode_change(&mut self, user_key: &UserKey<&[u8]>) -> (bool, bool) {

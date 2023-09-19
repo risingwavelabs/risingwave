@@ -491,7 +491,7 @@ mod tests {
                     epoch,
                 };
                 let v = HummockValue::put(test_value_of(i));
-                builder.add(k.to_ref(), v.as_slice(), j == 0).await.unwrap();
+                builder.add(k.to_ref(), v.as_slice()).await.unwrap();
             }
         }
         let ret = builder.finish().await.unwrap();

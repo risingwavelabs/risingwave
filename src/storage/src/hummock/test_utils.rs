@@ -150,7 +150,7 @@ pub async fn gen_test_sstable_data(
 ) -> (Bytes, SstableMeta) {
     let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
-        b.add_for_test(key.to_ref(), value.as_slice(), true)
+        b.add_for_test(key.to_ref(), value.as_slice())
             .await
             .unwrap();
     }
@@ -225,7 +225,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     let mut last_key = FullKey::<B>::default();
     let mut user_key_last_delete = HummockEpoch::MAX;
     for (mut key, value) in kv_iter {
-        let mut is_new_user_key =
+        let is_new_user_key =
             last_key.is_empty() || key.user_key.as_ref() != last_key.user_key.as_ref();
         let epoch = key.epoch;
         if is_new_user_key {
@@ -254,16 +254,11 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
             user_key_last_delete = earliest_delete_epoch;
 
             key.epoch = earliest_delete_epoch;
-            b.add(key.to_ref(), HummockValue::Delete, is_new_user_key)
-                .await
-                .unwrap();
+            b.add(key.to_ref(), HummockValue::Delete).await.unwrap();
             key.epoch = epoch;
-            is_new_user_key = false;
         }
 
-        b.add(key.to_ref(), value.as_slice(), is_new_user_key)
-            .await
-            .unwrap();
+        b.add(key.to_ref(), value.as_slice()).await.unwrap();
     }
     b.add_monotonic_deletes(create_monotonic_events(range_tombstones));
     let output = b.finish().await.unwrap();

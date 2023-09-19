@@ -1354,7 +1354,7 @@ pub(crate) mod tests {
         let compact_ctx = prepare_compactor_and_filter(&storage, existing_table_id);
 
         let sstable_store = compact_ctx.sstable_store.clone();
-        let capacity = 256 * 1024;
+        let capacity = 512 * 1024;
         let mut options = SstableBuilderOptions {
             capacity,
             block_capacity: 2048,
@@ -1431,6 +1431,7 @@ pub(crate) mod tests {
             .into_iter()
             .map(|sst| sst.sst_info)
             .collect_vec();
+        println!("ssts: {} vs {}", fast_ret.len(), ret.len());
         let mut fast_tables = Vec::with_capacity(fast_ret.len());
         let mut normal_tables = Vec::with_capacity(ret.len());
         let mut stats = StoreLocalStatistic::default();
@@ -1535,7 +1536,7 @@ pub(crate) mod tests {
         for _ in 0..KEY_COUNT {
             let rand_v = rng.next_u32() % 100;
             let (k, epoch) = if rand_v == 0 {
-                (last_k + 2000, 400)
+                (last_k + 3000, 400)
             } else if rand_v < 5 {
                 (last_k, last_epoch - 1)
             } else {
@@ -1566,7 +1567,7 @@ pub(crate) mod tests {
         for _ in 0..KEY_COUNT * 2 {
             let rand_v = rng.next_u32() % 100;
             let (k, epoch) = if rand_v == 0 {
-                (last_k + 1100, max_epoch)
+                (last_k + 1000, max_epoch)
             } else if rand_v < 5 {
                 (last_k, last_epoch - 1)
             } else {

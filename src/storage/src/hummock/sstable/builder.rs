@@ -30,12 +30,15 @@ use super::{
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
 use crate::hummock::sstable::{utils, FilterBuilder};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, MemoryLimiter, Xor16FilterBuilder};
+use crate::hummock::{
+    Block, BlockHolder, BlockIterator, HummockResult, MemoryLimiter, Xor16FilterBuilder,
+};
 use crate::opts::StorageOpts;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.001;
 pub const DEFAULT_MAX_SST_SIZE: u64 = 512 * 1024 * 1024;
+pub const MIN_BLOCK_SIZE: usize = 8 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct SstableBuilderOptions {
@@ -226,12 +229,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         &mut self,
         full_key: FullKey<&[u8]>,
         value: HummockValue<&[u8]>,
-        is_new_user_key: bool,
     ) -> HummockResult<()> {
-        self.add(full_key, value, is_new_user_key).await
+        self.add(full_key, value).await
     }
 
-    /// Add kv pair to sstable.
+    /// Add raw data of block to sstable. return false means fallback
     pub async fn add_raw_block(
         &mut self,
         buf: Bytes,
@@ -239,8 +241,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         smallest_key: FullKey<Vec<u8>>,
         largest_key: Vec<u8>,
         mut meta: BlockMeta,
-    ) -> HummockResult<()> {
-        self.last_full_key = largest_key;
+    ) -> HummockResult<bool> {
         let table_id = smallest_key.user_key.table_id.table_id;
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
             self.table_ids.insert(table_id);
@@ -248,14 +249,29 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.last_table_id = Some(table_id);
         }
         if !self.block_builder.is_empty() {
+            let min_block_size = std::cmp::min(MIN_BLOCK_SIZE, self.options.block_capacity / 4);
+            if self.block_builder.approximate_len() < min_block_size {
+                let block = Block::decode(buf, meta.uncompressed_size as usize)?;
+                let mut iter = BlockIterator::new(BlockHolder::from_owned_block(Box::new(block)));
+                iter.seek_to_first();
+                while iter.is_valid() {
+                    let value = HummockValue::from_slice(iter.value())
+                        .expect("decode failed for fast compact");
+                    self.add_impl(iter.key(), value, false).await?;
+                    iter.next();
+                }
+                return Ok(false);
+            }
             self.build_block().await?;
         }
+        self.last_full_key = largest_key;
         assert_eq!(meta.len as usize, buf.len());
         meta.offset = self.writer.data_len() as u32;
         self.block_metas.push(meta);
         self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
-        self.writer.send_block(buf, block_meta).await
+        self.writer.send_block(buf, block_meta).await?;
+        Ok(true)
     }
 
     /// Add kv pair to sstable.
@@ -263,7 +279,16 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         &mut self,
         full_key: FullKey<&[u8]>,
         value: HummockValue<&[u8]>,
-        is_new_user_key: bool,
+    ) -> HummockResult<()> {
+        self.add_impl(full_key, value, true).await
+    }
+
+    /// Add kv pair to sstable.
+    async fn add_impl(
+        &mut self,
+        full_key: FullKey<&[u8]>,
+        value: HummockValue<&[u8]>,
+        could_switch_block: bool,
     ) -> HummockResult<()> {
         const LARGE_KEY_LEN: usize = MAX_KEY_LEN >> 1;
 
@@ -281,9 +306,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         // TODO: refine me
         full_key.encode_into(&mut self.raw_key);
         value.encode(&mut self.raw_value);
+        let is_new_user_key = self.last_full_key.is_empty()
+            || user_key(&self.raw_key).eq(user_key(&self.last_full_key));
         let table_id = full_key.user_key.table_id.table_id();
         let is_new_table = self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id;
         if is_new_table {
+            assert!(could_switch_block);
             self.table_ids.insert(table_id);
             self.finalize_last_table_stats();
             self.last_table_id = Some(table_id);
@@ -292,6 +320,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         } else if is_new_user_key
             && self.block_builder.approximate_len() >= self.options.block_capacity
+            && could_switch_block
         {
             self.build_block().await?;
         }
@@ -678,7 +707,6 @@ pub(super) mod tests {
             b.add_for_test(
                 test_key_of(i).to_ref(),
                 HummockValue::put(&test_value_of(i)),
-                true,
             )
             .await
             .unwrap();
@@ -796,11 +824,7 @@ pub(super) mod tests {
                 let k = UserKey::for_test(TableId::new(table_id), table_key.as_ref());
                 let v = test_value_of(idx);
                 builder
-                    .add(
-                        FullKey::from_user_key(k, 1),
-                        HummockValue::put(v.as_ref()),
-                        true,
-                    )
+                    .add(FullKey::from_user_key(k, 1), HummockValue::put(v.as_ref()))
                     .await
                     .unwrap();
             }

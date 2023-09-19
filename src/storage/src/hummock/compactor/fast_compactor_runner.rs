@@ -407,14 +407,18 @@ impl CompactorRunner {
                         meta.len = block.len() as u32;
                     }
 
-                    skip_raw_block_size += block.len() as u64;
-                    skip_raw_block_count += 1;
                     let largest_key = first.current_sstable().current_block_largest();
+                    let block_len = block.len() as u64;
 
-                    self.executor
+                    if self
+                        .executor
                         .builder
                         .add_raw_block(block, filter_data, smallest_key, largest_key, meta)
-                        .await?;
+                        .await?
+                    {
+                        skip_raw_block_size += block_len;
+                        skip_raw_block_count += 1;
+                    }
                     self.executor.clear();
                 }
                 if !first.current_sstable().is_valid() {
@@ -456,13 +460,17 @@ impl CompactorRunner {
                 let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
                 let (block, filter_data, block_meta) =
                     sstable_iter.download_next_block().await?.unwrap();
-                skip_raw_block_count += 1;
-                skip_raw_block_size += block.len() as u64;
                 let largest_key = sstable_iter.current_block_largest();
-                self.executor
+                let block_len = block.len() as u64;
+                if self
+                    .executor
                     .builder
                     .add_raw_block(block, filter_data, smallest_key, largest_key, block_meta)
-                    .await?;
+                    .await?
+                {
+                    skip_raw_block_count += 1;
+                    skip_raw_block_size += block_len;
+                }
             }
             rest_data.next_sstable().await?;
         }
@@ -482,6 +490,7 @@ impl CompactorRunner {
             self.task_id,
             skip_raw_block_size * 100 / total_read_bytes,
         );
+        println!("optimize {}%", skip_raw_block_size * 100 / total_read_bytes);
 
         let outputs = self.executor.builder.finish().await?;
         let ssts = Compactor::report_progress(
