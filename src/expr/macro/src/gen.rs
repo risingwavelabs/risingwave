@@ -123,7 +123,7 @@ impl FunctionAttr {
             #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                use crate::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
 
                 unsafe { _register(FuncSign {
                     name: risingwave_pb::expr::expr_node::Type::#pb_type.into(),
@@ -558,10 +558,10 @@ impl FunctionAttr {
             #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                use crate::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
 
                 unsafe { _register(FuncSign {
-                    name: crate::agg::AggKind::#pb_type.into(),
+                    name: risingwave_expr::agg::AggKind::#pb_type.into(),
                     inputs_type: vec![#(#args),*],
                     variadic: false,
                     ret_type: #ret,
@@ -846,7 +846,7 @@ impl FunctionAttr {
             #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                use crate::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
 
                 unsafe { _register(FuncSign {
                     name: risingwave_pb::expr::table_function::Type::#pb_type.into(),
