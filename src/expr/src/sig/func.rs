@@ -40,30 +40,30 @@ pub fn func_sigs() -> impl Iterator<Item = &'static FuncSign> {
 }
 
 #[derive(Default, Clone, Debug)]
-pub struct FuncSigMap(HashMap<(PbType, usize), Vec<FuncSign>>);
+pub struct FuncSigMap(HashMap<PbType, Vec<FuncSign>>);
 
 impl FuncSigMap {
     /// Inserts a function signature.
     pub fn insert(&mut self, desc: FuncSign) {
-        self.0
-            .entry((desc.func, desc.inputs_type.len()))
-            .or_default()
-            .push(desc)
+        self.0.entry(desc.func).or_default().push(desc)
     }
 
     /// Returns a function signature with the same type, argument types and return type.
     /// Deprecated functions are included.
     pub fn get(&self, ty: PbType, args: &[DataTypeName], ret: DataTypeName) -> Option<&FuncSign> {
-        let v = self.0.get(&(ty, args.len()))?;
+        let v = self.0.get(&ty)?;
         v.iter()
-            .find(|d| d.inputs_type == args && d.ret_type == ret)
+            .find(|d| (d.variadic || d.inputs_type == args) && d.ret_type == ret)
     }
 
     /// Returns all function signatures with the same type and number of arguments.
     /// Deprecated functions are excluded.
     pub fn get_with_arg_nums(&self, ty: PbType, nargs: usize) -> Vec<&FuncSign> {
-        match self.0.get(&(ty, nargs)) {
-            Some(v) => v.iter().filter(|d| !d.deprecated).collect(),
+        match self.0.get(&ty) {
+            Some(v) => v
+                .iter()
+                .filter(|d| (d.variadic || d.inputs_type.len() == nargs) && !d.deprecated)
+                .collect(),
             None => vec![],
         }
     }
@@ -74,6 +74,7 @@ impl FuncSigMap {
 pub struct FuncSign {
     pub func: PbType,
     pub inputs_type: &'static [DataTypeName],
+    pub variadic: bool,
     pub ret_type: DataTypeName,
     pub build: fn(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression>,
     /// Whether the function is deprecated and should not be used in the frontend.
@@ -128,11 +129,10 @@ mod tests {
         // convert FUNC_SIG_MAP to a more convenient map for testing
         let mut new_map: BTreeMap<PbType, BTreeMap<Vec<DataTypeName>, Vec<FuncSign>>> =
             BTreeMap::new();
-        for ((func, num_args), sigs) in &FUNC_SIG_MAP.0 {
+        for (func, sigs) in &FUNC_SIG_MAP.0 {
             for sig in sigs {
                 // validate the FUNC_SIG_MAP is consistent
                 assert_eq!(func, &sig.func);
-                assert_eq!(num_args, &sig.inputs_type.len());
                 // exclude deprecated functions
                 if sig.deprecated {
                     continue;
@@ -205,6 +205,9 @@ mod tests {
                 ],
                 ArrayMax: [
                     "array_max(list) -> bytea/varchar/timestamptz/timestamp/time/date/int256/serial/decimal/float32/float64/int16/int32/int64",
+                ],
+                ArraySum: [
+                    "array_sum(list) -> interval/decimal/float64/float32/int64",
                 ],
             }
         "#]];

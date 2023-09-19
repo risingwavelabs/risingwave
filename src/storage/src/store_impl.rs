@@ -205,6 +205,7 @@ pub mod verify {
     use bytes::Bytes;
     use futures::{pin_mut, TryStreamExt};
     use futures_async_stream::try_stream;
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
@@ -250,7 +251,7 @@ pub mod verify {
 
         async fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>> {
@@ -270,7 +271,7 @@ pub mod verify {
         #[allow(clippy::manual_async_fn)]
         fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
@@ -316,7 +317,7 @@ pub mod verify {
     impl<A: StateStoreWrite, E: StateStoreWrite> StateStoreWrite for VerifyStateStore<A, E> {
         async fn ingest_batch(
             &self,
-            kv_pairs: Vec<(Bytes, StorageValue)>,
+            kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
             write_options: WriteOptions,
         ) -> StorageResult<usize> {
@@ -355,13 +356,17 @@ pub mod verify {
         // be consistent across different state store backends.
         fn may_exist(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
             self.actual.may_exist(key_range, read_options)
         }
 
-        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
+        async fn get(
+            &self,
+            key: TableKey<Bytes>,
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>> {
             let actual = self.actual.get(key.clone(), read_options.clone()).await;
             if let Some(expected) = &self.expected {
                 let expected = expected.get(key, read_options).await;
@@ -373,7 +378,7 @@ pub mod verify {
         #[allow(clippy::manual_async_fn)]
         fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
             async move {
@@ -393,7 +398,7 @@ pub mod verify {
 
         fn insert(
             &mut self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()> {
@@ -405,7 +410,7 @@ pub mod verify {
             Ok(())
         }
 
-        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
             if let Some(expected) = &mut self.expected {
                 expected.delete(key.clone(), old_val.clone())?;
             }
@@ -678,6 +683,7 @@ pub mod boxed_state_store {
     use dyn_clone::{clone_trait_object, DynClone};
     use futures::stream::BoxStream;
     use futures::StreamExt;
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
@@ -694,14 +700,14 @@ pub mod boxed_state_store {
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
         async fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>>;
 
         async fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIterStream>;
@@ -711,7 +717,7 @@ pub mod boxed_state_store {
     impl<S: StateStoreRead> DynamicDispatchedStateStoreRead for S {
         async fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>> {
@@ -720,7 +726,7 @@ pub mod boxed_state_store {
 
         async fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIterStream> {
@@ -734,26 +740,30 @@ pub mod boxed_state_store {
     pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
         async fn may_exist(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<bool>;
 
-        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>>;
+        async fn get(
+            &self,
+            key: TableKey<Bytes>,
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>>;
 
         async fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>>;
 
         fn insert(
             &mut self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()>;
 
-        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
+        fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()>;
 
         async fn flush(
             &mut self,
@@ -773,19 +783,23 @@ pub mod boxed_state_store {
     impl<S: LocalStateStore> DynamicDispatchedLocalStateStore for S {
         async fn may_exist(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<bool> {
             self.may_exist(key_range, read_options).await
         }
 
-        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
+        async fn get(
+            &self,
+            key: TableKey<Bytes>,
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>> {
             self.get(key, read_options).await
         }
 
         async fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>> {
             Ok(self.iter(key_range, read_options).await?.boxed())
@@ -793,14 +807,14 @@ pub mod boxed_state_store {
 
         fn insert(
             &mut self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()> {
             self.insert(key, new_val, old_val)
         }
 
-        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
             self.delete(key, old_val)
         }
 
@@ -835,7 +849,7 @@ pub mod boxed_state_store {
 
         fn may_exist(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
             self.deref().may_exist(key_range, read_options)
@@ -843,7 +857,7 @@ pub mod boxed_state_store {
 
         fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
             self.deref().get(key, read_options)
@@ -851,7 +865,7 @@ pub mod boxed_state_store {
 
         fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
             self.deref().iter(key_range, read_options)
@@ -859,14 +873,14 @@ pub mod boxed_state_store {
 
         fn insert(
             &mut self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()> {
             self.deref_mut().insert(key, new_val, old_val)
         }
 
-        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
             self.deref_mut().delete(key, old_val)
         }
 
@@ -948,7 +962,7 @@ pub mod boxed_state_store {
 
         fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
@@ -957,7 +971,7 @@ pub mod boxed_state_store {
 
         fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {

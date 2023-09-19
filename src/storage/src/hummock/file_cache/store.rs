@@ -264,6 +264,21 @@ where
         }
     }
 
+    #[tracing::instrument(skip(self, value))]
+    pub async fn insert_force(&self, key: K, value: V) -> Result<bool> {
+        match self {
+            FileCache::None => Ok(false),
+            FileCache::FoyerRuntime { runtime, store, .. } => {
+                let store = store.clone();
+                runtime
+                    .spawn(async move { store.insert_force(key, value).await })
+                    .await
+                    .unwrap()
+                    .map_err(FileCacheError::foyer)
+            }
+        }
+    }
+
     /// only fetch value if judge pass
     #[tracing::instrument(skip(self, fetch_value))]
     pub async fn insert_with<F, FU>(
