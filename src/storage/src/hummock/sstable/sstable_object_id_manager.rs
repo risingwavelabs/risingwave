@@ -202,12 +202,18 @@ impl GetObjectId for Arc<SstableObjectIdManager> {
 struct SharedComapctorObjectIdManagerCore {
     output_object_ids: VecDeque<u64>,
     client: GrpcCompactorProxyClient,
+    sstable_id_remote_fetch_number: u32,
 }
 impl SharedComapctorObjectIdManagerCore {
-    pub fn new(output_object_ids: VecDeque<u64>, client: GrpcCompactorProxyClient) -> Self {
+    pub fn new(
+        output_object_ids: VecDeque<u64>,
+        client: GrpcCompactorProxyClient,
+        sstable_id_remote_fetch_number: u32,
+    ) -> Self {
         Self {
             output_object_ids,
             client,
+            sstable_id_remote_fetch_number,
         }
     }
 }
@@ -218,10 +224,18 @@ pub struct SharedComapctorObjectIdManager {
 }
 
 impl SharedComapctorObjectIdManager {
-    pub fn new(output_object_ids: VecDeque<u64>, client: GrpcCompactorProxyClient) -> Self {
+    pub fn new(
+        output_object_ids: VecDeque<u64>,
+        client: GrpcCompactorProxyClient,
+        sstable_id_remote_fetch_number: u32,
+    ) -> Self {
         Self {
             core: Arc::new(tokio::sync::Mutex::new(
-                SharedComapctorObjectIdManagerCore::new(output_object_ids, client),
+                SharedComapctorObjectIdManagerCore::new(
+                    output_object_ids,
+                    client,
+                    sstable_id_remote_fetch_number,
+                ),
             )),
         }
     }
@@ -237,7 +251,9 @@ impl GetObjectId for SharedComapctorObjectIdManager {
             Ok(first_element)
         } else {
             tracing::warn!("The pre-allocated object ids are used up, and new object id are obtained through RPC.");
-            let request = GetNewSstIdsRequest { number: 10 };
+            let request = GetNewSstIdsRequest {
+                number: core.sstable_id_remote_fetch_number,
+            };
             match core.client.get_new_sst_ids(request).await {
                 Ok(response) => {
                     let resp = response.into_inner();

@@ -682,7 +682,7 @@ pub fn start_shared_compactor(
                         let mut output_object_ids_deque: VecDeque<_> = VecDeque::new();
                         output_object_ids_deque.extend(output_object_ids);
                         let shared_compactor_object_id_manager =
-                            SharedComapctorObjectIdManager::new(output_object_ids_deque, get_sst_id_client);
+                            SharedComapctorObjectIdManager::new(output_object_ids_deque, get_sst_id_client, context.storage_opts.sstable_id_remote_fetch_number);
                             match dispatch_task.unwrap() {
                                 dispatch_compaction_task_request::Task::CompactTask(compact_task) => {
                                     context.running_task_count.fetch_add(1, Ordering::SeqCst);
