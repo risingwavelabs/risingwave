@@ -61,7 +61,7 @@ To replace the built static files in RisingWave with your newest code,
 run the following scripts in the root directory.
 
 ```bash
-./risedev prepare-dashboard
+./risedev export-dashboard
 ```
 
 ## Deployment

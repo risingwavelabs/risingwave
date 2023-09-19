@@ -360,24 +360,35 @@ alias = "build-risingwave"
 [tasks.build]
 alias = "build-risingwave"
 
-[tasks.prepare-dashboard]
+[tasks.extract-dashboard-artifact]
 private = true
 category = "RiseDev - Build"
-description = "Download or build dashboard"
+description = "Extract dashboard artifact"
+condition = { env_not_set = ["ENABLE_BUILD_DASHBOARD"] }
+script = '''
+#!/usr/bin/env bash
+
+# we allow this script to fail
+
+echo "Extracting dashboard artifacts to ${PREFIX_UI}"
+
+rm -rf "${PREFIX_UI}"
+git worktree prune
+git worktree add "${PREFIX_UI}" origin/dashboard-artifact
+'''
+
+[tasks.export-dashboard]
+private = true
+category = "RiseDev - Build"
+description = "Build dashboard"
+condition = { env_set = ["ENABLE_BUILD_DASHBOARD"] }
 script = """
 #!/usr/bin/env bash
 set -e
 
 rm -rf "${PREFIX_UI}"
-
-if [[ -z "$ENABLE_BUILD_DASHBOARD" ]]; then
-  echo "Extracting dashboard artifacts to ${PREFIX_UI}"
-  git worktree prune
-  git worktree add "${PREFIX_UI}" origin/dashboard-artifact
-else
-  cd dashboard && npm run build-static
-  cd .. && ln -s "$(pwd)/dashboard/out" "${PREFIX_UI}"
-fi
+cd dashboard && npm run build-static
+cd .. && ln -s "$(pwd)/dashboard/out" "${PREFIX_UI}"
 """
 
 [tasks.build-risingwave]
@@ -511,7 +522,8 @@ dependencies = [
   "build-risingwave",
   "build-connector-node",
   "post-build-risingwave",
-  "prepare-dashboard",
+  "extract-dashboard-artifact",
+  "export-dashboard",
   "prepare-config",
 ]
 
