@@ -7,9 +7,15 @@ RUN apt-get update \
 
 FROM base AS dashboard-builder
 
-COPY ./dashboard .
+RUN apt-get install -y curl gnupg protobuf-compiler && mkdir -p /etc/apt/keyrings \
+  && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+  && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_18.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+  && apt-get update && apt-get install -y nodejs
 
+COPY ./dashboard/ /risingwave/dashboard
+COPY ./proto  /risingwave/proto
 
+RUN cd /risingwave/dashboard && npm i && npm run build-static && rm -rf node_modules
 
 FROM base AS builder
 
@@ -63,7 +69,7 @@ RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
 COPY --from=builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
 COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
-COPY --from=dashboard-builder /risingwave/ui /risingwave/ui
+COPY --from=dashboard-builder /risingwave/dashboard/out /risingwave/ui
 COPY --from=builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 
 # Set default playground mode to docker-playground profile
