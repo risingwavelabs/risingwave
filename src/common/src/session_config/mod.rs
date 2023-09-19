@@ -36,7 +36,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 37] = [
+const CONFIG_KEYS: [&str; 39] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -74,6 +74,8 @@ const CONFIG_KEYS: [&str; 37] = [
     "STREAMING_RATE_LIMIT",
     "CDC_BACKFILL",
     "RW_STREAMING_OVER_WINDOW_CACHE_POLICY",
+    "LC_COLLATE",
+    "LC_CTYPE",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -115,6 +117,8 @@ const STANDARD_CONFORMING_STRINGS: usize = 33;
 const STREAMING_RATE_LIMIT: usize = 34;
 const CDC_BACKFILL: usize = 35;
 const STREAMING_OVER_WINDOW_CACHE_POLICY: usize = 36;
+const LC_COLLATE: usize = 37;
+const LC_CTYPE: usize = 38;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -339,6 +343,8 @@ type RowSecurity = ConfigBool<ROW_SECURITY, true>;
 type StandardConformingStrings = ConfigString<STANDARD_CONFORMING_STRINGS>;
 type StreamingRateLimit = ConfigU64<STREAMING_RATE_LIMIT, 0>;
 type CdcBackfill = ConfigBool<CDC_BACKFILL, false>;
+type LcCollate = ConfigString<LC_COLLATE>;
+type LcCType = ConfigString<LC_CTYPE>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -486,6 +492,15 @@ pub struct ConfigMap {
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "recent_first_n" or "recent_last_n".
     streaming_over_window_cache_policy: OverWindowCachePolicy,
+
+    /// the LC_COLLATE and LC_CTYPE parameters can be shown but not set.
+    /// see <https://www.postgresql.org/docs/current/sql-show.html>
+    /// Locale Setting for collation (text ordering)
+    #[educe(Default(expression = "ConfigString::<LC_COLLATE>(String::from(\"C\"))"))]
+    lc_collate: LcCollate,
+    /// Locale Setting for character classification
+    #[educe(Default(expression = "ConfigString::<LC_CTYPE>(String::from(\"C\"))"))]
+    lc_ctype: LcCType,
 }
 
 impl ConfigMap {
@@ -690,6 +705,10 @@ impl ConfigMap {
             Ok(self.cdc_backfill.to_string())
         } else if key.eq_ignore_ascii_case(OverWindowCachePolicy::entry_name()) {
             Ok(self.streaming_over_window_cache_policy.to_string())
+        } else if key.eq_ignore_ascii_case(LcCollate::entry_name()) {
+            Ok(self.lc_collate.to_string())
+        } else if key.eq_ignore_ascii_case(LcCType::entry_name()) {
+            Ok(self.lc_ctype.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -1019,5 +1038,13 @@ impl ConfigMap {
 
     pub fn get_streaming_over_window_cache_policy(&self) -> OverWindowCachePolicy {
         self.streaming_over_window_cache_policy
+    }
+
+    pub fn get_lc_collate(&self) -> &str {
+        &self.lc_collate
+    }
+
+    pub fn get_lc_ctype(&self) -> &str {
+        &self.lc_ctype
     }
 }
