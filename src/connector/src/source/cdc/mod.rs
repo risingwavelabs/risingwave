@@ -19,7 +19,9 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 
 pub use enumerator::*;
+use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
 pub use source::*;
 pub use split::*;
@@ -70,10 +72,30 @@ where
     type SplitEnumerator = DebeziumSplitEnumerator<T>;
     type SplitReader = CdcSplitReader<T>;
 
-    const IS_CDC_SOURCE: bool = true;
     const SOURCE_NAME: &'static str = T::CDC_CONNECTOR_NAME;
 
-    fn set_schema(&mut self, table_schema: PbTableSchema) {
+    fn init_from_pb_source(&mut self, source: &PbSource) {
+        let pk_indices = source
+            .pk_column_ids
+            .iter()
+            .map(|&id| {
+                source
+                    .columns
+                    .iter()
+                    .position(|col| col.column_desc.as_ref().unwrap().column_id == id)
+                    .unwrap() as u32
+            })
+            .collect_vec();
+
+        let table_schema = PbTableSchema {
+            columns: source
+                .columns
+                .iter()
+                .flat_map(|col| &col.column_desc)
+                .cloned()
+                .collect(),
+            pk_indices,
+        };
         self.table_schema = table_schema;
     }
 }

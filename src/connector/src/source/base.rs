@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -28,7 +27,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorSuppressor, RwError};
 use risingwave_common::types::{JsonbVal, Scalar};
-use risingwave_pb::connector_service::PbTableSchema;
+use risingwave_pb::catalog::PbSource;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
@@ -56,12 +55,11 @@ pub trait TryFromHashmap: Sized {
 
 pub trait SourceProperties: TryFromHashmap + Clone {
     const SOURCE_NAME: &'static str;
-    const IS_CDC_SOURCE: bool = false;
     type Split: SplitMetaData + TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>;
     type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;
     type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
 
-    fn set_schema(&mut self, _table_schema: PbTableSchema) {}
+    fn init_from_pb_source(&mut self, _source: &PbSource) {}
 }
 
 impl<P: DeserializeOwned> TryFromHashmap for P {
@@ -312,15 +310,8 @@ impl ConnectorProperties {
         )
     }
 
-    pub fn init_cdc_properties(&mut self, table_schema: PbTableSchema) {
-        dispatch_source_prop!(self, prop, prop.set_schema(table_schema));
-    }
-
-    pub fn is_cdc_connector(&self) -> bool {
-        fn is_cdc_source<P: SourceProperties>(_prop: &P) -> bool {
-            P::IS_CDC_SOURCE
-        }
-        dispatch_source_prop!(self, prop, is_cdc_source(prop.deref()))
+    pub fn init_from_pb_source(&mut self, source: &PbSource) {
+        dispatch_source_prop!(self, prop, prop.init_from_pb_source(source))
     }
 
     pub fn support_multiple_splits(&self) -> bool {
