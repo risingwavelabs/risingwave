@@ -10035,6 +10035,7 @@ dependencies = [
  "proc-macro2",
  "prometheus",
  "prost 0.11.9",
+ "prost-types 0.11.9",
  "rand",
  "rand_chacha",
  "rand_core",
