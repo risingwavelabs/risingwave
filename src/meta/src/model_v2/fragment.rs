@@ -12,11 +12,11 @@ pub struct Model {
     pub distribution_type: String,
     pub stream_node: Json,
     pub vnode_mapping: Option<Json>,
-    pub state_table_ids: Option<Vec<i32>>,
-    pub upstream_fragment_id: Option<Vec<i32>>,
+    pub state_table_ids: Option<Json>,
+    pub upstream_fragment_id: Option<Json>,
     pub dispatcher_type: Option<String>,
-    pub dist_key_indices: Option<Vec<i32>>,
-    pub output_indices: Option<Vec<i32>>,
+    pub dist_key_indices: Option<Json>,
+    pub output_indices: Option<Json>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -24,13 +24,13 @@ pub enum Relation {
     #[sea_orm(has_many = "super::actor::Entity")]
     Actor,
     #[sea_orm(
-        belongs_to = "super::table::Entity",
+        belongs_to = "super::object::Entity",
         from = "Column::TableId",
-        to = "super::table::Column::TableId",
+        to = "super::object::Column::Oid",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
-    Table,
+    Object,
 }
 
 impl Related<super::actor::Entity> for Entity {
@@ -39,9 +39,9 @@ impl Related<super::actor::Entity> for Entity {
     }
 }
 
-impl Related<super::table::Entity> for Entity {
+impl Related<super::object::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Table.def()
+        Relation::Object.def()
     }
 }
 

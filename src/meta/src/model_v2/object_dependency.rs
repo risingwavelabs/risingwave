@@ -18,7 +18,7 @@ pub enum Relation {
         from = "Column::Oid",
         to = "super::object::Column::Oid",
         on_update = "NoAction",
-        on_delete = "NoAction"
+        on_delete = "Cascade"
     )]
     Object2,
     #[sea_orm(

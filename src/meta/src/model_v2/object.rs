@@ -19,6 +19,8 @@ pub enum Relation {
     Connection,
     #[sea_orm(has_many = "super::database::Entity")]
     Database,
+    #[sea_orm(has_many = "super::fragment::Entity")]
+    Fragment,
     #[sea_orm(has_many = "super::function::Entity")]
     Function,
     #[sea_orm(has_many = "super::index::Entity")]
@@ -54,6 +56,12 @@ impl Related<super::connection::Entity> for Entity {
 impl Related<super::database::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Database.def()
+    }
+}
+
+impl Related<super::fragment::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Fragment.def()
     }
 }
 

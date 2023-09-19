@@ -84,7 +84,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(WorkerProperty::ParallelUnitIds)
-                            .array(ColumnType::Integer)
+                            .json()
                             .not_null(),
                     )
                     .col(
@@ -101,6 +101,14 @@ impl MigrationTrait for Migration {
                         ColumnDef::new(WorkerProperty::IsUnschedulable)
                             .boolean()
                             .not_null(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_worker_property_worker_id")
+                            .from(WorkerProperty::Table, WorkerProperty::WorkerId)
+                            .to(Worker::Table, Worker::WorkerId)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
                     )
                     .to_owned(),
             )
@@ -128,6 +136,40 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 MigrationTable::create()
+                    .table(Object::Table)
+                    .col(
+                        ColumnDef::new(Object::Oid)
+                            .integer()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(Object::ObjType).string().not_null())
+                    .col(ColumnDef::new(Object::OwnerId).integer().not_null())
+                    .col(
+                        ColumnDef::new(Object::InitializedAt)
+                            .timestamp()
+                            .default(Expr::current_timestamp())
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Object::CreatedAt)
+                            .timestamp()
+                            .default(Expr::current_timestamp())
+                            .not_null(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_object_owner_id")
+                            .from(Object::Table, Object::OwnerId)
+                            .to(User::Table, User::UserId)
+                            .to_owned(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
                     .table(UserPrivilege::Table)
                     .col(
                         ColumnDef::new(UserPrivilege::Id)
@@ -142,15 +184,68 @@ impl MigrationTrait for Migration {
                             .integer()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(UserPrivilege::Actions)
-                            .array(ColumnType::String(None))
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(UserPrivilege::Actions).string().not_null())
                     .col(
                         ColumnDef::new(UserPrivilege::WithGrantOption)
                             .boolean()
                             .not_null(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_user_privilege_user_id")
+                            .from(UserPrivilege::Table, UserPrivilege::UserId)
+                            .to(User::Table, User::UserId)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_user_privilege_granted_by")
+                            .from(UserPrivilege::Table, UserPrivilege::GrantedBy)
+                            .to(User::Table, User::UserId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_user_privilege_oid")
+                            .from(UserPrivilege::Table, UserPrivilege::Oid)
+                            .to(Object::Table, Object::Oid)
+                            .to_owned(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(ObjectDependency::Table)
+                    .col(
+                        ColumnDef::new(ObjectDependency::Id)
+                            .integer()
+                            .auto_increment()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(ObjectDependency::Oid).integer().not_null())
+                    .col(
+                        ColumnDef::new(ObjectDependency::UsedBy)
+                            .integer()
+                            .not_null(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_object_dependency_oid")
+                            .from(ObjectDependency::Table, ObjectDependency::Oid)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_object_dependency_used_by")
+                            .from(ObjectDependency::Table, ObjectDependency::UsedBy)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
                     )
                     .to_owned(),
             )
@@ -166,6 +261,14 @@ impl MigrationTrait for Migration {
                             .unique_key()
                             .not_null(),
                     )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_database_object_id")
+                            .from(Database::Table, Database::DatabaseId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -176,6 +279,21 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Schema::SchemaId).integer().primary_key())
                     .col(ColumnDef::new(Schema::Name).string().not_null())
                     .col(ColumnDef::new(Schema::DatabaseId).integer().not_null())
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_schema_database_id")
+                            .from(Schema::Table, Schema::DatabaseId)
+                            .to(Database::Table, Database::DatabaseId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_schema_object_id")
+                            .from(Schema::Table, Schema::SchemaId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -202,11 +320,19 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Fragment::StreamNode).json().not_null())
                     .col(ColumnDef::new(Fragment::VnodeMapping).json())
-                    .col(ColumnDef::new(Fragment::StateTableIds).array(ColumnType::Integer))
-                    .col(ColumnDef::new(Fragment::UpstreamFragmentId).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Fragment::StateTableIds).json())
+                    .col(ColumnDef::new(Fragment::UpstreamFragmentId).json())
                     .col(ColumnDef::new(Fragment::DispatcherType).string())
-                    .col(ColumnDef::new(Fragment::DistKeyIndices).array(ColumnType::Integer))
-                    .col(ColumnDef::new(Fragment::OutputIndices).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Fragment::DistKeyIndices).json())
+                    .col(ColumnDef::new(Fragment::OutputIndices).json())
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_fragment_table_id")
+                            .from(Fragment::Table, Fragment::TableId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -224,39 +350,55 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Actor::Status).string())
                     .col(ColumnDef::new(Actor::Splits).json())
                     .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
-                    .col(ColumnDef::new(Actor::UpstreamActorIds).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Actor::UpstreamActorIds).json())
                     .col(ColumnDef::new(Actor::Dispatchers).json())
                     .col(ColumnDef::new(Actor::VnodeBitmap).string())
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_actor_fragment_id")
+                            .from(Actor::Table, Actor::FragmentId)
+                            .to(Fragment::Table, Fragment::FragmentId)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
         manager
             .create_table(
                 MigrationTable::create()
-                    .table(Table::Table)
-                    .col(ColumnDef::new(Table::TableId).integer().primary_key())
-                    .col(ColumnDef::new(Table::Name).string().not_null())
-                    .col(ColumnDef::new(Table::SchemaId).integer().not_null())
-                    .col(ColumnDef::new(Table::DatabaseId).integer().not_null())
-                    .col(ColumnDef::new(Table::OptionalAssociatedSourceId).integer())
-                    .col(ColumnDef::new(Table::TableType).string())
-                    .col(ColumnDef::new(Table::Columns).json())
-                    .col(ColumnDef::new(Table::Pk).json())
-                    .col(ColumnDef::new(Table::DistributionKey).array(ColumnType::Integer))
-                    .col(ColumnDef::new(Table::AppendOnly).boolean())
-                    .col(ColumnDef::new(Table::Properties).json())
-                    .col(ColumnDef::new(Table::FragmentId).integer())
-                    .col(ColumnDef::new(Table::VnodeColIndex).integer())
-                    .col(ColumnDef::new(Table::ValueIndices).array(ColumnType::Integer))
-                    .col(ColumnDef::new(Table::Definition).string())
-                    .col(ColumnDef::new(Table::HandlePkConflictBehavior).integer())
-                    .col(ColumnDef::new(Table::ReadPrefixLenHint).integer())
-                    .col(ColumnDef::new(Table::WatermarkIndices).array(ColumnType::Integer))
-                    .col(ColumnDef::new(Table::DistKeyInPk).array(ColumnType::Integer))
-                    .col(ColumnDef::new(Table::DmlFragmentId).integer())
-                    .col(ColumnDef::new(Table::Cardinality).array(ColumnType::Integer))
-                    .col(ColumnDef::new(Table::CleanedByWatermark).boolean())
-                    .col(ColumnDef::new(Table::Version).array(ColumnType::Integer))
+                    .table(Connection::Table)
+                    .col(
+                        ColumnDef::new(Connection::ConnectionId)
+                            .integer()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(Connection::Name).string().not_null())
+                    .col(ColumnDef::new(Connection::SchemaId).integer().not_null())
+                    .col(ColumnDef::new(Connection::DatabaseId).integer().not_null())
+                    .col(ColumnDef::new(Connection::Info).json())
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_connection_database_id")
+                            .from(Connection::Table, Connection::DatabaseId)
+                            .to(Database::Table, Database::DatabaseId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_connection_schema_id")
+                            .from(Connection::Table, Connection::SchemaId)
+                            .to(Schema::Table, Schema::SchemaId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_connection_object_id")
+                            .from(Connection::Table, Connection::ConnectionId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -277,6 +419,108 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Source::WatermarkDescs).json())
                     .col(ColumnDef::new(Source::OptionalAssociatedTableId).integer())
                     .col(ColumnDef::new(Source::ConnectionId).integer())
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_source_database_id")
+                            .from(Source::Table, Source::DatabaseId)
+                            .to(Database::Table, Database::DatabaseId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_source_schema_id")
+                            .from(Source::Table, Source::SchemaId)
+                            .to(Schema::Table, Schema::SchemaId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_source_object_id")
+                            .from(Source::Table, Source::SourceId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_source_connection_id")
+                            .from(Source::Table, Source::ConnectionId)
+                            .to(Connection::Table, Connection::ConnectionId)
+                            .to_owned(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(Table::Table)
+                    .col(ColumnDef::new(Table::TableId).integer().primary_key())
+                    .col(ColumnDef::new(Table::Name).string().not_null())
+                    .col(ColumnDef::new(Table::SchemaId).integer().not_null())
+                    .col(ColumnDef::new(Table::DatabaseId).integer().not_null())
+                    .col(ColumnDef::new(Table::OptionalAssociatedSourceId).integer())
+                    .col(ColumnDef::new(Table::TableType).string())
+                    .col(ColumnDef::new(Table::Columns).json())
+                    .col(ColumnDef::new(Table::Pk).json())
+                    .col(ColumnDef::new(Table::DistributionKey).json())
+                    .col(ColumnDef::new(Table::AppendOnly).boolean())
+                    .col(ColumnDef::new(Table::Properties).json())
+                    .col(ColumnDef::new(Table::FragmentId).integer())
+                    .col(ColumnDef::new(Table::VnodeColIndex).integer())
+                    .col(ColumnDef::new(Table::ValueIndices).json())
+                    .col(ColumnDef::new(Table::Definition).string())
+                    .col(ColumnDef::new(Table::HandlePkConflictBehavior).integer())
+                    .col(ColumnDef::new(Table::ReadPrefixLenHint).integer())
+                    .col(ColumnDef::new(Table::WatermarkIndices).json())
+                    .col(ColumnDef::new(Table::DistKeyInPk).json())
+                    .col(ColumnDef::new(Table::DmlFragmentId).integer())
+                    .col(ColumnDef::new(Table::Cardinality).json())
+                    .col(ColumnDef::new(Table::CleanedByWatermark).boolean())
+                    .col(ColumnDef::new(Table::Version).json())
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_table_database_id")
+                            .from(Table::Table, Table::DatabaseId)
+                            .to(Database::Table, Database::DatabaseId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_table_schema_id")
+                            .from(Table::Table, Table::SchemaId)
+                            .to(Schema::Table, Schema::SchemaId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_view_object_id")
+                            .from(Table::Table, Table::TableId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_table_fragment_id")
+                            .from(Table::Table, Table::FragmentId)
+                            .to(Fragment::Table, Fragment::FragmentId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_table_dml_fragment_id")
+                            .from(Table::Table, Table::DmlFragmentId)
+                            .to(Fragment::Table, Fragment::FragmentId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_table_optional_associated_source_id")
+                            .from(Table::Table, Table::OptionalAssociatedSourceId)
+                            .to(Source::Table, Source::SourceId)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -290,28 +534,41 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Sink::DatabaseId).integer().not_null())
                     .col(ColumnDef::new(Sink::Columns).json())
                     .col(ColumnDef::new(Sink::PkColumnIds).json())
-                    .col(ColumnDef::new(Sink::DistributionKey).array(ColumnType::Integer))
-                    .col(ColumnDef::new(Sink::DownstreamPk).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Sink::DistributionKey).json())
+                    .col(ColumnDef::new(Sink::DownstreamPk).json())
                     .col(ColumnDef::new(Sink::SinkType).string())
                     .col(ColumnDef::new(Sink::Properties).json())
                     .col(ColumnDef::new(Sink::Definition).string())
                     .col(ColumnDef::new(Sink::ConnectionId).integer())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_table(
-                MigrationTable::create()
-                    .table(Connection::Table)
-                    .col(
-                        ColumnDef::new(Connection::ConnectionId)
-                            .integer()
-                            .primary_key(),
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_sink_database_id")
+                            .from(Sink::Table, Sink::DatabaseId)
+                            .to(Database::Table, Database::DatabaseId)
+                            .to_owned(),
                     )
-                    .col(ColumnDef::new(Connection::Name).string().not_null())
-                    .col(ColumnDef::new(Connection::SchemaId).integer().not_null())
-                    .col(ColumnDef::new(Connection::DatabaseId).integer().not_null())
-                    .col(ColumnDef::new(Connection::Info).json())
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_sink_schema_id")
+                            .from(Sink::Table, Sink::SchemaId)
+                            .to(Schema::Table, Schema::SchemaId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_sink_object_id")
+                            .from(Sink::Table, Sink::SinkId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_sink_connection_id")
+                            .from(Sink::Table, Sink::ConnectionId)
+                            .to(Connection::Table, Connection::ConnectionId)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -326,6 +583,28 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(View::Properties).json())
                     .col(ColumnDef::new(View::Sql).string())
                     .col(ColumnDef::new(View::Columns).json())
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_view_database_id")
+                            .from(View::Table, View::DatabaseId)
+                            .to(Database::Table, Database::DatabaseId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_view_schema_id")
+                            .from(View::Table, View::SchemaId)
+                            .to(Schema::Table, Schema::SchemaId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_view_object_id")
+                            .from(View::Table, View::ViewId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -340,7 +619,43 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Index::IndexTableId).integer().not_null())
                     .col(ColumnDef::new(Index::PrimaryTableId).integer().not_null())
                     .col(ColumnDef::new(Index::IndexItems).json())
-                    .col(ColumnDef::new(Index::OriginalColumns).array(ColumnType::Integer))
+                    .col(ColumnDef::new(Index::OriginalColumns).json())
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_index_database_id")
+                            .from(Index::Table, Index::DatabaseId)
+                            .to(Database::Table, Database::DatabaseId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_index_schema_id")
+                            .from(Index::Table, Index::SchemaId)
+                            .to(Schema::Table, Schema::SchemaId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_index_object_id")
+                            .from(Index::Table, Index::IndexId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_index_index_table_id")
+                            .from(Index::Table, Index::IndexTableId)
+                            .to(Table::Table, Table::TableId)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_index_primary_table_id")
+                            .from(Index::Table, Index::PrimaryTableId)
+                            .to(Table::Table, Table::TableId)
+                            .to_owned(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -358,51 +673,27 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Function::Link).string())
                     .col(ColumnDef::new(Function::Identifier).string())
                     .col(ColumnDef::new(Function::Kind).json())
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_table(
-                MigrationTable::create()
-                    .table(Object::Table)
-                    .col(
-                        ColumnDef::new(Object::Oid)
-                            .integer()
-                            .auto_increment()
-                            .primary_key(),
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_function_database_id")
+                            .from(Function::Table, Function::DatabaseId)
+                            .to(Database::Table, Database::DatabaseId)
+                            .to_owned(),
                     )
-                    .col(ColumnDef::new(Object::ObjType).string().not_null())
-                    .col(ColumnDef::new(Object::OwnerId).integer().not_null())
-                    .col(
-                        ColumnDef::new(Object::InitializedAt)
-                            .timestamp()
-                            .default(Expr::current_timestamp())
-                            .not_null(),
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_function_schema_id")
+                            .from(Function::Table, Function::SchemaId)
+                            .to(Schema::Table, Schema::SchemaId)
+                            .to_owned(),
                     )
-                    .col(
-                        ColumnDef::new(Object::CreatedAt)
-                            .timestamp()
-                            .default(Expr::current_timestamp())
-                            .not_null(),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_table(
-                MigrationTable::create()
-                    .table(ObjectDependency::Table)
-                    .col(
-                        ColumnDef::new(ObjectDependency::Id)
-                            .integer()
-                            .auto_increment()
-                            .primary_key(),
-                    )
-                    .col(ColumnDef::new(ObjectDependency::Oid).integer().not_null())
-                    .col(
-                        ColumnDef::new(ObjectDependency::UsedBy)
-                            .integer()
-                            .not_null(),
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_function_object_id")
+                            .from(Function::Table, Function::FunctionId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
                     )
                     .to_owned(),
             )
@@ -433,6 +724,7 @@ impl MigrationTrait for Migration {
             .create_index(
                 MigrationIndex::create()
                     .table(Worker::Table)
+                    .name("idx_worker_host_port")
                     .unique()
                     .col(Worker::Host)
                     .col(Worker::Port)
@@ -443,394 +735,10 @@ impl MigrationTrait for Migration {
             .create_index(
                 MigrationIndex::create()
                     .table(Schema::Table)
+                    .name("idx_schema_database_id_name")
                     .unique()
                     .col(Schema::DatabaseId)
                     .col(Schema::Name)
-                    .to_owned(),
-            )
-            .await?;
-
-        // 4. create foreign keys.
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_worker_property_worker_id")
-                    .from(WorkerProperty::Table, WorkerProperty::WorkerId)
-                    .to(Worker::Table, Worker::WorkerId)
-                    .on_delete(ForeignKeyAction::Cascade)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_user_privilege_user_id")
-                    .from(UserPrivilege::Table, UserPrivilege::UserId)
-                    .to(User::Table, User::UserId)
-                    .on_delete(ForeignKeyAction::Cascade)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_user_privilege_granted_by")
-                    .from(UserPrivilege::Table, UserPrivilege::GrantedBy)
-                    .to(User::Table, User::UserId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_user_privilege_oid")
-                    .from(UserPrivilege::Table, UserPrivilege::Oid)
-                    .to(Object::Table, Object::Oid)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_database_object_id")
-                    .from(Database::Table, Database::DatabaseId)
-                    .to(Object::Table, Object::Oid)
-                    .on_delete(ForeignKeyAction::Cascade)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_schema_database_id")
-                    .from(Schema::Table, Schema::DatabaseId)
-                    .to(Database::Table, Database::DatabaseId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_schema_object_id")
-                    .from(Schema::Table, Schema::SchemaId)
-                    .to(Object::Table, Object::Oid)
-                    .on_delete(ForeignKeyAction::Cascade)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_fragment_table_id")
-                    .from(Fragment::Table, Fragment::TableId)
-                    .to(Table::Table, Table::TableId)
-                    .on_delete(ForeignKeyAction::Cascade)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_actor_fragment_id")
-                    .from(Actor::Table, Actor::FragmentId)
-                    .to(Fragment::Table, Fragment::FragmentId)
-                    .on_delete(ForeignKeyAction::Cascade)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_table_schema_id")
-                    .from(Table::Table, Table::SchemaId)
-                    .to(Schema::Table, Schema::SchemaId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_table_database_id")
-                    .from(Table::Table, Table::DatabaseId)
-                    .to(Database::Table, Database::DatabaseId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_table_object_id")
-                    .from(Table::Table, Table::TableId)
-                    .to(Object::Table, Object::Oid)
-                    .on_delete(ForeignKeyAction::Cascade)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_table_fragment_id")
-                    .from(Table::Table, Table::FragmentId)
-                    .to(Fragment::Table, Fragment::FragmentId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_table_dml_fragment_id")
-                    .from(Table::Table, Table::DmlFragmentId)
-                    .to(Fragment::Table, Fragment::FragmentId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_table_optional_associated_source_id")
-                    .from(Table::Table, Table::OptionalAssociatedSourceId)
-                    .to(Source::Table, Source::SourceId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_source_schema_id")
-                    .from(Source::Table, Source::SchemaId)
-                    .to(Schema::Table, Schema::SchemaId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_source_database_id")
-                    .from(Source::Table, Source::DatabaseId)
-                    .to(Database::Table, Database::DatabaseId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_source_object_id")
-                    .from(Source::Table, Source::SourceId)
-                    .to(Object::Table, Object::Oid)
-                    .on_delete(ForeignKeyAction::Cascade)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_source_connection_id")
-                    .from(Source::Table, Source::ConnectionId)
-                    .to(Connection::Table, Connection::ConnectionId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_source_optional_associated_table_id")
-                    .from(Source::Table, Source::OptionalAssociatedTableId)
-                    .to(Table::Table, Table::TableId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_sink_schema_id")
-                    .from(Sink::Table, Sink::SchemaId)
-                    .to(Schema::Table, Schema::SchemaId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_sink_database_id")
-                    .from(Sink::Table, Sink::DatabaseId)
-                    .to(Database::Table, Database::DatabaseId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_sink_object_id")
-                    .from(Sink::Table, Sink::SinkId)
-                    .to(Object::Table, Object::Oid)
-                    .on_delete(ForeignKeyAction::Cascade)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_sink_connection_id")
-                    .from(Sink::Table, Sink::ConnectionId)
-                    .to(Connection::Table, Connection::ConnectionId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_connection_schema_id")
-                    .from(Connection::Table, Connection::SchemaId)
-                    .to(Schema::Table, Schema::SchemaId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_connection_database_id")
-                    .from(Connection::Table, Connection::DatabaseId)
-                    .to(Database::Table, Database::DatabaseId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_connection_object_id")
-                    .from(Connection::Table, Connection::ConnectionId)
-                    .to(Object::Table, Object::Oid)
-                    .on_delete(ForeignKeyAction::Cascade)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_view_schema_id")
-                    .from(View::Table, View::SchemaId)
-                    .to(Schema::Table, Schema::SchemaId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_view_database_id")
-                    .from(View::Table, View::DatabaseId)
-                    .to(Database::Table, Database::DatabaseId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_view_object_id")
-                    .from(View::Table, View::ViewId)
-                    .to(Object::Table, Object::Oid)
-                    .on_delete(ForeignKeyAction::Cascade)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_index_schema_id")
-                    .from(Index::Table, Index::SchemaId)
-                    .to(Schema::Table, Schema::SchemaId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_index_database_id")
-                    .from(Index::Table, Index::DatabaseId)
-                    .to(Database::Table, Database::DatabaseId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_index_object_id")
-                    .from(Index::Table, Index::IndexId)
-                    .to(Object::Table, Object::Oid)
-                    .on_delete(ForeignKeyAction::Cascade)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_index_index_table_id")
-                    .from(Index::Table, Index::IndexTableId)
-                    .to(Table::Table, Table::TableId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_index_primary_table_id")
-                    .from(Index::Table, Index::PrimaryTableId)
-                    .to(Table::Table, Table::TableId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_function_schema_id")
-                    .from(Function::Table, Function::SchemaId)
-                    .to(Schema::Table, Schema::SchemaId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_function_database_id")
-                    .from(Function::Table, Function::DatabaseId)
-                    .to(Database::Table, Database::DatabaseId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_function_object_id")
-                    .from(Function::Table, Function::FunctionId)
-                    .to(Object::Table, Object::Oid)
-                    .on_delete(ForeignKeyAction::Cascade)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_object_owner_id")
-                    .from(Object::Table, Object::OwnerId)
-                    .to(User::Table, User::UserId)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_object_dependency_oid")
-                    .from(ObjectDependency::Table, ObjectDependency::Oid)
-                    .to(Object::Table, Object::Oid)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_foreign_key(
-                ForeignKey::create()
-                    .name("FK_object_dependency_used_by")
-                    .from(ObjectDependency::Table, ObjectDependency::UsedBy)
-                    .to(Object::Table, Object::Oid)
-                    .on_delete(ForeignKeyAction::Cascade)
                     .to_owned(),
             )
             .await?;

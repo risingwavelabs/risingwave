@@ -11,7 +11,7 @@ pub struct Model {
     pub status: Option<String>,
     pub splits: Option<Json>,
     pub parallel_unit_id: i32,
-    pub upstream_actor_ids: Option<Vec<i32>>,
+    pub upstream_actor_ids: Option<Json>,
     pub dispatchers: Option<Json>,
     pub vnode_bitmap: Option<String>,
 }

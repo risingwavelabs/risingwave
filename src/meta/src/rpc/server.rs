@@ -20,6 +20,7 @@ use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use itertools::Itertools;
+use model_migration::{Migrator, MigratorTrait};
 use regex::Regex;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -144,6 +145,11 @@ pub async fn rpc_serve(
                 .connect_timeout(Duration::from_secs(10))
                 .idle_timeout(Duration::from_secs(30));
             let conn = sea_orm::Database::connect(options).await?;
+            // Try to upgrade if any new model changes are added.
+            Migrator::up(&conn, None)
+                .await
+                .expect("Failed to upgrade models in meta store");
+
             Some(SqlMetaStore::new(conn))
         }
         None => None,

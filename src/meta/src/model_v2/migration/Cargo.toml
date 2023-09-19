@@ -1,11 +1,11 @@
 [package]
-name = "migration"
+name = "model_migration"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [lib]
-name = "migration"
+name = "model_migration"
 path = "src/lib.rs"
 
 [dependencies]

@@ -7,7 +7,7 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub worker_id: i32,
-    pub parallel_unit_ids: Vec<i32>,
+    pub parallel_unit_ids: Json,
     pub is_streaming: bool,
     pub is_serving: bool,
     pub is_unschedulable: bool,

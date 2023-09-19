@@ -356,7 +356,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
     async fn test_create_database() {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await)
             .await

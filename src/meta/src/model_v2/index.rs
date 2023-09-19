@@ -13,7 +13,7 @@ pub struct Model {
     pub index_table_id: i32,
     pub primary_table_id: i32,
     pub index_items: Option<Json>,
-    pub original_columns: Option<Vec<i32>>,
+    pub original_columns: Option<Json>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -4646,15 +4646,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "migration"
-version = "0.1.0"
-dependencies = [
- "async-std",
- "sea-orm-migration",
- "uuid",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4722,6 +4713,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "model_migration"
+version = "0.1.0"
+dependencies = [
+ "async-std",
+ "sea-orm-migration",
+ "uuid",
 ]
 
 [[package]]
@@ -7494,6 +7494,7 @@ dependencies = [
  "maplit",
  "memcomparable",
  "mime_guess",
+ "model_migration",
  "num-integer",
  "num-traits",
  "parking_lot 0.12.1",

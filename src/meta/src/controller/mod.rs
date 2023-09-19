@@ -41,8 +41,11 @@ impl SqlMetaStore {
         Self { conn }
     }
 
+    #[cfg(any(test, feature = "test"))]
     pub async fn for_test() -> Self {
+        use model_migration::{Migrator, MigratorTrait};
         let conn = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        Migrator::up(&conn, None).await.unwrap();
         Self { conn }
     }
 }

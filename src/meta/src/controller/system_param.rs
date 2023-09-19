@@ -251,20 +251,14 @@ impl SystemParamsController {
 #[cfg(test)]
 mod tests {
     use risingwave_common::system_param::system_params_for_test;
-    use sea_orm::{ConnectionTrait, Schema};
 
     use super::*;
     use crate::manager::MetaSrvEnv;
 
     #[tokio::test]
     async fn test_system_params() {
-        let meta_store = SqlMetaStore::for_test().await;
-        let builder = meta_store.conn.get_database_backend();
-        let schema = Schema::new(builder);
-        let stmt = schema.create_table_from_entity(SystemParameter);
-        meta_store.conn.execute(builder.build(&stmt)).await.unwrap();
-
         let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.sql_meta_store().unwrap();
         let init_params = system_params_for_test();
 
         // init system parameter controller as first launch.

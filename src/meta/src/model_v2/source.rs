@@ -55,13 +55,7 @@ pub enum Relation {
         on_delete = "NoAction"
     )]
     Schema,
-    #[sea_orm(
-        belongs_to = "super::table::Entity",
-        from = "Column::OptionalAssociatedTableId",
-        to = "super::table::Column::TableId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
+    #[sea_orm(has_many = "super::table::Entity")]
     Table,
 }
 
