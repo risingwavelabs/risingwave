@@ -25,7 +25,7 @@ use crate::array::{Op, RowRef, StreamChunk};
 use crate::row::{Project, RowExt};
 use crate::util::hash_util::Crc32FastBuilder;
 
-/// Compact the stream chunks with just modify the `Ops` and `Vis` of the chunk. Currently, two
+/// Compact the stream chunks with just modify the `Ops` and visibility of the chunk. Currently, two
 /// transformation will be applied
 /// - remove intermediate operation of the same key. The operations of the same stream key will only
 ///   have three kind of patterns Insert, Delete or Update.
