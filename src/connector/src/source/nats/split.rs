@@ -41,6 +41,11 @@ impl SplitMetaData for NatsSplit {
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
     }
+
+    fn update_with_offset(&mut self, start_sequence: String) -> anyhow::Result<()> {
+        self.start_sequence = Some(start_sequence.as_str().parse::<u64>().unwrap());
+        Ok(())
+    }
 }
 
 impl NatsSplit {
@@ -50,10 +55,5 @@ impl NatsSplit {
             split_num,
             start_sequence,
         }
-    }
-
-    pub fn update_with_offset(&mut self, start_sequence: String) -> anyhow::Result<()> {
-        self.start_sequence = Some(start_sequence.as_str().parse::<u64>().unwrap());
-        Ok(())
     }
 }

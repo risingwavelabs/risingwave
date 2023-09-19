@@ -936,6 +936,10 @@ mod tests {
         fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
             serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
         }
+
+        fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
+            Ok(())
+        }
     }
 
     fn check_all_splits(
