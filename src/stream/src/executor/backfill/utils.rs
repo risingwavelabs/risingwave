@@ -308,9 +308,16 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
     Ok(result)
 }
 
-pub(crate) fn get_backfill_finished(row: OwnedRow) -> Option<bool> {
-    let backfill_finished_idx = row.len() - 2;
-    row.datum_at(backfill_finished_idx).map(|d| d.into_bool())
+pub(crate) fn get_backfill_finished(row: OwnedRow, row_count_is_persisted: bool) -> Option<bool> {
+    let datum = if row_count_is_persisted {
+        // Row count is the last datum in the schema.
+        // backfill is second last.
+        row.datum_at(row.len() - 2)
+    } else {
+        // handle backwards compat case where there isn't a row count persisted.
+        row.last()
+    };
+    datum.map(|d| d.into_bool())
 }
 
 pub(crate) fn get_row_count(row: OwnedRow) -> u64 {
@@ -337,6 +344,7 @@ pub(crate) async fn get_row_count_state<S: StateStore, const IS_REPLICATED: bool
 /// All vnodes should be persisted with status finished.
 pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED: bool>(
     state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
+    row_count_is_persisted: bool,
 ) -> StreamExecutorResult<bool> {
     debug_assert!(!state_table.vnode_bitmap().is_empty());
     let vnodes = state_table.vnodes().iter_vnodes_scalar();
@@ -346,7 +354,7 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
         let row = state_table.get_row(key).await?;
 
         let vnode_is_finished = if let Some(row) = row
-            && let Some(vnode_is_finished) = get_backfill_finished(row)
+            && let Some(vnode_is_finished) = get_backfill_finished(row, row_count_is_persisted)
         {
             vnode_is_finished
         } else {

@@ -153,7 +153,7 @@ where
         }
 
         let is_finished = if let Some(state_table) = self.state_table.as_ref() {
-            let is_finished = check_all_vnode_finished(state_table).await?;
+            let is_finished = check_all_vnode_finished(state_table, row_count_is_persisted).await?;
             if is_finished {
                 assert!(!first_barrier.is_newly_added(self.actor_id));
             }
