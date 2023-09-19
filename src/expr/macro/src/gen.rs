@@ -71,7 +71,7 @@ impl FunctionAttr {
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
-        let descriptor_type = quote! { crate::sig::func::FuncSign };
+        let descriptor_type = quote! { risingwave_expr::sig::func::FuncSign };
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
@@ -80,10 +80,10 @@ impl FunctionAttr {
         };
         let deprecated = self.deprecated;
         Ok(quote! {
-            #[ctor::ctor]
+            #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                unsafe { crate::sig::func::_register(#descriptor_type {
+                unsafe { risingwave_expr::sig::func::_register(#descriptor_type {
                     func: risingwave_pb::expr::expr_node::Type::#pb_type,
                     inputs_type: &[#(#args),*],
                     variadic: #variadic,
@@ -203,7 +203,7 @@ impl FunctionAttr {
                     let #prebuilt_inputs = match &#prebuilt_inputs {
                         Some(s) => s.as_scalar_ref_impl().try_into()?,
                         // the function should always return null if any const argument is null
-                        None => return Ok(Box::new(crate::expr::LiteralExpression::new(
+                        None => return Ok(Box::new(risingwave_expr::expr::LiteralExpression::new(
                             return_type,
                             None,
                         ))),
@@ -217,8 +217,8 @@ impl FunctionAttr {
 
         // ensure the number of children matches the number of arguments
         let check_children = match variadic {
-            true => quote! { crate::ensure!(children.len() >= #num_args); },
-            false => quote! { crate::ensure!(children.len() == #num_args); },
+            true => quote! { risingwave_expr::ensure!(children.len() >= #num_args); },
+            false => quote! { risingwave_expr::ensure!(children.len() == #num_args); },
         };
 
         // evaluate variadic arguments in `eval`
@@ -407,8 +407,8 @@ impl FunctionAttr {
         };
 
         Ok(quote! {
-            |return_type: DataType, children: Vec<crate::expr::BoxedExpression>|
-                -> crate::Result<crate::expr::BoxedExpression>
+            |return_type: DataType, children: Vec<risingwave_expr::expr::BoxedExpression>|
+                -> risingwave_expr::Result<risingwave_expr::expr::BoxedExpression>
             {
                 use std::sync::Arc;
                 use risingwave_common::array::*;
@@ -418,8 +418,8 @@ impl FunctionAttr {
                 use risingwave_common::util::iter_util::ZipEqFast;
                 use itertools::multizip;
 
-                use crate::expr::{Context, BoxedExpression};
-                use crate::Result;
+                use risingwave_expr::expr::{Context, BoxedExpression};
+                use risingwave_expr::Result;
 
                 #check_children
                 let prebuilt_arg = #prebuild_const;
@@ -435,7 +435,7 @@ impl FunctionAttr {
                     prebuilt_arg: #prebuilt_arg_type,
                 }
                 #[async_trait::async_trait]
-                impl crate::expr::Expression for #struct_name {
+                impl risingwave_expr::expr::Expression for #struct_name {
                     fn return_type(&self) -> DataType {
                         self.context.return_type.clone()
                     }
@@ -497,7 +497,7 @@ impl FunctionAttr {
             false => format_ident!("{}", self.ident_name()),
             true => format_ident!("{}_append_only", self.ident_name()),
         };
-        let descriptor_type = quote! { crate::sig::agg::AggFuncSig };
+        let descriptor_type = quote! { risingwave_expr::sig::agg::AggFuncSig };
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.as_fn().name);
             quote! { #name }
@@ -505,11 +505,11 @@ impl FunctionAttr {
             self.generate_agg_build_fn(user_fn)?
         };
         Ok(quote! {
-            #[ctor::ctor]
+            #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                unsafe { crate::sig::agg::_register(#descriptor_type {
-                    func: crate::agg::AggKind::#pb_type,
+                unsafe { risingwave_expr::sig::agg::_register(#descriptor_type {
+                    func: risingwave_expr::agg::AggKind::#pb_type,
                     inputs_type: &[#(#args),*],
                     state_type: #state_type,
                     ret_type: #ret,
@@ -678,8 +678,8 @@ impl FunctionAttr {
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::estimate_size::EstimateSize;
 
-                use crate::Result;
-                use crate::agg::AggregateState;
+                use risingwave_expr::Result;
+                use risingwave_expr::agg::AggregateState;
 
                 #[derive(Clone)]
                 struct Agg {
@@ -688,7 +688,7 @@ impl FunctionAttr {
                 }
 
                 #[async_trait::async_trait]
-                impl crate::agg::AggregateFunction for Agg {
+                impl risingwave_expr::agg::AggregateFunction for Agg {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }
@@ -780,7 +780,7 @@ impl FunctionAttr {
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
-        let descriptor_type = quote! { crate::sig::table_function::FuncSign };
+        let descriptor_type = quote! { risingwave_expr::sig::table_function::FuncSign };
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
@@ -800,10 +800,10 @@ impl FunctionAttr {
             quote! { |_| Ok(#ty) }
         };
         Ok(quote! {
-            #[ctor::ctor]
+            #[risingwave_expr::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                unsafe { crate::sig::table_function::_register(#descriptor_type {
+                unsafe { risingwave_expr::sig::table_function::_register(#descriptor_type {
                     func: risingwave_pb::expr::table_function::Type::#pb_type,
                     inputs_type: &[#(#args),*],
                     ret_type: #ret,
@@ -910,7 +910,7 @@ impl FunctionAttr {
                 use risingwave_common::util::iter_util::ZipEqFast;
                 use itertools::multizip;
 
-                crate::ensure!(children.len() == #num_args);
+                risingwave_expr::ensure!(children.len() == #num_args);
                 let mut iter = children.into_iter();
                 #(let #all_child = iter.next().unwrap();)*
                 #(
@@ -918,7 +918,7 @@ impl FunctionAttr {
                     let #const_child = match &#const_child {
                         Some(s) => s.as_scalar_ref_impl().try_into()?,
                         // the function should always return empty if any const argument is null
-                        None => return Ok(crate::table_function::empty(return_type)),
+                        None => return Ok(risingwave_expr::table_function::empty(return_type)),
                     };
                 )*
 
@@ -930,7 +930,7 @@ impl FunctionAttr {
                     prebuilt_arg: #prebuilt_arg_type,
                 }
                 #[async_trait::async_trait]
-                impl crate::table_function::TableFunction for #struct_name {
+                impl risingwave_expr::table_function::TableFunction for #struct_name {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }

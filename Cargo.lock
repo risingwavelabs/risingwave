@@ -1077,6 +1077,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "base64-url"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c5b0a88aa36e9f095ee2e2b13fb8c5e4313e022783aedacc123328c0084916d"
+dependencies = [
+ "base64 0.21.3",
+]
+
+[[package]]
 name = "base64ct"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1484,9 +1493,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.30"
+version = "0.4.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "defd4e7873dbddba6c7c91e199c7fcb946abc4a6a4ac3195400bcfb01b5de877"
+checksum = "7f2c685bad3eb3d45a01354cedb7d5faa66194d1d58ba6e267a8de788f79db38"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -6704,6 +6713,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror",
+ "tikv-jemalloc-ctl",
  "tinyvec",
  "toml 0.7.8",
  "tower-layer",
@@ -7205,6 +7215,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-ec2",
  "axum",
+ "base64-url",
  "bytes",
  "clap",
  "crepe",
@@ -10049,7 +10060,6 @@ dependencies = [
  "aws-credential-types",
  "aws-sdk-s3",
  "aws-smithy-client",
- "axum",
  "base64 0.21.3",
  "bit-vec",
  "bitflags 2.4.0",
@@ -10092,18 +10102,12 @@ dependencies = [
  "log",
  "madsim-rdkafka",
  "madsim-tokio",
- "memchr",
- "mime_guess",
- "miniz_oxide",
  "mio",
  "multimap",
  "nom",
  "num-bigint",
  "num-integer",
  "num-traits",
- "once_cell",
- "openssl-sys",
- "opentelemetry",
  "opentelemetry_api",
  "opentelemetry_sdk",
  "parking_lot 0.12.1",
@@ -10118,15 +10122,12 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rand_core 0.6.4",
- "rdkafka-sys",
  "regex",
  "regex-automata 0.3.8",
  "regex-syntax 0.7.5",
  "reqwest",
  "ring",
  "rust_decimal",
- "rustix 0.38.11",
- "rustls 0.21.7",
  "scopeguard",
  "serde",
  "serde_json",
@@ -10135,8 +10136,6 @@ dependencies = [
  "subtle",
  "syn 1.0.109",
  "syn 2.0.33",
- "tikv-jemalloc-sys",
- "tikv-jemallocator",
  "time",
  "time-macros",
  "tinyvec",
@@ -10148,7 +10147,6 @@ dependencies = [
  "toml_edit",
  "tonic",
  "tower",
- "tower-http",
  "tracing",
  "tracing-core",
  "tracing-subscriber",
@@ -10157,7 +10155,6 @@ dependencies = [
  "url",
  "uuid",
  "zeroize",
- "zstd-sys",
 ]
 
 [[package]]
