@@ -1221,6 +1221,25 @@ impl HummockManager {
                 false
             };
             if is_success {
+                // Record comapction inheritance metrics.
+                let group = compact_task.compaction_group_id.to_string();
+                let level = compact_task.target_level.to_string();
+                let sublevel = compact_task.target_sub_level_id.to_string();
+                compact_task
+                    .inheritances
+                    .values()
+                    .for_each(|sstable_inheritance| {
+                        sstable_inheritance
+                            .blocks
+                            .iter()
+                            .for_each(|block_inheritance| {
+                                self.metrics
+                                    .compaction_inheritance_info
+                                    .with_label_values(&[&group, &level, &sublevel])
+                                    .observe(block_inheritance.parents.len() as f64)
+                            })
+                    });
+
                 let mut hummock_version_deltas =
                     BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
                 let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
