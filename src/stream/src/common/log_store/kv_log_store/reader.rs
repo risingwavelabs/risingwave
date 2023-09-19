@@ -45,8 +45,10 @@ pub struct KvLogStoreReader<S: StateStore> {
 
     rx: LogStoreBufferReceiver,
 
+    /// The first epoch that newly written by the log writer
     first_write_epoch: Option<u64>,
 
+    /// `Some` means consuming historical log data
     state_store_stream: Option<Pin<Box<LogStoreItemStream<S::IterStream>>>>,
 
     latest_offset: TruncateOffset,
