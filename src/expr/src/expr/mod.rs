@@ -166,6 +166,7 @@ impl dyn Expression {
 /// An owned dynamically typed [`Expression`].
 pub type BoxedExpression = Box<dyn Expression>;
 
+// TODO: avoid the overhead of extra boxing.
 #[async_trait::async_trait]
 impl Expression for BoxedExpression {
     fn return_type(&self) -> DataType {

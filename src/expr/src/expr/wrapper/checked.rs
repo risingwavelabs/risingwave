@@ -24,6 +24,7 @@ use crate::expr::{Expression, ValueImpl};
 #[derive(Debug)]
 pub struct CheckedExpression<E>(pub E);
 
+// TODO: avoid the overhead of extra boxing.
 #[async_trait]
 impl<E: Expression> Expression for CheckedExpression<E> {
     fn return_type(&self) -> DataType {

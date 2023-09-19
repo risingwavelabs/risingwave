@@ -35,7 +35,8 @@ use crate::sig::func::FUNC_SIG_MAP;
 use crate::sig::FuncSigDebug;
 use crate::{bail, ExprError, Result};
 
-fn build_node(prost: &ExprNode) -> Result<BoxedExpression> {
+/// Build an expression from protobuf.
+fn build_from_prost_inner(prost: &ExprNode) -> Result<BoxedExpression> {
     use PbType as E;
 
     let func_call = match prost.get_rex_node()? {
@@ -70,9 +71,9 @@ fn build_node(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
-/// Build an expression from protobuf.
+/// Build an expression from protobuf with wrappers.
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    let expr = build_node(prost)?;
+    let expr = build_from_prost_inner(prost)?;
 
     let checked = CheckedExpression(expr);
 
