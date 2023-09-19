@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_common::array::{ArrayRef, DataChunk, Vis};
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ListValue, ScalarImpl};
 
@@ -40,8 +40,7 @@ impl Expression for ArrayTransformExpression {
         let new_list = lambda_input
             .map_inner(|flatten_input| async move {
                 let flatten_len = flatten_input.len();
-                let chunk =
-                    DataChunk::new(vec![Arc::new(flatten_input)], Vis::Compact(flatten_len));
+                let chunk = DataChunk::new(vec![Arc::new(flatten_input)], flatten_len);
                 self.lambda.eval(&chunk).await.map(Arc::unwrap_or_clone)
             })
             .await?;

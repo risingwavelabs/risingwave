@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use itertools::{multizip, Itertools};
+use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayRef, BoolArray, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ListRef, Scalar, ScalarImpl, ScalarRefImpl};
@@ -84,7 +84,6 @@ impl Expression for SomeAllExpression {
     async fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
         let arr_left = self.left_expr.eval_checked(data_chunk).await?;
         let arr_right = self.right_expr.eval_checked(data_chunk).await?;
-        let bitmap = data_chunk.visibility();
         let mut num_array = Vec::with_capacity(data_chunk.capacity());
 
         let arr_right_inner = arr_right.as_list();
@@ -124,24 +123,21 @@ impl Expression for SomeAllExpression {
                 }
             };
 
-        match bitmap {
-            Some(bitmap) => {
-                for ((left, right), visible) in arr_left
-                    .iter()
-                    .zip_eq_fast(arr_right.iter())
-                    .zip_eq_fast(bitmap.iter())
-                {
-                    if !visible {
-                        num_array.push(None);
-                        continue;
-                    }
-                    unfolded_left_right(left, right, &mut num_array);
-                }
+        if data_chunk.is_compacted() {
+            for (left, right) in arr_left.iter().zip_eq_fast(arr_right.iter()) {
+                unfolded_left_right(left, right, &mut num_array);
             }
-            None => {
-                for (left, right) in multizip((arr_left.iter(), arr_right.iter())) {
-                    unfolded_left_right(left, right, &mut num_array);
+        } else {
+            for ((left, right), visible) in arr_left
+                .iter()
+                .zip_eq_fast(arr_right.iter())
+                .zip_eq_fast(data_chunk.visibility().iter())
+            {
+                if !visible {
+                    num_array.push(None);
+                    continue;
                 }
+                unfolded_left_right(left, right, &mut num_array);
             }
         }
 

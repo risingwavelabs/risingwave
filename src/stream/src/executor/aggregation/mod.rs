@@ -16,8 +16,9 @@ pub use agg_group::*;
 pub use agg_state::*;
 pub use distinct::*;
 use risingwave_common::array::ArrayImpl::Bool;
-use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::agg::{AggCall, AggKind};
 use risingwave_storage::StateStore;
@@ -63,8 +64,8 @@ pub async fn agg_call_filter_res(
     identity: &str,
     agg_call: &AggCall,
     chunk: &DataChunk,
-) -> StreamExecutorResult<Vis> {
-    let mut vis = chunk.vis().clone();
+) -> StreamExecutorResult<Bitmap> {
+    let mut vis = chunk.visibility().clone();
     if matches!(
         agg_call.kind,
         AggKind::Min | AggKind::Max | AggKind::StringAgg

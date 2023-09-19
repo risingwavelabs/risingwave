@@ -263,15 +263,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     /// in one chunk.
     ///
     /// * `keys`: Hash Keys of rows.
-    /// * `base_visibility`: Visibility of rows, `None` means all are visible.
-    fn get_group_visibilities(keys: Vec<K>, base_visibility: Option<&Bitmap>) -> Vec<(K, Bitmap)> {
+    /// * `base_visibility`: Visibility of rows.
+    fn get_group_visibilities(keys: Vec<K>, base_visibility: &Bitmap) -> Vec<(K, Bitmap)> {
         let n_rows = keys.len();
         let mut vis_builders = HashMap::new();
-        for (row_idx, key) in keys.into_iter().enumerate().filter(|(row_idx, _)| {
-            base_visibility
-                .map(|vis| vis.is_set(*row_idx))
-                .unwrap_or(true)
-        }) {
+        for (row_idx, key) in keys
+            .into_iter()
+            .enumerate()
+            .filter(|(row_idx, _)| base_visibility.is_set(*row_idx))
+        {
             vis_builders
                 .entry(key)
                 .or_insert_with(|| BitmapBuilder::zeroed(n_rows))

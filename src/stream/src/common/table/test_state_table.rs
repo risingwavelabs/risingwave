@@ -1110,11 +1110,8 @@ async fn test_state_table_write_chunk_visibility() {
         &data_types,
     );
     let (ops, columns, _) = chunk.into_inner();
-    let chunk = StreamChunk::new(
-        ops,
-        columns,
-        Some(Bitmap::from_iter([true, true, true, false])),
-    );
+    let chunk =
+        StreamChunk::with_visibility(ops, columns, Bitmap::from_iter([true, true, true, false]));
 
     state_table.write_chunk(chunk);
 
