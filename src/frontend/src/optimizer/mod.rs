@@ -351,8 +351,6 @@ impl PlanRoot {
 
     /// Generate create index or create materialize view plan.
     fn gen_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
-        println!("self is {:#?}", self);
-
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
