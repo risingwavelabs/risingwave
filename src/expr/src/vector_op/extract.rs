@@ -138,11 +138,11 @@ fn extract_from_timestamptz_at_timezone(
             let east_secs = instant_local.offset().fix().local_minus_utc();
             east_secs.into()
         }
-        TimezoneHour => {
+        Timezone_Hour => {
             let east_secs = instant_local.offset().fix().local_minus_utc();
             (east_secs / 3600).into()
         }
-        TimezoneMinute => {
+        Timezone_Minute => {
             let east_secs = instant_local.offset().fix().local_minus_utc();
             (east_secs % 3600 / 60).into()
         }
@@ -239,9 +239,10 @@ fn date_part_from_interval(interval: Interval, unit: &Unit) -> Result<F64> {
         .map_err(|_| ExprError::NumericOutOfRange)
 }
 
-/// Define an enum and its FromStr impl.
+/// Define an enum and its `FromStr` impl.
 macro_rules! define_unit {
-    (enum $name:ident { $($variant:ident,)* }) => {
+    ($(#[ $attr:meta ])* enum $name:ident { $($variant:ident,)* }) => {
+        $(#[$attr])*
         #[derive(Debug, PartialEq, Eq, Clone, Copy)]
         enum $name {
             $($variant,)*
@@ -263,6 +264,8 @@ macro_rules! define_unit {
 }
 
 define_unit! {
+    /// Datetime units.
+    #[allow(non_camel_case_types)]
     enum Unit {
         Millennium,
         Century,
@@ -284,8 +287,8 @@ define_unit! {
         Epoch,
         Julian,
         Timezone,
-        TimezoneHour,
-        TimezoneMinute,
+        Timezone_Hour,
+        Timezone_Minute,
     }
 }
 
@@ -320,7 +323,7 @@ impl Unit {
 
     /// Whether the unit is a valid timestamptz at timezone unit.
     const fn is_timestamptz_at_timezone_unit(self) -> bool {
-        self.is_timestamp_unit() || matches!(self, Timezone | TimezoneHour | TimezoneMinute)
+        self.is_timestamp_unit() || matches!(self, Timezone | Timezone_Hour | Timezone_Minute)
     }
 
     /// Whether the unit is a valid interval unit.
@@ -429,6 +432,18 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_from_time() {
+        let time: Time = "23:22:57.123450".parse().unwrap();
+        let extract = |unit| extract_from_time(time, &unit).to_string();
+        assert_eq!(extract(Hour), "23");
+        assert_eq!(extract(Minute), "22");
+        assert_eq!(extract(Second), "57.123450");
+        assert_eq!(extract(Millisecond), "57123.450");
+        assert_eq!(extract(Microsecond), "57123450");
+        assert_eq!(extract(Epoch), "84177.123450");
+    }
+
+    #[test]
     fn test_extract_from_timestamp() {
         let ts = Timestamp::new(
             NaiveDateTime::parse_from_str("2021-11-22 12:4:2.575400", "%Y-%m-%d %H:%M:%S%.f")
@@ -457,15 +472,16 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_from_time() {
-        let time: Time = "23:22:57.123450".parse().unwrap();
-        let extract = |unit| extract_from_time(time, &unit).to_string();
-        assert_eq!(extract(Hour), "23");
-        assert_eq!(extract(Minute), "22");
-        assert_eq!(extract(Second), "57.123450");
-        assert_eq!(extract(Millisecond), "57123.450");
-        assert_eq!(extract(Microsecond), "57123450");
-        assert_eq!(extract(Epoch), "84177.123450");
+    fn test_extract_from_timestamptz() {
+        let ts: Timestamptz = "2023-06-01 00:00:00Z".parse().unwrap();
+        let extract = |unit| {
+            extract_from_timestamptz_at_timezone(ts, "pst8pdt", &unit)
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(extract(Timezone), "-25200");
+        assert_eq!(extract(Timezone_Hour), "-7");
+        assert_eq!(extract(Timezone_Minute), "0");
     }
 
     #[test]
