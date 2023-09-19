@@ -10,11 +10,11 @@ statement ok
 CREATE TABLE alter_test (k BIGINT PRIMARY KEY, v CHARACTER VARYING)
 WITH (
     connector = 'postgres-cdc',
-    hostname = '$PGHOST',
+    hostname = '${PGHOST:localhost}',
     port = '${PGPORT:5432}',
-    username = '$PGUSER',
-    password = '$PGPASSWORD',
-    database.name = '$PGDATABASE',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
     schema.name = 'public',
     table.name = 'alter_test',
     slot.name = 'alter_test'
