@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use base64::engine::general_purpose;
 use base64::Engine as _;
 use chrono::{Datelike, Timelike};
@@ -37,13 +39,26 @@ impl<'a> JsonEncoder<'a> {
         schema: &'a Schema,
         col_indices: Option<&'a [usize]>,
         timestamp_handling_mode: TimestampHandlingMode,
-        custom_json_type: CustomJsonType,
     ) -> Self {
         Self {
             schema,
             col_indices,
             timestamp_handling_mode,
-            custom_json_type,
+            custom_json_type: CustomJsonType::None,
+        }
+    }
+
+    pub fn new_with_doris(
+        schema: &'a Schema,
+        col_indices: Option<&'a [usize]>,
+        timestamp_handling_mode: TimestampHandlingMode,
+        map: HashMap<String, (u8, u8)>,
+    ) -> Self {
+        Self {
+            schema,
+            col_indices,
+            timestamp_handling_mode,
+            custom_json_type: CustomJsonType::Doris(map),
         }
     }
 }
@@ -130,8 +145,8 @@ fn datum_to_json_object(
         (DataType::Varchar, ScalarRefImpl::Utf8(v)) => {
             json!(v)
         }
-        (DataType::Decimal, ScalarRefImpl::Decimal(mut v)) => {
-            if let CustomJsonType::Doris(map) = custom_json_type {
+        (DataType::Decimal, ScalarRefImpl::Decimal(mut v)) => match custom_json_type {
+            CustomJsonType::Doris(map) => {
                 if !matches!(v, Decimal::Normalized(_)) {
                     return Err(ArrayError::internal(
                         "doris can't support decimal Inf, -Inf, Nan".to_string(),
@@ -145,10 +160,11 @@ fn datum_to_json_object(
                         format!("rw Decimal's precision is large than doris max decimal len is {:?}, doris max is {:?}",v_string.len(),p)));
                 }
                 json!(v_string)
-            } else {
+            }
+            CustomJsonType::None => {
                 json!(v.to_text())
             }
-        }
+        },
         (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => {
             // risingwave's timestamp with timezone is stored in UTC and does not maintain the
             // timezone info and the time is in microsecond.
@@ -161,7 +177,7 @@ fn datum_to_json_object(
             json!(v.0.num_seconds_from_midnight() as i64 * 1000)
         }
         (DataType::Date, ScalarRefImpl::Date(v)) => match custom_json_type {
-            CustomJsonType::NoSPecial => json!(v.0.num_days_from_ce()),
+            CustomJsonType::None => json!(v.0.num_days_from_ce()),
             CustomJsonType::Doris(_) => {
                 let a = v.0.format("%Y-%m-%d").to_string();
                 json!(a)
@@ -197,40 +213,42 @@ fn datum_to_json_object(
             json!(vec)
         }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
-            if let CustomJsonType::Doris(_) = custom_json_type {
-                let mut map = IndexMap::with_capacity(st.len());
-                for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
-                    st.iter()
-                        .map(|(name, dt)| Field::with_name(dt.clone(), name)),
-                ) {
-                    let value = datum_to_json_object(
-                        &sub_field,
-                        sub_datum_ref,
-                        timestamp_handling_mode,
-                        custom_json_type,
-                    )?;
-                    map.insert(sub_field.name.clone(), value);
-                }
-                Value::String(
-                    serde_json::to_string(&map).map_err(|err| {
+            match custom_json_type {
+                CustomJsonType::Doris(_) => {
+                    // We need to ensure that the order of elements in the json matches the insertion order.
+                    let mut map = IndexMap::with_capacity(st.len());
+                    for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
+                        st.iter()
+                            .map(|(name, dt)| Field::with_name(dt.clone(), name)),
+                    ) {
+                        let value = datum_to_json_object(
+                            &sub_field,
+                            sub_datum_ref,
+                            timestamp_handling_mode,
+                            custom_json_type,
+                        )?;
+                        map.insert(sub_field.name.clone(), value);
+                    }
+                    Value::String(serde_json::to_string(&map).map_err(|err| {
                         ArrayError::internal(format!("Json to string err{:?}", err))
-                    })?,
-                )
-            } else {
-                let mut map = Map::with_capacity(st.len());
-                for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
-                    st.iter()
-                        .map(|(name, dt)| Field::with_name(dt.clone(), name)),
-                ) {
-                    let value = datum_to_json_object(
-                        &sub_field,
-                        sub_datum_ref,
-                        timestamp_handling_mode,
-                        custom_json_type,
-                    )?;
-                    map.insert(sub_field.name.clone(), value);
+                    })?)
                 }
-                json!(map)
+                CustomJsonType::None => {
+                    let mut map = Map::with_capacity(st.len());
+                    for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
+                        st.iter()
+                            .map(|(name, dt)| Field::with_name(dt.clone(), name)),
+                    ) {
+                        let value = datum_to_json_object(
+                            &sub_field,
+                            sub_datum_ref,
+                            timestamp_handling_mode,
+                            custom_json_type,
+                        )?;
+                        map.insert(sub_field.name.clone(), value);
+                    }
+                    json!(map)
+                }
             }
         }
         (data_type, scalar_ref) => {
@@ -264,7 +282,7 @@ mod tests {
             },
             Some(ScalarImpl::Bool(false).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
-            &CustomJsonType::NoSPecial,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(boolean_value, json!(false));
@@ -276,7 +294,7 @@ mod tests {
             },
             Some(ScalarImpl::Int16(16).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
-            &CustomJsonType::NoSPecial,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(int16_value, json!(16));
@@ -288,7 +306,7 @@ mod tests {
             },
             Some(ScalarImpl::Int64(std::i64::MAX).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
-            &CustomJsonType::NoSPecial,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(
@@ -305,7 +323,7 @@ mod tests {
             },
             Some(ScalarImpl::Timestamptz(tstz_inner).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
-            &CustomJsonType::NoSPecial,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(tstz_value, "2018-01-26 18:30:09.453000");
@@ -320,7 +338,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::Milli,
-            &CustomJsonType::NoSPecial,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(ts_value, json!(1000 * 1000));
@@ -335,7 +353,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
-            &CustomJsonType::NoSPecial,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(ts_value, json!("1970-01-01 00:16:40.000000".to_string()));
@@ -351,7 +369,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
-            &CustomJsonType::NoSPecial,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(time_value, json!(1000 * 1000));
@@ -366,7 +384,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
-            &CustomJsonType::NoSPecial,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));

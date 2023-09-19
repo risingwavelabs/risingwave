@@ -28,7 +28,6 @@ use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
-use super::encoder::CustomJsonType;
 use super::formatter::{
     AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, UpsertFormatter,
 };
@@ -207,14 +206,8 @@ impl KinesisSinkWriter {
             &self.schema,
             Some(&self.pk_indices),
             TimestampHandlingMode::Milli,
-            CustomJsonType::NoSPecial,
         );
-        let val_encoder = JsonEncoder::new(
-            &self.schema,
-            None,
-            TimestampHandlingMode::Milli,
-            CustomJsonType::NoSPecial,
-        );
+        let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
         let f = UpsertFormatter::new(key_encoder, val_encoder);
         self.write_chunk(chunk, f).await
     }
@@ -224,14 +217,8 @@ impl KinesisSinkWriter {
             &self.schema,
             Some(&self.pk_indices),
             TimestampHandlingMode::Milli,
-            CustomJsonType::NoSPecial,
         );
-        let val_encoder = JsonEncoder::new(
-            &self.schema,
-            None,
-            TimestampHandlingMode::Milli,
-            CustomJsonType::NoSPecial,
-        );
+        let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
         let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
         self.write_chunk(chunk, f).await
     }

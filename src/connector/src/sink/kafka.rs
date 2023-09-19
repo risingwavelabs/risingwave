@@ -31,7 +31,7 @@ use risingwave_rpc_client::ConnectorClient;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
-use super::encoder::{CustomJsonType, JsonEncoder, TimestampHandlingMode};
+use super::encoder::{JsonEncoder, TimestampHandlingMode};
 use super::formatter::{
     AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, UpsertFormatter,
 };
@@ -544,18 +544,9 @@ impl KafkaSinkWriter {
         // TODO: Remove the clones here, only to satisfy borrow checker at present
         let schema = self.schema.clone();
         let pk_indices = self.pk_indices.clone();
-        let key_encoder = JsonEncoder::new(
-            &schema,
-            Some(&pk_indices),
-            TimestampHandlingMode::Milli,
-            CustomJsonType::NoSPecial,
-        );
-        let val_encoder = JsonEncoder::new(
-            &schema,
-            None,
-            TimestampHandlingMode::Milli,
-            CustomJsonType::NoSPecial,
-        );
+        let key_encoder =
+            JsonEncoder::new(&schema, Some(&pk_indices), TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
         // Initialize the upsert_stream
         let f = UpsertFormatter::new(key_encoder, val_encoder);
@@ -567,18 +558,9 @@ impl KafkaSinkWriter {
         // TODO: Remove the clones here, only to satisfy borrow checker at present
         let schema = self.schema.clone();
         let pk_indices = self.pk_indices.clone();
-        let key_encoder = JsonEncoder::new(
-            &schema,
-            Some(&pk_indices),
-            TimestampHandlingMode::Milli,
-            CustomJsonType::NoSPecial,
-        );
-        let val_encoder = JsonEncoder::new(
-            &schema,
-            None,
-            TimestampHandlingMode::Milli,
-            CustomJsonType::NoSPecial,
-        );
+        let key_encoder =
+            JsonEncoder::new(&schema, Some(&pk_indices), TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
         // Initialize the append_only_stream
         let f = AppendOnlyFormatter::new(key_encoder, val_encoder);

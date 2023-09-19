@@ -18,7 +18,7 @@ use serde_json::{json, Map, Value};
 use tracing::warn;
 
 use super::{Result, SinkFormatter, StreamChunk};
-use crate::sink::encoder::{CustomJsonType, JsonEncoder, RowEncoder, TimestampHandlingMode};
+use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
 use crate::tri;
 
 const DEBEZIUM_NAME_FIELD_PREFIX: &str = "RisingWave";
@@ -92,18 +92,9 @@ impl<'a> SinkFormatter for DebeziumJsonFormatter<'a> {
 
             let mut update_cache: Option<Map<String, Value>> = None;
 
-            let key_encoder = JsonEncoder::new(
-                schema,
-                Some(pk_indices),
-                TimestampHandlingMode::Milli,
-                CustomJsonType::NoSPecial,
-            );
-            let val_encoder = JsonEncoder::new(
-                schema,
-                None,
-                TimestampHandlingMode::Milli,
-                CustomJsonType::NoSPecial,
-            );
+            let key_encoder =
+                JsonEncoder::new(schema, Some(pk_indices), TimestampHandlingMode::Milli);
+            let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
 
             for (op, row) in chunk.rows() {
                 let event_key_object: Option<Value> = Some(json!({

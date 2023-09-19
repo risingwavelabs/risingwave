@@ -17,16 +17,11 @@ use risingwave_common::array::{RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use serde_json::{Map, Value};
 
-use super::encoder::{CustomJsonType, JsonEncoder, RowEncoder, TimestampHandlingMode};
+use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
 use crate::sink::Result;
 
 pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>> {
-    let encoder = JsonEncoder::new(
-        schema,
-        None,
-        TimestampHandlingMode::Milli,
-        CustomJsonType::NoSPecial,
-    );
+    let encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
     let mut records: Vec<String> = Vec::with_capacity(chunk.capacity());
     for (_, row) in chunk.rows() {
         let record = Value::Object(encoder.encode(row)?);
@@ -41,11 +36,11 @@ pub fn doris_rows_to_json(
     schema: &Schema,
     decimal_map: &HashMap<String, (u8, u8)>,
 ) -> Result<Map<String, Value>> {
-    let encoder = JsonEncoder::new(
+    let encoder = JsonEncoder::new_with_doris(
         schema,
         None,
         TimestampHandlingMode::Milli,
-        CustomJsonType::Doris(decimal_map.clone()),
+        decimal_map.clone(),
     );
     let map = encoder.encode(row)?;
     Ok(map)

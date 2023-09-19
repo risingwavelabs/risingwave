@@ -26,7 +26,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
 
-use super::doris_connector::{DorisField, DorisInsert, DorisInsertClient};
+use super::doris_connector::{DorisField, DorisInsert, DorisInsertClient, DORIS_DELETE_SIGN};
 use super::utils::doris_rows_to_json;
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::common::DorisCommon;
@@ -95,12 +95,12 @@ impl DorisSink {
         }
 
         for i in rw_fields_name {
-            let value = doris_columns_desc
-                .get(&i.name)
-                .ok_or(SinkError::Doris(format!(
+            let value = doris_columns_desc.get(&i.name).ok_or_else(|| {
+                SinkError::Doris(format!(
                     "Column name don't find in doris, risingwave is {:?} ",
                     i.name
-                )))?;
+                ))
+            })?;
             if !Self::check_and_correct_column_type(&i.data_type, value.to_string())? {
                 return Err(SinkError::Doris(format!(
                     "Column type don't match, column name is {:?}. doris type is {:?} risingwave type is {:?} ",i.name,value,i.data_type
@@ -254,7 +254,7 @@ impl DorisSinkWriter {
                     .to_string();
             self.insert
                 .as_mut()
-                .ok_or(SinkError::Doris("Can't find doris sink insert".to_string()))?
+                .ok_or_else(|| SinkError::Doris("Can't find doris sink insert".to_string()))?
                 .write(row_json_string.into())
                 .await?;
         }
@@ -268,14 +268,16 @@ impl DorisSinkWriter {
                     let mut row_json_value =
                         doris_rows_to_json(row, &self.schema, &self.decimal_map)?;
                     row_json_value.insert(
-                        "__DORIS_DELETE_SIGN__".to_string(),
+                        DORIS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value)
                         .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
                     self.insert
                         .as_mut()
-                        .ok_or(SinkError::Doris("Can't find doris sink insert".to_string()))?
+                        .ok_or_else(|| {
+                            SinkError::Doris("Can't find doris sink insert".to_string())
+                        })?
                         .write(row_json_string.into())
                         .await?;
                 }
@@ -283,14 +285,16 @@ impl DorisSinkWriter {
                     let mut row_json_value =
                         doris_rows_to_json(row, &self.schema, &self.decimal_map)?;
                     row_json_value.insert(
-                        "__DORIS_DELETE_SIGN__".to_string(),
+                        DORIS_DELETE_SIGN.to_string(),
                         Value::String("1".to_string()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value)
                         .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
                     self.insert
                         .as_mut()
-                        .ok_or(SinkError::Doris("Can't find doris sink insert".to_string()))?
+                        .ok_or_else(|| {
+                            SinkError::Doris("Can't find doris sink insert".to_string())
+                        })?
                         .write(row_json_string.into())
                         .await?;
                 }
@@ -299,14 +303,16 @@ impl DorisSinkWriter {
                     let mut row_json_value =
                         doris_rows_to_json(row, &self.schema, &self.decimal_map)?;
                     row_json_value.insert(
-                        "__DORIS_DELETE_SIGN__".to_string(),
+                        DORIS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value)
                         .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
                     self.insert
                         .as_mut()
-                        .ok_or(SinkError::Doris("Can't find doris sink insert".to_string()))?
+                        .ok_or_else(|| {
+                            SinkError::Doris("Can't find doris sink insert".to_string())
+                        })?
                         .write(row_json_string.into())
                         .await?;
                 }
@@ -342,7 +348,7 @@ impl SinkWriter for DorisSinkWriter {
             let insert = self
                 .insert
                 .take()
-                .ok_or(SinkError::Doris("Can't find doris inserter".to_string()))?;
+                .ok_or_else(|| SinkError::Doris("Can't find doris inserter".to_string()))?;
             insert.finish().await?;
         }
         Ok(())

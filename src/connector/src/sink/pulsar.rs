@@ -28,7 +28,7 @@ use risingwave_rpc_client::ConnectorClient;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
-use super::encoder::{CustomJsonType, JsonEncoder, TimestampHandlingMode};
+use super::encoder::{JsonEncoder, TimestampHandlingMode};
 use super::formatter::{AppendOnlyFormatter, UpsertFormatter};
 use super::{
     FormattedSink, Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam, SINK_TYPE_APPEND_ONLY,
@@ -281,18 +281,9 @@ impl PulsarSinkWriter {
         // TODO: Remove the clones here, only to satisfy borrow checker at present
         let schema = self.schema.clone();
         let downstream_pk = self.downstream_pk.clone();
-        let key_encoder = JsonEncoder::new(
-            &schema,
-            Some(&downstream_pk),
-            TimestampHandlingMode::Milli,
-            CustomJsonType::NoSPecial,
-        );
-        let val_encoder = JsonEncoder::new(
-            &schema,
-            None,
-            TimestampHandlingMode::Milli,
-            CustomJsonType::NoSPecial,
-        );
+        let key_encoder =
+            JsonEncoder::new(&schema, Some(&downstream_pk), TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
         // Initialize the append_only_stream
         let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
@@ -304,18 +295,9 @@ impl PulsarSinkWriter {
         // TODO: Remove the clones here, only to satisfy borrow checker at present
         let schema = self.schema.clone();
         let downstream_pk = self.downstream_pk.clone();
-        let key_encoder = JsonEncoder::new(
-            &schema,
-            Some(&downstream_pk),
-            TimestampHandlingMode::Milli,
-            CustomJsonType::NoSPecial,
-        );
-        let val_encoder = JsonEncoder::new(
-            &schema,
-            None,
-            TimestampHandlingMode::Milli,
-            CustomJsonType::NoSPecial,
-        );
+        let key_encoder =
+            JsonEncoder::new(&schema, Some(&downstream_pk), TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
         // Initialize the upsert_stream
         let f = UpsertFormatter::new(key_encoder, val_encoder);

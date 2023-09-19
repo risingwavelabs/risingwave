@@ -1,0 +1,87 @@
+---
+version: "3"
+services:
+  services:
+  doris-fe:
+    image: apache/doris:2.0.0_alpha-fe-x86_64
+    hostname: fe
+    environment:
+     - FE_SERVERS=fe1:127.0.0.1:9010
+     - FE_ID=1
+    network_mode: host
+    ports:
+      - "8030:8030"
+      - "9030:9030"
+  doris-be:
+    image: apache/doris:2.0.0_alpha-be-x86_64
+    hostname: be
+    environment:
+     - FE_SERVERS=fe1:127.0.0.1:9010
+     - BE_ADDR=127.0.0.1:9050
+    depends_on:
+      - fe
+    ports:
+      - "9050:9050"
+  compactor-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compactor-0
+  compute-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compute-node-0
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  frontend-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: frontend-node-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  meta-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: meta-node-0
+  connector-node:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: connector-node
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
+  datagen:
+    build: ../datagen
+    depends_on: [message_queue]
+    command:
+      - /bin/sh
+      - -c
+      - /datagen --mode clickstream --qps 2 kafka --brokers message_queue:29092
+    restart: always
+    container_name: datagen
+volumes:
+  compute-node-0:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+  message_queue:
+    external: false
+name: risingwave-compose

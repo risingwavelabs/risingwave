@@ -32,6 +32,11 @@ use super::{Result, SinkError};
 
 const BUFFER_SIZE: usize = 64 * 1024;
 const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024;
+const DORIS_SUCCESS_STATUS: [&str; 2] = ["Success", "Publish Timeout"];
+pub(crate) const DORIS_DELETE_SIGN: &str = "__DORIS_DELETE_SIGN__";
+const SEND_CHUNK_TIMEOUT: Duration = Duration::from_secs(10);
+const WAIT_HANDDLE_TIMEOUT: Duration = Duration::from_secs(10);
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct DorisInsertClient {
     url: String,
     header: HashMap<String, String>,
@@ -58,19 +63,21 @@ impl DorisInsertClient {
         self
     }
 
+    /// The method is temporarily not in use, reserved for later use in 2PC.
+    /// Doris will generate a default, non-repeating label.
     pub fn set_label(mut self, label: String) -> Self {
         self.header.insert("label".to_string(), label);
         self
     }
 
+    /// This method is only called during upsert operations.
     pub fn add_hidden_column(mut self) -> Self {
-        self.header.insert(
-            "hidden_columns".to_string(),
-            "__DORIS_DELETE_SIGN__".to_string(),
-        );
+        self.header
+            .insert("hidden_columns".to_string(), DORIS_DELETE_SIGN.to_string());
         self
     }
 
+    /// The method is temporarily not in use, reserved for later use in 2PC.
     pub fn enable_2_pc(mut self) -> Self {
         self.header
             .insert("two_phase_commit".to_string(), "true".to_string());
@@ -86,24 +93,28 @@ impl DorisInsertClient {
         self
     }
 
+    /// The method is temporarily not in use, reserved for later use in 2PC.
     pub fn set_txn_id(mut self, txn_id: i64) -> Self {
         self.header
             .insert("txn_operation".to_string(), txn_id.to_string());
         self
     }
 
+    /// The method is temporarily not in use, reserved for later use in 2PC.
     pub fn add_commit(mut self) -> Self {
         self.header
             .insert("txn_operation".to_string(), "commit".to_string());
         self
     }
 
+    /// The method is temporarily not in use, reserved for later use in 2PC.
     pub fn add_abort(mut self) -> Self {
         self.header
             .insert("txn_operation".to_string(), "abort".to_string());
         self
     }
 
+    /// This method is used to add custom message headers, such as the data import format.
     pub fn set_properties(mut self, properties: HashMap<String, String>) -> Self {
         self.header.extend(properties);
         self
@@ -120,7 +131,7 @@ impl DorisInsertClient {
 
         let connector = HttpsConnector::new();
         let client = Client::builder()
-            .pool_idle_timeout(Duration::from_secs(10))
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .build(connector);
 
         (builder, client)
@@ -139,9 +150,9 @@ impl DorisInsertClient {
         let be_url = if resp.status() == StatusCode::TEMPORARY_REDIRECT {
             resp.headers()
                 .get("location")
-                .ok_or(SinkError::Http(anyhow::anyhow!(
-                    "Can't get doris BE url in header",
-                )))?
+                .ok_or_else(|| {
+                    SinkError::Http(anyhow::anyhow!("Can't get doris BE url in header",))
+                })?
                 .to_str()
                 .map_err(|err| {
                     SinkError::Http(anyhow::anyhow!(
@@ -212,7 +223,7 @@ impl DorisInsert {
         let chunk = mem::replace(&mut self.buffer, BytesMut::with_capacity(BUFFER_SIZE));
 
         let is_timed_out = match tokio::time::timeout(
-            Duration::from_secs(10),
+            SEND_CHUNK_TIMEOUT,
             self.sender.as_mut().unwrap().send_data(chunk.into()),
         )
         .await
@@ -255,13 +266,13 @@ impl DorisInsert {
 
     async fn wait_handle(&mut self) -> Result<DorisInsertResultResponse> {
         let res =
-            match tokio::time::timeout(Duration::from_secs(10), self.join_handle.as_mut().unwrap())
+            match tokio::time::timeout(WAIT_HANDDLE_TIMEOUT, self.join_handle.as_mut().unwrap())
                 .await
             {
                 Ok(res) => res.map_err(|err| SinkError::Http(err.into()))??,
                 Err(err) => return Err(SinkError::Http(err.into())),
             };
-        if !["Success".to_string(), "Publish Timeout".to_string()].contains(&res.status) {
+        if !DORIS_SUCCESS_STATUS.contains(&res.status.as_str()) {
             return Err(SinkError::Http(anyhow::anyhow!(
                 "Insert error: {:?}, error url: {:?}",
                 res.message,
@@ -304,7 +315,7 @@ impl DorisGet {
 
         let connector = HttpsConnector::new();
         let client = Client::builder()
-            .pool_idle_timeout(Duration::from_secs(10))
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
             .build(connector);
 
         let request = builder
@@ -334,13 +345,13 @@ impl DorisGet {
         let json_data = if json_map.contains_key("code") && json_map.contains_key("msg") {
             let data = json_map
                 .get("data")
-                .ok_or(SinkError::Http(anyhow::anyhow!("Can't find data")))?;
+                .ok_or_else(|| SinkError::Http(anyhow::anyhow!("Can't find data")))?;
             data.to_string()
         } else {
             raw_bytes
         };
         let schema: DorisSchema = serde_json::from_str(&json_data).map_err(|err| {
-            SinkError::Http(anyhow::anyhow!("Can't get schema from jsom {:?}", err))
+            SinkError::Http(anyhow::anyhow!("Can't get schema from json {:?}", err))
         })?;
         Ok(schema)
     }
