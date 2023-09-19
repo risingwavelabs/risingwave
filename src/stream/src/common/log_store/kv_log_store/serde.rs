@@ -567,7 +567,20 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
             )));
         }
 
-        while let Some((stream_epoch, _)) = self.not_started_streams.last() && *stream_epoch == epoch {
+        while let Some((stream_epoch, _)) = self.not_started_streams.last() {
+            if *stream_epoch > epoch {
+                // Current epoch has not reached the first epoch of
+                // the stream. Later streams must also have greater epoch, so break here.
+                break;
+            }
+            if *stream_epoch < epoch {
+                return Err(anyhow!(
+                    "current epoch {} has exceed epoch {} of stream not started",
+                    epoch,
+                    stream_epoch
+                )
+                .into());
+            }
             let (_, stream) = self.not_started_streams.pop().expect("should not be empty");
             self.row_streams.push(stream.into_future());
         }
@@ -616,7 +629,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
                 }
             }
         }
-
+        // End of stream
         match &self.stream_state {
             StreamState::BarrierEmitted { .. } => {},
             s => return Err(LogStoreError::Internal(
@@ -626,6 +639,10 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
             )
             ),
         }
+        assert!(
+            self.barrier_streams.is_empty(),
+            "should not have any pending barrier received stream after barrier emit"
+        );
         if !self.not_started_streams.is_empty() {
             return Err(anyhow!(
                 "a stream has reached the end but some other stream has not started yet"
@@ -636,7 +653,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
             while let Some((opt, _stream)) = self.row_streams.next().await {
                 if let Some(result) = opt {
                     return Err(LogStoreError::Internal(
-                        anyhow!("when any of the stream reaches the end, other row stream should also reaches the end, but poll result: {:?}", result))
+                        anyhow!("when any of the stream reaches the end, other stream should also reaches the end, but poll result: {:?}", result))
                     );
                 }
             }
