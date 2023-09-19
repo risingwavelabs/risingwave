@@ -416,7 +416,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap(),
+            chunk_msg.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I I I
                 + 3 2 1",
@@ -428,7 +428,7 @@ mod test {
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
-            chunk_msg.into_chunk().unwrap(),
+            chunk_msg.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
                 " I I I
                 + 3 4 1
