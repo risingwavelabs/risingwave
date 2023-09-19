@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
-use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
@@ -63,19 +63,19 @@ pub fn default_opts_for_test() -> StorageOpts {
     }
 }
 
-pub fn gen_dummy_batch(n: u64) -> Vec<(Bytes, StorageValue)> {
+pub fn gen_dummy_batch(n: u64) -> Vec<(TableKey<Bytes>, StorageValue)> {
     vec![(
-        Bytes::from(iterator_test_table_key_of(n as usize)),
+        TableKey(Bytes::from(iterator_test_table_key_of(n as usize))),
         StorageValue::new_put(b"value1".to_vec()),
     )]
 }
 
-pub fn gen_dummy_batch_several_keys(n: usize) -> Vec<(Bytes, StorageValue)> {
+pub fn gen_dummy_batch_several_keys(n: usize) -> Vec<(TableKey<Bytes>, StorageValue)> {
     let mut kvs = vec![];
     let v = Bytes::from(b"value1".to_vec().repeat(100));
     for idx in 0..n {
         kvs.push((
-            Bytes::from(iterator_test_table_key_of(idx)),
+            TableKey(Bytes::from(iterator_test_table_key_of(idx))),
             StorageValue::new_put(v.clone()),
         ));
     }
