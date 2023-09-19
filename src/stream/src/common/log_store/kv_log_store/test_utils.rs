@@ -144,18 +144,6 @@ pub(crate) fn gen_multi_vnode_stream_chunks<const MOD_COUNT: usize>(
         .collect_vec()
         .try_into()
         .unwrap()
-
-    // unsafe {
-    //     let mut ret: [MaybeUninit<StreamChunk>; MOD_COUNT] = MaybeUninit::uninit().assume_init();
-    //     for (i, chunk) in data_builder
-    //         .into_iter()
-    //         .map(|(ops, mut builder)| StreamChunk::from_parts(ops, builder.consume_all().unwrap()))
-    //         .enumerate()
-    //     {
-    //         ret[i].write(chunk);
-    //     }
-    //     std::mem::transmute_copy::<_, [StreamChunk; MOD_COUNT]>(&ret)
-    // }
 }
 
 pub(crate) const TEST_SCHEMA_DIST_KEY_INDEX: usize = 0;
@@ -187,9 +175,9 @@ pub(crate) fn calculate_vnode_bitmap<'a>(
     builder.finish()
 }
 
-pub(crate) fn check_rows_eq<'a>(
-    first: impl Iterator<Item = (Op, RowRef<'a>)>,
-    second: impl Iterator<Item = (Op, RowRef<'a>)>,
+pub(crate) fn check_rows_eq<R1: Row, R2: Row>(
+    first: impl Iterator<Item = (Op, R1)>,
+    second: impl Iterator<Item = (Op, R2)>,
 ) -> bool {
     for ((op1, row1), (op2, row2)) in zip_eq(
         first.sorted_by_key(|(_, row)| {
@@ -206,7 +194,7 @@ pub(crate) fn check_rows_eq<'a>(
         if op1 != op2 {
             return false;
         }
-        if row1 != row2 {
+        if row1.to_owned_row() != row2.to_owned_row() {
             return false;
         }
     }
