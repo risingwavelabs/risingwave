@@ -30,7 +30,7 @@ use self::projection::Projection;
 
 /// Build an `BoxedAggregateFunction` from `AggCall`.
 pub fn build(agg: &AggCall) -> Result<BoxedAggregateFunction> {
-    let mut aggregator = agg::build(agg)?;
+    let mut aggregator = agg::build_append_only(agg)?;
 
     if agg.distinct {
         aggregator = Box::new(Distinct::new(aggregator));

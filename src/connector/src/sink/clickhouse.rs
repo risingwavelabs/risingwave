@@ -661,7 +661,7 @@ impl Serialize for ClickHouseField {
             ClickHouseField::Bool(v) => serializer.serialize_bool(*v),
             ClickHouseField::List(v) => {
                 let mut s = serializer.serialize_seq(Some(v.len()))?;
-                for i in v.iter() {
+                for i in v {
                     s.serialize_element(i)?;
                 }
                 s.end()

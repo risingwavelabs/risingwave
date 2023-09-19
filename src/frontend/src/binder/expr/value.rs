@@ -214,7 +214,7 @@ mod tests {
         use super::*;
 
         let mut binder = mock_binder();
-        let values = vec![
+        let values = [
             "1",
             "111111111111111",
             "111111111.111111",
@@ -258,7 +258,7 @@ mod tests {
         use super::*;
 
         let mut binder = mock_binder();
-        let values = vec![
+        let values = [
             ("1e6"),
             ("1.25e6"),
             ("1.25e1"),
@@ -336,7 +336,7 @@ mod tests {
         use super::*;
 
         let mut binder = mock_binder();
-        let values = vec![
+        let values = [
             "1 hour",
             "1 h",
             "1 year",

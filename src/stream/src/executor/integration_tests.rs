@@ -14,7 +14,6 @@
 
 use std::sync::{Arc, Mutex};
 
-use anyhow::Context;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use multimap::MultiMap;
@@ -111,6 +110,7 @@ async fn test_merger_sum_aggr() {
             vec![0],
             0,
         ))],
+        0,
         0,
         ctx,
         metrics,
@@ -259,7 +259,7 @@ impl StreamConsumer for SenderConsumer {
                 let msg = item?;
                 let barrier = msg.as_barrier().cloned();
 
-                channel.send(msg).await.context("failed to send message")?;
+                channel.send(msg).await.expect("failed to send message");
 
                 if let Some(barrier) = barrier {
                     yield barrier;

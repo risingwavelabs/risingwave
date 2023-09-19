@@ -248,11 +248,13 @@ pub async fn handle(
                 )
                 .await;
             }
-            // TODO(st1page): refacor it
-            let notice = Default::default();
-            let source_schema =
-                source_schema.map(|source_schema| source_schema.into_source_schema_v2());
-
+            let (source_schema, notice) = match source_schema {
+                Some(s) => {
+                    let (s, notice) = s.into_source_schema_v2();
+                    (Some(s), notice)
+                }
+                None => (None, None),
+            };
             create_table::handle_create_table(
                 handler_args,
                 name,

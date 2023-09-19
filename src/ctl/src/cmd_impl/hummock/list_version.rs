@@ -70,7 +70,7 @@ pub async fn list_version(
                 }
             }
 
-            for level in levels.get_levels().iter() {
+            for level in levels.get_levels() {
                 println!(
                     "level_idx {} type {} sst_num {} size {}",
                     level.level_idx,

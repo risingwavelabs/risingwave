@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![expect(clippy::arc_with_non_send_sync, reason = "FIXME: later")]
+
 pub mod compaction_config;
 mod level_selector;
 mod overlap_strategy;
@@ -35,8 +37,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, KeyRange, LevelType};
 
 pub use crate::hummock::compaction::level_selector::{
-    default_level_selector, DynamicLevelSelector, DynamicLevelSelectorCore, LevelSelector,
-    ManualCompactionSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
+    default_level_selector, DynamicLevelSelector, DynamicLevelSelectorCore, EmergencySelector,
+    LevelSelector, ManualCompactionSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::{CompactionInput, LocalPickerStatistic};

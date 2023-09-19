@@ -446,6 +446,7 @@ impl LocalStreamManagerCore {
         input: BoxedExecutor,
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
+        fragment_id: FragmentId,
     ) -> StreamResult<DispatchExecutor> {
         let dispatcher_impls = dispatchers
             .iter()
@@ -456,12 +457,16 @@ impl LocalStreamManagerCore {
             input,
             dispatcher_impls,
             actor_id,
+            fragment_id,
             self.context.clone(),
             self.streaming_metrics.clone(),
         ))
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
+    // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+    // TODO: remove `allow` here after the issued is closed.
+    #[expect(clippy::needless_pass_by_ref_mut)]
     #[allow(clippy::too_many_arguments)]
     #[async_recursion]
     async fn create_nodes_inner(
@@ -635,7 +640,8 @@ impl LocalStreamManagerCore {
                 .may_trace_hummock()
                 .await?;
 
-            let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
+            let dispatcher =
+                self.create_dispatcher(executor, &actor.dispatcher, actor_id, actor.fragment_id)?;
             let actor = Actor::new(
                 dispatcher,
                 subtasks,

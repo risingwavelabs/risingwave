@@ -1,0 +1,37 @@
+query I
+select array_sort(array[3, 2, 1]);
+----
+{1,2,3}
+
+query I
+select array_sort(array[3.14, 2.12, 1.14514]);
+----
+{1.14514,2.12,3.14}
+
+query I
+select array_sort(array['b', 'a', 'c']);
+----
+{a,b,c}
+
+query I
+select array_sort(array[-1000, 2000, 0]);
+----
+{-1000,0,2000}
+
+query I
+select array_sort(array['abcdef', 'aacedf', 'aaadef']);
+----
+{aaadef,aacedf,abcdef}
+
+query I
+select array_sort(array['114514🤔️1919810', '113514🥵1919810', '112514😅1919810']);
+----
+{112514😅1919810,113514🥵1919810,114514🤔️1919810}
+
+query I
+select array_sort(array[3, 2, NULL, 1, NULL]);
+----
+{1,2,3,NULL,NULL}
+
+query error invalid digit found in string
+select array_sort(array[3, 2, 1, 'a']);

@@ -215,6 +215,7 @@ impl SourceSchema {
 
 impl fmt::Display for SourceSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ROW FORMAT ")?;
         match self {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
@@ -396,9 +397,10 @@ impl Format {
             "CANAL" => Format::Canal,
             "PLAIN" => Format::Plain,
             "UPSERT" => Format::Upsert,
+            "NATIVE" => Format::Native, // used internally for schema change
             _ => {
                 return Err(ParserError::ParserError(
-                    "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | Plain after FORMAT"
+                    "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE after FORMAT"
                         .to_string(),
                 ))
             }
@@ -443,9 +445,11 @@ impl Encode {
             "CSV" => Encode::Csv,
             "PROTOBUF" => Encode::Protobuf,
             "JSON" => Encode::Json,
+            "NATIVE" => Encode::Native, // used internally for schema change
             _ => {
                 return Err(ParserError::ParserError(
-                    "expected AVRO | BYTES | CSV | PROTOBUF | JSON after Encode".to_string(),
+                    "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE after Encode"
+                        .to_string(),
                 ))
             }
         })
@@ -481,6 +485,7 @@ impl fmt::Display for CompatibleSourceSchema {
 }
 
 impl CompatibleSourceSchema {
+    #[deprecated]
     pub fn into_source_schema(
         self,
     ) -> Result<(SourceSchema, Vec<SqlOption>, Option<String>), ParserError> {
@@ -496,10 +501,12 @@ impl CompatibleSourceSchema {
         }
     }
 
-    pub fn into_source_schema_v2(self) -> SourceSchemaV2 {
+    pub fn into_source_schema_v2(self) -> (SourceSchemaV2, Option<String>) {
         match self {
-            CompatibleSourceSchema::RowFormat(inner) => inner.into_source_schema_v2(),
-            CompatibleSourceSchema::V2(inner) => inner,
+            CompatibleSourceSchema::RowFormat(inner) => (
+                inner.into_source_schema_v2(),
+                Some("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.".to_string())),
+            CompatibleSourceSchema::V2(inner) => (inner, None),
         }
     }
 }
@@ -510,7 +517,7 @@ impl From<SourceSchemaV2> for CompatibleSourceSchema {
     }
 }
 
-pub fn parse_source_shcema(p: &mut Parser) -> Result<CompatibleSourceSchema, ParserError> {
+fn parse_source_schema(p: &mut Parser) -> Result<CompatibleSourceSchema, ParserError> {
     if p.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
         p.expect_keyword(Keyword::FORMAT)?;
         let id = p.parse_identifier()?;
@@ -557,18 +564,20 @@ pub fn parse_source_shcema(p: &mut Parser) -> Result<CompatibleSourceSchema, Par
                 impl_parse_to!(csv_info: CsvInfo, p);
                 SourceSchema::Csv(csv_info)
             }
+            "NATIVE" => SourceSchema::Native, // used internally by schema change
             "DEBEZIUM_AVRO" => {
                 impl_parse_to!(avro_schema: DebeziumAvroSchema, p);
                 SourceSchema::DebeziumAvro(avro_schema)
             }
-            "BYTES" => {
-                SourceSchema::Bytes
+            "BYTES" => SourceSchema::Bytes,
+            _ => {
+                return Err(ParserError::ParserError(
+                    "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO \
+                    | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON | BYTES | NATIVE after ROW FORMAT"
+                        .to_string(),
+                ))
             }
-            _ => return Err(ParserError::ParserError(
-                "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON | BYTES after ROW FORMAT".to_string(),
-            ))
-
-        }    ;
+        };
         Ok(CompatibleSourceSchema::RowFormat(schema))
     } else {
         Err(ParserError::ParserError(
@@ -577,7 +586,77 @@ pub fn parse_source_shcema(p: &mut Parser) -> Result<CompatibleSourceSchema, Par
     }
 }
 
+impl Parser {
+    /// Peek the next tokens to see if it is `FORMAT` or `ROW FORMAT` (for compatibility).
+    fn peek_source_schema_format(&mut self) -> bool {
+        (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+            && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])) // ROW FORMAT
+            || self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) // FORMAT
+    }
+
+    /// Parse the source schema. The behavior depends on the `connector` type.
+    pub fn parse_source_schema_with_connector(
+        &mut self,
+        connector: &str,
+    ) -> Result<CompatibleSourceSchema, ParserError> {
+        // row format for cdc source must be debezium json
+        // row format for nexmark source must be native
+        // default row format for datagen source is native
+        if connector.contains("-cdc") {
+            let expected = SourceSchemaV2::debezium_json();
+            if self.peek_source_schema_format() {
+                let schema = parse_source_schema(self)?.into_source_schema_v2().0;
+                if schema != expected {
+                    return Err(ParserError::ParserError(format!(
+                        "Row format for CDC connectors should be \
+                         either omitted or set to `{expected}`",
+                    )));
+                }
+            }
+            Ok(expected.into())
+        } else if connector.contains("nexmark") {
+            let expected = SourceSchemaV2::native();
+            if self.peek_source_schema_format() {
+                let schema = parse_source_schema(self)?.into_source_schema_v2().0;
+                if schema != expected {
+                    return Err(ParserError::ParserError(format!(
+                        "Row format for nexmark connectors should be \
+                         either omitted or set to `{expected}`",
+                    )));
+                }
+            }
+            Ok(expected.into())
+        } else if connector.contains("datagen") {
+            Ok(if self.peek_source_schema_format() {
+                parse_source_schema(self)?
+            } else {
+                SourceSchemaV2::native().into()
+            })
+        } else {
+            Ok(parse_source_schema(self)?)
+        }
+    }
+}
+
 impl SourceSchemaV2 {
+    /// Create a new source schema with `Debezium` format and `Json` encoding.
+    pub const fn debezium_json() -> Self {
+        SourceSchemaV2 {
+            format: Format::Debezium,
+            row_encode: Encode::Json,
+            row_options: Vec::new(),
+        }
+    }
+
+    /// Create a new source schema with `Native` format and encoding.
+    pub const fn native() -> Self {
+        SourceSchemaV2 {
+            format: Format::Native,
+            row_encode: Encode::Native,
+            row_options: Vec::new(),
+        }
+    }
+
     pub fn gen_options(&self) -> Result<BTreeMap<String, String>, ParserError> {
         self.row_options
             .iter()
@@ -896,49 +975,7 @@ impl ParseTo for CreateSourceStatement {
         // row format for cdc source must be debezium json
         // row format for nexmark source must be native
         // default row format for datagen source is native
-        let source_schema = if connector.contains("-cdc") {
-            if (p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-                && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
-                || p.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
-            {
-                return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
-            }
-            SourceSchemaV2 {
-                format: Format::Debezium,
-                row_encode: Encode::Json,
-                row_options: Default::default(),
-            }
-            .into()
-        } else if connector.contains("nexmark") {
-            if (p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-                && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
-                || p.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
-            {
-                return Err(ParserError::ParserError("Row format for nexmark connectors should not be set here because it is limited to internal native format".to_string()));
-            }
-            SourceSchemaV2 {
-                format: Format::Native,
-                row_encode: Encode::Native,
-                row_options: Default::default(),
-            }
-            .into()
-        } else if connector.contains("datagen") {
-            if (p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-                && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
-                || p.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
-            {
-                parse_source_shcema(p)?
-            } else {
-                SourceSchemaV2 {
-                    format: Format::Native,
-                    row_encode: Encode::Native,
-                    row_options: Default::default(),
-                }
-                .into()
-            }
-        } else {
-            parse_source_shcema(p)?
-        };
+        let source_schema = p.parse_source_schema_with_connector(&connector)?;
 
         Ok(Self {
             if_not_exists,

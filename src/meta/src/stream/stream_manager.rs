@@ -483,6 +483,11 @@ impl GlobalStreamManager {
 
         let dummy_table_id = table_fragments.table_id();
 
+        let init_split_assignment = self
+            .source_manager
+            .pre_allocate_splits(&dummy_table_id)
+            .await?;
+
         if let Err(err) = self
             .barrier_scheduler
             .run_config_change_command_with_pause(Command::ReplaceTable {
@@ -490,6 +495,7 @@ impl GlobalStreamManager {
                 new_table_fragments: table_fragments,
                 merge_updates,
                 dispatchers,
+                init_split_assignment,
             })
             .await
         {
@@ -823,7 +829,7 @@ mod tests {
                 hummock_manager,
             )?;
 
-            let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
+            let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager);
 
             // Wait until the bootstrap recovery is done.
             loop {

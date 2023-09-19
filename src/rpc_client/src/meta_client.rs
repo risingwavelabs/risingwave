@@ -53,6 +53,7 @@ use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
+use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::*;
 use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
@@ -331,10 +332,12 @@ impl MetaClient {
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
+        stream_job_execution_mode: StreamJobExecutionMode,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
+            stream_job_execution_mode: stream_job_execution_mode as i32,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -429,11 +432,13 @@ impl MetaClient {
 
     pub async fn replace_table(
         &self,
+        source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
     ) -> Result<CatalogVersion> {
         let request = ReplaceTablePlanRequest {
+            source,
             table: Some(table),
             fragment_graph: Some(graph),
             table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
@@ -1042,6 +1047,24 @@ impl MetaClient {
         ))
     }
 
+    pub async fn list_branched_object(&self) -> Result<Vec<BranchedObject>> {
+        let req = ListBranchedObjectRequest {};
+        let resp = self.inner.list_branched_object(req).await?;
+        Ok(resp.branched_objects)
+    }
+
+    pub async fn list_active_write_limit(&self) -> Result<HashMap<u64, WriteLimit>> {
+        let req = ListActiveWriteLimitRequest {};
+        let resp = self.inner.list_active_write_limit(req).await?;
+        Ok(resp.write_limits)
+    }
+
+    pub async fn list_hummock_meta_config(&self) -> Result<HashMap<String, String>> {
+        let req = ListHummockMetaConfigRequest {};
+        let resp = self.inner.list_hummock_meta_config(req).await?;
+        Ok(resp.configs)
+    }
+
     pub async fn delete_worker_node(&self, worker: HostAddress) -> Result<()> {
         let _resp = self
             .inner
@@ -1267,7 +1290,8 @@ impl GrpcMetaClientCore {
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let meta_member_client = MetaMemberClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
-        let ddl_client = DdlServiceClient::new(channel.clone());
+        let ddl_client =
+            DdlServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let hummock_client =
             HummockManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let notification_client =
@@ -1369,7 +1393,7 @@ impl MetaMemberManagement {
             Either::Right(member_group) => {
                 let mut fetched_members = None;
 
-                for (addr, client) in member_group.members.iter_mut() {
+                for (addr, client) in &mut member_group.members {
                     let client: Result<MetaMemberClient> = try {
                         match client {
                             Some(cached_client) => cached_client.to_owned(),
@@ -1458,7 +1482,7 @@ impl GrpcMetaClient {
     // Max retry times for connecting to meta server.
     const INIT_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
-    async fn start_meta_member_monitor(
+    fn start_meta_member_monitor(
         &self,
         init_leader_addr: String,
         members: Either<MetaMemberClient, MetaMemberGroup>,
@@ -1559,9 +1583,7 @@ impl GrpcMetaClient {
             }
         };
 
-        client
-            .start_meta_member_monitor(addr, members, force_refresh_receiver, config)
-            .await?;
+        client.start_meta_member_monitor(addr, members, force_refresh_receiver, config)?;
 
         client.force_refresh_leader().await?;
 
@@ -1709,6 +1731,9 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
             ,{ hummock_client, subscribe_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeCompactionEventRequest>, Streaming<SubscribeCompactionEventResponse> }
+            ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
+            ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }
+            ,{ hummock_client, list_hummock_meta_config, ListHummockMetaConfigRequest, ListHummockMetaConfigResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

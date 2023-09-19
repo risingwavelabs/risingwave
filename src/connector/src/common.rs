@@ -26,11 +26,12 @@ use risingwave_common::error::anyhow_error;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::json::JsonString;
 use serde_with::{serde_as, DisplayFromStr};
+use time::OffsetDateTime;
 
 use crate::aws_auth::AwsAuthProps;
 use crate::deserialize_duration_from_string;
 use crate::sink::SinkError;
-
+use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
 
@@ -344,27 +345,33 @@ pub struct UpsertMessage<'a> {
 #[serde_as]
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct NatsCommon {
-    #[serde(rename = "nats.server_url")]
+    #[serde(rename = "server_url")]
     pub server_url: String,
-    #[serde(rename = "nats.subject")]
+    #[serde(rename = "subject")]
     pub subject: String,
-    #[serde(rename = "nats.user")]
+    #[serde(rename = "connect_mode")]
+    pub connect_mode: Option<String>,
+    #[serde(rename = "username")]
     pub user: Option<String>,
-    #[serde(rename = "nats.password")]
+    #[serde(rename = "password")]
     pub password: Option<String>,
-    #[serde(rename = "nats.max_bytes")]
+    #[serde(rename = "jwt")]
+    pub jwt: Option<String>,
+    #[serde(rename = "nkey")]
+    pub nkey: Option<String>,
+    #[serde(rename = "max_bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_bytes: Option<i64>,
-    #[serde(rename = "nats.max_messages")]
+    #[serde(rename = "max_messages")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_messages: Option<i64>,
-    #[serde(rename = "nats.max_messages_per_subject")]
+    #[serde(rename = "max_messages_per_subject")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_messages_per_subject: Option<i64>,
-    #[serde(rename = "nats.max_consumers")]
+    #[serde(rename = "max_consumers")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_consumers: Option<i32>,
-    #[serde(rename = "nats.max_message_size")]
+    #[serde(rename = "max_message_size")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub max_message_size: Option<i32>,
 }
@@ -372,9 +379,39 @@ pub struct NatsCommon {
 impl NatsCommon {
     pub(crate) async fn build_client(&self) -> anyhow::Result<async_nats::Client> {
         let mut connect_options = async_nats::ConnectOptions::new();
-        if let (Some(v_user), Some(v_password)) = (self.user.as_ref(), self.password.as_ref()) {
-            connect_options = connect_options.user_and_password(v_user.into(), v_password.into());
-        }
+        match self.connect_mode.as_deref() {
+            Some("user_and_password") => {
+                if let (Some(v_user), Some(v_password)) =
+                    (self.user.as_ref(), self.password.as_ref())
+                {
+                    connect_options =
+                        connect_options.user_and_password(v_user.into(), v_password.into())
+                } else {
+                    return Err(anyhow_error!(
+                        "nats connect mode is user_and_password, but user or password is empty"
+                    ));
+                }
+            }
+
+            Some("credential") => {
+                if let (Some(v_nkey), Some(v_jwt)) = (self.nkey.as_ref(), self.jwt.as_ref()) {
+                    connect_options = connect_options
+                        .credentials(&self.create_credential(v_nkey, v_jwt)?)
+                        .expect("failed to parse static creds")
+                } else {
+                    return Err(anyhow_error!(
+                        "nats connect mode is credential, but nkey or jwt is empty"
+                    ));
+                }
+            }
+            Some("plain") => {}
+            _ => {
+                return Err(anyhow_error!(
+                    "nats connect mode only accept user_and_password/credential/plain"
+                ));
+            }
+        };
+
         let servers = self.server_url.split(',').collect::<Vec<&str>>();
         let client = connect_options
             .connect(
@@ -396,8 +433,8 @@ impl NatsCommon {
 
     pub(crate) async fn build_consumer(
         &self,
-        split_id: i32,
-        start_sequence: Option<u64>,
+        split_id: String,
+        start_sequence: NatsOffset,
     ) -> anyhow::Result<
         async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
     > {
@@ -408,23 +445,28 @@ impl NatsCommon {
             ack_policy: jetstream::consumer::AckPolicy::None,
             ..Default::default()
         };
-        match start_sequence {
-            Some(v) => {
-                let consumer = stream
-                    .get_or_create_consumer(&name, {
-                        config.deliver_policy = DeliverPolicy::ByStartSequence {
-                            start_sequence: v + 1,
-                        };
-                        config
-                    })
-                    .await?;
-                Ok(consumer)
+
+        let deliver_policy = match start_sequence {
+            NatsOffset::Earliest => DeliverPolicy::All,
+            NatsOffset::Latest => DeliverPolicy::Last,
+            NatsOffset::SequenceNumber(v) => {
+                let parsed = v.parse::<u64>()?;
+                DeliverPolicy::ByStartSequence {
+                    start_sequence: 1 + parsed,
+                }
             }
-            None => {
-                let consumer = stream.get_or_create_consumer(&name, config).await?;
-                Ok(consumer)
-            }
-        }
+            NatsOffset::Timestamp(v) => DeliverPolicy::ByStartTime {
+                start_time: OffsetDateTime::from_unix_timestamp_nanos(v * 1_000_000)?,
+            },
+            NatsOffset::None => DeliverPolicy::All,
+        };
+        let consumer = stream
+            .get_or_create_consumer(&name, {
+                config.deliver_policy = deliver_policy;
+                config
+            })
+            .await?;
+        Ok(consumer)
     }
 
     pub(crate) async fn build_or_get_stream(
@@ -434,6 +476,7 @@ impl NatsCommon {
         let mut config = jetstream::stream::Config {
             // the subject default use name value
             name: self.subject.clone(),
+            max_bytes: 1000000,
             ..Default::default()
         };
         if let Some(v) = self.max_bytes {
@@ -453,5 +496,18 @@ impl NatsCommon {
         }
         let stream = jetstream.get_or_create_stream(config).await?;
         Ok(stream)
+    }
+
+    pub(crate) fn create_credential(&self, seed: &str, jwt: &str) -> anyhow::Result<String> {
+        let creds = format!(
+            "-----BEGIN NATS USER JWT-----\n{}\n------END NATS USER JWT------\n\n\
+                         ************************* IMPORTANT *************************\n\
+                         NKEY Seed printed below can be used to sign and prove identity.\n\
+                         NKEYs are sensitive and should be treated as secrets.\n\n\
+                         -----BEGIN USER NKEY SEED-----\n{}\n------END USER NKEY SEED------\n\n\
+                         *************************************************************",
+            jwt, seed
+        );
+        Ok(creds)
     }
 }
