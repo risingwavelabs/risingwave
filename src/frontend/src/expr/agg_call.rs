@@ -88,7 +88,7 @@ impl AggCall {
             // Ordered-Set Aggregation
             (AggKind::Grouping, _) => Int32,
             // other functions are handled by signature map
-            _ => FUNCTION_REGISTRY.get_return_type(agg_kind, &args)?,
+            _ => FUNCTION_REGISTRY.get_return_type(agg_kind, args)?,
         })
     }
 

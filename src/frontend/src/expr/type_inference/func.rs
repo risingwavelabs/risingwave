@@ -417,7 +417,7 @@ fn infer_type_for_special(
                     // when neither type is available, default to `varchar[]`
                     // when one side is unknown and other side is list, use that list type
                     let t = t.unwrap_or_else(|| DataType::List(DataType::Varchar.into()));
-                    for input in inputs.iter_mut() {
+                    for input in &mut *inputs {
                         input.cast_implicit_mut(t.clone())?;
                     }
                     Some(t)
@@ -578,7 +578,7 @@ fn infer_type_name<'a>(
         if let Ok(Some(t)) = t {
             let exact = candidates
                 .iter()
-                .find(|sig| sig.inputs_type[0].matches(&t) && sig.inputs_type[1].matches(&t));
+                .find(|sig| sig.inputs_type[0].matches(t) && sig.inputs_type[1].matches(t));
             if let Some(sig) = exact {
                 return Ok(sig);
             }
@@ -1136,7 +1136,7 @@ mod tests {
                     append_only: false,
                 });
             }
-            let result = infer_type_name(&sig_map, ExprType::Add.into(), inputs);
+            let result = infer_type_name(&sig_map, ExprType::Add, inputs);
             match (expected, result) {
                 (Ok(expected), Ok(found)) => {
                     if !found.match_args(expected) {
