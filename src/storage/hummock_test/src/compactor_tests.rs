@@ -28,6 +28,7 @@ pub(crate) mod tests {
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::util::epoch::Epoch;
     use risingwave_common_service::observer_manager::NotificationClient;
+    use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{next_key, FullKey, TableKey, TABLE_PREFIX_LEN};
@@ -54,15 +55,15 @@ pub(crate) mod tests {
         CompactionExecutor, CompactorContext, DummyCompactionFilter, TaskProgress,
     };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-    use risingwave_storage::hummock::iterator::UserIterator;
+    use risingwave_storage::hummock::iterator::{ConcatIterator, UserIterator};
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::test_utils::gen_test_sstable_info;
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
         CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
         HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
-        SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions, SstableIterator,
-        SstableIteratorReadOptions, SstableObjectIdManager,
+        SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions, SstableIteratorReadOptions,
+        SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
     use risingwave_storage::opts::StorageOpts;
@@ -1344,7 +1345,7 @@ pub(crate) mod tests {
         let compact_ctx = prepare_compactor_and_filter(&storage, existing_table_id);
 
         let sstable_store = compact_ctx.sstable_store.clone();
-        let capacity = 4 * 1024 * 1024;
+        let capacity = 256 * 1024;
         let mut options = SstableBuilderOptions {
             capacity,
             block_capacity: 2048,
@@ -1404,7 +1405,7 @@ pub(crate) mod tests {
             ]))),
             Arc::new(TaskProgress::default()),
         );
-        let (_, mut ret1, _) = slow_compact_runner
+        let (_, ret1, _) = slow_compact_runner
             .run(
                 compaction_filter,
                 multi_filter_key_extractor,
@@ -1413,58 +1414,59 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
-        let mut fast_ret = fast_compact_runner.run().await.unwrap();
-        assert_eq!(ret1.len(), 1);
-        assert_eq!(fast_ret.len(), 1);
-        let normal_ret = ret1.pop().unwrap();
-        let fast_sst = fast_ret.pop().unwrap();
-        println!(
-            "{}.file size={} {}.file size={}",
-            normal_ret.sst_info.object_id,
-            normal_ret.sst_info.file_size,
-            fast_sst.sst_info.object_id,
-            fast_sst.sst_info.file_size,
-        );
-        let mut stats = StoreLocalStatistic::default();
-
-        compact_ctx
-            .sstable_store
-            .delete_cache(fast_sst.sst_info.object_id);
-        compact_ctx
-            .sstable_store
-            .delete_cache(normal_ret.sst_info.object_id);
-        let normal_table = compact_ctx
-            .sstable_store
-            .sstable(&normal_ret.sst_info, &mut stats)
+        let ret = ret1.into_iter().map(|sst| sst.sst_info).collect_vec();
+        let fast_ret = fast_compact_runner
+            .run()
             .await
-            .unwrap();
+            .unwrap()
+            .into_iter()
+            .map(|sst| sst.sst_info)
+            .collect_vec();
+        let mut fast_tables = Vec::with_capacity(fast_ret.len());
+        let mut normal_tables = Vec::with_capacity(ret.len());
+        let mut stats = StoreLocalStatistic::default();
+        for sst_info in &fast_ret {
+            fast_tables.push(
+                compact_ctx
+                    .sstable_store
+                    .sstable(sst_info, &mut stats)
+                    .await
+                    .unwrap(),
+            );
+        }
+
+        for sst_info in &ret {
+            normal_tables.push(
+                compact_ctx
+                    .sstable_store
+                    .sstable(sst_info, &mut stats)
+                    .await
+                    .unwrap(),
+            );
+        }
+        println!(
+            "fast sstables {}.file size={} {}.file size={}",
+            fast_ret[0].object_id,
+            fast_ret[0].file_size,
+            fast_ret[1].object_id,
+            fast_ret[1].file_size,
+        );
+        assert!(can_concat(&ret));
+        assert!(can_concat(&fast_ret));
+
         let mut normal_iter = UserIterator::for_test(
-            SstableIterator::new(
-                normal_table,
+            ConcatIterator::new(ret, compact_ctx.sstable_store.clone(), read_options.clone()),
+            (Bound::Unbounded, Bound::Unbounded),
+        );
+        let mut fast_iter = UserIterator::for_test(
+            ConcatIterator::new(
+                fast_ret,
                 compact_ctx.sstable_store.clone(),
                 read_options.clone(),
             ),
             (Bound::Unbounded, Bound::Unbounded),
         );
-        let fast_table = compact_ctx
-            .sstable_store
-            .sstable(&fast_sst.sst_info, &mut stats)
-            .await
-            .unwrap();
-        let mut fast_iter = UserIterator::for_test(
-            SstableIterator::new(fast_table, compact_ctx.sstable_store.clone(), read_options),
-            (Bound::Unbounded, Bound::Unbounded),
-        );
-        let fast_table = compact_ctx
-            .sstable_store
-            .sstable(&fast_sst.sst_info, &mut stats)
-            .await
-            .unwrap();
-        let normal_table = compact_ctx
-            .sstable_store
-            .sstable(&normal_ret.sst_info, &mut stats)
-            .await
-            .unwrap();
+
         normal_iter.rewind().await.unwrap();
         fast_iter.rewind().await.unwrap();
         let mut count = 0;
@@ -1492,26 +1494,25 @@ pub(crate) mod tests {
             );
             assert_eq!(normal_iter.value(), fast_iter.value());
             let key_ref = fast_iter.key().user_key.as_ref();
-            assert!(normal_table
-                .value()
-                .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash));
-            assert!(
-                fast_table
+            assert!(normal_tables.iter().any(|table| {
+                table
                     .value()
-                    .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash),
-                "not found key at {}",
-                count
-            );
+                    .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+            }));
+            assert!(fast_tables.iter().any(|table| {
+                table
+                    .value()
+                    .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+            }));
             normal_iter.next().await.unwrap();
             fast_iter.next().await.unwrap();
             count += 1;
         }
-        assert_eq!(fast_sst.sst_info.key_range, normal_ret.sst_info.key_range);
     }
 
     #[tokio::test]
     async fn test_fast_compact() {
-        const KEY_COUNT: usize = 10000;
+        const KEY_COUNT: usize = 20000;
         let mut last_k: u64 = 0;
         let mut rng = rand::rngs::StdRng::seed_from_u64(
             std::time::SystemTime::now()
