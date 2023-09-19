@@ -38,6 +38,13 @@ impl ArrowFlightUdfClient {
         Ok(Self { client })
     }
 
+    /// Connect to a UDF service lazily (i.e. only when the first request is sent).
+    pub fn connect_lazy(addr: &str) -> Result<Self> {
+        let conn = tonic::transport::Endpoint::new(addr.to_string())?.connect_lazy();
+        let client = FlightServiceClient::new(conn);
+        Ok(Self { client })
+    }
+
     /// Check if the function is available and the schema is match.
     pub async fn check(&self, id: &str, args: &Schema, returns: &Schema) -> Result<()> {
         let descriptor = FlightDescriptor::new_path(vec![id.into()]);
