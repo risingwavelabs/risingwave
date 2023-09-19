@@ -19,12 +19,10 @@ use anyhow::anyhow;
 use arrow_array::RecordBatch;
 use arrow_schema::{DataType as ArrowDataType, Schema as ArrowSchema};
 use async_trait::async_trait;
-use icelake::catalog::load_catalog;
+use icelake::catalog::{load_catalog, CATALOG_NAME, CATALOG_TYPE};
 use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, DataFile};
 use icelake::{Table, TableIdentifier};
-use itertools::Itertools;
-use opendal::services::S3;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -66,23 +64,35 @@ pub struct IcebergConfig {
     #[serde(rename = "table.name")]
     pub table_name: String, // Full name of table, must include schema name
 
-    #[serde(skip)]
-    pub iceberg_configs: HashMap<String, String>,
+    #[serde(rename = "database.name")]
+    pub database_name: String, // Use as catalog name.
+
+    #[serde(rename = "catalog.type")]
+    pub catalog_type: String, // Catalog type supported by iceberg, such as "storage", "rest"
+
+    #[serde(rename = "warehouse.path")]
+    pub path: Option<String>, // Path of iceberg warehouse, only applicable in storage catalog.
+
+    #[serde(rename = "catalog.uri")]
+    pub uri: Option<String>, // URI of iceberg catalog, only applicable in rest catalog.
+
+    #[serde(rename = "s3.region")]
+    pub region: Option<String>,
+
+    #[serde(rename = "s3.endpoint")]
+    pub endpoint: Option<String>,
+
+    #[serde(rename = "s3.access.key")]
+    pub access_key: String,
+
+    #[serde(rename = "s3.secret.key")]
+    pub secret_key: String,
 }
 
 impl IcebergConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let iceberg_configs = values
-            .iter()
-            .filter(|(k, _v)| k.starts_with("iceberg."))
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-
-        let mut config =
-            serde_json::from_value::<IcebergConfig>(serde_json::to_value(values).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
-
-        config.iceberg_configs = iceberg_configs;
+        let config = serde_json::from_value::<IcebergConfig>(serde_json::to_value(values).unwrap())
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
         if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
             return Err(SinkError::Config(anyhow!(
@@ -94,6 +104,53 @@ impl IcebergConfig {
         }
 
         Ok(config)
+    }
+
+    fn build_iceberg_configs(&self) -> HashMap<String, String> {
+        let mut iceberg_configs = HashMap::new();
+        iceberg_configs.insert(CATALOG_TYPE.to_string(), self.catalog_type.clone());
+        iceberg_configs.insert(
+            CATALOG_NAME.to_string(),
+            self.database_name.clone().to_string(),
+        );
+        if let Some(path) = &self.path {
+            iceberg_configs.insert(
+                format!("iceberg.catalog.{}.warehouse", self.database_name),
+                path.clone().to_string(),
+            );
+        }
+
+        if let Some(uri) = &self.uri {
+            iceberg_configs.insert(
+                format!("iceberg.catalog.{}.uri", self.database_name),
+                uri.clone().to_string(),
+            );
+        }
+
+        if let Some(region) = &self.region {
+            iceberg_configs.insert(
+                "iceberg.catalog.table.io.region".to_string(),
+                region.clone().to_string(),
+            );
+        }
+
+        if let Some(endpoint) = &self.endpoint {
+            iceberg_configs.insert(
+                "iceberg.catalog.table.io.endpoint".to_string(),
+                endpoint.clone().to_string(),
+            );
+        }
+
+        iceberg_configs.insert(
+            "iceberg.catalog.table.io.access_key_id".to_string(),
+            self.access_key.clone().to_string(),
+        );
+        iceberg_configs.insert(
+            "iceberg.catalog.table.io.secret_access_key".to_string(),
+            self.secret_key.clone().to_string(),
+        );
+
+        iceberg_configs
     }
 }
 
@@ -112,7 +169,7 @@ impl Debug for IcebergSink {
 
 impl IcebergSink {
     async fn create_table(&self) -> Result<Table> {
-        let catalog = load_catalog(&self.config.iceberg_configs)
+        let catalog = load_catalog(&self.config.build_iceberg_configs())
             .await
             .map_err(|e| SinkError::Iceberg(anyhow!("Unable to load iceberg catalog: {e}")))?;
 
