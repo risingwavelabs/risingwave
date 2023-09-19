@@ -279,7 +279,7 @@
       └─StreamProject { exprs: [p_partkey, min(ps_supplycost)] }
         └─StreamHashAgg { group_key: [p_partkey], aggs: [min(ps_supplycost), count] }
           └─StreamHashJoin { type: LeftOuter, predicate: p_partkey IS NOT DISTINCT FROM ps_partkey, output: [p_partkey, ps_supplycost, _row_id, _row_id, ps_suppkey, _row_id, _row_id, r_regionkey, s_nationkey] }
-            ├─StreamAppendOnlyDedup { dedup_cols: [p_partkey] }
+            ├─StreamDedup { dedup_cols: [p_partkey] }
             │ └─StreamExchange { dist: HashShard(p_partkey) }
             │   └─StreamProject { exprs: [p_partkey] }
             │     └─StreamShare { id: 26 }
@@ -349,7 +349,7 @@
         └── StreamProject { exprs: [p_partkey, min(ps_supplycost)] }
             └── StreamHashAgg { group_key: [p_partkey], aggs: [min(ps_supplycost), count] } { intermediate state table: 26, state tables: [ 25 ], distinct tables: [] }
                 └── StreamHashJoin { type: LeftOuter, predicate: p_partkey IS NOT DISTINCT FROM ps_partkey, output: [p_partkey, ps_supplycost, _row_id, _row_id, ps_suppkey, _row_id, _row_id, r_regionkey, s_nationkey] } { left table: 27, right table: 29, left degree table: 28, right degree table: 30 }
-                    ├── StreamAppendOnlyDedup { dedup_cols: [p_partkey] } { state table: 31 }
+                    ├── StreamDedup { dedup_cols: [p_partkey] } { state table: 31 }
                     │   └── StreamExchange Hash([0]) from 15
                     └── StreamExchange Hash([0]) from 16
 
@@ -514,7 +514,7 @@
 
     Table 30 { columns: [ ps_partkey, _row_id, _row_id_0, ps_suppkey, _row_id_1, _row_id_2, r_regionkey, s_nationkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC ], value indices: [ 8 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 31 { columns: [ p_partkey ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 31 { columns: [ p_partkey, dup_count ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 32 { columns: [ ps_partkey, ps_supplycost, s_nationkey, _row_id, ps_suppkey, _row_id_0 ], primary key: [ $2 ASC, $3 ASC, $5 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 

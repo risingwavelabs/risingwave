@@ -707,7 +707,7 @@
     StreamMaterialize { columns: [id, name, starttime, $expr6(hidden), $expr8(hidden), $expr9(hidden), $expr10(hidden)], stream_key: [id, name, starttime, $expr6, $expr8, $expr9, $expr10], pk_columns: [id, name, starttime, $expr6, $expr8, $expr9, $expr10], pk_conflict: NoCheck }
     └─StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr8 AND $expr5 = $expr9 AND $expr6 = $expr10, output: all }
       ├─StreamExchange { dist: HashShard($expr2, $expr5, $expr6) }
-      │ └─StreamAppendOnlyDedup { dedup_cols: [$expr2, $expr3, $expr5, $expr6] }
+      │ └─StreamDedup { dedup_cols: [$expr2, $expr3, $expr5, $expr6] }
       │   └─StreamExchange { dist: HashShard($expr2, $expr3, $expr5, $expr6) }
       │     └─StreamProject { exprs: [$expr2, $expr3, $expr5, ($expr5 + '00:00:10':Interval) as $expr6] }
       │       └─StreamProject { exprs: [$expr2, $expr3, $expr4, TumbleStart($expr4, '00:00:10':Interval) as $expr5, _row_id] }
@@ -719,7 +719,7 @@
       │                   └─StreamRowIdGen { row_id_index: 5 }
       │                     └─StreamProject { exprs: [event_type, person, auction, bid, Proctime as $expr1, _row_id], output_watermarks: [$expr1] }
       │                       └─StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-      └─StreamAppendOnlyDedup { dedup_cols: [$expr8, $expr9, $expr10] }
+      └─StreamDedup { dedup_cols: [$expr8, $expr9, $expr10] }
         └─StreamExchange { dist: HashShard($expr8, $expr9, $expr10) }
           └─StreamProject { exprs: [$expr8, $expr9, ($expr9 + '00:00:10':Interval) as $expr10] }
             └─StreamProject { exprs: [$expr7, $expr8, TumbleStart($expr7, '00:00:10':Interval) as $expr9, _row_id] }
@@ -737,11 +737,11 @@
     ├── materialized table: 4294967294
     └── StreamHashJoin [append_only] { type: Inner, predicate: $expr2 = $expr8 AND $expr5 = $expr9 AND $expr6 = $expr10, output: all } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
         ├── StreamExchange Hash([0, 2, 3]) from 1
-        └── StreamAppendOnlyDedup { dedup_cols: [$expr8, $expr9, $expr10] } { state table: 6 }
+        └── StreamDedup { dedup_cols: [$expr8, $expr9, $expr10] } { state table: 6 }
             └── StreamExchange Hash([0, 1, 2]) from 4
 
     Fragment 1
-    StreamAppendOnlyDedup { dedup_cols: [$expr2, $expr3, $expr5, $expr6] } { state table: 4 }
+    StreamDedup { dedup_cols: [$expr2, $expr3, $expr5, $expr6] } { state table: 4 }
     └── StreamExchange Hash([0, 1, 2, 3]) from 2
 
     Fragment 2
@@ -773,11 +773,11 @@
 
     Table 3 { columns: [ $expr8, $expr9, $expr10, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
-    Table 4 { columns: [ $expr2, $expr3, $expr5, $expr6 ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1, 2, 3 ], read pk prefix len hint: 4 }
+    Table 4 { columns: [ $expr2, $expr3, $expr5, $expr6, dup_count ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 1, 2, 3 ], read pk prefix len hint: 4 }
 
     Table 5 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ $expr8, $expr9, $expr10 ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 6 { columns: [ $expr8, $expr9, $expr10, dup_count ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
     Table 4294967294 { columns: [ id, name, starttime, $expr6, $expr8, $expr9, $expr10 ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 0, 2, 3 ], read pk prefix len hint: 7 }
 
