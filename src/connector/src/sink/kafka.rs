@@ -20,7 +20,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::anyhow;
 use futures::future::try_join_all;
 use futures::{Future, FutureExt};
-use futures_async_stream::for_await;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
@@ -33,13 +32,14 @@ use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 
 use super::encoder::{CustomJsonType, JsonEncoder, TimestampHandlingMode};
-use super::formatter::{AppendOnlyFormatter, UpsertFormatter};
+use super::formatter::{
+    AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, UpsertFormatter,
+};
 use super::{
     FormattedSink, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM,
     SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
-use crate::sink::utils::{gen_debezium_message_stream, DebeziumAdapterOpts};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
 };
@@ -528,26 +528,16 @@ impl KafkaSinkWriter {
         let sink_from_name = self.sink_from_name.clone();
 
         // Initialize the dbz_stream
-        let dbz_stream = gen_debezium_message_stream(
+        let f = DebeziumJsonFormatter::new(
             &schema,
             &pk_indices,
-            chunk,
-            ts_ms,
-            DebeziumAdapterOpts::default(),
             &db_name,
             &sink_from_name,
+            DebeziumAdapterOpts::default(),
+            ts_ms,
         );
 
-        #[for_await]
-        for msg in dbz_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_inner(
-                event_key_object.map(|j| j.to_string().into_bytes()),
-                event_object.map(|j| j.to_string().into_bytes()),
-            )
-            .await?;
-        }
-        Ok(())
+        self.write_chunk(chunk, f).await
     }
 
     async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -655,12 +645,9 @@ impl SinkWriterV1 for KafkaSinkWriter {
 mod test {
     use maplit::hashmap;
     use risingwave_common::catalog::Field;
-    use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
-    use serde_json::Value;
 
     use super::*;
-    use crate::sink::utils::*;
 
     #[test]
     fn parse_rdkafka_props() {
@@ -855,71 +842,6 @@ mod test {
                 println!("commit success");
             }
         }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_chunk_to_json() -> Result<()> {
-        let chunk = StreamChunk::from_pretty(
-            " i   f   {i,f}
-            + 0 0.0 {0,0.0}
-            + 1 1.0 {1,1.0}
-            + 2 2.0 {2,2.0}
-            + 3 3.0 {3,3.0}
-            + 4 4.0 {4,4.0}
-            + 5 5.0 {5,5.0}
-            + 6 6.0 {6,6.0}
-            + 7 7.0 {7,7.0}
-            + 8 8.0 {8,8.0}
-            + 9 9.0 {9,9.0}",
-        );
-
-        let schema = Schema::new(vec![
-            Field {
-                data_type: DataType::Int32,
-                name: "v1".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
-            },
-            Field {
-                data_type: DataType::Float32,
-                name: "v2".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
-            },
-            Field {
-                data_type: DataType::new_struct(
-                    vec![DataType::Int32, DataType::Float32],
-                    vec!["v4".to_string(), "v5".to_string()],
-                ),
-                name: "v3".into(),
-                sub_fields: vec![
-                    Field {
-                        data_type: DataType::Int32,
-                        name: "v4".into(),
-                        sub_fields: vec![],
-                        type_name: "".into(),
-                    },
-                    Field {
-                        data_type: DataType::Float32,
-                        name: "v5".into(),
-                        sub_fields: vec![],
-                        type_name: "".into(),
-                    },
-                ],
-                type_name: "".into(),
-            },
-        ]);
-
-        let json_chunk = chunk_to_json(chunk, &schema).unwrap();
-        let schema_json = schema_to_json(&schema, "test_db", "test_table");
-        assert_eq!(schema_json, serde_json::from_str::<Value>("{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"source\",\"fields\":[{\"field\":\"db\",\"optional\":false,\"type\":\"string\"},{\"field\":\"table\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Source\",\"optional\":false,\"type\":\"struct\"},{\"field\":\"op\",\"optional\":false,\"type\":\"string\"},{\"field\":\"ts_ms\",\"optional\":false,\"type\":\"int64\"}],\"name\":\"RisingWave.test_db.test_table.Envelope\",\"optional\":false,\"type\":\"struct\"}").unwrap());
-        assert_eq!(
-            serde_json::from_str::<Value>(&json_chunk[0]).unwrap(),
-            serde_json::from_str::<Value>("{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":0,\"v5\":0.0}}")
-                .unwrap()
-        );
 
         Ok(())
     }

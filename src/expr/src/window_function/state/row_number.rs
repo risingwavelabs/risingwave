@@ -18,7 +18,7 @@ use risingwave_common::types::Datum;
 use smallvec::SmallVec;
 
 use super::{StateEvictHint, StateKey, StatePos, WindowState};
-use crate::function::window::WindowFuncCall;
+use crate::window_function::WindowFuncCall;
 use crate::Result;
 
 #[derive(EstimateSize)]
@@ -83,7 +83,7 @@ mod tests {
 
     use super::*;
     use crate::agg::AggArgs;
-    use crate::function::window::{Frame, FrameBound, WindowFuncKind};
+    use crate::window_function::{Frame, FrameBound, WindowFuncKind};
 
     fn create_state_key(pk: i64) -> StateKey {
         StateKey {

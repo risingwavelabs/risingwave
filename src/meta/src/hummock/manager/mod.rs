@@ -66,7 +66,8 @@ use tonic::Streaming;
 use tracing::warn;
 
 use crate::hummock::compaction::{
-    CompactStatus, LocalSelectorStatistic, ManualCompactionOption, TombstoneCompactionSelector,
+    CompactStatus, EmergencySelector, LocalSelectorStatistic, ManualCompactionOption,
+    TombstoneCompactionSelector,
 };
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
@@ -821,6 +822,7 @@ impl HummockManager {
                 return Ok(None);
             }
         };
+
         let (current_version, watermark) = {
             let versioning_guard = read_lock!(self, versioning).await;
             let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
@@ -829,7 +831,6 @@ impl HummockManager {
                 .values()
                 .map(|v| v.minimal_pinned_snapshot)
                 .fold(max_committed_epoch, std::cmp::min);
-
             (versioning_guard.current_version.clone(), watermark)
         };
         if current_version.levels.get(&compaction_group_id).is_none() {
@@ -837,7 +838,8 @@ impl HummockManager {
             return Ok(None);
         }
 
-        let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic);
+        let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic)
+            || matches!(selector.task_type(), compact_task::TaskType::Emergency);
 
         let mut stats = LocalSelectorStatistic::default();
         let member_table_ids = &current_version
@@ -1277,8 +1279,6 @@ impl HummockManager {
         let label = if is_trivial_reclaim {
             "trivial-space-reclaim"
         } else if is_trivial_move {
-            // TODO: only support can_trivial_move in DynamicLevelCompcation, will check
-            // task_type next PR
             "trivial-move"
         } else {
             self.compactor_manager
@@ -1312,7 +1312,8 @@ impl HummockManager {
         );
 
         if !deterministic_mode
-            && matches!(compact_task.task_type(), compact_task::TaskType::Dynamic)
+            && (matches!(compact_task.task_type(), compact_task::TaskType::Dynamic)
+                || matches!(compact_task.task_type(), compact_task::TaskType::Emergency))
         {
             // only try send Dynamic compaction
             self.try_send_compaction_request(
@@ -2469,6 +2470,7 @@ impl HummockManager {
         }
     }
 
+    #[named]
     pub fn compaction_event_loop(
         hummock_manager: Arc<Self>,
         mut compactor_streams_change_rx: UnboundedReceiver<(
@@ -2558,7 +2560,32 @@ impl HummockManager {
                                 assert_ne!(0, pull_task_count);
                                 if let Some(compactor) = hummock_manager.compactor_manager.get_compactor(context_id) {
                                     if let Some((group, task_type)) = hummock_manager.auto_pick_compaction_group_and_type().await {
-                                        let selector: &mut Box<dyn LevelSelector> = compaction_selectors.get_mut(&task_type).unwrap();
+                                        let selector: &mut Box<dyn LevelSelector> = {
+                                            let versioning_guard = read_lock!(hummock_manager, versioning).await;
+                                            let versioning = versioning_guard.deref();
+
+                                            if versioning.write_limit.contains_key(&group) {
+                                                let enable_emergency_picker = match hummock_manager
+                                                    .compaction_group_manager
+                                                    .read()
+                                                    .await
+                                                    .try_get_compaction_group_config(group)
+                                                {
+                                                    Some(config) =>{ config.compaction_config.enable_emergency_picker },
+                                                    None => { unreachable!("compaction-group {} not exist", group) }
+                                                };
+
+                                                if enable_emergency_picker {
+                                                    compaction_selectors.get_mut(&TaskType::Emergency).unwrap()
+                                                } else {
+                                                    compaction_selectors.get_mut(&task_type).unwrap()
+                                                }
+                                            } else {
+                                                compaction_selectors.get_mut(&task_type).unwrap()
+                                            }
+
+                                        };
+
                                         for _ in 0..pull_task_count {
                                             let compact_task =
                                                 hummock_manager
@@ -2880,6 +2907,11 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn LevelSelector>> {
     compaction_selectors.insert(
         compact_task::TaskType::Tombstone,
         Box::<TombstoneCompactionSelector>::default(),
+    );
+
+    compaction_selectors.insert(
+        compact_task::TaskType::Emergency,
+        Box::<EmergencySelector>::default(),
     );
     compaction_selectors
 }
