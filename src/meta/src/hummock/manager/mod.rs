@@ -1306,6 +1306,11 @@ impl HummockManager {
         };
 
         self.metrics
+            .report_compact_task_count
+            .with_label_values(&[&compaction_group_id.to_string()])
+            .inc();
+
+        self.metrics
             .compact_frequency
             .with_label_values(&[
                 label,
@@ -1490,6 +1495,11 @@ impl HummockManager {
                 self.notify_last_version_delta(versioning);
             }
         }
+
+        self.metrics
+            .report_compact_task_count
+            .with_label_values(&[&cg_id.to_string()])
+            .inc();
 
         if !deterministic_mode {
             self.try_send_compaction_request(cg_id, compact_task::TaskType::Dynamic);

@@ -151,6 +151,8 @@ pub struct MetaMetrics {
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
 
+    pub report_compact_task_count: IntCounterVec,
+
     /// ********************************** Object Store ************************************
     // Object store related metrics (for backup/restore and version checkpoint)
     pub object_store_metric: Arc<ObjectStoreMetrics>,
@@ -613,6 +615,14 @@ impl MetaMetrics {
         let compaction_event_loop_iteration_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let report_compact_task_count = register_int_counter_vec_with_registry!(
+            "storage_report_compact_task_count",
+            "Count of report compact task trx count",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -676,6 +686,7 @@ impl MetaMetrics {
             branched_sst_count,
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
+            report_compact_task_count,
         }
     }
 

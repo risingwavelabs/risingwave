@@ -170,6 +170,16 @@ def section_compaction(outer_panels):
                             f"sum({metric('storage_level_compact_frequency')}) by (compactor, group, task_type, result)",
                             "{{task_type}} - {{result}} - group-{{group}} @ {{compactor}}",
                         ),
+
+                        panels.target(
+                            f"sum({metric('storage_report_compact_task_count')}) by (group)",
+                            "report_compact_task_count group-{{group}}",
+                        ),
+
+                        panels.target(
+                            f"sum({metric('storage_level_compact_frequency')}) by (group) / sum({metric('storage_report_compact_task_count')}) by (group)",
+                            "task_count_per_commit group-{{group}}",
+                        ),
                     ],
                 ),
                 panels.timeseries_count(
