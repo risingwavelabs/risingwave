@@ -218,6 +218,14 @@ pub fn insert_privatelink_broker_rewrite_map(
     let link_targets: Vec<AwsPrivateLinkItem> =
         serde_json::from_str(link_target_value.as_str()).map_err(|e| anyhow!(e))?;
 
+    if broker_addrs.len() != link_targets.len() {
+        return Err(anyhow!(
+            "The number of broker addrs {} does not match the number of private link targets {}",
+            broker_addrs.len(),
+            link_targets.len()
+        ));
+    }
+
     if let Some(endpoint) = privatelink_endpoint {
         for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
             // rewrite the broker address to endpoint:port
@@ -228,14 +236,6 @@ pub fn insert_privatelink_broker_rewrite_map(
             return Err(anyhow!("Privatelink endpoint not found.",));
         }
         let svc = svc.unwrap();
-        if broker_addrs.len() != link_targets.len() {
-            return Err(anyhow!(
-                "The number of broker addrs {} does not match the number of private link targets {}",
-                broker_addrs.len(),
-                link_targets.len()
-            ));
-        }
-
         for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
             if svc.dns_entries.is_empty() {
                 return Err(anyhow!(
