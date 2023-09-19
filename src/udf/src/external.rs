@@ -100,6 +100,7 @@ impl ArrowFlightUdfClient {
     }
 
     /// Call a function with streaming input and output.
+    #[panic_return = "Result<stream::Empty<_>>"]
     pub async fn call_stream(
         &self,
         id: &str,

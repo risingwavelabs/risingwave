@@ -22,7 +22,7 @@ arrow-schema = { workspace = true }
 async-trait = "0.1"
 auto_enums = "0.8"
 await-tree = { workspace = true }
-cfg-or-panic = "0.1"
+cfg-or-panic = "0.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = { version = "0.8", features = ["case-insensitive"] }
 ctor = "0.2"
