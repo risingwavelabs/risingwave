@@ -164,9 +164,7 @@ pub(crate) fn get_or_create_client(link: &str) -> Result<Arc<ArrowFlightUdfClien
         Ok(client)
     } else {
         // create new client
-        let client = Arc::new(tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(ArrowFlightUdfClient::connect(link))
-        })?);
+        let client = Arc::new(ArrowFlightUdfClient::connect_lazy(link)?);
         clients.insert(link.into(), Arc::downgrade(&client));
         Ok(client)
     }
