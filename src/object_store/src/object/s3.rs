@@ -618,7 +618,7 @@ impl S3ObjectStore {
         let (access_key_id, rest) = server.split_once(':').unwrap();
         let (secret_access_key, rest) = rest.split_once('@').unwrap();
         let (address, bucket) = rest.split_once('/').unwrap();
-
+        println!("这里");
         #[cfg(madsim)]
         let builder = aws_sdk_s3::config::Builder::new();
         #[cfg(not(madsim))]
@@ -629,7 +629,7 @@ impl S3ObjectStore {
 
         let config = builder
             .region(Region::new("custom"))
-            .endpoint_url(format!("http://{}", address))
+            .endpoint_url(format!("https://{}", address))
             .credentials_provider(Credentials::from_keys(
                 access_key_id,
                 secret_access_key,
