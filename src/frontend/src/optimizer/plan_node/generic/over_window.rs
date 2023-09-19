@@ -18,7 +18,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay};
-use risingwave_expr::function::window::{Frame, WindowFuncKind};
+use risingwave_expr::window_function::{Frame, WindowFuncKind};
 use risingwave_pb::expr::PbWindowFunction;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};

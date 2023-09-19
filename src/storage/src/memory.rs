@@ -20,7 +20,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;
@@ -501,7 +501,7 @@ impl MemoryStateStore {
 impl<R: RangeKv> RangeKvStateStore<R> {
     fn scan(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         epoch: u64,
         table_id: TableId,
         limit: Option<usize>,
@@ -538,7 +538,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
     #[allow(clippy::unused_async)]
     async fn get(
         &self,
-        key: Bytes,
+        key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
@@ -556,7 +556,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
     #[allow(clippy::unused_async)]
     async fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<Self::IterStream> {
@@ -575,7 +575,7 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
     #[allow(clippy::unused_async)]
     async fn ingest_batch(
         &self,
-        mut kv_pairs: Vec<(Bytes, StorageValue)>,
+        mut kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
@@ -594,7 +594,7 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
                 ),
                 None,
             )? {
-                delete_keys.insert(key.user_key.table_key.0);
+                delete_keys.insert(key.user_key.table_key);
             }
         }
         for key in delete_keys {
@@ -606,7 +606,7 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
             .ingest_batch(kv_pairs.into_iter().map(|(key, value)| {
                 size += key.len() + value.size();
                 (
-                    FullKey::new(write_options.table_id, TableKey(key), epoch),
+                    FullKey::new(write_options.table_id, key, epoch),
                     value.user_value,
                 )
             }))?;
@@ -729,8 +729,14 @@ mod tests {
         state_store
             .ingest_batch(
                 vec![
-                    (b"a".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
-                    (b"b".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
+                    (
+                        TableKey(Bytes::from(b"a".to_vec())),
+                        StorageValue::new_put(b"v1".to_vec()),
+                    ),
+                    (
+                        TableKey(Bytes::from(b"b".to_vec())),
+                        StorageValue::new_put(b"v1".to_vec()),
+                    ),
                 ],
                 vec![],
                 WriteOptions {
@@ -743,8 +749,14 @@ mod tests {
         state_store
             .ingest_batch(
                 vec![
-                    (b"a".to_vec().into(), StorageValue::new_put(b"v2".to_vec())),
-                    (b"b".to_vec().into(), StorageValue::new_delete()),
+                    (
+                        TableKey(Bytes::from(b"a".to_vec())),
+                        StorageValue::new_put(b"v2".to_vec()),
+                    ),
+                    (
+                        TableKey(Bytes::from(b"b".to_vec())),
+                        StorageValue::new_delete(),
+                    ),
                 ],
                 vec![],
                 WriteOptions {
@@ -758,8 +770,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(Bytes::from("a")),
-                        Bound::Included(Bytes::from("b")),
+                        Bound::Included(TableKey(Bytes::from("a"))),
+                        Bound::Included(TableKey(Bytes::from("b"))),
                     ),
                     0,
                     TableId::default(),
@@ -785,8 +797,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(Bytes::from("a")),
-                        Bound::Included(Bytes::from("b")),
+                        Bound::Included(TableKey(Bytes::from("a"))),
+                        Bound::Included(TableKey(Bytes::from("b"))),
                     ),
                     0,
                     TableId::default(),
@@ -804,8 +816,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(Bytes::from("a")),
-                        Bound::Included(Bytes::from("b")),
+                        Bound::Included(TableKey(Bytes::from("a"))),
+                        Bound::Included(TableKey(Bytes::from("b"))),
                     ),
                     1,
                     TableId::default(),
@@ -821,42 +833,54 @@ mod tests {
         );
         assert_eq!(
             state_store
-                .get(Bytes::from("a"), 0, ReadOptions::default(),)
+                .get(TableKey(Bytes::from("a")), 0, ReadOptions::default(),)
                 .await
                 .unwrap(),
             Some(Bytes::from("v1"))
         );
         assert_eq!(
             state_store
-                .get(Bytes::copy_from_slice(b"b"), 0, ReadOptions::default(),)
+                .get(
+                    TableKey(Bytes::copy_from_slice(b"b")),
+                    0,
+                    ReadOptions::default(),
+                )
                 .await
                 .unwrap(),
             Some(b"v1".to_vec().into())
         );
         assert_eq!(
             state_store
-                .get(Bytes::copy_from_slice(b"c"), 0, ReadOptions::default(),)
+                .get(
+                    TableKey(Bytes::copy_from_slice(b"c")),
+                    0,
+                    ReadOptions::default(),
+                )
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             state_store
-                .get(Bytes::copy_from_slice(b"a"), 1, ReadOptions::default(),)
+                .get(
+                    TableKey(Bytes::copy_from_slice(b"a")),
+                    1,
+                    ReadOptions::default(),
+                )
                 .await
                 .unwrap(),
             Some(b"v2".to_vec().into())
         );
         assert_eq!(
             state_store
-                .get(Bytes::from("b"), 1, ReadOptions::default(),)
+                .get(TableKey(Bytes::from("b")), 1, ReadOptions::default(),)
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             state_store
-                .get(Bytes::from("c"), 1, ReadOptions::default())
+                .get(TableKey(Bytes::from("c")), 1, ReadOptions::default())
                 .await
                 .unwrap(),
             None

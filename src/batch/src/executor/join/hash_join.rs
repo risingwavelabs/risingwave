@@ -1905,8 +1905,8 @@ mod tests {
     }
 
     fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) -> bool {
-        assert!(left.visibility().is_none());
-        assert!(right.visibility().is_none());
+        assert!(left.is_compacted());
+        assert!(right.is_compacted());
 
         if left.cardinality() != right.cardinality() {
             return false;

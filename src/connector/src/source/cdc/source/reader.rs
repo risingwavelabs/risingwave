@@ -131,6 +131,9 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
             snapshot_done: self.snapshot_done,
         };
 
+        let source_id = get_event_stream_request.source_id.to_string();
+        let source_type = get_event_stream_request.source_type.to_string();
+
         std::thread::spawn(move || {
             let mut env = JVM
                 .as_ref()
@@ -163,6 +166,11 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
 
         while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {
             tracing::debug!("receive events {:?}", events.len());
+            self.source_ctx
+                .metrics
+                .connector_source_rows_received
+                .with_label_values(&[&source_type, &source_id])
+                .inc_by(events.len() as u64);
             let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
             yield msgs;
         }

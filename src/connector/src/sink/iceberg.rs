@@ -24,7 +24,6 @@ use icelake::config::{TableConfig, TableConfigRef};
 use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, DataFile};
 use icelake::Table;
-use itertools::Itertools;
 use opendal::services::S3;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
@@ -289,12 +288,7 @@ impl IcebergWriter {
         let (mut chunk, ops) = chunk.into_parts();
 
         let filters =
-            Bitmap::from_bool_slice(&ops.iter().map(|op| *op == Op::Insert).collect_vec());
-        let filters = if let Some(ori_vis) = chunk.visibility() {
-            ori_vis & &filters
-        } else {
-            filters
-        };
+            chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
 
         chunk.set_visibility(filters);
         let chunk = RecordBatch::try_from(&chunk.compact())

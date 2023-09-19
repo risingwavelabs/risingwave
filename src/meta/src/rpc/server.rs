@@ -352,7 +352,7 @@ pub async fn start_service_as_election_leader(
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let env = MetaSrvEnv::new(opts, init_system_params, meta_store.clone()).await?;
+    let env = MetaSrvEnv::new(opts.clone(), init_system_params, meta_store.clone()).await?;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
 
     let system_params_manager = env.system_params_manager_ref();
@@ -426,8 +426,9 @@ pub async fn start_service_as_election_leader(
             fragment_manager: fragment_manager.clone(),
             compute_clients: ComputeClientPool::default(),
             meta_store: env.meta_store_ref(),
+            ui_path: address_info.ui_path,
         };
-        let task = tokio::spawn(dashboard_service.serve(address_info.ui_path));
+        let task = tokio::spawn(dashboard_service.serve());
         Some(task)
     } else {
         None

@@ -911,6 +911,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::Level0MaxCompactFileNumber(c) => {
                 target.level0_max_compact_file_number = *c;
             }
+            MutableConfig::EnableEmergencyPicker(c) => {
+                target.enable_emergency_picker = *c;
+            }
         }
     }
 }

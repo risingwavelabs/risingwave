@@ -32,6 +32,7 @@ pprof = { version = "0.12", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
 risingwave_common = { workspace = true }
 risingwave_variables = { workspace = true }
+rlimit = "0.10"
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

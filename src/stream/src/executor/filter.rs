@@ -15,7 +15,7 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk, Vis};
+use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -72,10 +72,7 @@ impl FilterExecutor {
         let mut new_visibility = BitmapBuilder::with_capacity(n);
         let mut last_res = false;
 
-        assert!(match vis {
-            Vis::Compact(c) => c == n,
-            Vis::Bitmap(ref m) => m.len() == n,
-        });
+        assert_eq!(vis.len(), n);
 
         let ArrayImpl::Bool(bool_array) = &*filter else {
             panic!("unmatched type: filter expr returns a non-null array");
@@ -127,7 +124,7 @@ impl FilterExecutor {
         let new_visibility = new_visibility.finish();
 
         Ok(if new_visibility.count_ones() > 0 {
-            let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
+            let new_chunk = StreamChunk::with_visibility(new_ops, columns, new_visibility);
             Some(new_chunk)
         } else {
             None

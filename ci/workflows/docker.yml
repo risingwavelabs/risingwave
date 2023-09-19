@@ -44,7 +44,7 @@ steps:
             DOCKER_TOKEN: docker-token
     retry: *auto-retry
 
-  - label: "release"
+  - label: "pre build binary"
     command: "ci/scripts/release.sh"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
