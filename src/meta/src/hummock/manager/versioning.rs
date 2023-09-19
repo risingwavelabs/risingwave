@@ -357,27 +357,6 @@ pub(super) fn calc_new_write_limits(
             continue;
         }
 
-        if l0_non_overlapping_sub_level_count + l0_overlapping_file_count
-            > config
-                .compaction_config
-                .level0_stop_write_threshold_merge_iter_count as usize
-        {
-            new_write_limits.insert(
-                *id,
-                WriteLimit {
-                    table_ids: levels.member_table_ids.clone(),
-                    reason: format!(
-                        "too many L0 files and level non-overlapping sub levels: {} l0_overlapping_file_count {} level0_stop_write_threshold_merge_iter_count {}",
-                        l0_non_overlapping_sub_level_count,
-                        l0_overlapping_file_count,
-                        config
-                            .compaction_config
-                            .level0_stop_write_threshold_merge_iter_count
-                    ),
-                },
-            );
-            continue;
-        }
         // No condition is met.
         new_write_limits.remove(id);
     }

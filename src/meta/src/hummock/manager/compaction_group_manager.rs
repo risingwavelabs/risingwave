@@ -398,7 +398,6 @@ impl HummockManager {
             .await?;
         if config_to_update.iter().any(|c| {
             matches!(c, MutableConfig::Level0StopWriteThresholdSubLevelNumber(_))
-                || matches!(c, MutableConfig::Level0StopWriteThresholdMergeIterCount(_))
                 || matches!(
                     c,
                     MutableConfig::Level0StopWriteThresholdOverlappingFileCount(_)

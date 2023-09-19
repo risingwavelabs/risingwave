@@ -555,7 +555,6 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_overlapping_sub_level_compact_level_count,
             enable_emergency_picker,
             level0_stop_write_threshold_overlapping_file_count,
-            level0_stop_write_threshold_overlapping_file_count,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,

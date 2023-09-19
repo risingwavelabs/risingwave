@@ -1208,7 +1208,7 @@ pub mod default {
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
-        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_OVERLAPPING_FILE_COUNT: u64 = 384;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_OVERLAPPING_FILE_COUNT: u64 = 100;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
