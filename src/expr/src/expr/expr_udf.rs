@@ -18,6 +18,7 @@ use std::sync::{Arc, LazyLock, Mutex, Weak};
 
 use arrow_schema::{Field, Fields, Schema, SchemaRef};
 use await_tree::InstrumentAwait;
+use cfg_or_panic::cfg_or_panic;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
@@ -39,13 +40,13 @@ pub struct UdfExpression {
     span: await_tree::Span,
 }
 
-#[cfg(not(madsim))]
 #[async_trait::async_trait]
 impl Expression for UdfExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
+    #[cfg_or_panic(not(madsim))]
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let vis = input.visibility();
         let mut columns = Vec::with_capacity(self.children.len());
@@ -56,6 +57,7 @@ impl Expression for UdfExpression {
         self.eval_inner(columns, vis).await
     }
 
+    #[cfg_or_panic(not(madsim))]
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
@@ -112,7 +114,7 @@ impl UdfExpression {
     }
 }
 
-#[cfg(not(madsim))]
+#[cfg_or_panic(not(madsim))]
 impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
     type Error = ExprError;
 
@@ -165,30 +167,5 @@ pub(crate) fn get_or_create_client(link: &str) -> Result<Arc<ArrowFlightUdfClien
         let client = Arc::new(ArrowFlightUdfClient::connect_lazy(link)?);
         clients.insert(link.into(), Arc::downgrade(&client));
         Ok(client)
-    }
-}
-
-#[cfg(madsim)]
-#[async_trait::async_trait]
-impl Expression for UdfExpression {
-    fn return_type(&self) -> DataType {
-        self.return_type.clone()
-    }
-
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        panic!("UDF is not supported in simulation yet");
-    }
-
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        panic!("UDF is not supported in simulation yet");
-    }
-}
-
-#[cfg(madsim)]
-impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
-    type Error = ExprError;
-
-    fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        panic!("UDF is not supported in simulation yet");
     }
 }
