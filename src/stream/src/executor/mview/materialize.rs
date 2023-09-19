@@ -22,7 +22,7 @@ use enum_as_inner::EnumAsInner;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
-use risingwave_common::array::{Op, StreamChunk, Vis};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
 use risingwave_common::estimate_size::EstimateSize;
@@ -281,7 +281,7 @@ fn generate_output(
     }
 
     if let Some(new_data_chunk) = data_chunk_builder.consume_all() {
-        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
+        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec());
         Ok(Some(new_stream_chunk))
     } else {
         Ok(None)
@@ -309,15 +309,14 @@ impl MaterializeBuffer {
     ) -> Self {
         let (data_chunk, ops) = stream_chunk.into_parts();
 
-        let value_chunk = if let Some(ref value_indices) = value_indices {
-            data_chunk.clone().reorder_columns(value_indices)
+        let values = if let Some(ref value_indices) = value_indices {
+            data_chunk.project(value_indices).serialize()
         } else {
-            data_chunk.clone()
+            data_chunk.serialize()
         };
-        let values = value_chunk.serialize();
 
         let mut pks = vec![vec![]; data_chunk.capacity()];
-        let key_chunk = data_chunk.reorder_columns(pk_indices);
+        let key_chunk = data_chunk.project(pk_indices);
         key_chunk
             .rows_with_holes()
             .zip_eq_fast(pks.iter_mut())
@@ -330,24 +329,12 @@ impl MaterializeBuffer {
         let (_, vis) = key_chunk.into_parts();
 
         let mut buffer = MaterializeBuffer::new();
-        match vis {
-            Vis::Bitmap(vis) => {
-                for ((op, key, value), vis) in izip!(ops, pks, values).zip_eq_debug(vis.iter()) {
-                    if vis {
-                        match op {
-                            Op::Insert | Op::UpdateInsert => buffer.insert(key, value),
-                            Op::Delete | Op::UpdateDelete => buffer.delete(key, value),
-                        };
-                    }
-                }
-            }
-            Vis::Compact(_) => {
-                for (op, key, value) in izip!(ops, pks, values) {
-                    match op {
-                        Op::Insert | Op::UpdateInsert => buffer.insert(key, value),
-                        Op::Delete | Op::UpdateDelete => buffer.delete(key, value),
-                    };
-                }
+        for ((op, key, value), vis) in izip!(ops.iter(), pks, values).zip_eq_debug(vis.iter()) {
+            if vis {
+                match op {
+                    Op::Insert | Op::UpdateInsert => buffer.insert(key, value),
+                    Op::Delete | Op::UpdateDelete => buffer.delete(key, value),
+                };
             }
         }
         buffer

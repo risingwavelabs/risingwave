@@ -18,7 +18,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay};
-use risingwave_expr::function::window::{Frame, WindowFuncKind};
+use risingwave_expr::window_function::{Frame, WindowFuncKind};
 use risingwave_pb::expr::PbWindowFunction;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
@@ -28,7 +28,8 @@ use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMappingRewriteExt;
 use crate::OptimizerContextRef;
 
-/// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
+/// Rewritten version of [`crate::expr::WindowFunction`] which uses `InputRef` instead of
+/// `ExprImpl`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlanWindowFunction {
     pub kind: WindowFuncKind,
@@ -177,6 +178,10 @@ impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
     pub fn order_key(&self) -> &[ColumnOrder] {
         assert!(self.funcs_have_same_partition_and_order());
         &self.window_functions[0].order_by
+    }
+
+    pub fn decompose(self) -> (PlanRef, Vec<PlanWindowFunction>) {
+        (self.input, self.window_functions)
     }
 }
 

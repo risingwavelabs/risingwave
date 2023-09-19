@@ -15,10 +15,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use bytes::{Buf, Bytes};
 use chrono::offset::Utc;
 use chrono::DateTime;
 use clap::Args;
+use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::types::ToText;
 use risingwave_common::util::epoch::Epoch;
@@ -29,7 +31,7 @@ use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_object_store::object::{BlockLocation, ObjectMetadata, ObjectStoreImpl};
+use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
 use risingwave_pb::hummock::{Level, SstableInfo};
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
@@ -112,10 +114,14 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
         if let Some(obj_id) = &args.object_id {
             let obj_store = sstable_store.store();
             let obj_path = sstable_store.get_sst_data_path(*obj_id);
-            let obj = &obj_store.list(&obj_path).await?[0];
-            print_object(obj);
-            let meta_offset = get_meta_offset_from_object(obj, obj_store.as_ref()).await?;
-            let obj_id = sstable_store.get_object_id_from_path(&obj.key);
+            let mut obj_metadata_iter = obj_store.list(&obj_path).await?;
+            let obj = obj_metadata_iter
+                .try_next()
+                .await?
+                .ok_or_else(|| anyhow!(format!("object {obj_path} doesn't exist")))?;
+            print_object(&obj);
+            let meta_offset = get_meta_offset_from_object(&obj, obj_store.as_ref()).await?;
+            let obj_id = SstableStore::get_object_id_from_path(&obj.key);
             sst_dump_via_sstable_store(
                 &sstable_store,
                 obj_id,
@@ -126,12 +132,14 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             )
             .await?;
         } else {
-            let objects = sstable_store.list_ssts_from_object_store().await?;
-            for obj in objects {
+            let mut metadata_iter = sstable_store
+                .list_object_metadata_from_object_store()
+                .await?;
+            while let Some(obj) = metadata_iter.try_next().await? {
                 print_object(&obj);
                 let meta_offset =
                     get_meta_offset_from_object(&obj, sstable_store.store().as_ref()).await?;
-                let obj_id = sstable_store.get_object_id_from_path(&obj.key);
+                let obj_id = SstableStore::get_object_id_from_path(&obj.key);
                 sst_dump_via_sstable_store(
                     &sstable_store,
                     obj_id,
@@ -168,20 +176,15 @@ async fn get_meta_offset_from_object(
     obj: &ObjectMetadata,
     obj_store: &ObjectStoreImpl,
 ) -> anyhow::Result<u64> {
-    let meta_offset_loc = BlockLocation {
-        offset: obj.total_size
-            - (
-                // version, magic
-                2 * std::mem::size_of::<u32>() +
-                // footer, checksum
-                2 * std::mem::size_of::<u64>()
-            ),
-        size: std::mem::size_of::<u64>(),
-    };
-    Ok(obj_store
-        .read(&obj.key, Some(meta_offset_loc))
-        .await?
-        .get_u64_le())
+    let start = obj.total_size
+        - (
+            // version, magic
+            2 * std::mem::size_of::<u32>() +
+        // footer, checksum
+        2 * std::mem::size_of::<u64>()
+        );
+    let end = start + std::mem::size_of::<u64>();
+    Ok(obj_store.read(&obj.key, start..end).await?.get_u64_le())
 }
 
 pub async fn sst_dump_via_sstable_store(
@@ -273,11 +276,8 @@ async fn print_block(
 
     // Retrieve encoded block data in bytes
     let store = sstable_store.store();
-    let block_loc = BlockLocation {
-        offset: block_meta.offset as usize,
-        size: block_meta.len as usize,
-    };
-    let block_data = store.read(&data_path, Some(block_loc)).await?;
+    let range = block_meta.offset as usize..block_meta.offset as usize + block_meta.len as usize;
+    let block_data = store.read(&data_path, range).await?;
 
     // Retrieve checksum and compression algorithm used from the encoded block data
     let len = block_data.len();

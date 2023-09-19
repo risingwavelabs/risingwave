@@ -24,8 +24,12 @@ import java.util.Map;
 import java.util.Properties;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.text.StringSubstitutor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class DbzConnectorConfig {
+    private static final Logger LOG = LoggerFactory.getLogger(DbzConnectorConfig.class);
+
     /* Debezium private configs */
     public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
             "debezium.embedded.shutdown.pause.before.interrupt.ms";
@@ -55,6 +59,8 @@ public class DbzConnectorConfig {
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
+
+    private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";
 
     private static Map<String, String> extractDebeziumProperties(
             Map<String, String> userProperties) {
@@ -94,6 +100,13 @@ public class DbzConnectorConfig {
             String startOffset,
             Map<String, String> userProps,
             boolean snapshotDone) {
+        LOG.info(
+                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}",
+                source,
+                sourceId,
+                startOffset,
+                snapshotDone);
+
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
         if (source == SourceTypeE.MYSQL) {
@@ -102,12 +115,16 @@ public class DbzConnectorConfig {
             // reading from the given offset
             if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
                 // 'snapshot.mode=schema_only_recovery' must be configured if binlog offset is
-                // specified.
-                // It only snapshots the schemas, not the data, and continue binlog reading from the
-                // specified offset
+                // specified. It only snapshots the schemas, not the data, and continue binlog
+                // reading from the specified offset
                 mysqlProps.setProperty("snapshot.mode", "schema_only_recovery");
                 mysqlProps.setProperty(
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+            } else if (mysqlProps.getProperty("snapshot.mode").equals(SNAPSHOT_MODE_BACKFILL)) {
+                // only snapshot table schemas which is not required by the source parser
+                mysqlProps.setProperty("snapshot.mode", "schema_only");
+                // disable snapshot locking at all
+                mysqlProps.setProperty("snapshot.locking.mode", "none");
             }
 
             dbzProps.putAll(mysqlProps);
@@ -140,7 +157,9 @@ public class DbzConnectorConfig {
         }
 
         var otherProps = extractDebeziumProperties(userProps);
-        dbzProps.putAll(otherProps);
+        for (var entry : otherProps.entrySet()) {
+            dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
+        }
 
         this.sourceId = sourceId;
         this.sourceType = source;

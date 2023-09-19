@@ -15,7 +15,8 @@
 use risingwave_pb::expr::expr_node;
 
 use super::{ExprImpl, ExprVisitor};
-struct ImpureAnalyzer {}
+use crate::expr::FunctionCall;
+pub(crate) struct ImpureAnalyzer {}
 
 impl ExprVisitor<bool> for ImpureAnalyzer {
     fn merge(a: bool, b: bool) -> bool {
@@ -64,6 +65,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::AtTimeZone
             | expr_node::Type::DateTrunc
             | expr_node::Type::ToTimestamp1
+            | expr_node::Type::CharToDate
             | expr_node::Type::CastWithTimeZone
             | expr_node::Type::AddWithTimeZone
             | expr_node::Type::SubtractWithTimeZone
@@ -71,6 +73,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Substr
             | expr_node::Type::Length
             | expr_node::Type::Like
+            | expr_node::Type::ILike
             | expr_node::Type::Upper
             | expr_node::Type::Lower
             | expr_node::Type::Trim
@@ -100,6 +103,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::BitLength
             | expr_node::Type::Overlay
             | expr_node::Type::RegexpMatch
+            | expr_node::Type::RegexpReplace
+            | expr_node::Type::RegexpCount
             | expr_node::Type::Pow
             | expr_node::Type::Exp
             | expr_node::Type::Ln
@@ -125,6 +130,9 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Sqrt
             | expr_node::Type::Cbrt
             | expr_node::Type::Sign
+            | expr_node::Type::Scale
+            | expr_node::Type::MinScale
+            | expr_node::Type::TrimScale
             | expr_node::Type::Left
             | expr_node::Type::Right
             | expr_node::Type::Degrees
@@ -145,10 +153,14 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Row
             | expr_node::Type::ArrayToString
             | expr_node::Type::ArrayCat
+            | expr_node::Type::ArrayMax
+            | expr_node::Type::ArraySum
+            | expr_node::Type::ArraySort
             | expr_node::Type::ArrayAppend
             | expr_node::Type::ArrayPrepend
             | expr_node::Type::FormatType
             | expr_node::Type::ArrayDistinct
+            | expr_node::Type::ArrayMin
             | expr_node::Type::ArrayDims
             | expr_node::Type::ArrayLength
             | expr_node::Type::Cardinality
@@ -161,6 +173,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbTypeof
             | expr_node::Type::JsonbArrayLength
+            | expr_node::Type::IsJson
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
             | expr_node::Type::Cotd
@@ -181,7 +194,9 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Sha512
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
-            | expr_node::Type::StringToArray =>
+            | expr_node::Type::StringToArray
+            | expr_node::Type::Format
+            | expr_node::Type::ArrayTransform =>
             // expression output is deterministic(same result for the same input)
             {
                 let x = func_call
@@ -193,7 +208,12 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
                 x
             }
             // expression output is not deterministic
-            expr_node::Type::Vnode | expr_node::Type::Proctime => true,
+            expr_node::Type::Vnode
+            | expr_node::Type::Proctime
+            | expr_node::Type::PgSleep
+            | expr_node::Type::PgSleepFor
+            | expr_node::Type::PgSleepUntil
+            | expr_node::Type::ColDescription => true,
         }
     }
 }
@@ -201,9 +221,15 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
 pub fn is_pure(expr: &ExprImpl) -> bool {
     !is_impure(expr)
 }
+
 pub fn is_impure(expr: &ExprImpl) -> bool {
     let mut a = ImpureAnalyzer {};
     a.visit_expr(expr)
+}
+
+pub fn is_impure_func_call(func_call: &FunctionCall) -> bool {
+    let mut a = ImpureAnalyzer {};
+    a.visit_function_call(func_call)
 }
 
 #[cfg(test)]

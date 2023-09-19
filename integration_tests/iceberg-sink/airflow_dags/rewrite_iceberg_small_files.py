@@ -19,8 +19,8 @@ with DAG(
 
     spark_sql_rewrite_files = SparkSubmitOperator(
         application=PYSPARK_APPLICATION_PATH,
-        task_id="spark_sql_rewrite_files", 
-        packages=SPARK_PACKAGES, 
-        conn_id = "spark_local" 
+        task_id="spark_sql_rewrite_files",
+        packages=SPARK_PACKAGES,
+        conn_id = "spark_local"
     )
 

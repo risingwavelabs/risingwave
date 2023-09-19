@@ -19,18 +19,14 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
-use super::expr_array_concat::ArrayConcatExpression;
+use super::expr_array_transform::ArrayTransformExpression;
 use super::expr_case::CaseExpression;
 use super::expr_coalesce::CoalesceExpression;
-use super::expr_concat_ws::ConcatWsExpression;
 use super::expr_field::FieldExpression;
 use super::expr_in::InExpression;
-use super::expr_nested_construct::NestedConstructExpression;
-use super::expr_regexp::RegexpMatchExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
-use crate::expr::expr_proctime::ProcTimeExpression;
 use crate::expr::{
     BoxedExpression, Expression, InputRefExpression, LiteralExpression, TryFromExprNodeBoxed,
 };
@@ -58,19 +54,8 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         E::In => InExpression::try_from_boxed(prost),
         E::Case => CaseExpression::try_from_boxed(prost),
         E::Coalesce => CoalesceExpression::try_from_boxed(prost),
-        E::ConcatWs => ConcatWsExpression::try_from_boxed(prost),
         E::Field => FieldExpression::try_from_boxed(prost),
-        E::Array => NestedConstructExpression::try_from_boxed(prost),
-        E::Row => NestedConstructExpression::try_from_boxed(prost),
-        E::RegexpMatch => RegexpMatchExpression::try_from_boxed(prost),
-        E::ArrayCat | E::ArrayAppend | E::ArrayPrepend => {
-            // Now we implement these three functions as a single expression for the
-            // sake of simplicity. If performance matters at some time, we can split
-            // the implementation to improve performance.
-            ArrayConcatExpression::try_from_boxed(prost)
-        }
         E::Vnode => VnodeExpression::try_from_boxed(prost),
-        E::Proctime => ProcTimeExpression::try_from_boxed(prost),
 
         _ => {
             let ret_type = DataType::from(prost.get_return_type().unwrap());
@@ -91,6 +76,12 @@ pub fn build_func(
     ret_type: DataType,
     children: Vec<BoxedExpression>,
 ) -> Result<BoxedExpression> {
+    if func == PbType::ArrayTransform {
+        // TODO: The function framework can't handle the lambda arg now.
+        let [array, lambda] = <[BoxedExpression; 2]>::try_from(children).unwrap();
+        return Ok(ArrayTransformExpression { array, lambda }.boxed());
+    }
+
     let args = children
         .iter()
         .map(|c| c.return_type().into())
@@ -106,6 +97,7 @@ pub fn build_func(
                     ret_type: (&ret_type).into(),
                     set_returning: false,
                     deprecated: false,
+                    append_only: false,
                 }
             ))
         })?;

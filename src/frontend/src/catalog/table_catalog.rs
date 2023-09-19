@@ -24,7 +24,7 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
-use risingwave_pb::catalog::PbTable;
+use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
@@ -140,12 +140,15 @@ pub struct TableCatalog {
     pub watermark_columns: FixedBitSet,
 
     /// Optional field specifies the distribution key indices in pk.
-    /// See https://github.com/risingwavelabs/risingwave/issues/8377 for more information.
+    /// See <https://github.com/risingwavelabs/risingwave/issues/8377> for more information.
     pub dist_key_in_pk: Vec<usize>,
 
     pub created_at_epoch: Option<Epoch>,
 
     pub initialized_at_epoch: Option<Epoch>,
+
+    /// Indicate whether to use watermark cache for state table.
+    pub cleaned_by_watermark: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -230,6 +233,11 @@ impl TableCatalog {
 
     pub fn with_id(mut self, id: TableId) -> Self {
         self.id = id;
+        self
+    }
+
+    pub fn with_cleaned_by_watermark(mut self, cleaned_by_watermark: bool) -> Self {
+        self.cleaned_by_watermark = cleaned_by_watermark;
         self
     }
 
@@ -392,6 +400,8 @@ impl TableCatalog {
             cardinality: Some(self.cardinality.to_protobuf()),
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
+            cleaned_by_watermark: self.cleaned_by_watermark,
+            stream_job_status: PbStreamJobStatus::Creating.into(),
         }
     }
 
@@ -407,6 +417,14 @@ impl TableCatalog {
             .iter()
             .filter(|c| c.is_generated())
             .map(|c| c.name())
+    }
+
+    pub fn generated_col_idxes(&self) -> impl Iterator<Item = usize> + '_ {
+        self.columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.is_generated())
+            .map(|(i, _)| i)
     }
 
     pub fn default_columns(&self) -> impl Iterator<Item = (usize, ExprImpl)> + '_ {
@@ -497,6 +515,7 @@ impl From<PbTable> for TableCatalog {
                 .unwrap_or_else(Cardinality::unknown),
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
+            cleaned_by_watermark: matches!(tb.cleaned_by_watermark, true),
         }
     }
 }
@@ -524,7 +543,7 @@ mod tests {
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_pb::catalog::PbTable;
+    use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
     use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
     use super::*;
@@ -586,6 +605,8 @@ mod tests {
             dist_key_in_pk: vec![],
             cardinality: None,
             created_at_epoch: None,
+            cleaned_by_watermark: false,
+            stream_job_status: PbStreamJobStatus::Creating.into(),
         }
         .into();
 
@@ -639,6 +660,7 @@ mod tests {
                 cardinality: Cardinality::unknown(),
                 created_at_epoch: None,
                 initialized_at_epoch: None,
+                cleaned_by_watermark: false,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

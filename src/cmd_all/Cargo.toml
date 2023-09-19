@@ -24,16 +24,17 @@ clap = { version = "4", features = ["cargo", "derive"] }
 console = "0.15"
 const-str = "0.5"
 prometheus = { version = "0.13" }
-risingwave_cmd = { path = "../cmd" }
-risingwave_common = { path = "../common" }
-risingwave_compactor = { path = "../storage/compactor" }
-risingwave_compute = { path = "../compute" }
-risingwave_ctl = { path = "../ctl" }
-risingwave_frontend = { path = "../frontend" }
-risingwave_meta = { path = "../meta" }
-risingwave_rt = { path = "../utils/runtime" }
-strum = "0.24"
-strum_macros = "0.24"
+risingwave_cmd = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_compactor = { workspace = true }
+risingwave_compute = { workspace = true }
+risingwave_ctl = { workspace = true }
+risingwave_frontend = { workspace = true }
+risingwave_meta = { workspace = true }
+risingwave_rt = { workspace = true }
+shell-words = "1.1.0"
+strum = "0.25"
+strum_macros = "0.25"
 tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -48,15 +49,27 @@ tracing = { version = "0.1" }
 workspace-config = { path = "../utils/workspace-config" }
 workspace-hack = { path = "../workspace-hack" }
 
+[dev-dependencies]
+expect-test = "1"
+
 [build-dependencies]
-vergen = { version = "8", default-features = false, features = ["build", "git", "gitcl"] }
+vergen = { version = "8", default-features = false, features = [
+    "build",
+    "git",
+    "gitcl",
+] }
 
 [target.'cfg(enable_task_local_alloc)'.dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { version = "0.5", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tikv-jemallocator = { workspace = true, features = [
+    "unprefixed_malloc_on_supported_platforms",
+] }
 
 [[bin]]
 name = "risingwave"
 path = "src/bin/risingwave.rs"
+
+[lints]
+workspace = true

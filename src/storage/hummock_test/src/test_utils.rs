@@ -18,22 +18,23 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
 };
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
-use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::catalog::{PbTable, Table};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::version_update_payload;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
-    FullKeyFilterKeyExtractor,
+    FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
+    RpcFilterKeyExtractorManager,
 };
 use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::event_handler::HummockEvent;
@@ -49,9 +50,19 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::mock_notification_client::get_notification_client_for_test;
 
+pub fn gen_key_from_bytes(vnode: VirtualNode, payload: &[u8]) -> TableKey<Bytes> {
+    TableKey(Bytes::from(
+        [vnode.to_be_bytes().as_slice(), payload].concat(),
+    ))
+}
+
+pub fn gen_key_from_str(vnode: VirtualNode, payload: &str) -> TableKey<Bytes> {
+    gen_key_from_bytes(vnode, payload.as_bytes())
+}
+
 pub async fn prepare_first_valid_version(
-    env: MetaSrvEnv<MemStore>,
-    hummock_manager_ref: HummockManagerRef<MemStore>,
+    env: MetaSrvEnv,
+    hummock_manager_ref: HummockManagerRef,
     worker_node: WorkerNode,
 ) -> (
     PinnedVersion,
@@ -66,7 +77,7 @@ pub async fn prepare_first_valid_version(
     let observer_manager = ObserverManager::new(
         notification_client,
         HummockObserverNode::new(
-            Arc::new(FilterKeyExtractorManager::default()),
+            Arc::new(RpcFilterKeyExtractorManager::default()),
             backup_manager,
             tx.clone(),
             write_limiter,
@@ -92,7 +103,7 @@ pub async fn prepare_first_valid_version(
 pub trait TestIngestBatch: LocalStateStore {
     async fn ingest_batch(
         &mut self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
+        kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize>;
@@ -102,7 +113,7 @@ pub trait TestIngestBatch: LocalStateStore {
 impl<S: LocalStateStore> TestIngestBatch for S {
     async fn ingest_batch(
         &mut self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
+        kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
@@ -163,20 +174,27 @@ pub async fn with_hummock_storage_v2(
     (hummock_storage, meta_client)
 }
 pub fn update_filter_key_extractor_for_table_ids(
-    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
+    filter_key_extractor_manager_ref: &FilterKeyExtractorManager,
     table_ids: &[u32],
 ) {
+    let rpc_filter_key_extractor_manager = match filter_key_extractor_manager_ref {
+        FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            rpc_filter_key_extractor_manager,
+        ) => rpc_filter_key_extractor_manager,
+        FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+    };
+
     for table_id in table_ids {
-        filter_key_extractor_manager_ref.update(
+        rpc_filter_key_extractor_manager.update(
             *table_id,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         )
     }
 }
 
-pub async fn register_tables_with_id_for_test<S: MetaStore>(
-    filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
-    hummock_manager_ref: &HummockManagerRef<S>,
+pub async fn register_tables_with_id_for_test(
+    filter_key_extractor_manager: &FilterKeyExtractorManager,
+    hummock_manager_ref: &HummockManagerRef,
     table_ids: &[u32],
 ) {
     update_filter_key_extractor_for_table_ids(filter_key_extractor_manager, table_ids);
@@ -189,19 +207,25 @@ pub async fn register_tables_with_id_for_test<S: MetaStore>(
 }
 
 pub fn update_filter_key_extractor_for_tables(
-    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
+    filter_key_extractor_manager: &FilterKeyExtractorManager,
     tables: &[PbTable],
 ) {
+    let rpc_filter_key_extractor_manager = match filter_key_extractor_manager {
+        FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            rpc_filter_key_extractor_manager,
+        ) => rpc_filter_key_extractor_manager,
+        FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
+    };
     for table in tables {
-        filter_key_extractor_manager_ref.update(
+        rpc_filter_key_extractor_manager.update(
             table.id,
             Arc::new(FilterKeyExtractorImpl::from_table(table)),
         )
     }
 }
-pub async fn register_tables_with_catalog_for_test<S: MetaStore>(
-    filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
-    hummock_manager_ref: &HummockManagerRef<S>,
+pub async fn register_tables_with_catalog_for_test(
+    filter_key_extractor_manager: &FilterKeyExtractorManager,
+    hummock_manager_ref: &HummockManagerRef,
     tables: &[Table],
 ) {
     update_filter_key_extractor_for_tables(filter_key_extractor_manager, tables);
@@ -216,7 +240,7 @@ pub async fn register_tables_with_catalog_for_test<S: MetaStore>(
 
 pub struct HummockTestEnv {
     pub storage: HummockStorage,
-    pub manager: HummockManagerRef<MemStore>,
+    pub manager: HummockManagerRef,
     pub meta_client: Arc<MockHummockMetaClient>,
 }
 

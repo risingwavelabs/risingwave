@@ -27,6 +27,7 @@ use crate::util::iter_util::ZipEqDebug;
 
 // Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
 
+// note: DataChunk -> arrow RecordBatch will IGNORE the visibilities.
 impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
     type Error = ArrayError;
 
@@ -47,8 +48,9 @@ impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
             .collect();
 
         let schema = Arc::new(Schema::new(fields));
-
-        arrow_array::RecordBatch::try_new(schema, columns)
+        let opts =
+            arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
+        arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
             .map_err(|err| ArrayError::ToArrow(err.to_string()))
     }
 }
@@ -184,7 +186,7 @@ impl TryFrom<&DataType> for arrow_schema::DataType {
             DataType::Timestamp => Ok(Self::Timestamp(arrow_schema::TimeUnit::Microsecond, None)),
             DataType::Timestamptz => Ok(Self::Timestamp(
                 arrow_schema::TimeUnit::Microsecond,
-                Some("UTC".into()),
+                Some("+00:00".into()),
             )),
             DataType::Time => Ok(Self::Time64(arrow_schema::TimeUnit::Microsecond)),
             DataType::Interval => Ok(Self::Interval(arrow_schema::IntervalUnit::MonthDayNano)),
@@ -415,7 +417,7 @@ impl From<&DecimalArray> for arrow_array::Decimal128Array {
     fn from(array: &DecimalArray) -> Self {
         let max_scale = array
             .iter()
-            .filter_map(|o| o.map(|v| v.scale()))
+            .filter_map(|o| o.map(|v| v.scale().unwrap_or(0)))
             .max()
             .unwrap_or(0) as u32;
         let mut builder = arrow_array::builder::Decimal128Builder::with_capacity(array.len())
@@ -578,7 +580,7 @@ impl From<&ListArray> for arrow_array::ListArray {
             ArrayImpl::Decimal(a) => {
                 let max_scale = a
                     .iter()
-                    .filter_map(|o| o.map(|v| v.scale()))
+                    .filter_map(|o| o.map(|v| v.scale().unwrap_or(0)))
                     .max()
                     .unwrap_or(0) as u32;
                 build(

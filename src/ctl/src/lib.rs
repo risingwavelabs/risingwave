@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
-#![feature(hash_drain_filter)]
+#![feature(hash_extract_if)]
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -71,10 +71,8 @@ enum Commands {
     Trace,
     // TODO(yuhao): profile other nodes
     /// Commands for profilng the compute nodes
-    Profile {
-        #[clap(short, long = "sleep")]
-        sleep: u64,
-    },
+    #[clap(subcommand)]
+    Profile(ProfileCommands),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -223,7 +221,7 @@ enum HummockCommands {
         #[clap(long)]
         level0_overlapping_sub_level_compact_level_count: Option<u32>,
         #[clap(long)]
-        level0_stop_write_threshold_merge_iter_count: Option<u64>,
+        enable_emergency_picker: Option<bool>,
         #[clap(long)]
         level0_stop_write_threshold_overlapping_file_count: Option<u64>,
     },
@@ -245,6 +243,8 @@ enum HummockCommands {
         #[clap(short, long = "verbose", default_value_t = false)]
         verbose: bool,
     },
+    /// Validate the current HummockVersion.
+    ValidateVersion,
 }
 
 #[derive(Subcommand)]
@@ -267,9 +267,8 @@ enum TableCommands {
     List,
 }
 
-#[derive(clap::Args, Debug)]
-#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers"])))]
-pub struct ScaleResizeCommands {
+#[derive(clap::Args, Debug, Clone)]
+pub struct ScaleHorizonCommands {
     /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
     /// supported
     #[clap(
@@ -284,10 +283,22 @@ pub struct ScaleResizeCommands {
     #[clap(
         long,
         value_delimiter = ',',
-        value_name = "worker_id or worker_host, ..."
+        value_name = "all or worker_id or worker_host, ..."
     )]
     include_workers: Option<Vec<String>>,
 
+    /// The target parallelism, currently, it is used to limit the target parallelism and only
+    /// takes effect when the actual parallelism exceeds this value. Can be used in conjunction
+    /// with exclude/include_workers.
+    #[clap(long)]
+    target_parallelism: Option<u32>,
+
+    #[command(flatten)]
+    common: ScaleCommon,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ScaleCommon {
     /// Will generate a plan supported by the `reschedule` command and save it to the provided path
     /// by the `--output`.
     #[clap(long, default_value_t = false)]
@@ -307,12 +318,37 @@ pub struct ScaleResizeCommands {
     fragments: Option<Vec<u32>>,
 }
 
+#[derive(clap::Args, Debug, Clone)]
+pub struct ScaleVerticalCommands {
+    #[command(flatten)]
+    common: ScaleCommon,
+
+    /// The worker that needs to be scheduled, worker_id and worker_host are both
+    /// supported
+    #[clap(
+        long,
+        value_delimiter = ',',
+        value_name = "all or worker_id or worker_host, ..."
+    )]
+    workers: Option<Vec<String>>,
+
+    /// The target parallelism per worker, requires `workers` to be set.
+    #[clap(long, requires = "workers")]
+    target_parallelism_per_worker: Option<u32>,
+}
+
 #[derive(Subcommand, Debug)]
 enum ScaleCommands {
-    /// The resize command scales the cluster by specifying the workers to be included and
-    /// excluded.
-    Resize(ScaleResizeCommands),
-    /// mark a compute node as unschedulable
+    /// Scale the compute nodes horizontally, alias of `horizon`
+    Resize(ScaleHorizonCommands),
+
+    /// Scale the compute nodes horizontally
+    Horizon(ScaleHorizonCommands),
+
+    /// Scale the compute nodes vertically
+    Vertical(ScaleVerticalCommands),
+
+    /// Mark a compute node as unschedulable
     #[clap(verbatim_doc_comment)]
     Cordon {
         /// Workers that need to be cordoned, both id and host are supported.
@@ -354,12 +390,14 @@ enum MetaCommands {
     /// `added` when both are provided.
     ///
     /// For example, for plan `100-[1,2,3]+[4,5]` the follow request will be generated:
+    /// ```text
     /// {
     ///     100: Reschedule {
     ///         added_parallel_units: [4,5],
     ///         removed_parallel_units: [1,2,3],
     ///     }
     /// }
+    /// ```
     /// Use ; to separate multiple fragment
     #[clap(verbatim_doc_comment)]
     #[clap(group(clap::ArgGroup::new("input_group").required(true).args(&["plan", "from"])))]
@@ -409,6 +447,30 @@ enum MetaCommands {
         /// The worker not found will be ignored
         #[clap(long, default_value_t = false)]
         ignore_not_found: bool,
+    },
+
+    /// Validate source interface for the cloud team
+    ValidateSource {
+        /// With properties in json format
+        /// If privatelink is used, specify `connection.id` instead of `connection.name`
+        #[clap(long)]
+        props: String,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum ProfileCommands {
+    /// CPU profile
+    Cpu {
+        /// The time to active profiling for (in seconds)
+        #[clap(short, long = "sleep")]
+        sleep: u64,
+    },
+    /// Heap profile
+    Heap {
+        /// The output directory of the dumped file
+        #[clap(long = "dir")]
+        dir: Option<String>,
     },
 }
 
@@ -491,7 +553,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             max_space_reclaim_bytes,
             level0_max_compact_file_number,
             level0_overlapping_sub_level_compact_level_count,
-            level0_stop_write_threshold_merge_iter_count,
+            enable_emergency_picker,
+            level0_stop_write_threshold_overlapping_file_count,
             level0_stop_write_threshold_overlapping_file_count,
         }) => {
             cmd_impl::hummock::update_compaction_config(
@@ -511,7 +574,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     max_space_reclaim_bytes,
                     level0_max_compact_file_number,
                     level0_overlapping_sub_level_compact_level_count,
-                    level0_stop_write_threshold_merge_iter_count,
+                    enable_emergency_picker,
                     level0_stop_write_threshold_overlapping_file_count,
                 ),
             )
@@ -535,6 +598,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Hummock(HummockCommands::ListCompactionStatus { verbose }) => {
             cmd_impl::hummock::list_compaction_status(context, verbose).await?;
+        }
+        Commands::Hummock(HummockCommands::ValidateVersion) => {
+            cmd_impl::hummock::validate_version(context).await?;
         }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?
@@ -575,10 +641,22 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             yes,
             ignore_not_found,
         }) => cmd_impl::meta::unregister_workers(context, workers, yes, ignore_not_found).await?,
+        Commands::Meta(MetaCommands::ValidateSource { props }) => {
+            cmd_impl::meta::validate_source(context, props).await?
+        }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
-        Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,
-        Commands::Scale(ScaleCommands::Resize(resize)) => {
-            cmd_impl::scale::resize(context, resize).await?
+        Commands::Profile(ProfileCommands::Cpu { sleep }) => {
+            cmd_impl::profile::cpu_profile(context, sleep).await?
+        }
+        Commands::Profile(ProfileCommands::Heap { dir }) => {
+            cmd_impl::profile::heap_profile(context, dir).await?
+        }
+        Commands::Scale(ScaleCommands::Horizon(resize))
+        | Commands::Scale(ScaleCommands::Resize(resize)) => {
+            cmd_impl::scale::resize(context, resize.into()).await?
+        }
+        Commands::Scale(ScaleCommands::Vertical(resize)) => {
+            cmd_impl::scale::resize(context, resize.into()).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)

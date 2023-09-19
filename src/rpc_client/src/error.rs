@@ -16,24 +16,38 @@ pub use anyhow::anyhow;
 use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
-pub type Result<T> = std::result::Result<T, RpcError>;
+pub type Result<T, E = RpcError> = std::result::Result<T, E>;
 
 #[derive(Error, Debug)]
 pub enum RpcError {
     #[error("Transport error: {0}")]
-    TransportError(#[from] tonic::transport::Error),
+    TransportError(#[source] Box<tonic::transport::Error>),
 
     #[error("gRPC error ({}): {}", .0.code(), .0.message())]
-    GrpcStatus(#[from] tonic::Status),
+    GrpcStatus(#[source] Box<tonic::Status>),
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
 
+static_assertions::const_assert_eq!(std::mem::size_of::<RpcError>(), 16);
+
+impl From<tonic::transport::Error> for RpcError {
+    fn from(e: tonic::transport::Error) -> Self {
+        RpcError::TransportError(Box::new(e))
+    }
+}
+
+impl From<tonic::Status> for RpcError {
+    fn from(s: tonic::Status) -> Self {
+        RpcError::GrpcStatus(Box::new(s))
+    }
+}
+
 impl From<RpcError> for RwError {
     fn from(r: RpcError) -> Self {
         match r {
-            RpcError::GrpcStatus(status) => status.into(),
+            RpcError::GrpcStatus(status) => (*status).into(),
             _ => ErrorCode::RpcError(r.into()).into(),
         }
     }

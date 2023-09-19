@@ -20,6 +20,7 @@ use std::ptr;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::VirtualNode;
 
 use crate::HummockEpoch;
@@ -38,6 +39,7 @@ pub type UserKeyRange = (
     Bound<UserKey<KeyPayloadType>>,
     Bound<UserKey<KeyPayloadType>>,
 );
+pub type UserKeyRangeRef<'a> = (Bound<UserKey<&'a [u8]>>, Bound<UserKey<&'a [u8]>>);
 pub type FullKeyRange = (
     Bound<FullKey<KeyPayloadType>>,
     Bound<FullKey<KeyPayloadType>>,
@@ -396,13 +398,33 @@ impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
     }
 }
 
+impl<T: AsRef<[u8]>> TableKey<T> {
+    pub fn vnode_part(&self) -> VirtualNode {
+        VirtualNode::from_be_bytes(
+            self.0.as_ref()[..VirtualNode::SIZE]
+                .try_into()
+                .expect("slice with incorrect length"),
+        )
+    }
+
+    pub fn key_part(&self) -> &[u8] {
+        &self.0.as_ref()[VirtualNode::SIZE..]
+    }
+}
+
+impl EstimateSize for TableKey<Bytes> {
+    fn estimated_heap_size(&self) -> usize {
+        self.0.estimated_heap_size()
+    }
+}
+
 #[inline]
 pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)) -> TableKeyRange {
     (range.0.map(TableKey), range.1.map(TableKey))
 }
 
 /// [`UserKey`] is is an internal concept in storage. In the storage interface, user specifies
-/// `table_key` and `table_id` (in [`ReadOptions`] or [`WriteOptions`]) as the input. The storage
+/// `table_key` and `table_id` (in `ReadOptions` or `WriteOptions`) as the input. The storage
 /// will group these two values into one struct for convenient filtering.
 ///
 /// The encoded format is | `table_id` | `table_key` |.
@@ -473,12 +495,7 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     }
 
     pub fn get_vnode_id(&self) -> usize {
-        VirtualNode::from_be_bytes(
-            self.table_key.as_ref()[..VirtualNode::SIZE]
-                .try_into()
-                .expect("slice with incorrect length"),
-        )
-        .to_index()
+        self.table_key.vnode_part().to_index()
     }
 }
 

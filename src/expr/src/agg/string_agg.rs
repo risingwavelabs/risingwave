@@ -15,17 +15,20 @@
 use risingwave_common::bail;
 use risingwave_expr_macro::aggregate;
 
-#[aggregate("string_agg(varchar, varchar) -> varchar", state = "String")]
+#[aggregate("string_agg(varchar, varchar) -> varchar")]
 fn string_agg(
-    state: Option<String>,
+    state: Option<Box<str>>,
     value: Option<&str>,
     delimiter: Option<&str>,
-) -> Option<String> {
+) -> Option<Box<str>> {
     let Some(value) = value else { return state };
-    let Some(mut state) = state else { return Some(value.into()) };
+    let Some(state) = state else {
+        return Some(value.into());
+    };
+    let mut state = String::from(state);
     state += delimiter.unwrap_or("");
     state += value;
-    Some(state)
+    Some(state.into())
 }
 
 #[cfg(test)]
@@ -37,70 +40,43 @@ mod tests {
 
     #[tokio::test]
     async fn test_string_agg_basic() -> Result<()> {
-        let chunk = DataChunk::from_pretty(
-            "T   T
-             aaa ,
-             bbb ,
-             ccc ,
-             ddd ,",
+        let chunk = StreamChunk::from_pretty(
+            " T   T
+            + aaa ,
+            + bbb ,
+            + ccc ,
+            + ddd ,",
         );
-        let mut agg = crate::agg::build(AggCall::from_pretty(
+        let string_agg = crate::agg::build_append_only(&AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
-        let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
-        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
-        agg.output(&mut builder)?;
-        let output = builder.finish();
-        let actual = output.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        let expected = "aaa,bbb,ccc,ddd";
-        assert_eq!(actual, &[Some(expected)]);
+        let mut state = string_agg.create_state();
+        string_agg.update(&mut state, &chunk).await?;
+        assert_eq!(
+            string_agg.get_result(&state).await?,
+            Some("aaa,bbb,ccc,ddd".into())
+        );
         Ok(())
     }
 
     #[tokio::test]
     async fn test_string_agg_complex() -> Result<()> {
-        let chunk = DataChunk::from_pretty(
-            "T   T
-             aaa ,
-             .   _
-             ccc _
-             ddd .",
+        let chunk = StreamChunk::from_pretty(
+            " T   T
+            + aaa ,
+            + .   _
+            + ccc _
+            + ddd .",
         );
-        let mut agg = crate::agg::build(AggCall::from_pretty(
+        let string_agg = crate::agg::build_append_only(&AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar)",
         ))?;
-        let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
-        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
-        agg.output(&mut builder)?;
-        let output = builder.finish();
-        let actual = output.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        let expected = "aaa_cccddd";
-        assert_eq!(actual, &[Some(expected)]);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_string_agg_with_order() -> Result<()> {
-        let chunk = DataChunk::from_pretty(
-            "T   T i i
-             aaa _ 1 3
-             bbb _ 0 4
-             ccc _ 0 8
-             ddd _ 1 3",
+        let mut state = string_agg.create_state();
+        string_agg.update(&mut state, &chunk).await?;
+        assert_eq!(
+            string_agg.get_result(&state).await?,
+            Some("aaa_cccddd".into())
         );
-        let mut agg = crate::agg::build(AggCall::from_pretty(
-            "(string_agg:varchar $0:varchar $1:varchar orderby $2:asc $3:desc $0:desc)",
-        ))?;
-        let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
-        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
-        agg.output(&mut builder)?;
-        let output = builder.finish();
-        let actual = output.as_utf8();
-        let actual = actual.iter().collect::<Vec<_>>();
-        let expected = "ccc_bbb_ddd_aaa";
-        assert_eq!(actual, &[Some(expected)]);
         Ok(())
     }
 }

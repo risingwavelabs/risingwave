@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl, SystemCatalogColumnsDef};
 
 pub const RW_TABLE_STATS_TABLE_NAME: &str = "rw_table_stats";
 pub const RW_TABLE_STATS_TABLE_ID_INDEX: usize = 0;
@@ -29,6 +30,13 @@ pub const RW_TABLE_STATS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int64, "total_key_size"),
     (DataType::Int64, "total_value_size"),
 ];
+
+pub const RW_TABLE_STATS: BuiltinTable = BuiltinTable {
+    name: RW_TABLE_STATS_TABLE_NAME,
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: RW_TABLE_STATS_COLUMNS,
+    pk: &[RW_TABLE_STATS_TABLE_ID_INDEX],
+};
 
 impl SysCatalogReaderImpl {
     pub fn read_table_stats(&self) -> Result<Vec<OwnedRow>> {

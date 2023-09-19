@@ -22,12 +22,12 @@ use risingwave_pb::hummock::version_update_payload;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::HummockResult;
+use crate::mem_table::ImmutableMemtable;
 use crate::store::SyncResult;
 
-mod cache_refill_policy;
 pub mod hummock_event_handler;
+pub mod refiller;
 pub mod uploader;
 
 pub use hummock_event_handler::HummockEventHandler;

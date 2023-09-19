@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::Hash;
+
 use super::Row;
 use crate::types::DatumRef;
 
@@ -60,12 +62,25 @@ impl<'i, R: Row> Project<'i, R> {
     pub(crate) fn new(row: R, indices: &'i [usize]) -> Self {
         if let Some(index) = indices.iter().find(|&&i| i >= row.len()) {
             panic!(
-                "index {} out of bounds for row of length {}",
+                "index {} out of bounds for row of length {}, row {:?}",
                 index,
-                row.len()
+                row.len(),
+                row
             );
         }
         Self { row, indices }
+    }
+
+    pub fn row(&self) -> &R {
+        &self.row
+    }
+}
+
+impl<R: Row> Hash for Project<'_, R> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        for i in 0..self.len() {
+            self.datum_at(i).hash(state);
+        }
     }
 }
 

@@ -11,7 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use anyhow::anyhow;
+
+pub mod aggregation;
 mod delete;
 mod expand;
 mod filter;
@@ -40,6 +41,7 @@ mod update;
 mod utils;
 mod values;
 
+use anyhow::anyhow;
 use async_recursion::async_recursion;
 pub use delete::*;
 pub use expand::*;

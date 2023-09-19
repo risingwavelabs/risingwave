@@ -16,16 +16,15 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{
-    get_acl_items, SysCatalogReaderImpl, SystemCatalogColumnsDef,
+    get_acl_items, BuiltinTable, SysCatalogReaderImpl, SystemCatalogColumnsDef,
 };
-
-pub const RW_FUNCTIONS_TABLE_NAME: &str = "rw_functions";
 
 pub static RW_FUNCTIONS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
     vec![
@@ -34,14 +33,19 @@ pub static RW_FUNCTIONS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = La
         (DataType::Int32, "schema_id"),
         (DataType::Int32, "owner"),
         (DataType::Varchar, "type"),
-        // [16, 20]
         (DataType::List(Box::new(DataType::Int32)), "arg_type_ids"),
-        // 16
         (DataType::Int32, "return_type_id"),
         (DataType::Varchar, "language"),
         (DataType::Varchar, "link"),
         (DataType::Varchar, "acl"),
     ]
+});
+
+pub static RW_FUNCTIONS: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
+    name: "rw_functions",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &RW_FUNCTIONS_COLUMNS,
+    pk: &[0],
 });
 
 impl SysCatalogReaderImpl {
@@ -74,6 +78,7 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(
                             get_acl_items(
                                 &Object::FunctionId(function.id.function_id()),
+                                false,
                                 &users,
                                 username_map,
                             )

@@ -37,7 +37,7 @@ use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitImpl,
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta,
     StreamChunkWithState,
 };
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
@@ -164,10 +164,11 @@ impl S3FileReader {
 #[async_trait]
 impl SplitReader for S3FileReader {
     type Properties = S3Properties;
+    type Split = FsSplit;
 
     async fn new(
         props: S3Properties,
-        state: Vec<SplitImpl>,
+        splits: Vec<FsSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
@@ -179,10 +180,6 @@ impl SplitReader for S3FileReader {
         let bucket_name = props.bucket_name;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
 
-        let splits = state
-            .into_iter()
-            .map(|split| split.into_fs().expect("not a fs split"))
-            .collect();
         let s3_file_reader = S3FileReader {
             split_offset: HashMap::new(),
             bucket_name,
@@ -248,8 +245,8 @@ mod tests {
 
     use super::*;
     use crate::parser::{
-        CommonParserConfig, CsvProperties, EncodingProperties, ParserProperties,
-        ProtocolProperties, SpecificParserConfig,
+        CommonParserConfig, CsvProperties, EncodingProperties, ProtocolProperties,
+        SpecificParserConfig,
     };
     use crate::source::filesystem::{S3Properties, S3SplitEnumerator};
     use crate::source::{SourceColumnDesc, SourceEnumeratorContext, SplitEnumerator};
@@ -272,8 +269,6 @@ mod tests {
         let splits = enumerator.list_splits().await.unwrap();
         println!("splits {:?}", splits);
 
-        let splits = splits.into_iter().map(SplitImpl::S3).collect();
-
         let descs = vec![
             SourceColumnDesc::simple("id", DataType::Int64, 1.into()),
             SourceColumnDesc::simple("name", DataType::Varchar, 2.into()),
@@ -287,11 +282,11 @@ mod tests {
 
         let config = ParserConfig {
             common: CommonParserConfig { rw_columns: descs },
-            specific: SpecificParserConfig::Plain(ParserProperties {
+            specific: SpecificParserConfig {
                 key_encoding_config: None,
                 encoding_config: EncodingProperties::Csv(csv_config),
                 protocol_config: ProtocolProperties::Plain,
-            }),
+            },
         };
 
         let reader = S3FileReader::new(props, splits, config, Default::default(), None)

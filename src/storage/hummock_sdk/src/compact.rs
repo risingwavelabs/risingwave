@@ -101,25 +101,78 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     }
 }
 
-pub fn estimate_state_for_compaction(task: &CompactTask) -> (u64, usize, u64) {
-    let mut total_memory_size = 0;
-    let mut total_file_count = 0;
+pub fn statistics_compact_task(task: &CompactTask) -> CompactTaskStatistics {
     let mut total_key_count = 0;
-    for level in &task.input_ssts {
-        if level.level_type == LevelType::Nonoverlapping as i32 {
-            if let Some(table) = level.table_infos.first() {
-                total_memory_size += table.file_size * task.splits.len() as u64;
-                total_key_count += table.total_key_count;
-            }
-        } else {
-            for table in &level.table_infos {
-                total_memory_size += table.file_size;
-                total_key_count += table.total_key_count;
-            }
-        }
+    let mut total_file_count: u64 = 0;
+    let mut total_file_size = 0;
+    let mut total_uncompressed_file_size = 0;
 
-        total_file_count += level.table_infos.len();
+    for level in &task.input_ssts {
+        total_file_count += level.table_infos.len() as u64;
+
+        level.table_infos.iter().for_each(|sst| {
+            total_file_size += sst.get_file_size();
+            total_uncompressed_file_size += sst.get_uncompressed_file_size();
+            total_key_count += sst.total_key_count;
+        });
     }
 
-    (total_memory_size, total_file_count, total_key_count)
+    CompactTaskStatistics {
+        total_file_count,
+        total_key_count,
+        total_file_size,
+        total_uncompressed_file_size,
+    }
+}
+
+#[derive(Debug)]
+pub struct CompactTaskStatistics {
+    pub total_file_count: u64,
+    pub total_key_count: u64,
+    pub total_file_size: u64,
+    pub total_uncompressed_file_size: u64,
+}
+
+pub fn estimate_memory_for_compact_task(
+    task: &CompactTask,
+    block_size: u64,
+    recv_buffer_size: u64,
+    sst_capacity: u64,
+    support_streaming_upload: bool,
+) -> u64 {
+    let mut result = 0;
+    // When building the SstableStreamIterator, sstable_syncable will fetch the SstableMeta and seek
+    // to the specified block and build the iterator. Since this operation is concurrent, the memory
+    // usage will need to take into account the size of the SstableMeta.
+    // The common size of SstableMeta in tests is no more than 1m (mainly from xor filters). Even
+    // though SstableMeta is used for a shorter period of time, it is safe to use 3m for the
+    // calculation.
+    // TODO: Note that this algorithm may fail when SstableMeta is occupied by a large number of
+    // range tombstones
+    const ESTIMATED_META_SIZE: u64 = 3 * 1048576;
+
+    // The memory usage of the SstableStreamIterator comes from SstableInfo with some state
+    // information (use ESTIMATED_META_SIZE to estimate it), the BlockStream being read (one block),
+    // and tcp recv_buffer_size.
+    let max_input_stream_estimated_memory = ESTIMATED_META_SIZE + block_size + recv_buffer_size;
+
+    // input
+    for level in &task.input_ssts {
+        if level.level_type() == LevelType::Nonoverlapping {
+            result += max_input_stream_estimated_memory;
+        } else {
+            result += max_input_stream_estimated_memory * level.table_infos.len() as u64;
+        }
+    }
+
+    // output
+    // builder will maintain SstableInfo + block_builder(block) + writer (block to vec)
+    if support_streaming_upload {
+        result += ESTIMATED_META_SIZE + 2 * block_size
+    } else {
+        result += ESTIMATED_META_SIZE + sst_capacity; // Use sst_capacity to avoid BatchUploader
+                                                      // memory bursts.
+    }
+
+    result
 }

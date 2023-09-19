@@ -52,7 +52,7 @@ impl<'a> HeuristicOptimizer<'a> {
         for rule in self.rules {
             if let Some(applied) = rule.apply(plan.clone()) {
                 #[cfg(debug_assertions)]
-                Self::check_equivalent_plan(rule, &plan, &applied);
+                Self::check_equivalent_plan(rule.description(), &plan, &applied);
 
                 plan = applied;
                 self.stats.count_rule(rule);
@@ -88,10 +88,10 @@ impl<'a> HeuristicOptimizer<'a> {
     }
 
     #[cfg(debug_assertions)]
-    fn check_equivalent_plan(rule: &BoxedRule, input_plan: &PlanRef, output_plan: &PlanRef) {
+    pub fn check_equivalent_plan(rule_desc: &str, input_plan: &PlanRef, output_plan: &PlanRef) {
         if !input_plan.schema().type_eq(output_plan.schema()) {
             panic!("{} fails to generate equivalent plan.\nInput schema: {:?}\nInput plan: \n{}\nOutput schema: {:?}\nOutput plan: \n{}\nSQL: {}",
-                   rule.description(),
+                   rule_desc,
                    input_plan.schema(),
                    input_plan.explain_to_string(),
                    output_plan.schema(),

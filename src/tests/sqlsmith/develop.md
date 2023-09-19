@@ -68,7 +68,7 @@ Query execution and generation happen in step. Here's an overview of it.
 4. Generate `UPDATE / DELETE` statements and Update base tables with them.
    If no PK we will just do `DELETE` for some rows and `INSERT` back statements.
 5. Generate and run batch queries e.g. `SELECT * FROM t`, `WITH w AS ... SELECT * FROM w`.
-6. Generate and run stream queries. 
+6. Generate and run stream queries.
    These are immediately removed after they are successfully created.
 7. Drop base materialized views.
 8. Drop base tables.
@@ -104,7 +104,7 @@ This generates either:
 4. Aggregates.
 5. Casts.
 6. Other kinds of expressions e.g. `CASE ... WHEN`.
- 
+
 We mentioned that we call `gen_expr` with a **specific type**.
 That should be the return type of calling functions and aggregates.
 It should also be the cast target type.

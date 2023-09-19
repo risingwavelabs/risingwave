@@ -25,6 +25,7 @@ pub async fn handle_drop_sink(
     handler_args: HandlerArgs,
     sink_name: ObjectName,
     if_exists: bool,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -55,7 +56,7 @@ pub async fn handle_drop_sink(
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_sink(sink_id.sink_id).await?;
+    catalog_writer.drop_sink(sink_id.sink_id, cascade).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SINK))
 }

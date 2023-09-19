@@ -347,7 +347,7 @@ pub mod agg_executor {
             | AggKind::Count
             | AggKind::Avg
             | AggKind::ApproxCountDistinct => {
-                AggStateStorage::ResultValue
+                AggStateStorage::Value
             }
             _ => {
                 panic!("no need to mock other agg kinds here");
@@ -355,8 +355,8 @@ pub mod agg_executor {
         }
     }
 
-    /// Create result state table for agg executor.
-    pub async fn create_result_table<S: StateStore>(
+    /// Create intermediate state table for agg executor.
+    pub async fn create_intermediate_state_table<S: StateStore>(
         store: S,
         table_id: TableId,
         agg_calls: &[AggCall],
@@ -386,7 +386,7 @@ pub mod agg_executor {
             add_column_desc(agg_call.return_type.clone());
         });
 
-        StateTable::new_without_distribution(
+        StateTable::new_without_distribution_inconsistent_op(
             store,
             table_id,
             column_descs,
@@ -426,7 +426,7 @@ pub mod agg_executor {
             )
         }
 
-        let result_table = create_result_table(
+        let intermediate_state_table = create_intermediate_state_table(
             store,
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
@@ -446,7 +446,7 @@ pub mod agg_executor {
             agg_calls,
             row_count_index,
             storages,
-            result_table,
+            intermediate_state_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
             metrics: Arc::new(StreamingMetrics::unused()),
@@ -488,7 +488,7 @@ pub mod agg_executor {
             )
         }
 
-        let result_table = create_result_table(
+        let intermediate_state_table = create_intermediate_state_table(
             store,
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
@@ -508,7 +508,7 @@ pub mod agg_executor {
             agg_calls,
             row_count_index,
             storages,
-            result_table,
+            intermediate_state_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
             metrics: Arc::new(StreamingMetrics::unused()),

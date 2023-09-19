@@ -35,6 +35,18 @@
   expected_outputs:
   - binder_error
 - sql: |
+    select ARRAY[]::timestamptz[];
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+  - stream_plan
+- sql: |
+    select ARRAY[]::STRUCT<f1 INT>[];
+  expected_outputs:
+  - logical_plan
+  - batch_plan
+  - stream_plan
+- sql: |
     select array_cat(array[66], array[123]);
   expected_outputs:
   - batch_plan

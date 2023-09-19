@@ -16,7 +16,7 @@ use std::iter::FusedIterator;
 use std::mem::swap;
 
 use super::iter_util::ZipEqDebug;
-use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, DataChunk};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk};
 use crate::row::Row;
 use crate::types::{DataType, ToDatumRef};
 
@@ -76,32 +76,30 @@ impl DataChunkBuilder {
         self.ensure_builders();
 
         let mut new_return_offset = input_chunk.offset;
-        match input_chunk.data_chunk.visibility() {
-            Some(vis) => {
-                for vis in vis.iter().skip(input_chunk.offset) {
-                    new_return_offset += 1;
-                    if !vis {
-                        continue;
-                    }
+        let vis = input_chunk.data_chunk.visibility();
+        if !vis.all() {
+            for vis in vis.iter().skip(input_chunk.offset) {
+                new_return_offset += 1;
+                if !vis {
+                    continue;
+                }
 
-                    self.append_one_row_internal(&input_chunk.data_chunk, new_return_offset - 1);
-                    if self.buffered_count >= self.batch_size {
-                        break;
-                    }
+                self.append_one_row_internal(&input_chunk.data_chunk, new_return_offset - 1);
+                if self.buffered_count >= self.batch_size {
+                    break;
                 }
             }
-            None => {
-                let num_rows_to_append = std::cmp::min(
-                    self.batch_size - self.buffered_count,
-                    input_chunk.data_chunk.capacity() - input_chunk.offset,
-                );
-                let end_offset = input_chunk.offset + num_rows_to_append;
-                for input_row_idx in input_chunk.offset..end_offset {
-                    new_return_offset += 1;
-                    self.append_one_row_internal(&input_chunk.data_chunk, input_row_idx)
-                }
+        } else {
+            let num_rows_to_append = std::cmp::min(
+                self.batch_size - self.buffered_count,
+                input_chunk.data_chunk.capacity() - input_chunk.offset,
+            );
+            let end_offset = input_chunk.offset + num_rows_to_append;
+            for input_row_idx in input_chunk.offset..end_offset {
+                new_return_offset += 1;
+                self.append_one_row_internal(&input_chunk.data_chunk, input_row_idx)
             }
-        }
+        };
 
         assert!(self.buffered_count <= self.batch_size);
 
@@ -157,15 +155,18 @@ impl DataChunkBuilder {
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
     #[must_use]
     pub fn append_one_row(&mut self, row: impl Row) -> Option<DataChunk> {
-        assert!(self.buffered_count < self.batch_size);
-        self.ensure_builders();
-
-        self.do_append_one_row_from_datums(row.iter());
+        self.append_one_row_no_finish(row);
         if self.buffered_count == self.batch_size {
             Some(self.build_data_chunk())
         } else {
             None
         }
+    }
+
+    fn append_one_row_no_finish(&mut self, row: impl Row) {
+        assert!(self.buffered_count < self.batch_size);
+        self.ensure_builders();
+        self.do_append_one_row_from_datums(row.iter());
     }
 
     /// Append one row from the given two arrays.
@@ -203,19 +204,15 @@ impl DataChunkBuilder {
     }
 
     fn build_data_chunk(&mut self) -> DataChunk {
-        let mut new_array_builders = vec![];
-        swap(&mut new_array_builders, &mut self.array_builders);
+        let mut finished_array_builders = vec![];
+        swap(&mut finished_array_builders, &mut self.array_builders);
         let cardinality = self.buffered_count;
         self.buffered_count = 0;
 
-        let columns = new_array_builders.into_iter().fold(
-            Vec::with_capacity(self.data_types.len()),
-            |mut vec, array_builder| -> Vec<ArrayRef> {
-                let column = array_builder.finish().into();
-                vec.push(column);
-                vec
-            },
-        );
+        let columns: Vec<_> = finished_array_builders
+            .into_iter()
+            .map(|builder| builder.finish().into())
+            .collect();
         DataChunk::new(columns, cardinality)
     }
 
@@ -229,6 +226,17 @@ impl DataChunkBuilder {
 
     pub fn data_types(&self) -> Vec<DataType> {
         self.data_types.clone()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffered_count == 0
+    }
+
+    pub fn clear(&mut self) {
+        if !self.is_empty() {
+            self.array_builders.clear()
+        }
+        self.buffered_count = 0;
     }
 }
 
@@ -322,14 +330,14 @@ mod tests {
         assert_eq!(Some(1), returned_input.as_ref().map(|c| c.offset));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::cardinality));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::capacity));
-        assert!(output.unwrap().visibility().is_none());
+        assert!(output.unwrap().is_compacted());
 
         // Append last input
         let (returned_input, output) = builder.append_chunk_inner(returned_input.unwrap());
         assert!(returned_input.is_none());
         assert_eq!(Some(3), output.as_ref().map(DataChunk::cardinality));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::capacity));
-        assert!(output.unwrap().visibility().is_none());
+        assert!(output.unwrap().is_compacted());
     }
 
     #[test]
@@ -360,7 +368,7 @@ mod tests {
         assert_eq!(Some(3), returned_input.as_ref().map(|c| c.offset));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::cardinality));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::capacity));
-        assert!(output.unwrap().visibility().is_none());
+        assert!(output.unwrap().is_compacted());
         assert_eq!(0, builder.buffered_count());
 
         // Append last input
@@ -402,7 +410,7 @@ mod tests {
         for output in &[output_1, output_2] {
             assert_eq!(3, output.cardinality());
             assert_eq!(3, output.capacity());
-            assert!(output.visibility().is_none());
+            assert!(output.is_compacted());
         }
     }
 
@@ -427,7 +435,7 @@ mod tests {
         let output = builder.consume_all().expect("Failed to consume all!");
         assert_eq!(2, output.cardinality());
         assert_eq!(2, output.capacity());
-        assert!(output.visibility().is_none());
+        assert!(output.is_compacted());
     }
 
     #[test]

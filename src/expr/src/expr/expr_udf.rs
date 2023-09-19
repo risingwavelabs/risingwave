@@ -47,7 +47,7 @@ impl Expression for UdfExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let vis = input.vis().to_bitmap();
+        let vis = input.visibility();
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
             let array = child.eval_checked(input).await?;
@@ -69,9 +69,7 @@ impl Expression for UdfExpression {
             .iter()
             .map::<Result<_>, _>(|c| Ok(c.as_ref().try_into()?))
             .try_collect()?;
-        let output_array = self
-            .eval_inner(arg_columns, chunk.vis().to_bitmap())
-            .await?;
+        let output_array = self.eval_inner(arg_columns, chunk.visibility()).await?;
         Ok(output_array.to_datum())
     }
 }
@@ -80,7 +78,7 @@ impl UdfExpression {
     async fn eval_inner(
         &self,
         columns: Vec<arrow_array::ArrayRef>,
-        vis: risingwave_common::buffer::Bitmap,
+        vis: &risingwave_common::buffer::Bitmap,
     ) -> Result<ArrayRef> {
         let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(vis.len()));
         let input =
@@ -103,6 +101,13 @@ impl UdfExpression {
         };
         let mut array = ArrayImpl::try_from(arrow_array)?;
         array.set_bitmap(array.null_bitmap() & vis);
+        if !array.data_type().equals_datatype(&self.return_type) {
+            bail!(
+                "UDF returned {:?}, but expected {:?}",
+                array.data_type(),
+                self.return_type,
+            );
+        }
         Ok(Arc::new(array))
     }
 }
@@ -157,9 +162,7 @@ pub(crate) fn get_or_create_client(link: &str) -> Result<Arc<ArrowFlightUdfClien
         Ok(client)
     } else {
         // create new client
-        let client = Arc::new(tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(ArrowFlightUdfClient::connect(link))
-        })?);
+        let client = Arc::new(ArrowFlightUdfClient::connect_lazy(link)?);
         clients.insert(link.into(), Arc::downgrade(&client));
         Ok(client)
     }

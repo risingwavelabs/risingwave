@@ -184,6 +184,10 @@ impl LogicalJoin {
         self.core.is_full_out()
     }
 
+    pub fn output_indices_is_trivial(&self) -> bool {
+        self.output_indices() == &(0..self.internal_column_num()).collect_vec()
+    }
+
     /// Try to split and pushdown `predicate` into a join's left/right child or the on clause.
     /// Returns the pushed predicates. The pushed part will be removed from the original predicate.
     ///
@@ -222,7 +226,7 @@ impl LogicalJoin {
             Condition {
                 conjunctions: others
                     .conjunctions
-                    .drain_filter(|expr| expr.count_nows() == 0)
+                    .extract_if(|expr| expr.count_nows() == 0)
                     .collect(),
             }
         } else {
@@ -651,8 +655,8 @@ impl ExprRewritable for LogicalJoin {
 ///    then we proceed. Else abort.
 /// 2. Then, we collect `InputRef`s in the conjunction.
 /// 3. If they are all columns in the given side of join eq condition, then we proceed. Else abort.
-/// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with
-///    the equivalent in the other side.
+/// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with the equivalent in
+///    the other side.
 ///
 /// # Arguments
 ///

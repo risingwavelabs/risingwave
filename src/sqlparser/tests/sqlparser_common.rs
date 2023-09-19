@@ -253,7 +253,8 @@ fn parse_select_all() {
 #[test]
 fn parse_select_all_distinct() {
     let result = parse_sql_statements("SELECT ALL DISTINCT name FROM customer");
-    assert!(format!("{}", result.unwrap_err()).contains("syntax error at or near \"DISTINCT\""));
+    assert!(format!("{}", result.unwrap_err())
+        .contains("syntax error at or near DISTINCT at line:1, column:20"));
 }
 
 #[test]
@@ -1995,9 +1996,10 @@ fn parse_literal_string() {
         expr_from_projection(&select.projection[2])
     );
     assert_eq!(
-        &Expr::Value(Value::CstyleEscapesString(
-            r"c style escape string \x3f".to_string()
-        )),
+        &Expr::Value(Value::CstyleEscapedString(CstyleEscapedString {
+            value: "c style escape string \x3f".to_string(),
+            raw: r"c style escape string \x3f".to_string(),
+        })),
         expr_from_projection(&select.projection[3])
     );
 
@@ -3094,7 +3096,7 @@ fn parse_create_materialized_view() {
 
 #[test]
 fn parse_create_materialized_view_emit_immediately() {
-    let sql = "CREATE MATERIALIZED VIEW myschema.myview EMIT IMMEDIATELY AS SELECT foo FROM bar";
+    let sql = "CREATE MATERIALIZED VIEW myschema.myview AS SELECT foo FROM bar EMIT IMMEDIATELY";
     match verified_stmt(sql) {
         Statement::CreateView {
             if_not_exists,
@@ -3122,7 +3124,7 @@ fn parse_create_materialized_view_emit_immediately() {
 #[test]
 fn parse_create_materialized_view_emit_on_window_close() {
     let sql =
-        "CREATE MATERIALIZED VIEW myschema.myview EMIT ON WINDOW CLOSE AS SELECT foo FROM bar";
+        "CREATE MATERIALIZED VIEW myschema.myview AS SELECT foo FROM bar EMIT ON WINDOW CLOSE";
     match verified_stmt(sql) {
         Statement::CreateView {
             if_not_exists,

@@ -13,27 +13,29 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::user::grant_privilege::Object;
 
-use crate::catalog::system_catalog::{
-    get_acl_items, SysCatalogReaderImpl, SystemCatalogColumnsDef,
+use crate::catalog::system_catalog::{get_acl_items, BuiltinTable, SysCatalogReaderImpl};
+
+pub const RW_TABLES: BuiltinTable = BuiltinTable {
+    name: "rw_tables",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "id"),
+        (DataType::Varchar, "name"),
+        (DataType::Int32, "schema_id"),
+        (DataType::Int32, "owner"),
+        (DataType::Varchar, "definition"),
+        (DataType::Varchar, "acl"),
+        (DataType::Timestamptz, "initialized_at"),
+        (DataType::Timestamptz, "created_at"),
+    ],
+    pk: &[0],
 };
-
-pub const RW_TABLES_TABLE_NAME: &str = "rw_tables";
-
-pub const RW_TABLES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "id"),
-    (DataType::Varchar, "name"),
-    (DataType::Int32, "schema_id"),
-    (DataType::Int32, "owner"),
-    (DataType::Varchar, "definition"),
-    (DataType::Varchar, "acl"),
-    (DataType::Timestamptz, "initialized_at"),
-    (DataType::Timestamptz, "created_at"),
-];
 
 impl SysCatalogReaderImpl {
     pub fn read_rw_table_info(&self) -> Result<Vec<OwnedRow>> {
@@ -55,6 +57,7 @@ impl SysCatalogReaderImpl {
                         Some(ScalarImpl::Utf8(
                             get_acl_items(
                                 &Object::TableId(table.id.table_id),
+                                true,
                                 &users,
                                 username_map,
                             )

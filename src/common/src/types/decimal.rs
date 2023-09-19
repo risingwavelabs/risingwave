@@ -409,43 +409,11 @@ impl Sub for Decimal {
 impl Decimal {
     pub const MAX_PRECISION: u8 = 28;
 
-    /// TODO: handle nan and inf
-    pub fn mantissa(&self) -> i128 {
-        match self {
-            Self::Normalized(d) => d.mantissa(),
-            _ => 0,
-        }
-    }
-
-    /// TODO: handle nan and inf
-    pub fn scale(&self) -> i32 {
-        match self {
-            Self::Normalized(d) => d.scale() as i32,
-            _ => 0,
-        }
-    }
-
-    /// TODO: handle nan and inf
-    /// There are maybe better solution here.
-    pub fn precision(&self) -> u32 {
-        match &self {
-            Decimal::Normalized(decimal) => {
-                let s = decimal.to_string();
-                let mut res = s.len();
-                if s.find('.').is_some() {
-                    res -= 1;
-                }
-                if s.find('-').is_some() {
-                    res -= 1;
-                }
-                res as u32
-            }
-            _ => 0,
-        }
-    }
-
-    pub fn new(num: i64, scale: u32) -> Self {
-        Self::Normalized(RustDecimal::new(num, scale))
+    pub fn scale(&self) -> Option<i32> {
+        let Decimal::Normalized(d) = self else {
+            return None;
+        };
+        Some(d.scale() as _)
     }
 
     #[must_use]
@@ -462,7 +430,9 @@ impl Decimal {
     /// Round to the left of the decimal point, for example `31.5` -> `30`.
     #[must_use]
     pub fn round_left_ties_away(&self, left: u32) -> Option<Self> {
-        let Self::Normalized(mut d) = self else { return Some(*self) };
+        let Self::Normalized(mut d) = self else {
+            return Some(*self);
+        };
 
         // First, move the decimal point to the left so that we can reuse `round`. This is more
         // efficient than division.

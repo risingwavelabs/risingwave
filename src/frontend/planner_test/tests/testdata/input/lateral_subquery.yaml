@@ -1,0 +1,106 @@
+- name: lateral join 1
+  sql: |
+    create table all_sales (salesperson_id int, customer_name varchar, amount int );
+    create table salesperson (id int, name varchar );
+    SELECT
+    salesperson.name,
+    max_sale.amount,
+    max_sale_customer.customer_name
+    FROM
+    salesperson,
+    -- calculate maximum size, cache it in transient derived table max_sale
+    LATERAL
+    (SELECT MAX(amount) AS amount
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id)
+    AS max_sale,
+    -- find customer, reusing cached maximum size
+    LATERAL
+    (SELECT customer_name
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id
+    AND all_sales.amount =
+    -- the cached maximum size
+    max_sale.amount)
+    AS max_sale_customer;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: lateral join 2
+  sql: |
+    create table all_sales (salesperson_id int, customer_name varchar, amount int );
+    create table salesperson (id int, name varchar );
+    SELECT
+    salesperson.name,
+    max_sale.amount,
+    max_sale.customer_name
+    FROM
+    salesperson,
+    -- find maximum size and customer at same time
+    LATERAL
+    (SELECT amount, customer_name
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id
+    ORDER BY amount DESC LIMIT 1)
+    AS max_sale;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: lateral join 2 (left join)
+  sql: |
+    create table all_sales (salesperson_id int, customer_name varchar, amount int );
+    create table salesperson (id int, name varchar );
+    SELECT
+    salesperson.name,
+    max_sale.amount,
+    max_sale.customer_name
+    FROM
+    salesperson LEFT JOIN
+    -- find maximum size and customer at same time
+    LATERAL
+    (SELECT amount, customer_name
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id
+    ORDER BY amount DESC LIMIT 1)
+    AS max_sale on true;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: lateral join 2 (right join) should throw an error
+  sql: |
+    create table all_sales (salesperson_id int, customer_name varchar, amount int );
+    create table salesperson (id int, name varchar );
+    SELECT
+    salesperson.name,
+    max_sale.amount,
+    max_sale.customer_name
+    FROM
+    salesperson RIGHT JOIN
+    -- find maximum size and customer at same time
+    LATERAL
+    (SELECT amount, customer_name
+    FROM all_sales
+    WHERE all_sales.salesperson_id = salesperson.id
+    ORDER BY amount DESC LIMIT 1)
+    AS max_sale on true;
+  expected_outputs:
+    - binder_error
+- name: implicit lateral subquery of correlated table function
+  sql: |
+    create table t(x int , arr int[]);
+    select * from t cross join unnest(arr);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: https://github.com/risingwavelabs/risingwave/issues/12298
+  sql: |
+    create table t1(c varchar, n varchar, id varchar, d varchar);
+    create table t2(c varchar, p varchar, id varchar, d varchar);
+    select array_agg(t1.n order by path_idx) from t1
+    join t2
+    on t1.c = 'abc'
+    and t2.c = 'abc'
+    cross join unnest((case when t2.p <> '' then (string_to_array(trim(t2.p, ','), ',') || t2.d) else ARRAY[t2.d] end)) WITH ORDINALITY AS path_cols(path_val, path_idx)
+    where path_val = t1.id;
+  expected_outputs:
+    - stream_plan

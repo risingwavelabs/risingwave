@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
 
-use super::{Block, HummockResult, TieredCacheEntry};
+use super::{Block, HummockResult};
 use crate::hummock::HummockError;
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024;
@@ -65,15 +65,6 @@ impl BlockHolder {
         Self {
             _handle: BlockEntry::Cache(entry),
             block: ptr,
-        }
-    }
-
-    pub fn from_tiered_cache(
-        entry: TieredCacheEntry<(HummockSstableObjectId, u64), Box<Block>>,
-    ) -> Self {
-        match entry {
-            TieredCacheEntry::Cache(entry) => Self::from_cached_block(entry),
-            TieredCacheEntry::Owned(block) => Self::from_owned_block(*block),
         }
     }
 }

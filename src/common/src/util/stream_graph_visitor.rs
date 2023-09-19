@@ -61,7 +61,6 @@ fn visit_stream_node_tables_inner<F>(
         }};
     }
 
-    #[allow(unused_macros)]
     macro_rules! optional {
         ($table:expr, $name:expr) => {
             if let Some(table) = &mut $table {
@@ -96,13 +95,10 @@ fn visit_stream_node_tables_inner<F>(
             // Aggregation
             NodeBody::HashAgg(node) => {
                 assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
-                always!(node.result_table, "HashAggResult");
+                always!(node.intermediate_state_table, "HashAggState");
                 for (call_idx, state) in node.agg_call_states.iter_mut().enumerate() {
                     match state.inner.as_mut().unwrap() {
-                        agg_call_state::Inner::ResultValueState(_) => {}
-                        agg_call_state::Inner::TableState(s) => {
-                            always!(s.table, &format!("HashAggCall{}", call_idx));
-                        }
+                        agg_call_state::Inner::ValueState(_) => {}
                         agg_call_state::Inner::MaterializedInputState(s) => {
                             always!(s.table, &format!("HashAggCall{}", call_idx));
                         }
@@ -114,13 +110,10 @@ fn visit_stream_node_tables_inner<F>(
             }
             NodeBody::SimpleAgg(node) => {
                 assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
-                always!(node.result_table, "SimpleAggResult");
+                always!(node.intermediate_state_table, "SimpleAggState");
                 for (call_idx, state) in node.agg_call_states.iter_mut().enumerate() {
                     match state.inner.as_mut().unwrap() {
-                        agg_call_state::Inner::ResultValueState(_) => {}
-                        agg_call_state::Inner::TableState(s) => {
-                            always!(s.table, &format!("SimpleAggCall{}", call_idx));
-                        }
+                        agg_call_state::Inner::ValueState(_) => {}
                         agg_call_state::Inner::MaterializedInputState(s) => {
                             always!(s.table, &format!("SimpleAggCall{}", call_idx));
                         }
@@ -217,6 +210,7 @@ where
     visit_stream_node_tables_inner(stream_node, true, f)
 }
 
+#[allow(dead_code)]
 pub fn visit_stream_node_tables<F>(stream_node: &mut StreamNode, f: F)
 where
     F: FnMut(&mut Table, &str),

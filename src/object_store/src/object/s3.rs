@@ -13,12 +13,16 @@
 // limitations under the License.
 
 use std::cmp;
+use std::collections::VecDeque;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
 use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder;
 use aws_sdk_s3::operation::get_object::GetObjectError;
+use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
 use aws_sdk_s3::operation::upload_part::UploadPartOutput;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{
@@ -26,26 +30,28 @@ use aws_sdk_s3::types::{
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
 };
 use aws_sdk_s3::Client;
-use aws_smithy_client::conns::NativeTls;
-use aws_smithy_client::http_connector::ConnectorSettings;
+use aws_smithy_client::http_connector::{ConnectorSettings, HttpConnector};
 use aws_smithy_http::body::SdkBody;
 use aws_smithy_http::result::SdkError;
 use aws_smithy_types::retry::RetryConfig;
 use fail::fail_point;
-use futures::future::try_join_all;
-use futures::stream;
+use futures::future::{try_join_all, BoxFuture, FutureExt};
+use futures::{stream, Stream};
 use hyper::Body;
 use itertools::Itertools;
+use risingwave_common::config::default::s3_objstore_config;
+use risingwave_common::monitor::connection::monitor_connector;
+use risingwave_common::range::RangeBoundsExt;
 use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
-    BlockLocation, BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectResult,
+    BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectRangeBounds, ObjectResult,
     ObjectStore, StreamingUploader,
 };
-use crate::object::try_update_failure_metric;
+use crate::object::{try_update_failure_metric, ObjectMetadataIter};
 
 type PartId = i32;
 
@@ -64,10 +70,6 @@ const NUM_BUCKET_PREFIXES: u32 = 256;
 /// initiated. (Day is the smallest granularity)
 const S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 1;
 
-/// Retry config for compute node http timeout error.
-const DEFAULT_RETRY_INTERVAL: u64 = 20;
-const DEFAULT_RETRY_MAX_DELAY: Duration = Duration::from_secs(10);
-const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 8;
 /// S3 multipart upload handle. The multipart upload is not initiated until the first part is
 /// available for upload.
 ///
@@ -303,6 +305,8 @@ pub struct S3ObjectStore {
     part_size: usize,
     /// For S3 specific metrics.
     metrics: Arc<ObjectStoreMetrics>,
+
+    config: S3ObjectStoreConfig,
 }
 
 #[async_trait::async_trait]
@@ -344,29 +348,16 @@ impl ObjectStore for S3ObjectStore {
     }
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+    async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         fail_point!("s3_read_err", |_| Err(ObjectError::internal(
             "s3 read error"
         )));
 
-        let (start_pos, end_pos) = block_loc.as_ref().map_or((None, None), |block_loc| {
-            (
-                Some(block_loc.offset),
-                Some(
-                    block_loc.offset + block_loc.size - 1, // End is inclusive.
-                ),
-            )
-        });
-
         // retry if occurs AWS EC2 HTTP timeout error.
         let resp = tokio_retry::RetryIf::spawn(
-            Self::get_retry_strategy(),
+            self.config.get_retry_strategy(),
             || async {
-                match self
-                    .obj_store_request(path, start_pos, end_pos)
-                    .send()
-                    .await
-                {
+                match self.obj_store_request(path, range.clone()).send().await {
                     Ok(resp) => Ok(resp),
                     Err(err) => {
                         if let SdkError::DispatchFailure(e) = &err
@@ -388,24 +379,17 @@ impl ObjectStore for S3ObjectStore {
 
         let val = resp.body.collect().await?.into_bytes();
 
-        if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
+        if let Some(len) = range.len() && len != val.len() {
             return Err(ObjectError::internal(format!(
                 "mismatched size: expected {}, found {} when reading {} at {:?}",
-                block_loc.as_ref().unwrap().size,
+                len,
                 val.len(),
                 path,
-                block_loc.as_ref().unwrap()
+                range,
             )));
         }
-        Ok(val)
-    }
 
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
-        let futures = block_locs
-            .iter()
-            .map(|block_loc| self.read(path, Some(*block_loc)))
-            .collect_vec();
-        try_join_all(futures).await
+        Ok(val)
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -443,9 +427,13 @@ impl ObjectStore for S3ObjectStore {
 
         // retry if occurs AWS EC2 HTTP timeout error.
         let resp = tokio_retry::RetryIf::spawn(
-            Self::get_retry_strategy(),
+            self.config.get_retry_strategy(),
             || async {
-                match self.obj_store_request(path, start_pos, None).send().await {
+                match self
+                    .obj_store_request(path, start_pos.unwrap_or_default()..)
+                    .send()
+                    .await
+                {
                     Ok(resp) => Ok(resp),
                     Err(err) => {
                         if let SdkError::DispatchFailure(e) = &err
@@ -519,41 +507,12 @@ impl ObjectStore for S3ObjectStore {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
-        let mut ret: Vec<ObjectMetadata> = vec![];
-        let mut next_continuation_token = None;
-        // list_objects_v2 returns up to 1000 keys and truncated the exceeded parts.
-        // Use `continuation_token` given by last response to fetch more parts of the result,
-        // until result is no longer truncated.
-        loop {
-            let mut request = self
-                .client
-                .list_objects_v2()
-                .bucket(&self.bucket)
-                .prefix(prefix);
-            if let Some(continuation_token) = next_continuation_token.take() {
-                request = request.continuation_token(continuation_token);
-            }
-            let result = request.send().await?;
-            let is_truncated = result.is_truncated;
-            ret.append(
-                &mut result
-                    .contents()
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|obj| ObjectMetadata {
-                        key: obj.key().expect("key required").to_owned(),
-                        last_modified: obj.last_modified().map(|l| l.as_secs_f64()).unwrap_or(0f64),
-                        total_size: obj.size() as usize,
-                    })
-                    .collect_vec(),
-            );
-            next_continuation_token = result.next_continuation_token;
-            if !is_truncated {
-                break;
-            }
-        }
-        Ok(ret)
+    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+        Ok(Box::pin(S3ObjectIter::new(
+            self.client.clone(),
+            self.bucket.clone(),
+            prefix.to_string(),
+        )))
     }
 
     fn store_media_type(&self) -> &'static str {
@@ -566,25 +525,54 @@ impl S3ObjectStore {
     ///
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
+        Self::new_with_config(bucket, metrics, S3ObjectStoreConfig::default()).await
+    }
+
+    pub fn new_http_connector(config: &S3ObjectStoreConfig) -> impl Into<HttpConnector> {
         // Customize http connector to set keepalive.
-        let native_tls = || -> NativeTls {
+        let native_tls = {
             let mut tls = hyper_tls::native_tls::TlsConnector::builder();
             let tls = tls
                 .min_protocol_version(Some(hyper_tls::native_tls::Protocol::Tlsv12))
                 .build()
                 .unwrap_or_else(|e| panic!("Error while creating TLS connector: {}", e));
             let mut http = hyper::client::HttpConnector::new();
-            http.set_keepalive(Some(Duration::from_secs(600)));
+
+            // connection config
+            if let Some(keepalive_ms) = config.keepalive_ms.as_ref() {
+                http.set_keepalive(Some(Duration::from_millis(*keepalive_ms)));
+            }
+
+            if let Some(nodelay) = config.nodelay.as_ref() {
+                http.set_nodelay(*nodelay);
+            }
+
+            if let Some(recv_buffer_size) = config.recv_buffer_size.as_ref() {
+                http.set_recv_buffer_size(Some(*recv_buffer_size));
+            }
+
+            if let Some(send_buffer_size) = config.send_buffer_size.as_ref() {
+                http.set_send_buffer_size(Some(*send_buffer_size));
+            }
+
             http.enforce_http(false);
             hyper_tls::HttpsConnector::from((http, tls.into()))
         };
-        let hyper_adapter = aws_smithy_client::hyper_ext::Adapter::builder()
+
+        aws_smithy_client::hyper_ext::Adapter::builder()
             .hyper_builder(hyper::client::Builder::default())
             .connector_settings(ConnectorSettings::builder().build())
-            .build(native_tls());
+            .build(monitor_connector(native_tls, "S3"))
+    }
+
+    pub async fn new_with_config(
+        bucket: String,
+        metrics: Arc<ObjectStoreMetrics>,
+        config: S3ObjectStoreConfig,
+    ) -> Self {
         let sdk_config_loader = aws_config::from_env()
             .retry_config(RetryConfig::standard().with_max_attempts(4))
-            .http_connector(hyper_adapter);
+            .http_connector(Self::new_http_connector(&config));
 
         // Retry 3 times if we get server-side errors or throttling errors
         let client = match std::env::var("RW_S3_ENDPOINT") {
@@ -620,6 +608,7 @@ impl S3ObjectStore {
             bucket,
             part_size: S3_PART_SIZE,
             metrics,
+            config,
         }
     }
 
@@ -635,7 +624,8 @@ impl S3ObjectStore {
         #[cfg(not(madsim))]
         let builder =
             aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
-                .force_path_style(true);
+                .force_path_style(true)
+                .http_connector(Self::new_http_connector(&S3ObjectStoreConfig::default()));
 
         let config = builder
             .region(Region::new("custom"))
@@ -652,6 +642,7 @@ impl S3ObjectStore {
             bucket: bucket.to_string(),
             part_size: MINIO_PART_SIZE,
             metrics,
+            config: S3ObjectStoreConfig::default(),
         }
     }
 
@@ -669,25 +660,18 @@ impl S3ObjectStore {
     fn obj_store_request(
         &self,
         path: &str,
-        start_pos: Option<usize>,
-        end_pos: Option<usize>,
+        range: impl ObjectRangeBounds,
     ) -> GetObjectFluentBuilder {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
 
-        match (start_pos, end_pos) {
-            (None, None) => {
-                // No range is given. Return request as is.
-                req
-            }
-            _ => {
-                // At least one boundary is given. Return request with range limitation.
-                req.range(format!(
-                    "bytes={}-{}",
-                    start_pos.map_or(String::new(), |pos| pos.to_string()),
-                    end_pos.map_or(String::new(), |pos| pos.to_string())
-                ))
-            }
+        if range.is_full() {
+            return req;
         }
+
+        let start = range.start().map(|v| v.to_string()).unwrap_or_default();
+        let end = range.end().map(|v| (v - 1).to_string()).unwrap_or_default(); // included
+
+        req.range(format!("bytes={}-{}", start, end))
     }
 
     // When multipart upload is aborted, if any part uploads are in progress, those part uploads
@@ -716,7 +700,7 @@ impl S3ObjectStore {
             .send()
             .await;
         if let Ok(config) = &get_config_result {
-            for rule in config.rules().unwrap_or_default().iter() {
+            for rule in config.rules().unwrap_or_default() {
                 if matches!(rule.status().unwrap(), ExpirationStatus::Enabled)
                     && rule.abort_incomplete_multipart_upload().is_some()
                 {
@@ -766,14 +750,6 @@ impl S3ObjectStore {
     }
 
     #[inline(always)]
-    fn get_retry_strategy() -> impl Iterator<Item = Duration> {
-        ExponentialBackoff::from_millis(DEFAULT_RETRY_INTERVAL)
-            .max_delay(DEFAULT_RETRY_MAX_DELAY)
-            .take(DEFAULT_RETRY_MAX_ATTEMPTS)
-            .map(jitter)
-    }
-
-    #[inline(always)]
     fn should_retry(err: &SdkError<GetObjectError>) -> bool {
         if let SdkError::DispatchFailure(e) = err {
             if e.is_timeout() {
@@ -782,6 +758,141 @@ impl S3ObjectStore {
             }
         }
         false
+    }
+}
+
+pub struct S3ObjectStoreConfig {
+    pub keepalive_ms: Option<u64>,
+    pub recv_buffer_size: Option<usize>,
+    pub send_buffer_size: Option<usize>,
+    pub nodelay: Option<bool>,
+
+    pub req_retry_interval_ms: Option<u64>,
+    pub req_retry_max_delay_ms: Option<u64>,
+    pub req_retry_max_attempts: Option<usize>,
+}
+
+impl Default for S3ObjectStoreConfig {
+    fn default() -> Self {
+        Self {
+            keepalive_ms: s3_objstore_config::object_store_keepalive_ms(),
+            recv_buffer_size: s3_objstore_config::object_store_recv_buffer_size(),
+            send_buffer_size: s3_objstore_config::object_store_send_buffer_size(),
+            nodelay: s3_objstore_config::object_store_nodelay(),
+            req_retry_interval_ms: Some(s3_objstore_config::object_store_req_retry_interval_ms()),
+            req_retry_max_delay_ms: Some(s3_objstore_config::object_store_req_retry_max_delay_ms()),
+            req_retry_max_attempts: Some(s3_objstore_config::object_store_req_retry_max_attempts()),
+        }
+    }
+}
+
+impl S3ObjectStoreConfig {
+    #[inline(always)]
+    fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
+        ExponentialBackoff::from_millis(
+            self.req_retry_interval_ms
+                .unwrap_or(s3_objstore_config::object_store_req_retry_interval_ms()),
+        )
+        .max_delay(Duration::from_millis(
+            self.req_retry_max_delay_ms
+                .unwrap_or(s3_objstore_config::object_store_req_retry_max_delay_ms()),
+        ))
+        .take(
+            self.req_retry_max_attempts
+                .unwrap_or(s3_objstore_config::object_store_req_retry_max_attempts()),
+        )
+        .map(jitter)
+    }
+}
+
+struct S3ObjectIter {
+    buffer: VecDeque<ObjectMetadata>,
+    client: Client,
+    bucket: String,
+    prefix: String,
+    next_continuation_token: Option<String>,
+    is_truncated: bool,
+    #[allow(clippy::type_complexity)]
+    send_future: Option<
+        BoxFuture<
+            'static,
+            Result<(Vec<ObjectMetadata>, Option<String>, bool), SdkError<ListObjectsV2Error>>,
+        >,
+    >,
+}
+
+impl S3ObjectIter {
+    fn new(client: Client, bucket: String, prefix: String) -> Self {
+        Self {
+            buffer: VecDeque::default(),
+            client,
+            bucket,
+            prefix,
+            next_continuation_token: None,
+            is_truncated: true,
+            send_future: None,
+        }
+    }
+}
+
+impl Stream for S3ObjectIter {
+    type Item = ObjectResult<ObjectMetadata>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(e) = self.buffer.pop_front() {
+            return Poll::Ready(Some(Ok(e)));
+        }
+        if let Some(f) = self.send_future.as_mut() {
+            return match ready!(f.poll_unpin(cx)) {
+                Ok((more, next_continuation_token, is_truncated)) => {
+                    self.next_continuation_token = next_continuation_token;
+                    self.is_truncated = is_truncated;
+                    self.buffer.extend(more);
+                    self.send_future = None;
+                    self.poll_next(cx)
+                }
+                Err(e) => {
+                    self.send_future = None;
+                    Poll::Ready(Some(Err(e.into())))
+                }
+            };
+        }
+        if !self.is_truncated {
+            return Poll::Ready(None);
+        }
+        let mut request = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket)
+            .prefix(&self.prefix);
+        if let Some(continuation_token) = self.next_continuation_token.as_ref() {
+            request = request.continuation_token(continuation_token);
+        }
+        let f = async move {
+            match request.send().await {
+                Ok(r) => {
+                    let more = r
+                        .contents()
+                        .unwrap_or_default()
+                        .iter()
+                        .map(|obj| ObjectMetadata {
+                            key: obj.key().expect("key required").to_owned(),
+                            last_modified: obj
+                                .last_modified()
+                                .map(|l| l.as_secs_f64())
+                                .unwrap_or(0f64),
+                            total_size: obj.size() as usize,
+                        })
+                        .collect_vec();
+                    let is_truncated = r.is_truncated;
+                    let next_continuation_token = r.next_continuation_token;
+                    Ok((more, next_continuation_token, is_truncated))
+                }
+                Err(e) => Err(e),
+            }
+        };
+        self.send_future = Some(Box::pin(f));
+        self.poll_next(cx)
     }
 }
 

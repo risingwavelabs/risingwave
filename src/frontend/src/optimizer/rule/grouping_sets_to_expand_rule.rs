@@ -75,13 +75,10 @@ impl Rule for GroupingSetsToExpandRule {
             return None;
         }
         let agg = Self::prune_column_for_agg(agg);
-        let (agg_calls, mut group_keys, grouping_sets, input) = agg.decompose();
+        let (agg_calls, mut group_keys, grouping_sets, input, enable_two_phase) = agg.decompose();
 
         let flag_col_idx = group_keys.len();
         let input_schema_len = input.schema().len();
-
-        // TODO: support GROUPING expression.
-        // TODO: optimize the case existing only one set.
 
         let column_subset = grouping_sets
             .iter()
@@ -162,7 +159,8 @@ impl Rule for GroupingSetsToExpandRule {
             }
         }
 
-        let new_agg = Agg::new(new_agg_calls, group_keys, expand);
+        let new_agg =
+            Agg::new(new_agg_calls, group_keys, expand).with_enable_two_phase(enable_two_phase);
         let project_exprs = (0..flag_col_idx)
             .map(|i| {
                 ExprImpl::InputRef(

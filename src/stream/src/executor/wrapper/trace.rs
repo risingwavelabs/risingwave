@@ -27,6 +27,7 @@ use crate::task::ActorId;
 /// Streams wrapped by `trace` will be traced with `tracing` spans and reported to `opentelemetry`.
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn trace(
+    enable_executor_row_count: bool,
     info: Arc<ExecutorInfo>,
     _input_pos: usize,
     actor_id: ActorId,
@@ -38,26 +39,53 @@ pub async fn trace(
 
     let span_name = pretty_identity(&info.identity, actor_id, executor_id);
 
+    let is_sink_or_mv = info.identity.contains("Materialize") || info.identity.contains("Sink");
+
     let new_span = || tracing::info_span!("executor", "otel.name" = span_name, actor_id);
     let mut span = new_span();
 
     pin_mut!(input);
 
     while let Some(message) = input.next().instrument(span.clone()).await.transpose()? {
-        if let Message::Chunk(chunk) = &message {
-            if chunk.cardinality() > 0 {
-                metrics
-                    .executor_row_count
-                    .with_label_values(&[&actor_id_string, &span_name])
-                    .inc_by(chunk.cardinality() as u64);
-                tracing::trace!(?chunk, "chunk");
+        // Trace the message in the span's scope.
+        span.in_scope(|| match &message {
+            Message::Chunk(chunk) => {
+                if chunk.cardinality() > 0 {
+                    if enable_executor_row_count || is_sink_or_mv {
+                        metrics
+                            .executor_row_count
+                            .with_label_values(&[&actor_id_string, &span_name])
+                            .inc_by(chunk.cardinality() as u64);
+                    }
+                    tracing::trace!(
+                        target: "events::stream::message::chunk",
+                        cardinality = chunk.cardinality(),
+                        capacity = chunk.capacity(),
+                        "\n{}\n", chunk.to_pretty_with_schema(&info.schema),
+                    );
+                }
             }
-        }
+            Message::Watermark(watermark) => {
+                tracing::trace!(
+                    target: "events::stream::message::watermark",
+                    value = ?watermark.val,
+                    col_idx = watermark.col_idx,
+                );
+            }
+            Message::Barrier(barrier) => {
+                tracing::trace!(
+                    target: "events::stream::message::barrier",
+                    prev_epoch = barrier.epoch.prev,
+                    curr_epoch = barrier.epoch.curr,
+                    kind = ?barrier.kind,
+                );
+            }
+        });
 
+        // Yield the message and update the span.
         match &message {
             Message::Chunk(_) | Message::Watermark(_) => yield message,
-
-            Message::Barrier(_barrier) => {
+            Message::Barrier(_) => {
                 // Drop the span as the inner executor has finished processing the barrier (then all
                 // data from the previous epoch).
                 let _ = std::mem::replace(&mut span, Span::none());

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::fmt::Debug;
 use std::io::{Read, Write};
 use std::mem::size_of;
 use std::ops::Range;
@@ -24,6 +25,7 @@ use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
 
 use super::utils::{bytes_diff_below_max_key_length, xxhash64_verify, CompressionAlgorithm};
+use crate::hummock::sstable::utils;
 use crate::hummock::sstable::utils::xxhash64_checksum;
 use crate::hummock::{HummockError, HummockResult};
 
@@ -149,6 +151,16 @@ pub struct Block {
 
     /// Restart points.
     restart_points: Vec<RestartPoint>,
+}
+
+impl Debug for Block {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Block")
+            .field("data_len", &self.data_len)
+            .field("table_id", &self.table_id)
+            .field("restart_points", &self.restart_points)
+            .finish()
+    }
 }
 
 impl Block {
@@ -474,7 +486,7 @@ impl BlockBuilder {
         };
 
         let diff_key = if self.entry_count % self.restart_count == 0 || type_mismatch {
-            let offset = self.buf.len() as u32;
+            let offset = utils::checked_into_u32(self.buf.len());
 
             self.restart_points.push(offset);
 
@@ -553,7 +565,8 @@ impl BlockBuilder {
             self.buf.put_u32_le(*restart_point);
         }
 
-        self.buf.put_u32_le(self.restart_points.len() as u32);
+        self.buf
+            .put_u32_le(utils::checked_into_u32(self.restart_points.len()));
         for RestartPoint {
             offset,
             key_len_type,
@@ -570,8 +583,9 @@ impl BlockBuilder {
             self.buf.put_u8(value);
         }
 
-        self.buf
-            .put_u32_le(self.restart_points_type_index.len() as u32);
+        self.buf.put_u32_le(utils::checked_into_u32(
+            self.restart_points_type_index.len(),
+        ));
 
         self.buf.put_u32_le(self.table_id.unwrap());
         match self.compression_algorithm {

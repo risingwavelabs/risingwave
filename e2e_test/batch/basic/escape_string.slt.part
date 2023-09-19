@@ -16,7 +16,7 @@ select e'\u003f'
 query T
 select e'\55p'
 ----
--p 
+-p
 
 query T
 select e'\pp'
@@ -38,8 +38,8 @@ select e'\\'
 ----
 \
 
-statement error 
+statement error
 select e'\x80'
 
-statement error 
+statement error
 select e'\200'

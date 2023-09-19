@@ -12,9 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use dyn_clone::DynClone;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
-use risingwave_common::types::{DataType, DataTypeName};
+use std::fmt::Debug;
+use std::ops::Range;
+
+use downcast_rs::{impl_downcast, Downcast};
+use risingwave_common::array::StreamChunk;
+use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::types::{DataType, DataTypeName, Datum};
 
 use crate::sig::FuncSigDebug;
 use crate::{ExprError, Result};
@@ -22,10 +26,11 @@ use crate::{ExprError, Result};
 // aggregate definition
 mod def;
 
-// concrete aggregators
+// concrete AggregateFunctions
 mod approx_count_distinct;
 mod array_agg;
-mod count_star;
+mod bool_and;
+mod bool_or;
 mod general;
 mod jsonb_agg;
 mod mode;
@@ -33,59 +38,122 @@ mod percentile_cont;
 mod percentile_disc;
 mod string_agg;
 
-// wrappers
-// XXX(wrj): should frontend plan these as operators?
-mod distinct;
-mod filter;
-mod orderby;
-mod projection;
-
 pub use self::def::*;
-use self::distinct::Distinct;
-use self::filter::*;
-use self::orderby::ProjectionOrderBy;
-use self::projection::Projection;
 
-/// An `Aggregator` supports `update` data and `output` result.
+/// A trait over all aggregate functions.
 #[async_trait::async_trait]
-pub trait Aggregator: Send + DynClone + 'static {
+pub trait AggregateFunction: Send + Sync + 'static {
+    /// Returns the return type of the aggregate function.
     fn return_type(&self) -> DataType;
 
-    /// `update_single` update the aggregator with a single row with type checked at runtime.
-    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        self.update_multi(input, row_id, row_id + 1).await
+    /// Creates an initial state of the aggregate function.
+    fn create_state(&self) -> AggregateState {
+        AggregateState::Datum(None)
     }
 
-    /// `update_multi` update the aggregator with multiple rows with type checked at runtime.
-    async fn update_multi(
-        &mut self,
-        input: &DataChunk,
-        start_row_id: usize,
-        end_row_id: usize,
+    /// Update the state with multiple rows.
+    async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()>;
+
+    /// Update the state with a range of rows.
+    async fn update_range(
+        &self,
+        state: &mut AggregateState,
+        input: &StreamChunk,
+        range: Range<usize>,
     ) -> Result<()>;
 
-    /// `output` the aggregator to `ArrayBuilder` with input with type checked at runtime.
-    /// After `output` the aggregator is reset to initial state.
-    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
+    /// Get aggregate result from the state.
+    async fn get_result(&self, state: &AggregateState) -> Result<Datum>;
 
-    /// The estimated size of the state.
-    fn estimated_size(&self) -> usize;
+    /// Encode the state into a datum that can be stored in state table.
+    fn encode_state(&self, state: &AggregateState) -> Result<Datum> {
+        match state {
+            AggregateState::Datum(d) => Ok(d.clone()),
+            _ => panic!("cannot encode state"),
+        }
+    }
+
+    /// Decode the state from a datum in state table.
+    fn decode_state(&self, datum: Datum) -> Result<AggregateState> {
+        Ok(AggregateState::Datum(datum))
+    }
 }
 
-dyn_clone::clone_trait_object!(Aggregator);
+/// Intermediate state of an aggregate function.
+#[derive(Debug)]
+pub enum AggregateState {
+    /// A scalar value.
+    Datum(Datum),
+    /// A state of any type.
+    Any(Box<dyn AggStateDyn>),
+}
 
-pub type BoxedAggState = Box<dyn Aggregator>;
+impl EstimateSize for AggregateState {
+    fn estimated_heap_size(&self) -> usize {
+        match self {
+            Self::Datum(d) => d.estimated_heap_size(),
+            Self::Any(a) => std::mem::size_of_val(&**a) + a.estimated_heap_size(),
+        }
+    }
+}
+
+pub trait AggStateDyn: Send + Sync + Debug + EstimateSize + Downcast {}
+
+impl_downcast!(AggStateDyn);
+
+impl AggregateState {
+    pub fn as_datum(&self) -> &Datum {
+        match self {
+            Self::Datum(d) => d,
+            Self::Any(_) => panic!("not datum"),
+        }
+    }
+
+    pub fn as_datum_mut(&mut self) -> &mut Datum {
+        match self {
+            Self::Datum(d) => d,
+            Self::Any(_) => panic!("not datum"),
+        }
+    }
+
+    pub fn downcast_ref<T: AggStateDyn>(&self) -> &T {
+        match self {
+            Self::Datum(_) => panic!("cannot downcast scalar"),
+            Self::Any(a) => a.downcast_ref::<T>().expect("cannot downcast"),
+        }
+    }
+
+    pub fn downcast_mut<T: AggStateDyn>(&mut self) -> &mut T {
+        match self {
+            Self::Datum(_) => panic!("cannot downcast scalar"),
+            Self::Any(a) => a.downcast_mut::<T>().expect("cannot downcast"),
+        }
+    }
+}
+
+pub type BoxedAggregateFunction = Box<dyn AggregateFunction>;
+
+/// Build an append-only `Aggregator` from `AggCall`.
+pub fn build_append_only(agg: &AggCall) -> Result<BoxedAggregateFunction> {
+    build(agg, true)
+}
+
+/// Build a retractable `Aggregator` from `AggCall`.
+pub fn build_retractable(agg: &AggCall) -> Result<BoxedAggregateFunction> {
+    build(agg, false)
+}
 
 /// Build an `Aggregator` from `AggCall`.
-pub fn build(agg: AggCall) -> Result<BoxedAggState> {
-    // NOTE: The function signature is checked by `AggCall::infer_return_type` in the frontend.
-
+///
+/// NOTE: This function ignores argument indices, `column_orders`, `filter` and `distinct` in
+/// `AggCall`. Such operations should be done in batch or streaming executors.
+pub fn build(agg: &AggCall, append_only: bool) -> Result<BoxedAggregateFunction> {
     let args = (agg.args.arg_types().iter())
         .map(|t| t.into())
         .collect::<Vec<DataTypeName>>();
     let ret_type = (&agg.return_type).into();
     let desc = crate::sig::agg::AGG_FUNC_SIG_MAP
-        .get(agg.kind, &args, ret_type)
+        .get(agg.kind, &args, ret_type, append_only)
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(
                 "{:?}",
@@ -95,28 +163,10 @@ pub fn build(agg: AggCall) -> Result<BoxedAggState> {
                     ret_type,
                     set_returning: false,
                     deprecated: false,
+                    append_only,
                 }
             ))
         })?;
 
-    let mut aggregator = (desc.build)(agg.clone())?;
-
-    if agg.distinct {
-        aggregator = Box::new(Distinct::new(aggregator));
-    }
-    if agg.column_orders.is_empty() {
-        aggregator = Box::new(Projection::new(agg.args.val_indices().to_vec(), aggregator));
-    } else {
-        aggregator = Box::new(ProjectionOrderBy::new(
-            agg.args.arg_types().to_vec(),
-            agg.args.val_indices().to_vec(),
-            agg.column_orders,
-            aggregator,
-        ));
-    }
-    if let Some(expr) = agg.filter {
-        aggregator = Box::new(Filter::new(expr, aggregator));
-    }
-
-    Ok(aggregator)
+    (desc.build)(agg)
 }

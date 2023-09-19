@@ -68,7 +68,10 @@ impl TryFrom<&[&str]> for SearchPath {
     fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
         let mut real_path = vec![];
         for p in value {
-            real_path.push(p.trim().to_string());
+            let p = p.trim();
+            if !p.is_empty() {
+                real_path.push(p.to_string());
+            }
         }
         let string = real_path.join(", ");
 

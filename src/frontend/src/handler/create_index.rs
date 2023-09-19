@@ -21,7 +21,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::catalog::{PbIndex, PbTable};
+use risingwave_pb::catalog::{PbIndex, PbStreamJobStatus, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast;
@@ -186,10 +186,10 @@ pub(crate) fn gen_create_index_plan(
         index_table_name.clone(),
         &index_columns_ordered_expr,
         &include_columns_expr,
-        // We use the whole index columns as distributed key by default if users
+        // We use the first index column as distributed key by default if users
         // haven't specify the distributed by columns.
         if distributed_columns_expr.is_empty() {
-            index_columns_ordered_expr.len()
+            1
         } else {
             distributed_columns_expr.len()
         },
@@ -242,6 +242,7 @@ pub(crate) fn gen_create_index_plan(
         original_columns,
         initialized_at_epoch: None,
         created_at_epoch: None,
+        stream_job_status: PbStreamJobStatus::Creating.into(),
     };
 
     let plan: PlanRef = materialize.into();

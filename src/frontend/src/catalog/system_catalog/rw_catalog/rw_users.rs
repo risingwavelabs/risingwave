@@ -13,22 +13,26 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-pub const RW_USERS_TABLE_NAME: &str = "rw_users";
-
-pub const RW_USERS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "id"),
-    (DataType::Varchar, "name"),
-    (DataType::Boolean, "is_super"),
-    (DataType::Boolean, "create_db"),
-    (DataType::Boolean, "create_user"),
-    (DataType::Boolean, "can_login"),
-];
+pub const RW_USERS: BuiltinTable = BuiltinTable {
+    name: "rw_users",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "id"),
+        (DataType::Varchar, "name"),
+        (DataType::Boolean, "is_super"),
+        (DataType::Boolean, "create_db"),
+        (DataType::Boolean, "create_user"),
+        (DataType::Boolean, "can_login"),
+    ],
+    pk: &[0],
+};
 
 impl SysCatalogReaderImpl {
     pub fn read_rw_user_info(&self) -> Result<Vec<OwnedRow>> {

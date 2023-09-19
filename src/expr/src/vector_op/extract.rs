@@ -227,7 +227,7 @@ pub fn date_part_from_interval(unit: &str, interval: Interval) -> Result<F64> {
 fn invalid_unit(name: &'static str, unit: &str) -> ExprError {
     ExprError::InvalidParam {
         name,
-        reason: format!("\"{unit}\" not recognized or supported"),
+        reason: format!("\"{unit}\" not recognized or supported").into(),
     }
 }
 

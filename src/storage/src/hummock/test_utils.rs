@@ -21,14 +21,14 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
-use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
-    create_monotonic_events, CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta,
-    SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
+    create_monotonic_events, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
+    DEFAULT_RESTART_INTERVAL,
 };
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
@@ -63,19 +63,19 @@ pub fn default_opts_for_test() -> StorageOpts {
     }
 }
 
-pub fn gen_dummy_batch(n: u64) -> Vec<(Bytes, StorageValue)> {
+pub fn gen_dummy_batch(n: u64) -> Vec<(TableKey<Bytes>, StorageValue)> {
     vec![(
-        Bytes::from(iterator_test_table_key_of(n as usize)),
+        TableKey(Bytes::from(iterator_test_table_key_of(n as usize))),
         StorageValue::new_put(b"value1".to_vec()),
     )]
 }
 
-pub fn gen_dummy_batch_several_keys(n: usize) -> Vec<(Bytes, StorageValue)> {
+pub fn gen_dummy_batch_several_keys(n: usize) -> Vec<(TableKey<Bytes>, StorageValue)> {
     let mut kvs = vec![];
     let v = Bytes::from(b"value1".to_vec().repeat(100));
     for idx in 0..n {
         kvs.push((
-            Bytes::from(iterator_test_table_key_of(idx)),
+            TableKey(Bytes::from(iterator_test_table_key_of(idx))),
             StorageValue::new_put(v.clone()),
         ));
     }
@@ -127,7 +127,7 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
         block_capacity: 4096,      // 4KB
         restart_interval: DEFAULT_RESTART_INTERVAL,
         bloom_false_positive: 0.1,
-        compression_algorithm: CompressionAlgorithm::None,
+        ..Default::default()
     }
 }
 
@@ -219,6 +219,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
         F::create(opts.bloom_false_positive, opts.capacity / 16),
         opts,
         Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+        None,
     );
 
     let mut last_key = FullKey::<B>::default();

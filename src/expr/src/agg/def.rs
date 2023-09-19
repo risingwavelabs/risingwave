@@ -27,12 +27,12 @@ use risingwave_pb::expr::agg_call::PbType;
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 
 use crate::expr::{
-    build_from_prost, BoxedExpression, ExpectExt, ExpressionRef, LiteralExpression, Token,
+    build_from_prost, BoxedExpression, ExpectExt, Expression, LiteralExpression, Token,
 };
 use crate::Result;
 
 /// Represents an aggregation function.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct AggCall {
     /// Aggregation kind for constructing agg state.
     pub kind: AggKind,
@@ -45,7 +45,7 @@ pub struct AggCall {
     pub column_orders: Vec<ColumnOrder>,
 
     /// Filter of aggregation.
-    pub filter: Option<ExpressionRef>,
+    pub filter: Option<Arc<dyn Expression>>,
 
     /// Should deduplicate the input before aggregation.
     pub distinct: bool,
@@ -68,7 +68,7 @@ impl AggCall {
             })
             .collect();
         let filter = match agg_call.filter {
-            Some(ref pb_filter) => Some(Arc::from(build_from_prost(pb_filter)?)),
+            Some(ref pb_filter) => Some(build_from_prost(pb_filter)?.into()),
             None => None,
         };
         let direct_args = agg_call
@@ -304,18 +304,16 @@ impl AggKind {
     }
 }
 
-/// Macros to generate match arms for [`AggKind`].
-/// IMPORTANT: These macros must be carefully maintained especially when adding new [`AggKind`]
-/// variants.
+/// Macros to generate match arms for [`AggKind`](crate::agg::AggKind).
+/// IMPORTANT: These macros must be carefully maintained especially when adding new
+/// [`AggKind`](crate::agg::AggKind) variants.
 pub mod agg_kinds {
-    /// [`AggKind`]s that are currently not supported in streaming mode.
+    /// [`AggKind`](crate::agg::AggKind)s that are currently not supported in streaming mode.
     #[macro_export]
     macro_rules! unimplemented_in_stream {
         () => {
             AggKind::BitAnd
                 | AggKind::BitOr
-                | AggKind::BoolAnd
-                | AggKind::BoolOr
                 | AggKind::JsonbAgg
                 | AggKind::JsonbObjectAgg
                 | AggKind::PercentileCont
@@ -325,8 +323,8 @@ pub mod agg_kinds {
     }
     pub use unimplemented_in_stream;
 
-    /// [`AggKind`]s that should've been rewritten to other kinds. These kinds should not appear
-    /// when generating physical plan nodes.
+    /// [`AggKind`](crate::agg::AggKind)s that should've been rewritten to other kinds. These kinds
+    /// should not appear when generating physical plan nodes.
     #[macro_export]
     macro_rules! rewritten {
         () => {
@@ -340,8 +338,8 @@ pub mod agg_kinds {
     }
     pub use rewritten;
 
-    /// [`AggKind`]s of which the aggregate results are not affected by the user given ORDER BY
-    /// clause.
+    /// [`AggKind`](crate::agg::AggKind)s of which the aggregate results are not affected by the
+    /// user given ORDER BY clause.
     #[macro_export]
     macro_rules! result_unaffected_by_order_by {
         () => {
@@ -365,9 +363,9 @@ pub mod agg_kinds {
     }
     pub use result_unaffected_by_order_by;
 
-    /// [`AggKind`]s that must be called with ORDER BY clause. These are slightly different from
-    /// variants not in [`result_unaffected_by_order_by`], in that variants returned by this macro
-    /// should be banned while the others should just be warned.
+    /// [`AggKind`](crate::agg::AggKind)s that must be called with ORDER BY clause. These are
+    /// slightly different from variants not in [`result_unaffected_by_order_by`], in that
+    /// variants returned by this macro should be banned while the others should just be warned.
     #[macro_export]
     macro_rules! must_have_order_by {
         () => {
@@ -380,8 +378,8 @@ pub mod agg_kinds {
     }
     pub use must_have_order_by;
 
-    /// [`AggKind`]s of which the aggregate results are not affected by the user given DISTINCT
-    /// keyword.
+    /// [`AggKind`](crate::agg::AggKind)s of which the aggregate results are not affected by the
+    /// user given DISTINCT keyword.
     #[macro_export]
     macro_rules! result_unaffected_by_distinct {
         () => {
@@ -396,7 +394,7 @@ pub mod agg_kinds {
     }
     pub use result_unaffected_by_distinct;
 
-    /// [`AggKind`]s that are simply cannot 2-phased.
+    /// [`AggKind`](crate::agg::AggKind)s that are simply cannot 2-phased.
     #[macro_export]
     macro_rules! simply_cannot_two_phase {
         () => {
@@ -410,21 +408,32 @@ pub mod agg_kinds {
                 | AggKind::PercentileCont
                 | AggKind::PercentileDisc
                 | AggKind::Mode
+                // FIXME(wrj): move `BoolAnd` and `BoolOr` out
+                //  after we support general merge in stateless_simple_agg
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
         };
     }
     pub use simply_cannot_two_phase;
 
-    /// [`AggKind`]s that are implemented with a single value state (so-called stateless).
+    /// [`AggKind`](crate::agg::AggKind)s that are implemented with a single value state (so-called
+    /// stateless).
     #[macro_export]
     macro_rules! single_value_state {
         () => {
-            AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::BitXor
+            AggKind::Sum
+                | AggKind::Sum0
+                | AggKind::Count
+                | AggKind::BitXor
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
+                | AggKind::ApproxCountDistinct
         };
     }
     pub use single_value_state;
 
-    /// [`AggKind`]s that are implemented with a single value state (so-called stateless) iff the
-    /// input is append-only.
+    /// [`AggKind`](crate::agg::AggKind)s that are implemented with a single value state (so-called
+    /// stateless) iff the input is append-only.
     #[macro_export]
     macro_rules! single_value_state_iff_in_append_only {
         () => {
@@ -450,8 +459,6 @@ impl AggKind {
             AggKind::BitAnd
             | AggKind::BitOr
             | AggKind::BitXor
-            | AggKind::BoolAnd
-            | AggKind::BoolOr
             | AggKind::Min
             | AggKind::Max
             | AggKind::Sum => Some(self),

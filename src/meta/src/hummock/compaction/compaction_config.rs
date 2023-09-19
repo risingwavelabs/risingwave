@@ -64,13 +64,8 @@ impl CompactionConfigBuilder {
                     compaction_config::level0_sub_level_compact_level_count(),
                 level0_overlapping_sub_level_compact_level_count:
                     compaction_config::level0_overlapping_sub_level_compact_level_count(),
-
-                // We expect the number of merge iters to be less than 128, and we want the
-                // overlapping file count + non-overlapping sub level count to be below this
-                // threshold
-                level0_stop_write_threshold_merge_iter_count:
-                    compaction_config::level0_stop_write_threshold_merge_iter_count(),
-
+                tombstone_reclaim_ratio: compaction_config::tombstone_reclaim_ratio(),
+                enable_emergency_picker: compaction_config::enable_emergency_picker(),
                 level0_stop_write_threshold_overlapping_file_count:
                     compaction_config::level0_stop_write_threshold_overlapping_file_count(),
             },
@@ -100,6 +95,7 @@ impl CompactionConfigBuilder {
             )
             .max_space_reclaim_bytes(opt.max_space_reclaim_bytes)
             .level0_max_compact_file_number(opt.level0_max_compact_file_number)
+            .tombstone_reclaim_ratio(opt.tombstone_reclaim_ratio)
     }
 
     pub fn build(self) -> CompactionConfig {
@@ -159,7 +155,6 @@ builder_field! {
     level0_max_compact_file_number: u64,
     level0_sub_level_compact_level_count: u32,
     level0_overlapping_sub_level_compact_level_count: u32,
-
-    level0_stop_write_threshold_merge_iter_count: u64,
+    tombstone_reclaim_ratio: u32,
     level0_stop_write_threshold_overlapping_file_count: u64,
 }

@@ -35,7 +35,9 @@ use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, Explain, FrontendOpts, OptimizerContext,
     OptimizerContextRef, PlanRef, Planner, WithOptions,
 };
-use risingwave_sqlparser::ast::{EmitMode, ExplainOptions, ObjectName, Statement};
+use risingwave_sqlparser::ast::{
+    AstOption, DropMode, EmitMode, ExplainOptions, ObjectName, Statement,
+};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -416,7 +418,8 @@ impl TestCase {
                 } => {
                     // TODO(st1page): refacor it
                     let notice = Default::default();
-                    let source_schema = source_schema.map(|schema| schema.into_source_schema_v2());
+                    let source_schema =
+                        source_schema.map(|schema| schema.into_source_schema_v2().0);
 
                     create_table::handle_create_table(
                         handler_args,
@@ -508,6 +511,7 @@ impl TestCase {
                         handler_args,
                         drop_statement.object_name,
                         drop_statement.if_exists,
+                        matches!(drop_statement.drop_mode, AstOption::Some(DropMode::Cascade)),
                     )
                     .await?;
                 }
@@ -776,6 +780,8 @@ impl TestCase {
                     format!("CREATE SINK {sink_name} AS {}", stmt),
                     options,
                     false,
+                    "test_db".into(),
+                    "test_table".into(),
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));

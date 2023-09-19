@@ -237,7 +237,7 @@
     Bind error: failed to bind expression: nullif(v1, 1, 2)
 
     Caused by:
-      Bind error: Nullif function must contain 2 arguments
+      Bind error: Function `nullif` must contain 2 arguments
 - sql: |
     create table t (v1 int);
     select nullif(v1, true) from t;
@@ -340,7 +340,7 @@
     Bind error: failed to bind expression: concat()
 
     Caused by:
-      Bind error: Function `Concat` takes at least 1 arguments (0 given)
+      Bind error: Function `concat` takes at least 1 arguments (0 given)
 - sql: |
     select concat(':', true);
   batch_plan: 'BatchValues { rows: [['':t'':Varchar]] }'
@@ -450,7 +450,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |-
-    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10037, ARRAY[2]:List(Int32)))) as $expr1] }
+    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10039, ARRAY[2]:List(Int32)))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
@@ -473,7 +473,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |-
-    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10037, ARRAY[2]:List(Int32)))) as $expr1] }
+    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10039, ARRAY[2]:List(Int32)))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
@@ -487,7 +487,7 @@
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
-    └─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t._row_id] }
+    └─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t._row_id], cleaned_by_watermark: true }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamNow { output: [now] }
@@ -501,7 +501,7 @@
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
-    └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [t.v1], output: [t.v1, t._row_id] }
+    └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [t.v1], output: [t.v1, t._row_id], cleaned_by_watermark: true }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:02':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
@@ -512,8 +512,8 @@
     select * from t where v1 >= now() and v2 >= now();
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v2] }
-    └─StreamDynamicFilter { predicate: (t.v2 >= now), output_watermarks: [t.v2], output: [t.v1, t.v2, t._row_id] }
-      ├─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t.v2, t._row_id] }
+    └─StreamDynamicFilter { predicate: (t.v2 >= now), output_watermarks: [t.v2], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
+      ├─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
       │ ├─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       │ └─StreamExchange { dist: Broadcast }
       │   └─StreamNow { output: [now] }
@@ -531,7 +531,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [max_time, t.v2(hidden)], stream_key: [t.v2], pk_columns: [t.v2], pk_conflict: NoCheck, watermark_columns: [max_time] }
     └─StreamProject { exprs: [max(t.v1), t.v2], output_watermarks: [max(t.v1)] }
-      └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output_watermarks: [max(t.v1)], output: [t.v2, max(t.v1)] }
+      └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output_watermarks: [max(t.v1)], output: [t.v2, max(t.v1)], cleaned_by_watermark: true }
         ├─StreamProject { exprs: [t.v2, max(t.v1)] }
         │ └─StreamHashAgg { group_key: [t.v2], aggs: [max(t.v1), count] }
         │   └─StreamExchange { dist: HashShard(t.v2) }
@@ -599,14 +599,19 @@
     select * from abs(-1);
   batch_plan: 'BatchValues { rows: [[1:Int32]] }'
   stream_plan: |-
-    StreamMaterialize { columns: [abs, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [abs] }
+    StreamMaterialize { columns: [abs, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └─StreamValues { rows: [[Abs(-1:Int32), 0:Int64]] }
 - sql: |
     select * from range(1,2);
-  batch_plan: 'BatchTableFunction { table_function: Range(1:Int32, 2:Int32) }'
-  stream_error: |-
-    Feature is not yet implemented: LogicalTableFunction::logical_rewrite_for_stream
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+  batch_plan: |-
+    BatchProject { exprs: [Range(1:Int32, 2:Int32)] }
+    └─BatchProjectSet { select_list: [Range(1:Int32, 2:Int32)] }
+      └─BatchValues { rows: [[]] }
+  stream_plan: |-
+    StreamMaterialize { columns: [range, _row_id(hidden), projected_row_id(hidden)], stream_key: [_row_id, projected_row_id], pk_columns: [_row_id, projected_row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [Range(1:Int32, 2:Int32), _row_id, projected_row_id] }
+      └─StreamProjectSet { select_list: [Range(1:Int32, 2:Int32), $0] }
+        └─StreamValues { rows: [[0:Int64]] }
 - sql: |
     select * from max();
   binder_error: 'Invalid input syntax: aggregate functions are not allowed in FROM'
@@ -619,9 +624,11 @@
     ) as i,
     string_to_array(current_setting('search_path'),',') s
   batch_plan: |-
-    BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-    ├─BatchTableFunction { table_function: GenerateSeries(1:Int32, 2:Int32) }
+    BatchNestedLoopJoin { type: Inner, predicate: true, output: [GenerateSeries(1:Int32, 2:Int32), ] }
+    ├─BatchProjectSet { select_list: [GenerateSeries(1:Int32, 2:Int32)] }
+    │ └─BatchValues { rows: [[]] }
     └─BatchValues { rows: [[ARRAY["$user",  public]:List(Varchar)]] }
   stream_error: |-
-    Feature is not yet implemented: LogicalTableFunction::logical_rewrite_for_stream
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md

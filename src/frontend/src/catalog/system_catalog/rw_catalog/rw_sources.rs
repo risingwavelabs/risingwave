@@ -16,17 +16,16 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{
-    get_acl_items, SysCatalogReaderImpl, SystemCatalogColumnsDef,
+    get_acl_items, BuiltinTable, SysCatalogReaderImpl, SystemCatalogColumnsDef,
 };
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
-
-pub const RW_SOURCES_TABLE_NAME: &str = "rw_sources";
 
 pub static RW_SOURCES_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLock::new(|| {
     vec![
@@ -37,7 +36,8 @@ pub static RW_SOURCES_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = Lazy
         (DataType::Varchar, "connector"),
         // [col1, col2]
         (DataType::List(Box::new(DataType::Varchar)), "columns"),
-        (DataType::Varchar, "row_format"),
+        (DataType::Varchar, "format"),
+        (DataType::Varchar, "row_encode"),
         (DataType::Boolean, "append_only"),
         (DataType::Int32, "connection_id"),
         (DataType::Varchar, "definition"),
@@ -45,6 +45,13 @@ pub static RW_SOURCES_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = Lazy
         (DataType::Timestamptz, "initialized_at"),
         (DataType::Timestamptz, "created_at"),
     ]
+});
+
+pub static RW_SOURCES: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
+    name: "rw_sources",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &RW_SOURCES_COLUMNS,
+    pk: &[0],
 });
 
 impl SysCatalogReaderImpl {
@@ -82,15 +89,29 @@ impl SysCatalogReaderImpl {
                                     .map(|c| Some(ScalarImpl::Utf8(c.name().into())))
                                     .collect_vec(),
                             ))),
-                            Some(ScalarImpl::Utf8(
-                                source.info.get_row_format().unwrap().as_str_name().into(),
-                            )),
+                            source
+                                .info
+                                .get_format()
+                                .map(|format| Some(ScalarImpl::Utf8(format.as_str_name().into())))
+                                .unwrap_or(None),
+                            source
+                                .info
+                                .get_row_encode()
+                                .map(|row_encode| {
+                                    Some(ScalarImpl::Utf8(row_encode.as_str_name().into()))
+                                })
+                                .unwrap_or(None),
                             Some(ScalarImpl::Bool(source.append_only)),
                             source.connection_id.map(|id| ScalarImpl::Int32(id as i32)),
                             Some(ScalarImpl::Utf8(source.create_sql().into())),
                             Some(
-                                get_acl_items(&Object::SourceId(source.id), &users, username_map)
-                                    .into(),
+                                get_acl_items(
+                                    &Object::SourceId(source.id),
+                                    false,
+                                    &users,
+                                    username_map,
+                                )
+                                .into(),
                             ),
                             source.initialized_at_epoch.map(|e| e.as_scalar()),
                             source.created_at_epoch.map(|e| e.as_scalar()),

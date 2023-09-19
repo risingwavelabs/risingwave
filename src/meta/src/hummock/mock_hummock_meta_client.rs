@@ -14,6 +14,7 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -41,10 +42,9 @@ use crate::hummock::compaction::{
     default_level_selector, LevelSelector, SpaceReclaimCompactionSelector,
 };
 use crate::hummock::HummockManager;
-use crate::storage::MemStore;
 
 pub struct MockHummockMetaClient {
-    hummock_manager: Arc<HummockManager<MemStore>>,
+    hummock_manager: Arc<HummockManager>,
     context_id: HummockContextId,
     compact_context_id: AtomicU32,
     // used for hummock replay to avoid collision with existing sst files
@@ -53,7 +53,7 @@ pub struct MockHummockMetaClient {
 
 impl MockHummockMetaClient {
     pub fn new(
-        hummock_manager: Arc<HummockManager<MemStore>>,
+        hummock_manager: Arc<HummockManager>,
         context_id: HummockContextId,
     ) -> MockHummockMetaClient {
         MockHummockMetaClient {
@@ -65,7 +65,7 @@ impl MockHummockMetaClient {
     }
 
     pub fn with_sst_offset(
-        hummock_manager: Arc<HummockManager<MemStore>>,
+        hummock_manager: Arc<HummockManager>,
         context_id: HummockContextId,
         sst_offset: u64,
     ) -> Self {
@@ -186,7 +186,12 @@ impl HummockMetaClient for MockHummockMetaClient {
         todo!()
     }
 
-    async fn report_full_scan_task(&self, _object_ids: Vec<HummockSstableObjectId>) -> Result<()> {
+    async fn report_full_scan_task(
+        &self,
+        _filtered_object_ids: Vec<HummockSstableObjectId>,
+        _total_object_count: u64,
+        _total_object_size: u64,
+    ) -> Result<()> {
         unimplemented!()
     }
 
@@ -254,6 +259,10 @@ impl HummockMetaClient for MockHummockMetaClient {
                 {
                     let resp = SubscribeCompactionEventResponse {
                         event: Some(ResponseEvent::CompactTask(task)),
+                        create_at: SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .expect("Clock may have gone backwards")
+                            .as_millis() as u64,
                     };
 
                     let _ = task_tx.send(Ok(resp));
@@ -272,7 +281,7 @@ impl HummockMetaClient for MockHummockMetaClient {
 }
 
 impl MockHummockMetaClient {
-    pub fn hummock_manager_ref(&self) -> Arc<HummockManager<MemStore>> {
+    pub fn hummock_manager_ref(&self) -> Arc<HummockManager> {
         self.hummock_manager.clone()
     }
 }

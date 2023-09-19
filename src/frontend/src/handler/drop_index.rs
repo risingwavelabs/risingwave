@@ -28,6 +28,7 @@ pub async fn handle_drop_index(
     handler_args: HandlerArgs,
     index_name: ObjectName,
     if_exists: bool,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -48,7 +49,7 @@ pub async fn handle_drop_index(
             }
             Err(err) => {
                 match err {
-                    CatalogError::NotFound(kind, _) if kind == "index" => {
+                    CatalogError::NotFound("index", _) => {
                         // index not found, try to find table below to give a better error message
                     }
                     _ => return Err(err.into()),
@@ -68,7 +69,7 @@ pub async fn handle_drop_index(
                                 .into())
                         } else {
                             match e {
-                                CatalogError::NotFound(kind, name) if kind == "table" => {
+                                CatalogError::NotFound("table", name) => {
                                     Err(CatalogError::NotFound("index", name).into())
                                 }
                                 _ => Err(e.into()),
@@ -81,7 +82,7 @@ pub async fn handle_drop_index(
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_index(index_id).await?;
+    catalog_writer.drop_index(index_id, cascade).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_INDEX))
 }

@@ -106,7 +106,7 @@ macro_rules! impl_array_for_num256 {
                     data: Vec::with_capacity(capacity),
                 }
             }
-        
+
             fn with_type(capacity: usize, ty: DataType) -> Self {
                 assert_eq!(ty, DataType::$variant_name);
                 Self::new(capacity)
@@ -207,5 +207,15 @@ impl_array_for_num256!(
 impl EstimateSize for Int256Array {
     fn estimated_heap_size(&self) -> usize {
         self.bitmap.estimated_heap_size() + self.data.capacity() * size_of::<I256>()
+    }
+}
+
+impl FromIterator<Int256> for Int256Array {
+    fn from_iter<I: IntoIterator<Item = Int256>>(iter: I) -> Self {
+        let data: Vec<I256> = iter.into_iter().map(|i| *i.0).collect();
+        Int256Array {
+            bitmap: Bitmap::ones(data.len()),
+            data,
+        }
     }
 }

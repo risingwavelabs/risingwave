@@ -13,13 +13,14 @@
 // limitations under the License.
 
 #![feature(async_closure)]
-#![feature(drain_filter)]
-#![feature(hash_drain_filter)]
+#![feature(extract_if)]
+#![feature(hash_extract_if)]
 #![feature(lint_reasons)]
 #![feature(map_many_mut)]
 #![feature(bound_map)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(is_sorted)]
 
 mod key_cmp;
 use std::cmp::Ordering;
@@ -38,6 +39,8 @@ pub mod key;
 pub mod key_range;
 pub mod prost_key_range;
 pub mod table_stats;
+
+pub use compact::*;
 
 pub type HummockSstableObjectId = u64;
 pub type HummockSstableId = u64;

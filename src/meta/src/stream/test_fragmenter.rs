@@ -78,8 +78,8 @@ fn make_sum_aggcall(idx: u32) -> AggCall {
 
 fn make_agg_call_result_state() -> AggCallState {
     AggCallState {
-        inner: Some(agg_call_state::Inner::ResultValueState(
-            agg_call_state::ResultValueState {},
+        inner: Some(agg_call_state::Inner::ValueState(
+            agg_call_state::ValueState {},
         )),
     }
 }
@@ -188,7 +188,7 @@ fn make_materialize_table(id: u32) -> PbTable {
 fn make_stream_fragments() -> Vec<StreamFragment> {
     let mut fragments = vec![];
     // table source node
-    let column_ids = vec![1, 2, 0];
+    let column_ids = [1, 2, 0];
     let columns = column_ids
         .iter()
         .map(|column_id| ColumnCatalog {
@@ -271,7 +271,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
-            result_table: Some(make_empty_table(1)),
+            intermediate_state_table: Some(make_empty_table(1)),
             ..Default::default()
         })),
         input: vec![filter_node],
@@ -314,7 +314,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
-            result_table: Some(make_empty_table(2)),
+            intermediate_state_table: Some(make_empty_table(2)),
             ..Default::default()
         })),
         fields: vec![], // TODO: fill this later
@@ -343,8 +343,9 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
                 make_inputref(0),
                 make_inputref(1),
             ],
-            watermark_input_key: vec![],
-            watermark_output_key: vec![],
+            watermark_input_cols: vec![],
+            watermark_output_cols: vec![],
+            nondecreasing_exprs: vec![],
         })),
         fields: vec![], // TODO: fill this later
         input: vec![simple_agg_node_1],

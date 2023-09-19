@@ -51,8 +51,8 @@ mod tests {
 
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::{
-        BytesProperties, EncodingProperties, ParserProperties, ProtocolProperties,
-        SourceColumnDesc, SourceStreamChunkBuilder,
+        BytesProperties, EncodingProperties, ProtocolProperties, SourceColumnDesc,
+        SourceStreamChunkBuilder, SpecificParserConfig,
     };
 
     fn get_payload() -> Vec<Vec<u8>> {
@@ -61,7 +61,7 @@ mod tests {
 
     async fn test_bytes_parser(get_payload: fn() -> Vec<Vec<u8>>) {
         let descs = vec![SourceColumnDesc::simple("id", DataType::Bytea, 0.into())];
-        let props = ParserProperties {
+        let props = SpecificParserConfig {
             key_encoding_config: None,
             encoding_config: EncodingProperties::Bytes(BytesProperties { column_name: None }),
             protocol_config: ProtocolProperties::Plain,

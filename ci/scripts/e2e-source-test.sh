@@ -7,6 +7,7 @@ source ci/scripts/common.sh
 
 # prepare environment
 export CONNECTOR_RPC_ENDPOINT="localhost:50051"
+export CONNECTOR_LIBS_PATH="./connector-node/libs"
 
 while getopts 'p:' opt; do
     case ${opt} in
@@ -35,6 +36,7 @@ echo "--- Prepare data"
 cp src/connector/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
 cp src/connector/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
 cp src/connector/src/test_data/complex-schema ./proto-complex-schema
+cp src/connector/src/test_data/complex-schema.json ./json-complex-schema
 
 
 echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
@@ -133,6 +135,16 @@ cargo make ci-start ci-pubsub
 cargo run --bin prepare_ci_pubsub
 sqllogictest -p 4566 -d dev './e2e_test/source/basic/*.slt'
 sqllogictest -p 4566 -d dev './e2e_test/source/basic/old_row_format_syntax/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/source/basic/alter/kafka.slt'
+
+echo "--- e2e, kafka alter source"
+chmod +x ./scripts/source/prepare_data_after_alter.sh
+./scripts/source/prepare_data_after_alter.sh 2
+sqllogictest -p 4566 -d dev './e2e_test/source/basic/alter/kafka_after_new_data.slt'
+
+echo "--- e2e, kafka alter source again"
+./scripts/source/prepare_data_after_alter.sh 3
+sqllogictest -p 4566 -d dev './e2e_test/source/basic/alter/kafka_after_new_data_2.slt'
 
 echo "--- Run CH-benCHmark"
 ./risedev slt -p 4566 -d dev './e2e_test/ch_benchmark/batch/ch_benchmark.slt'

@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
+use std::sync::LazyLock;
+
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
 
-/// Stores information about relation access methods.
-/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-am.html`]
-pub const PG_AM_TABLE_NAME: &str = "pg_am";
 pub const PG_AM_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Varchar, "amname"),
@@ -28,8 +26,11 @@ pub const PG_AM_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "amtype"),
 ];
 
-impl SysCatalogReaderImpl {
-    pub fn read_am_info(&self) -> Result<Vec<OwnedRow>> {
-        Ok(vec![])
-    }
-}
+/// Stores information about relation access methods.
+/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-am.html`]
+pub static PG_AM: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_am",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: PG_AM_COLUMNS,
+    sql: infer_dummy_view_sql(PG_AM_COLUMNS),
+});

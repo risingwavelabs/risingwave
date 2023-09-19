@@ -56,7 +56,7 @@ pub trait Session: Send + Sync {
     type Portal: Send + Clone + std::fmt::Display + 'static;
 
     /// The str sql can not use the unparse from AST: There is some problem when dealing with create
-    /// view, see  https://github.com/risingwavelabs/risingwave/issues/6801.
+    /// view, see <https://github.com/risingwavelabs/risingwave/issues/6801>.
     fn run_one_query(
         self: Arc<Self>,
         sql: Statement,
@@ -66,7 +66,7 @@ pub trait Session: Send + Sync {
     fn parse(
         self: Arc<Self>,
         sql: Option<Statement>,
-        params_types: Vec<DataType>,
+        params_types: Vec<Option<DataType>>,
     ) -> Result<Self::PreparedStatement, BoxedError>;
 
     // TODO: maybe this function should be async and return the notice more timely
@@ -76,7 +76,7 @@ pub trait Session: Send + Sync {
     fn bind(
         self: Arc<Self>,
         prepare_statement: Self::PreparedStatement,
-        params: Vec<Bytes>,
+        params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
     ) -> Result<Self::Portal, BoxedError>;
@@ -232,7 +232,6 @@ mod tests {
         type PreparedStatement = String;
         type ValuesStream = BoxStream<'static, RowSetResult>;
 
-        #[expect(clippy::unused_async)]
         async fn run_one_query(
             self: Arc<Self>,
             _sql: Statement,
@@ -255,7 +254,7 @@ mod tests {
         fn parse(
             self: Arc<Self>,
             _sql: Option<Statement>,
-            _params_types: Vec<DataType>,
+            _params_types: Vec<Option<DataType>>,
         ) -> Result<String, BoxedError> {
             Ok(String::new())
         }
@@ -263,14 +262,13 @@ mod tests {
         fn bind(
             self: Arc<Self>,
             _prepare_statement: String,
-            _params: Vec<Bytes>,
+            _params: Vec<Option<Bytes>>,
             _param_formats: Vec<types::Format>,
             _result_formats: Vec<types::Format>,
         ) -> Result<String, BoxedError> {
             Ok(String::new())
         }
 
-        #[expect(clippy::unused_async)]
         async fn execute(
             self: Arc<Self>,
             _portal: String,

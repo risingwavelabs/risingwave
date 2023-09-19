@@ -7,6 +7,6 @@ SELECT
     auction, bidder, price, channel,
     split_part(url, '/', 4) as dir1,
     split_part(url, '/', 5) as dir2,
-    split_part(url, '/', 6) as dir3 
-FROM 
+    split_part(url, '/', 6) as dir3
+FROM
     bid;

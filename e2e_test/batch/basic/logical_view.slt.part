@@ -43,9 +43,6 @@ DROP TABLE t;
 statement error other relation\(s\) depend on it
 DROP VIEW v2;
 
-statement error
-SELECT * from v3;
-
 statement ok
 DROP VIEW v3;
 

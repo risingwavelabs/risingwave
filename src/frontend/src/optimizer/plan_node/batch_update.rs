@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -25,7 +26,7 @@ use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
-/// `BatchUpdate` implements [`LogicalUpdate`]
+/// `BatchUpdate` implements [`super::LogicalUpdate`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchUpdate {
     pub base: PlanBase,
@@ -34,6 +35,7 @@ pub struct BatchUpdate {
 
 impl BatchUpdate {
     pub fn new(logical: generic::Update<PlanRef>, schema: Schema) -> Self {
+        assert_eq!(logical.input.distribution(), &Distribution::Single);
         let ctx = logical.input.ctx();
         let base = PlanBase::new_batch(ctx, schema, Distribution::Single, Order::any());
         Self { base, logical }
@@ -72,11 +74,18 @@ impl ToBatchPb for BatchUpdate {
             .map(|x| x.to_expr_proto())
             .collect();
 
+        let update_column_indices = self
+            .logical
+            .update_column_indices
+            .iter()
+            .map(|i| *i as _)
+            .collect_vec();
         NodeBody::Update(UpdateNode {
             exprs,
             table_id: self.logical.table_id.table_id(),
             table_version_id: self.logical.table_version_id,
             returning: self.logical.returning,
+            update_column_indices,
         })
     }
 }

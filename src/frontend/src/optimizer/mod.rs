@@ -30,6 +30,7 @@ pub use plan_visitor::{
 mod logical_optimization;
 mod optimizer_context;
 mod plan_expr_rewriter;
+mod plan_expr_visitor;
 mod rule;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
@@ -176,12 +177,21 @@ impl PlanRoot {
 
         let ctx = plan.ctx();
         // Inline session timezone mainly for rewriting now()
-        plan = inline_session_timezone_in_exprs(ctx, plan)?;
+        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
+        if ctx.is_explain_trace() {
+            ctx.trace("To Batch Plan:");
+            ctx.trace(plan.explain_to_string());
+        }
 
-        let ctx = plan.ctx();
+        plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Merge BatchProject",
+            vec![BatchProjectMergeRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
@@ -428,7 +438,8 @@ impl PlanRoot {
             append_only,
             columns
                 .iter()
-                .filter_map(|c| (!c.is_generated()).then(|| c.column_desc.clone()))
+                .filter(|&c| (!c.is_generated()))
+                .map(|c| c.column_desc.clone())
                 .collect(),
         )
         .into();
@@ -437,6 +448,7 @@ impl PlanRoot {
         let exprs = LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
         if let Some(exprs) = exprs {
             let logical_project = generic::Project::new(exprs, stream_plan);
+            // The project node merges a chunk if it has an ungenerated row id as stream key.
             stream_plan = StreamProject::new(logical_project).into();
         }
 
@@ -543,12 +555,16 @@ impl PlanRoot {
         definition: String,
         properties: WithOptions,
         emit_on_window_close: bool,
+        db_name: String,
+        sink_from_table_name: String,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
         StreamSink::create(
             stream_plan,
             sink_name,
+            db_name,
+            sink_from_table_name,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),

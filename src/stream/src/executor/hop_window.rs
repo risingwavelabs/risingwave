@@ -17,14 +17,14 @@ use std::num::NonZeroUsize;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Op, StreamChunk, Vis};
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::types::Interval;
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
 
 use super::error::StreamExecutorError;
 use super::{ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message};
+use crate::common::StreamChunkBuilder;
 
 pub struct HopWindowExecutor {
     ctx: ActorContextRef,
@@ -110,7 +110,8 @@ impl HopWindowExecutor {
                 reason: format!(
                     "window_size {} cannot be divided by window_slide {}",
                     window_size, window_slide
-                ),
+                )
+                .into(),
             })?
             .get();
 
@@ -141,7 +142,7 @@ impl HopWindowExecutor {
                     let chunk = chunk.compact();
                     let (data_chunk, ops) = chunk.into_parts();
                     // SAFETY: Already compacted.
-                    assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
+                    assert!(data_chunk.is_compacted());
                     let len = data_chunk.cardinality();
 
                     // Collect each window's data into a chunk.
@@ -192,10 +193,9 @@ impl HopWindowExecutor {
                     let mut row_iters = chunks.iter().map(|c| c.rows()).collect_vec();
 
                     let data_types = chunks[0].data_types();
-                    let mut chunk_builder = DataChunkBuilder::new(data_types, chunk_size);
-                    let mut op_builder = Vec::with_capacity(chunk_size);
+                    let mut chunk_builder = StreamChunkBuilder::new(chunk_size, data_types);
 
-                    for &op in &ops {
+                    for &op in &*ops {
                         // Since there could be multiple rows for the same input row, we need to
                         // transform the `U-`/`U+` into `-`/`+` and then duplicate it.
                         let op = match op {
@@ -203,25 +203,19 @@ impl HopWindowExecutor {
                             Op::Delete | Op::UpdateDelete => Op::Delete,
                         };
                         for row_iter in &mut row_iters {
-                            op_builder.push(op);
                             if let Some(chunk) =
-                                chunk_builder.append_one_row(row_iter.next().unwrap())
+                                chunk_builder.append_row(op, row_iter.next().unwrap())
                             {
-                                let ops = op_builder.drain(..).collect_vec();
-                                let chunk = StreamChunk::from_data_chunk(ops, chunk);
                                 yield Message::Chunk(chunk);
                             }
                         }
                     }
 
-                    if let Some(chunk) = chunk_builder.consume_all() {
-                        let ops = op_builder.drain(..).collect_vec();
-                        let chunk = StreamChunk::from_data_chunk(ops, chunk);
+                    if let Some(chunk) = chunk_builder.take() {
                         yield Message::Chunk(chunk);
                     }
 
-                    // All builders should be exhausted.
-                    debug_assert!(op_builder.is_empty());
+                    // Rows should be exhausted.
                     debug_assert!(row_iters.into_iter().all(|mut it| it.next().is_none()));
                 }
                 Message::Barrier(b) => {

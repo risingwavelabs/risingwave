@@ -46,14 +46,9 @@ impl MonitoredHummockMetaClient {
 #[async_trait]
 impl HummockMetaClient for MonitoredHummockMetaClient {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
-        self.stats.unpin_version_before_counts.inc();
-        let timer = self.stats.unpin_version_before_latency.start_timer();
-        let res = self
-            .meta_client
+        self.meta_client
             .unpin_version_before(unpin_version_before)
-            .await;
-        timer.observe_duration();
-        res
+            .await
     }
 
     async fn get_current_version(&self) -> Result<HummockVersion> {
@@ -61,27 +56,15 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     }
 
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
-        self.stats.pin_snapshot_counts.inc();
-        let timer = self.stats.pin_snapshot_latency.start_timer();
-        let res = self.meta_client.pin_snapshot().await;
-        timer.observe_duration();
-        res
+        self.meta_client.pin_snapshot().await
     }
 
     async fn get_snapshot(&self) -> Result<HummockSnapshot> {
-        self.stats.pin_snapshot_counts.inc();
-        let timer = self.stats.pin_snapshot_latency.start_timer();
-        let res = self.meta_client.get_snapshot().await;
-        timer.observe_duration();
-        res
+        self.meta_client.get_snapshot().await
     }
 
     async fn unpin_snapshot(&self) -> Result<()> {
-        self.stats.unpin_snapshot_counts.inc();
-        let timer = self.stats.unpin_snapshot_latency.start_timer();
-        let res = self.meta_client.unpin_snapshot().await;
-        timer.observe_duration();
-        res
+        self.meta_client.unpin_snapshot().await
     }
 
     async fn unpin_snapshot_before(&self, _min_epoch: HummockEpoch) -> Result<()> {
@@ -120,8 +103,15 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
             .await
     }
 
-    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<()> {
-        self.meta_client.report_full_scan_task(object_ids).await
+    async fn report_full_scan_task(
+        &self,
+        filtered_object_ids: Vec<HummockSstableObjectId>,
+        total_object_count: u64,
+        total_object_size: u64,
+    ) -> Result<()> {
+        self.meta_client
+            .report_full_scan_task(filtered_object_ids, total_object_count, total_object_size)
+            .await
     }
 
     async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {

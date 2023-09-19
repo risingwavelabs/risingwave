@@ -23,6 +23,7 @@ use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, StreamNode};
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -36,20 +37,12 @@ pub struct StreamSource {
 
 impl StreamSource {
     pub fn new(logical: generic::Source) -> Self {
-        let mut watermark_columns = FixedBitSet::with_capacity(logical.column_catalog.len());
-        if let Some(catalog) = &logical.catalog {
-            catalog
-                .watermark_descs
-                .iter()
-                .for_each(|desc| watermark_columns.insert(desc.watermark_idx as usize))
-        }
-
         let base = PlanBase::new_stream_with_logical(
             &logical,
             Distribution::SomeShard,
             logical.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
-            watermark_columns,
+            FixedBitSet::with_capacity(logical.column_catalog.len()),
         );
         Self { base, logical }
     }
@@ -94,6 +87,12 @@ impl StreamNode for StreamSource {
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
             properties: source_catalog.properties.clone().into_iter().collect(),
+            rate_limit: self
+                .base
+                .ctx()
+                .session_ctx()
+                .config()
+                .get_streaming_rate_limit(),
         });
         PbNodeBody::Source(SourceNode { source_inner })
     }

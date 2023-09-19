@@ -21,21 +21,21 @@ use std::time::Instant;
 use anyhow::anyhow;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_pb::meta::PausedReason;
 use tokio::sync::{oneshot, watch, RwLock};
 
-use super::notifier::Notifier;
+use super::notifier::{BarrierInfo, Notifier};
 use super::{Command, Scheduled};
 use crate::hummock::HummockManagerRef;
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::MetaStore;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 /// A queue for scheduling barriers.
 ///
 /// We manually implement one here instead of using channels since we may need to update the front
 /// of the queue to add some notifiers for instant flushes.
 struct Inner {
-    queue: RwLock<VecDeque<Scheduled>>,
+    queue: RwLock<ScheduledQueue>,
 
     /// When `queue` is not empty anymore, all subscribers of this watcher will be notified.
     changed_tx: watch::Sender<()>,
@@ -50,6 +50,47 @@ struct Inner {
 
     /// Used for recording send latency of each barrier.
     metrics: Arc<MetaMetrics>,
+}
+
+enum QueueStatus {
+    /// The queue is ready to accept new command.
+    Ready,
+    /// The queue is blocked to accept new command with the given reason.
+    Blocked(String),
+}
+
+struct ScheduledQueue {
+    queue: VecDeque<Scheduled>,
+    status: QueueStatus,
+}
+
+impl ScheduledQueue {
+    fn new() -> Self {
+        Self {
+            queue: VecDeque::new(),
+            status: QueueStatus::Ready,
+        }
+    }
+
+    fn mark_blocked(&mut self, reason: String) {
+        self.status = QueueStatus::Blocked(reason);
+    }
+
+    fn mark_ready(&mut self) {
+        self.status = QueueStatus::Ready;
+    }
+
+    fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    fn push_back(&mut self, scheduled: Scheduled) -> MetaResult<()> {
+        if let QueueStatus::Blocked(reason) = &self.status {
+            return Err(MetaError::unavailable(reason.clone()));
+        }
+        self.queue.push_back(scheduled);
+        Ok(())
+    }
 }
 
 impl Inner {
@@ -80,18 +121,18 @@ impl Inner {
 /// The sender side of the barrier scheduling queue.
 /// Can be cloned and held by other managers to schedule and run barriers.
 #[derive(Clone)]
-pub struct BarrierScheduler<S: MetaStore> {
+pub struct BarrierScheduler {
     inner: Arc<Inner>,
 
     /// Used for getting the latest snapshot after `FLUSH`.
-    hummock_manager: HummockManagerRef<S>,
+    hummock_manager: HummockManagerRef,
 }
 
-impl<S: MetaStore> BarrierScheduler<S> {
+impl BarrierScheduler {
     /// Create a pair of [`BarrierScheduler`] and [`ScheduledBarriers`], for scheduling barriers
     /// from different managers, and executing them in the barrier manager, respectively.
     pub fn new_pair(
-        hummock_manager: HummockManagerRef<S>,
+        hummock_manager: HummockManagerRef,
         metrics: Arc<MetaMetrics>,
         checkpoint_frequency: usize,
     ) -> (Self, ScheduledBarriers) {
@@ -100,7 +141,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
             checkpoint_frequency,
         );
         let inner = Arc::new(Inner {
-            queue: RwLock::new(VecDeque::new()),
+            queue: RwLock::new(ScheduledQueue::new()),
             changed_tx: watch::channel(()).0,
             num_uncheckpointed_barrier: AtomicUsize::new(0),
             checkpoint_frequency: AtomicUsize::new(checkpoint_frequency),
@@ -118,20 +159,21 @@ impl<S: MetaStore> BarrierScheduler<S> {
     }
 
     /// Push a scheduled barrier into the queue.
-    async fn push(&self, scheduleds: impl IntoIterator<Item = Scheduled>) {
+    async fn push(&self, scheduleds: impl IntoIterator<Item = Scheduled>) -> MetaResult<()> {
         let mut queue = self.inner.queue.write().await;
         for scheduled in scheduleds {
-            queue.push_back(scheduled);
+            queue.push_back(scheduled)?;
             if queue.len() == 1 {
                 self.inner.changed_tx.send(()).ok();
             }
         }
+        Ok(())
     }
 
     /// Try to cancel scheduled cmd for create streaming job, return true if cancelled.
     pub async fn try_cancel_scheduled_create(&self, table_id: TableId) -> bool {
-        let mut queue = self.inner.queue.write().await;
-        if let Some(idx) = queue.iter().position(|scheduled| {
+        let queue = &mut self.inner.queue.write().await;
+        if let Some(idx) = queue.queue.iter().position(|scheduled| {
             if let Command::CreateStreamingJob {
                 table_fragments, ..
             } = &scheduled.command
@@ -142,7 +184,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
                 false
             }
         }) {
-            queue.remove(idx).unwrap();
+            queue.queue.remove(idx).unwrap();
             true
         } else {
             false
@@ -152,9 +194,13 @@ impl<S: MetaStore> BarrierScheduler<S> {
     /// Attach `new_notifiers` to the very first scheduled barrier. If there's no one scheduled, a
     /// default barrier will be created. If `new_checkpoint` is true, the barrier will become a
     /// checkpoint.
-    async fn attach_notifiers(&self, new_notifiers: Vec<Notifier>, new_checkpoint: bool) {
+    async fn attach_notifiers(
+        &self,
+        new_notifiers: Vec<Notifier>,
+        new_checkpoint: bool,
+    ) -> MetaResult<()> {
         let mut queue = self.inner.queue.write().await;
-        match queue.front_mut() {
+        match queue.queue.front_mut() {
             Some(Scheduled {
                 notifiers,
                 checkpoint,
@@ -169,10 +215,11 @@ impl<S: MetaStore> BarrierScheduler<S> {
                     new_checkpoint,
                     Command::barrier(),
                     new_notifiers,
-                ));
+                ))?;
                 self.inner.changed_tx.send(()).ok();
             }
         }
+        Ok(())
     }
 
     /// Wait for the next barrier to collect. Note that the barrier flowing in our stream graph is
@@ -183,49 +230,48 @@ impl<S: MetaStore> BarrierScheduler<S> {
             collected: Some(tx),
             ..Default::default()
         };
-        self.attach_notifiers(vec![notifier], checkpoint).await;
+        self.attach_notifiers(vec![notifier], checkpoint).await?;
         rx.await.unwrap()
     }
 
     /// Run multiple commands and return when they're all completely finished. It's ensured that
     /// multiple commands are executed continuously.
     ///
+    /// Returns the barrier info of each command.
+    ///
     /// TODO: atomicity of multiple commands is not guaranteed.
-    pub async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<()> {
-        struct Context {
-            collect_rx: oneshot::Receiver<MetaResult<()>>,
-            finish_rx: oneshot::Receiver<()>,
-        }
-
+    async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<Vec<BarrierInfo>> {
         let mut contexts = Vec::with_capacity(commands.len());
         let mut scheduleds = Vec::with_capacity(commands.len());
 
         for command in commands {
+            let (injected_tx, injected_rx) = oneshot::channel();
             let (collect_tx, collect_rx) = oneshot::channel();
             let (finish_tx, finish_rx) = oneshot::channel();
 
-            contexts.push(Context {
-                collect_rx,
-                finish_rx,
-            });
+            contexts.push((injected_rx, collect_rx, finish_rx));
             scheduleds.push(self.inner.new_scheduled(
                 command.need_checkpoint(),
                 command,
                 once(Notifier {
+                    injected: Some(injected_tx),
                     collected: Some(collect_tx),
                     finished: Some(finish_tx),
-                    ..Default::default()
                 }),
             ));
         }
 
-        self.push(scheduleds).await;
+        self.push(scheduleds).await?;
 
-        for Context {
-            collect_rx,
-            finish_rx,
-        } in contexts
-        {
+        let mut infos = Vec::with_capacity(contexts.len());
+
+        for (injected_rx, collect_rx, finish_rx) in contexts {
+            // Wait for this command to be injected, and record the result.
+            let info = injected_rx
+                .await
+                .map_err(|e| anyhow!("failed to inject barrier: {}", e))?;
+            infos.push(info);
+
             // Throw the error if it occurs when collecting this barrier.
             collect_rx
                 .await
@@ -237,19 +283,33 @@ impl<S: MetaStore> BarrierScheduler<S> {
                 .map_err(|e| anyhow!("failed to finish command: {}", e))?;
         }
 
-        Ok(())
+        Ok(infos)
     }
 
     /// Run a command with a `Pause` command before and `Resume` command after it. Used for
     /// configuration change.
-    pub async fn run_command_with_paused(&self, command: Command) -> MetaResult<()> {
-        self.run_multiple_commands(vec![Command::pause(), command, Command::resume()])
-            .await
+    ///
+    /// Returns the barrier info of the actual command.
+    pub async fn run_config_change_command_with_pause(
+        &self,
+        command: Command,
+    ) -> MetaResult<BarrierInfo> {
+        self.run_multiple_commands(vec![
+            Command::pause(PausedReason::ConfigChange),
+            command,
+            Command::resume(PausedReason::ConfigChange),
+        ])
+        .await
+        .map(|i| i[1])
     }
 
     /// Run a command and return when it's completely finished.
-    pub async fn run_command(&self, command: Command) -> MetaResult<()> {
-        self.run_multiple_commands(vec![command]).await
+    ///
+    /// Returns the barrier info of the actual command.
+    pub async fn run_command(&self, command: Command) -> MetaResult<BarrierInfo> {
+        self.run_multiple_commands(vec![command])
+            .await
+            .map(|i| i[0])
     }
 
     /// Flush means waiting for the next barrier to collect.
@@ -278,7 +338,7 @@ impl ScheduledBarriers {
     pub(super) async fn pop_or_default(&self) -> Scheduled {
         let mut queue = self.inner.queue.write().await;
         let checkpoint = self.try_get_checkpoint();
-        let scheduled = match queue.pop_front() {
+        let scheduled = match queue.queue.pop_front() {
             Some(mut scheduled) => {
                 scheduled.checkpoint = scheduled.checkpoint || checkpoint;
                 scheduled
@@ -305,14 +365,22 @@ impl ScheduledBarriers {
         rx.changed().await.unwrap();
     }
 
-    /// Clear all queued scheduled barriers, and notify their subscribers with failed as aborted.
-    pub(super) async fn abort(&self) {
+    /// Mark command scheduler as blocked and abort all queued scheduled command and notify with
+    /// specific reason.
+    pub(super) async fn abort_and_mark_blocked(&self, reason: impl Into<String> + Copy) {
         let mut queue = self.inner.queue.write().await;
-        while let Some(Scheduled { notifiers, .. }) = queue.pop_front() {
-            notifiers.into_iter().for_each(|notify| {
-                notify.notify_collection_failed(anyhow!("Scheduled barrier abort.").into())
-            })
+        queue.mark_blocked(reason.into());
+        while let Some(Scheduled { notifiers, .. }) = queue.queue.pop_front() {
+            notifiers
+                .into_iter()
+                .for_each(|notify| notify.notify_collection_failed(anyhow!(reason.into()).into()))
         }
+    }
+
+    /// Mark command scheduler as ready to accept new command.
+    pub(super) async fn mark_ready(&self) {
+        let mut queue = self.inner.queue.write().await;
+        queue.mark_ready();
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.

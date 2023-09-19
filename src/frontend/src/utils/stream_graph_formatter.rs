@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, HashMap};
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_pb::catalog::Table;
-use risingwave_pb::stream_plan::agg_call_state::{MaterializedInputState, TableState};
+use risingwave_pb::stream_plan::agg_call_state::MaterializedInputState;
 use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragmentEdge;
 use risingwave_pb::stream_plan::{
     agg_call_state, stream_node, DispatcherType, StreamFragmentGraph, StreamNode,
@@ -169,8 +169,8 @@ impl StreamGraphFormatter {
             )),
             stream_node::NodeBody::SimpleAgg(inner) => {
                 fields.push((
-                    "result table",
-                    self.pretty_add_table(inner.get_result_table().unwrap()),
+                    "intermediate state table",
+                    self.pretty_add_table(inner.get_intermediate_state_table().unwrap()),
                 ));
                 fields.push(("state tables", self.call_states(&inner.agg_call_states)));
                 fields.push((
@@ -180,8 +180,8 @@ impl StreamGraphFormatter {
             }
             stream_node::NodeBody::HashAgg(inner) => {
                 fields.push((
-                    "result table",
-                    self.pretty_add_table(inner.get_result_table().unwrap()),
+                    "intermediate state table",
+                    self.pretty_add_table(inner.get_intermediate_state_table().unwrap()),
                 ));
                 fields.push(("state tables", self.call_states(&inner.agg_call_states)));
                 fields.push((
@@ -342,9 +342,8 @@ impl StreamGraphFormatter {
         let vec = agg_call_states
             .iter()
             .filter_map(|state| match state.get_inner().unwrap() {
-                agg_call_state::Inner::ResultValueState(_) => None,
-                agg_call_state::Inner::TableState(TableState { table })
-                | agg_call_state::Inner::MaterializedInputState(MaterializedInputState {
+                agg_call_state::Inner::ValueState(_) => None,
+                agg_call_state::Inner::MaterializedInputState(MaterializedInputState {
                     table,
                     ..
                 }) => Some(self.pretty_add_table(table.as_ref().unwrap())),

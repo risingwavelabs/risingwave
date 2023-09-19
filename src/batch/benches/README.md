@@ -16,7 +16,7 @@ Run a specific benchmark
 cargo bench -p risingwave_batch -- <filter>
 ```
 
-where `<filter>` is a regular expression matching the benchmark ID, e.g., 
+where `<filter>` is a regular expression matching the benchmark ID, e.g.,
 `top_n.rs` uses `BenchmarkId::new("TopNExecutor", params)` , so we can run TopN benchmarks with
 
 ```bash

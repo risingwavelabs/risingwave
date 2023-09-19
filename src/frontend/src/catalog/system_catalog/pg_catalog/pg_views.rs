@@ -12,51 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use std::sync::LazyLock;
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::types::DataType;
+
+use crate::catalog::system_catalog::BuiltinView;
 
 /// The view `pg_views` provides access to useful information about each view in the database.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-views.html`]
-///
-/// `pg_views` in RisingWave doesn't contain system catalog.
-pub const PG_VIEWS_TABLE_NAME: &str = "pg_views";
-pub const PG_VIEWS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Varchar, "schemaname"),
-    (DataType::Varchar, "viewname"),
-    (DataType::Varchar, "viewowner"),
-    (DataType::Varchar, "definition"),
-];
-
-impl SysCatalogReaderImpl {
-    pub fn read_views_info(&self) -> Result<Vec<OwnedRow>> {
-        // TODO(zehua): solve the deadlock problem.
-        // Get two read locks. The order must be the same as
-        // `FrontendObserverNode::handle_initialization_notification`.
-        let catalog_reader = self.catalog_reader.read_guard();
-        let user_info_reader = self.user_info_reader.read_guard();
-        let schemas = catalog_reader.iter_schemas(&self.auth_context.database)?;
-
-        Ok(schemas
-            .flat_map(|schema| {
-                schema.iter_view().map(|view| {
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Utf8(schema.name().into())),
-                        Some(ScalarImpl::Utf8(view.name().into())),
-                        Some(ScalarImpl::Utf8(
-                            user_info_reader
-                                .get_user_name_by_id(view.owner)
-                                .unwrap()
-                                .into(),
-                        )),
-                        // TODO(zehua): may be not same as postgresql's "definition" column.
-                        Some(ScalarImpl::Utf8(view.sql.clone().into())),
-                    ])
-                })
-            })
-            .collect_vec())
-    }
-}
+pub static PG_VIEWS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_views",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Varchar, "schemaname"),
+        (DataType::Varchar, "viewname"),
+        (DataType::Varchar, "viewowner"),
+        (DataType::Varchar, "definition"),
+    ],
+    sql: "SELECT s.name AS schemaname, \
+                 v.name AS viewname, \
+                 pg_catalog.pg_get_userbyid(v.owner) AS viewowner, \
+                 v.definition AS definition \
+             FROM rw_catalog.rw_views v \
+             JOIN rw_catalog.rw_schemas s \
+             ON v.schema_id = s.id"
+        .into(),
+});

@@ -1,5 +1,5 @@
 query ITTTR
-select 
+select
   s_suppkey,
   s_name,
   s_address,

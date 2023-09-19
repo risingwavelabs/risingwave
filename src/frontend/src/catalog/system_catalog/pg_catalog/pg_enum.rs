@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
-use risingwave_common::row::OwnedRow;
+use std::sync::LazyLock;
+
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
 
-/// The `pg_enum` catalog contains entries showing the values and labels for each enum type.
-/// The internal representation of a given enum value is actually the OID of its associated row in
-/// `pg_enum`. Reference: [`https://www.postgresql.org/docs/current/catalog-pg-enum.html`]
-pub const PG_ENUM_TABLE_NAME: &str = "pg_enum";
 pub const PG_ENUM_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Int32, "enumtypid"),
@@ -29,8 +26,12 @@ pub const PG_ENUM_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "enumlabel"),
 ];
 
-impl SysCatalogReaderImpl {
-    pub fn read_enum_info(&self) -> Result<Vec<OwnedRow>> {
-        Ok(vec![])
-    }
-}
+/// The `pg_enum` catalog contains entries showing the values and labels for each enum type.
+/// The internal representation of a given enum value is actually the OID of its associated row in
+/// `pg_enum`. Reference: [`https://www.postgresql.org/docs/current/catalog-pg-enum.html`]
+pub static PG_ENUM: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_enum",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: PG_ENUM_COLUMNS,
+    sql: infer_dummy_view_sql(PG_ENUM_COLUMNS),
+});

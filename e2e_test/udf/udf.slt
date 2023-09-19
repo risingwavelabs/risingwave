@@ -8,10 +8,10 @@ statement ok
 create function int_42() returns int as int_42 using link 'http://localhost:8815';
 
 # Argument or return type mismatch.
-statement error argument mismatch
+statement error type mismatch
 create function foo(int) returns int as int_42 using link 'http://localhost:8815';
 
-statement error return type mismatch
+statement error type mismatch
 create function foo() returns real as int_42 using link 'http://localhost:8815';
 
 # Create another function.
@@ -223,6 +223,35 @@ query TTII
 select (extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4' :: BYTEA)).*;
 ----
 192.168.0.14 192.168.0.1 861 8374
+
+# steaming
+# to ensure UDF & UDTF respect visibility
+
+statement ok
+create table t (x int);
+
+statement ok
+create materialized view mv as select gcd(x, x), series(x) from t where x <> 2;
+
+statement ok
+insert into t values (1), (2), (3);
+
+statement ok
+flush;
+
+query II
+select * from mv;
+----
+1 0
+3 0
+3 1
+3 2
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;
 
 # error handling
 

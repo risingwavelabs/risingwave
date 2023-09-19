@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rustdoc::private_intra_doc_links)]
+#![allow(non_snake_case)] // for `ctor` generated code
 #![feature(let_chains)]
 #![feature(assert_matches)]
 #![feature(lint_reasons)]
@@ -21,16 +21,20 @@
 #![feature(lazy_cell)]
 #![feature(round_ties_even)]
 #![feature(generators)]
+#![feature(test)]
+#![feature(arc_unwrap_or_clone)]
+
+extern crate self as risingwave_expr;
 
 pub mod agg;
 mod error;
 pub mod expr;
-pub mod function;
 pub mod sig;
 pub mod table_function;
 pub mod vector_op;
 pub mod window_function;
 
+pub use ctor::ctor;
 pub use error::{ExprError, Result};
-use risingwave_common::{bail, ensure};
+pub use risingwave_common::{bail, ensure};
 pub use risingwave_expr_macro::*;

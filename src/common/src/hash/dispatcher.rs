@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use super::HashKey;
-use crate::hash;
-use crate::hash::{HeapNullBitmap, NullBitmap, StackNullBitmap, MAX_GROUP_KEYS_ON_STACK};
-use crate::types::{DataType, Serial};
+use crate::dispatch_data_types;
+use crate::hash::{
+    self, HashKeySer, HeapNullBitmap, NullBitmap, StackNullBitmap, MAX_GROUP_KEYS_ON_STACK,
+};
+use crate::types::DataType;
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -93,31 +95,11 @@ pub trait HashKeyDispatcher: Sized {
 }
 
 fn hash_key_size(data_type: &DataType) -> HashKeySize {
-    use std::mem::size_of;
+    let exact_size = dispatch_data_types!(data_type, [S = ScalarRef], { S::exact_size() });
 
-    use crate::types::{Date, Decimal, Interval, Time, Timestamp, Timestamptz, F32, F64};
-
-    match data_type {
-        // for `Boolean` in `HashKey` use 1 FixedBytes , but in `Array` use 1 FixedBits
-        DataType::Boolean => HashKeySize::Fixed(size_of::<bool>()), //
-        DataType::Int16 => HashKeySize::Fixed(size_of::<i16>()),
-        DataType::Int32 => HashKeySize::Fixed(size_of::<i32>()),
-        DataType::Int64 => HashKeySize::Fixed(size_of::<i64>()),
-        DataType::Serial => HashKeySize::Fixed(size_of::<Serial>()),
-        DataType::Float32 => HashKeySize::Fixed(size_of::<F32>()),
-        DataType::Float64 => HashKeySize::Fixed(size_of::<F64>()),
-        DataType::Decimal => HashKeySize::Fixed(size_of::<Decimal>()),
-        DataType::Date => HashKeySize::Fixed(size_of::<Date>()),
-        DataType::Time => HashKeySize::Fixed(size_of::<Time>()),
-        DataType::Timestamp => HashKeySize::Fixed(size_of::<Timestamp>()),
-        DataType::Timestamptz => HashKeySize::Fixed(size_of::<Timestamptz>()),
-        DataType::Interval => HashKeySize::Fixed(size_of::<Interval>()),
-        DataType::Int256 => HashKeySize::Variable,
-        DataType::Varchar => HashKeySize::Variable,
-        DataType::Bytea => HashKeySize::Variable,
-        DataType::Jsonb => HashKeySize::Variable,
-        DataType::Struct { .. } => HashKeySize::Variable,
-        DataType::List { .. } => HashKeySize::Variable,
+    match exact_size {
+        Some(size) => HashKeySize::Fixed(size),
+        None => HashKeySize::Variable,
     }
 }
 

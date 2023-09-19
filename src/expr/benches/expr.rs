@@ -19,14 +19,12 @@
 // `zip_eq` is a source of poor performance.
 #![allow(clippy::disallowed_methods)]
 
-use std::cell::RefCell;
-
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
 use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::*;
-use risingwave_expr::agg::{build as build_agg, AggArgs, AggCall};
+use risingwave_expr::agg::{build_append_only, AggArgs, AggCall, AggKind};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
 use risingwave_expr::sig::func::func_sigs;
@@ -41,7 +39,7 @@ const CHUNK_SIZE: usize = 1024;
 fn bench_expr(c: &mut Criterion) {
     use itertools::Itertools;
 
-    let input = DataChunk::new(
+    let input = StreamChunk::from(DataChunk::new(
         vec![
             BoolArray::from_iter((1..=CHUNK_SIZE).map(|i| i % 2 == 0)).into_ref(),
             I16Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into_ref(),
@@ -90,20 +88,42 @@ fn bench_expr(c: &mut Criterion) {
             .into_ref(),
             // 16: extract field for date
             Utf8Array::from_iter_display(
-                ["DAY", "MONTH", "YEAR", "DOW", "DOY"]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE)
-                    .map(Some),
+                [
+                    "DAY",
+                    "MONTH",
+                    "YEAR",
+                    "DOW",
+                    "DOY",
+                    "MILLENNIUM",
+                    "CENTURY",
+                    "DECADE",
+                    "ISOYEAR",
+                    "QUARTER",
+                    "WEEK",
+                    "ISODOW",
+                    "EPOCH",
+                    "JULIAN",
+                ]
+                .into_iter()
+                .cycle()
+                .take(CHUNK_SIZE)
+                .map(Some),
             )
             .into_ref(),
             // 17: extract field for time
             Utf8Array::from_iter_display(
-                ["HOUR", "MINUTE", "SECOND"]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE)
-                    .map(Some),
+                [
+                    "Hour",
+                    "Minute",
+                    "Second",
+                    "Millisecond",
+                    "Microsecond",
+                    "Epoch",
+                ]
+                .into_iter()
+                .cycle()
+                .take(CHUNK_SIZE)
+                .map(Some),
             )
             .into_ref(),
             // 18: extract field for timestamptz
@@ -150,12 +170,44 @@ fn bench_expr(c: &mut Criterion) {
             SerialArray::from_iter((1..=CHUNK_SIZE).map(|i| Serial::from(i as i64))).into_ref(),
             // 26: jsonb array
             JsonbArray::from_iter(
-                (1..=CHUNK_SIZE).map(|i| JsonbVal::from_serde(serde_json::Value::Number(i.into()))),
+                (1..=CHUNK_SIZE).map(|i| JsonbVal::from(serde_json::Value::Number(i.into()))),
+            )
+            .into_ref(),
+            // 27: int256 array
+            Int256Array::from_iter((1..=CHUNK_SIZE).map(|_| Int256::from(1))).into_ref(),
+            // 28: extract field for interval
+            Utf8Array::from_iter_display(
+                [
+                    "Millennium",
+                    "Century",
+                    "Decade",
+                    "Year",
+                    "Month",
+                    "Day",
+                    "Hour",
+                    "Minute",
+                    "Second",
+                    "Millisecond",
+                    "Microsecond",
+                    "Epoch",
+                ]
+                .into_iter()
+                .cycle()
+                .take(CHUNK_SIZE)
+                .map(Some),
+            )
+            .into_ref(),
+            // 29: timestamp string for to_timestamp
+            Utf8Array::from_iter_display(
+                [Some("2021/04/01 00:00:00")]
+                    .into_iter()
+                    .cycle()
+                    .take(CHUNK_SIZE),
             )
             .into_ref(),
         ],
         CHUNK_SIZE,
-    );
+    ));
     let inputrefs = [
         InputRefExpression::new(DataType::Boolean, 0),
         InputRefExpression::new(DataType::Int16, 1),
@@ -173,6 +225,7 @@ fn bench_expr(c: &mut Criterion) {
         InputRefExpression::new(DataType::Varchar, 12),
         InputRefExpression::new(DataType::Bytea, 13),
         InputRefExpression::new(DataType::Jsonb, 26),
+        InputRefExpression::new(DataType::Int256, 27),
     ];
     let input_index_for_type = |ty: DataType| {
         inputrefs
@@ -187,6 +240,7 @@ fn bench_expr(c: &mut Criterion) {
     const EXTRACT_FIELD_TIME: usize = 17;
     const EXTRACT_FIELD_TIMESTAMP: usize = 16;
     const EXTRACT_FIELD_TIMESTAMPTZ: usize = 18;
+    const EXTRACT_FIELD_INTERVAL: usize = 28;
     const BOOL_STRING: usize = 19;
     const NUMBER_STRING: usize = 12;
     const DATE_STRING: usize = 20;
@@ -194,6 +248,7 @@ fn bench_expr(c: &mut Criterion) {
     const TIMESTAMP_STRING: usize = 22;
     const TIMESTAMPTZ_STRING: usize = 23;
     const INTERVAL_STRING: usize = 24;
+    const TIMESTAMP_FORMATTED_STRING: usize = 29;
 
     c.bench_function("inputref", |bencher| {
         let inputref = inputrefs[0].clone().boxed();
@@ -220,28 +275,44 @@ fn bench_expr(c: &mut Criterion) {
     let sigs = func_sigs();
     let sigs = sigs.sorted_by_cached_key(|sig| format!("{sig:?}"));
     'sig: for sig in sigs {
-        if sig
-            .inputs_type
-            .iter()
+        if (sig.inputs_type.iter())
+            .chain(&[sig.ret_type])
             .any(|t| matches!(t, DataTypeName::Struct | DataTypeName::List))
         {
             // TODO: support struct and list
             println!("todo: {sig:?}");
             continue;
         }
+        if [
+            "date_trunc(varchar, timestamptz) -> timestamptz",
+            "to_timestamp1(varchar, varchar) -> timestamptz",
+            "to_char(timestamptz, varchar) -> varchar",
+        ]
+        .contains(&format!("{sig:?}").as_str())
+        {
+            println!("ignore: {sig:?}");
+            continue;
+        }
+
+        fn string_literal(s: &str) -> BoxedExpression {
+            LiteralExpression::new(DataType::Varchar, Some(s.into())).boxed()
+        }
 
         let mut children = vec![];
         for (i, t) in sig.inputs_type.iter().enumerate() {
             use DataTypeName::*;
             let idx = match (sig.func, i) {
-                (PbType::ToChar, 1) => {
-                    children.push(
-                        LiteralExpression::new(
-                            DataType::Varchar,
-                            Some("YYYY/MM/DD HH:MM:SS".into()),
-                        )
-                        .boxed(),
-                    );
+                (PbType::ToTimestamp1, 0) => TIMESTAMP_FORMATTED_STRING,
+                (PbType::ToChar | PbType::ToTimestamp1, 1) => {
+                    children.push(string_literal("YYYY/MM/DD HH:MM:SS"));
+                    continue;
+                }
+                (PbType::ToChar | PbType::ToTimestamp1, 2) => {
+                    children.push(string_literal("Australia/Sydney"));
+                    continue;
+                }
+                (PbType::IsJson, 1) => {
+                    children.push(string_literal("VALUE"));
                     continue;
                 }
                 (PbType::Cast, 0) if *t == DataTypeName::Varchar => match sig.ret_type {
@@ -266,6 +337,7 @@ fn bench_expr(c: &mut Criterion) {
                     Time => EXTRACT_FIELD_TIME,
                     Timestamp => EXTRACT_FIELD_TIMESTAMP,
                     Timestamptz => EXTRACT_FIELD_TIMESTAMPTZ,
+                    Interval => EXTRACT_FIELD_INTERVAL,
                     t => panic!("unexpected type: {t:?}"),
                 },
                 _ => input_index_for_type((*t).into()),
@@ -278,17 +350,27 @@ fn bench_expr(c: &mut Criterion) {
         });
     }
 
-    for sig in agg_func_sigs() {
-        if sig.inputs_type.len() != 1 {
+    let sigs = agg_func_sigs();
+    let sigs = sigs.sorted_by_cached_key(|sig| format!("{sig:?}"));
+    for sig in sigs {
+        if matches!(sig.func, AggKind::PercentileDisc | AggKind::PercentileCont)
+            || (sig.inputs_type.iter())
+                .chain(&[sig.ret_type])
+                .any(|t| matches!(t, DataTypeName::Struct | DataTypeName::List))
+        {
             println!("todo: {sig:?}");
             continue;
         }
-        let agg = match build_agg(AggCall {
+        let agg = match build_append_only(&AggCall {
             kind: sig.func,
-            args: AggArgs::Unary(
-                sig.inputs_type[0].into(),
-                input_index_for_type(sig.inputs_type[0].into()),
-            ),
+            args: match sig.inputs_type {
+                [] => AggArgs::None,
+                [t] => AggArgs::Unary((*t).into(), input_index_for_type((*t).into())),
+                _ => {
+                    println!("todo: {sig:?}");
+                    continue;
+                }
+            },
             return_type: sig.ret_type.into(),
             column_orders: vec![],
             filter: None,
@@ -301,16 +383,10 @@ fn bench_expr(c: &mut Criterion) {
                 continue;
             }
         };
-        // to workaround the lifetime issue
-        let agg = RefCell::new(agg);
         c.bench_function(&format!("{sig:?}"), |bencher| {
-            #[allow(clippy::await_holding_refcell_ref)]
-            bencher.to_async(FuturesExecutor).iter(|| async {
-                agg.borrow_mut()
-                    .update_multi(&input, 0, CHUNK_SIZE)
-                    .await
-                    .unwrap()
-            })
+            bencher
+                .to_async(FuturesExecutor)
+                .iter(|| async { agg.update(&mut agg.create_state(), &input).await.unwrap() })
         });
     }
 }
@@ -381,7 +457,7 @@ fn bench_raw(c: &mut Criterion) {
         let a = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
         let b = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
         #[allow(clippy::useless_conversion)]
-        fn checked_add(a: i32, b: i32) -> Result<i32, Error> {
+        fn checked_add(a: i32, b: i32) -> std::result::Result<i32, Error> {
             let a: i32 = a.try_into().map_err(|_| Error::Cast)?;
             let b: i32 = b.try_into().map_err(|_| Error::Cast)?;
             a.checked_add(b).ok_or(Error::Overflow)
@@ -403,7 +479,7 @@ fn bench_raw(c: &mut Criterion) {
             let a = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
             let b = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
             #[allow(clippy::useless_conversion)]
-            fn checked_add(a: i32, b: i32) -> Result<i32, Error> {
+            fn checked_add(a: i32, b: i32) -> std::result::Result<i32, Error> {
                 let a: i32 = a.try_into().map_err(|_| Error::Cast)?;
                 let b: i32 = b.try_into().map_err(|_| Error::Cast)?;
                 a.checked_add(b).ok_or(Error::Overflow)

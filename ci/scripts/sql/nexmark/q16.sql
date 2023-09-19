@@ -17,5 +17,5 @@ SELECT channel,
        count(distinct auction) filter (where price >= 10000 and price < 1000000) AS rank2_auctions,
        count(distinct auction) filter (where price >= 1000000)                   AS rank3_auctions
 FROM bid
-GROUP BY to_char(date_time, 'YYYY-MM-DD'), channel 
+GROUP BY to_char(date_time, 'YYYY-MM-DD'), channel
 WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true');

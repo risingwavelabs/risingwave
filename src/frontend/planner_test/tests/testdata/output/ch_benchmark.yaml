@@ -36,7 +36,7 @@
     Fragment 0
     StreamMaterialize { columns: [ol_number, sum_qty, sum_amount, avg_qty, avg_amount, count_order], stream_key: [ol_number], pk_columns: [ol_number], pk_conflict: NoCheck } { materialized table: 4294967294 }
     └── StreamProject { exprs: [order_line.ol_number, sum(order_line.ol_quantity), sum(order_line.ol_amount), (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr1, (sum(order_line.ol_amount) / count(order_line.ol_amount)::Decimal) as $expr2, count] }
-        └── StreamHashAgg { group_key: [order_line.ol_number], aggs: [sum(order_line.ol_quantity), sum(order_line.ol_amount), count(order_line.ol_quantity), count(order_line.ol_amount), count] } { result table: 0, state tables: [], distinct tables: [] }
+        └── StreamHashAgg { group_key: [order_line.ol_number], aggs: [sum(order_line.ol_quantity), sum(order_line.ol_amount), count(order_line.ol_quantity), count(order_line.ol_amount), count] } { intermediate state table: 0, state tables: [], distinct tables: [] }
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
@@ -189,7 +189,7 @@
     StreamProject { exprs: [item.i_id, item.i_name, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr2, stock.s_i_id, stock.s_w_id, stock.s_i_id, min(stock.s_quantity)] }
     └── StreamHashJoin { type: Inner, predicate: stock.s_i_id = item.i_id AND min(stock.s_quantity) = stock.s_quantity AND stock.s_i_id = stock.s_i_id, output: [item.i_id, item.i_name, stock.s_i_id, stock.s_w_id, stock.s_i_id, min(stock.s_quantity)] } { left table: 4, right table: 6, left degree table: 5, right degree table: 7 }
         ├── StreamProject { exprs: [stock.s_i_id, min(stock.s_quantity)] }
-        │   └── StreamHashAgg { group_key: [stock.s_i_id], aggs: [min(stock.s_quantity), count] } { result table: 9, state tables: [ 8 ], distinct tables: [] }
+        │   └── StreamHashAgg { group_key: [stock.s_i_id], aggs: [min(stock.s_quantity), count] } { intermediate state table: 9, state tables: [ 8 ], distinct tables: [] }
         │       └── StreamExchange Hash([0]) from 2
         └── StreamHashJoin { type: Inner, predicate: item.i_id = stock.s_i_id, output: all } { left table: 26, right table: 28, left degree table: 27, right degree table: 29 }
             ├── StreamExchange Hash([0]) from 9
@@ -435,7 +435,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [order_line.ol_o_id, order_line.ol_w_id, order_line.ol_d_id, sum(order_line.ol_amount), orders.o_entry_d] }
         └── StreamHashAgg { group_key: [orders.o_entry_d, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id], aggs: [sum(order_line.ol_amount), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0, 1, 2, 3]) from 1
@@ -565,7 +565,7 @@
     StreamMaterialize { columns: [o_ol_cnt, order_count], stream_key: [o_ol_cnt], pk_columns: [o_ol_cnt], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamHashAgg { group_key: [orders.o_ol_cnt], aggs: [count] }
-        ├── result table: 0
+        ├── intermediate state table: 0
         ├── state tables: []
         ├── distinct tables: []
         └── StreamExchange Hash([0]) from 1
@@ -712,7 +712,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [nation.n_name, sum(order_line.ol_amount)] }
         └── StreamHashAgg { group_key: [nation.n_name], aggs: [sum(order_line.ol_amount), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([1]) from 1
@@ -902,7 +902,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum(sum(order_line.ol_amount))] }
         └── StreamSimpleAgg { aggs: [sum(sum(order_line.ol_amount)), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -949,7 +949,7 @@
     LogicalProject { exprs: [supplier.s_nationkey, $expr3, $expr4, sum(order_line.ol_amount), supplier.s_nationkey] }
     └─LogicalAgg { group_key: [supplier.s_nationkey, $expr3, $expr4], aggs: [sum(order_line.ol_amount)] }
       └─LogicalProject { exprs: [supplier.s_nationkey, Substr(customer.c_state, 1:Int32, 1:Int32) as $expr3, Extract('YEAR':Varchar, orders.o_entry_d) as $expr4, order_line.ol_amount] }
-        └─LogicalJoin { type: Inner, on: ($expr2 = nation.n_nationkey) AND (((nation.n_name = 'JAPAN':Varchar) AND (nation.n_name = 'CHINA':Varchar)) OR ((nation.n_name = 'CHINA':Varchar) AND (nation.n_name = 'JAPAN':Varchar))), output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey] }
+        └─LogicalJoin { type: Inner, on: ($expr2 = nation.n_nationkey) AND (((nation.n_name = 'JAPAN':Varchar) AND (nation.n_name = 'CHINA':Varchar)) OR ((nation.n_name = 'CHINA':Varchar) AND (nation.n_name = 'JAPAN':Varchar))), output: [supplier.s_nationkey, order_line.ol_amount, orders.o_entry_d, customer.c_state] }
           ├─LogicalProject { exprs: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey, nation.n_name, (Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32)::Int64 as $expr2] }
           │ └─LogicalJoin { type: Inner, on: (supplier.s_nationkey = nation.n_nationkey), output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey, nation.n_name] }
           │   ├─LogicalJoin { type: Inner, on: ($expr1 = supplier.s_suppkey), output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey] }
@@ -972,7 +972,7 @@
           └─BatchHashAgg { group_key: [supplier.s_nationkey, $expr3, $expr4], aggs: [sum(order_line.ol_amount)] }
             └─BatchExchange { order: [], dist: HashShard(supplier.s_nationkey, $expr3, $expr4) }
               └─BatchProject { exprs: [supplier.s_nationkey, Substr(customer.c_state, 1:Int32, 1:Int32) as $expr3, Extract('YEAR':Varchar, orders.o_entry_d) as $expr4, order_line.ol_amount] }
-                └─BatchLookupJoin { type: Inner, predicate: $expr2 = nation.n_nationkey AND (((nation.n_name = 'JAPAN':Varchar) AND (nation.n_name = 'CHINA':Varchar)) OR ((nation.n_name = 'CHINA':Varchar) AND (nation.n_name = 'JAPAN':Varchar))), output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey] }
+                └─BatchLookupJoin { type: Inner, predicate: $expr2 = nation.n_nationkey AND (((nation.n_name = 'JAPAN':Varchar) AND (nation.n_name = 'CHINA':Varchar)) OR ((nation.n_name = 'CHINA':Varchar) AND (nation.n_name = 'JAPAN':Varchar))), output: [supplier.s_nationkey, order_line.ol_amount, orders.o_entry_d, customer.c_state] }
                   └─BatchExchange { order: [], dist: UpstreamHashShard($expr2) }
                     └─BatchProject { exprs: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey, nation.n_name, (Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32)::Int64 as $expr2] }
                       └─BatchLookupJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey, nation.n_name] }
@@ -1032,7 +1032,7 @@
     StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue, supplier.s_nationkey(hidden)], stream_key: [supplier.s_nationkey, cust_nation, l_year], pk_columns: [supplier.s_nationkey, cust_nation, l_year], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [supplier.s_nationkey, $expr3, $expr4, sum(order_line.ol_amount), supplier.s_nationkey] }
-        └── StreamHashAgg { group_key: [supplier.s_nationkey, $expr3, $expr4], aggs: [sum(order_line.ol_amount), count] } { result table: 0, state tables: [], distinct tables: [] }
+        └── StreamHashAgg { group_key: [supplier.s_nationkey, $expr3, $expr4], aggs: [sum(order_line.ol_amount), count] } { intermediate state table: 0, state tables: [], distinct tables: [] }
             └── StreamExchange Hash([0, 1, 2]) from 1
 
     Fragment 1
@@ -1277,7 +1277,7 @@
       └─StreamHashAgg { group_key: [$expr3], aggs: [sum($expr4), sum(order_line.ol_amount), count] }
         └─StreamExchange { dist: HashShard($expr3) }
           └─StreamProject { exprs: [Extract('YEAR':Varchar, orders.o_entry_d) as $expr3, Case((nation.n_name = 'INDIA':Varchar), order_line.ol_amount, 0:Decimal) as $expr4, order_line.ol_amount, orders.o_w_id, orders.o_d_id, orders.o_id, customer.c_w_id, customer.c_d_id, customer.c_id, orders.o_c_id, item.i_id, stock.s_w_id, stock.s_i_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, $expr1, nation.n_nationkey, region.r_regionkey, nation.n_regionkey, $expr2] }
-            └─StreamHashJoin { type: Inner, predicate: $expr2 = nation.n_nationkey, output: [orders.o_entry_d, order_line.ol_amount, nation.n_name, orders.o_w_id, orders.o_d_id, orders.o_id, customer.c_w_id, customer.c_d_id, customer.c_id, orders.o_c_id, item.i_id, stock.s_w_id, stock.s_i_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, $expr1, $expr2, nation.n_nationkey, region.r_regionkey, nation.n_regionkey] }
+            └─StreamHashJoin { type: Inner, predicate: $expr2 = nation.n_nationkey, output: [order_line.ol_amount, orders.o_entry_d, nation.n_name, orders.o_w_id, orders.o_d_id, orders.o_id, customer.c_w_id, customer.c_d_id, customer.c_id, orders.o_c_id, item.i_id, stock.s_w_id, stock.s_i_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, $expr1, $expr2, nation.n_nationkey, region.r_regionkey, nation.n_regionkey] }
               ├─StreamExchange { dist: HashShard($expr2) }
               │ └─StreamProject { exprs: [orders.o_entry_d, order_line.ol_amount, nation.n_name, (Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32)::Int64 as $expr2, orders.o_w_id, orders.o_d_id, orders.o_id, customer.c_w_id, customer.c_d_id, customer.c_id, orders.o_c_id, item.i_id, stock.s_w_id, stock.s_i_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, $expr1] }
               │   └─StreamHashJoin { type: Inner, predicate: $expr1 = supplier.s_suppkey, output: [orders.o_entry_d, customer.c_state, order_line.ol_amount, nation.n_name, orders.o_w_id, orders.o_d_id, orders.o_id, customer.c_w_id, customer.c_d_id, customer.c_id, orders.o_c_id, item.i_id, stock.s_w_id, stock.s_i_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, $expr1, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
@@ -1324,14 +1324,14 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [$expr3, (sum($expr4) / sum(order_line.ol_amount)) as $expr5] }
         └── StreamHashAgg { group_key: [$expr3], aggs: [sum($expr4), sum(order_line.ol_amount), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
     StreamProject { exprs: [Extract('YEAR':Varchar, orders.o_entry_d) as $expr3, Case((nation.n_name = 'INDIA':Varchar), order_line.ol_amount, 0:Decimal) as $expr4, order_line.ol_amount, orders.o_w_id, orders.o_d_id, orders.o_id, customer.c_w_id, customer.c_d_id, customer.c_id, orders.o_c_id, item.i_id, stock.s_w_id, stock.s_i_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, $expr1, nation.n_nationkey, region.r_regionkey, nation.n_regionkey, $expr2] }
-    └── StreamHashJoin { type: Inner, predicate: $expr2 = nation.n_nationkey, output: [orders.o_entry_d, order_line.ol_amount, nation.n_name, orders.o_w_id, orders.o_d_id, orders.o_id, customer.c_w_id, customer.c_d_id, customer.c_id, orders.o_c_id, item.i_id, stock.s_w_id, stock.s_i_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, $expr1, $expr2, nation.n_nationkey, region.r_regionkey, nation.n_regionkey] }
+    └── StreamHashJoin { type: Inner, predicate: $expr2 = nation.n_nationkey, output: [order_line.ol_amount, orders.o_entry_d, nation.n_name, orders.o_w_id, orders.o_d_id, orders.o_id, customer.c_w_id, customer.c_d_id, customer.c_id, orders.o_c_id, item.i_id, stock.s_w_id, stock.s_i_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, $expr1, $expr2, nation.n_nationkey, region.r_regionkey, nation.n_regionkey] }
         ├── left table: 1
         ├── right table: 3
         ├── left degree table: 2
@@ -1595,7 +1595,7 @@
       └─StreamHashAgg { group_key: [nation.n_name, $expr2], aggs: [sum(order_line.ol_amount), count] }
         └─StreamExchange { dist: HashShard(nation.n_name, $expr2) }
           └─StreamProject { exprs: [nation.n_name, Extract('YEAR':Varchar, orders.o_entry_d) as $expr2, order_line.ol_amount, item.i_id, stock.s_w_id, stock.s_i_id, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, $expr1] }
-            └─StreamHashJoin { type: Inner, predicate: $expr1 = supplier.s_suppkey, output: [orders.o_entry_d, order_line.ol_amount, nation.n_name, item.i_id, stock.s_w_id, stock.s_i_id, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, $expr1, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
+            └─StreamHashJoin { type: Inner, predicate: $expr1 = supplier.s_suppkey, output: [order_line.ol_amount, orders.o_entry_d, nation.n_name, item.i_id, stock.s_w_id, stock.s_i_id, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, $expr1, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
               ├─StreamExchange { dist: HashShard($expr1) }
               │ └─StreamProject { exprs: [orders.o_entry_d, order_line.ol_amount, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1, item.i_id, stock.s_w_id, stock.s_i_id, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
               │   └─StreamHashJoin { type: Inner, predicate: stock.s_i_id = order_line.ol_i_id AND stock.s_w_id = order_line.ol_supply_w_id AND item.i_id = order_line.ol_i_id, output: [stock.s_i_id, stock.s_w_id, orders.o_entry_d, order_line.ol_amount, item.i_id, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
@@ -1626,14 +1626,14 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [nation.n_name, $expr2, sum(order_line.ol_amount)] }
         └── StreamHashAgg { group_key: [nation.n_name, $expr2], aggs: [sum(order_line.ol_amount), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
     StreamProject { exprs: [nation.n_name, Extract('YEAR':Varchar, orders.o_entry_d) as $expr2, order_line.ol_amount, item.i_id, stock.s_w_id, stock.s_i_id, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, $expr1] }
-    └── StreamHashJoin { type: Inner, predicate: $expr1 = supplier.s_suppkey, output: [orders.o_entry_d, order_line.ol_amount, nation.n_name, item.i_id, stock.s_w_id, stock.s_i_id, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, $expr1, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
+    └── StreamHashJoin { type: Inner, predicate: $expr1 = supplier.s_suppkey, output: [order_line.ol_amount, orders.o_entry_d, nation.n_name, item.i_id, stock.s_w_id, stock.s_i_id, orders.o_w_id, orders.o_d_id, orders.o_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, $expr1, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
         ├── left table: 1
         ├── right table: 3
         ├── left degree table: 2
@@ -1849,7 +1849,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [customer.c_id, customer.c_last, sum(order_line.ol_amount), customer.c_city, customer.c_phone, nation.n_name] }
         └── StreamHashAgg { group_key: [customer.c_id, customer.c_last, customer.c_city, customer.c_phone, nation.n_name], aggs: [sum(order_line.ol_amount), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0, 1, 2, 3, 5]) from 1
@@ -2071,7 +2071,7 @@
             ├── right table: 1
             ├── StreamProject { exprs: [stock.s_i_id, sum(stock.s_order_cnt), sum(stock.s_order_cnt)::Decimal as $expr2] }
             │   └── StreamHashAgg { group_key: [stock.s_i_id], aggs: [sum(stock.s_order_cnt), count] }
-            │       ├── result table: 2
+            │       ├── intermediate state table: 2
             │       ├── state tables: []
             │       ├── distinct tables: []
             │       └── StreamExchange Hash([0]) from 1
@@ -2116,7 +2116,7 @@
 
     Fragment 7
     StreamProject { exprs: [(sum(sum(stock.s_order_cnt))::Decimal * 0.005:Decimal) as $expr3] }
-    └── StreamSimpleAgg { aggs: [sum(sum(stock.s_order_cnt)), count] } { result table: 14, state tables: [], distinct tables: [] }
+    └── StreamSimpleAgg { aggs: [sum(sum(stock.s_order_cnt)), count] } { intermediate state table: 14, state tables: [], distinct tables: [] }
         └── StreamExchange Single from 8
 
     Fragment 8
@@ -2237,7 +2237,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [orders.o_ol_cnt, sum($expr1), sum($expr2)] }
         └── StreamHashAgg { group_key: [orders.o_ol_cnt], aggs: [sum($expr1), sum($expr2), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -2328,13 +2328,16 @@
     Fragment 0
     StreamMaterialize { columns: [c_count, custdist], stream_key: [c_count], pk_columns: [custdist, c_count], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamHashAgg { group_key: [count(orders.o_id)], aggs: [count] } { result table: 0, state tables: [], distinct tables: [] }
+    └── StreamHashAgg { group_key: [count(orders.o_id)], aggs: [count] }
+        ├── intermediate state table: 0
+        ├── state tables: []
+        ├── distinct tables: []
         └── StreamExchange Hash([1]) from 1
 
     Fragment 1
     StreamProject { exprs: [customer.c_id, count(orders.o_id)] }
     └── StreamHashAgg { group_key: [customer.c_id], aggs: [count(orders.o_id), count] }
-        ├── result table: 1
+        ├── intermediate state table: 1
         ├── state tables: []
         ├── distinct tables: []
         └── StreamExchange Hash([0]) from 2
@@ -2429,7 +2432,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [((100.00:Decimal * sum(sum($expr1))) / (1:Decimal + sum(sum(order_line.ol_amount)))) as $expr2] }
         └── StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(order_line.ol_amount)), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -2548,11 +2551,11 @@
 
     Fragment 4
     StreamProject { exprs: [max(max(revenue1.total_revenue))] }
-    └── StreamSimpleAgg { aggs: [max(max(revenue1.total_revenue)), count] } { result table: 11, state tables: [ 10 ], distinct tables: [] }
+    └── StreamSimpleAgg { aggs: [max(max(revenue1.total_revenue)), count] } { intermediate state table: 11, state tables: [ 10 ], distinct tables: [] }
         └── StreamExchange Single from 5
 
     Fragment 5
-    StreamHashAgg { group_key: [$expr2], aggs: [max(revenue1.total_revenue), count] } { result table: 13, state tables: [ 12 ], distinct tables: [] }
+    StreamHashAgg { group_key: [$expr2], aggs: [max(revenue1.total_revenue), count] } { intermediate state table: 13, state tables: [ 12 ], distinct tables: [] }
     └── StreamProject { exprs: [revenue1.total_revenue, revenue1.supplier_no, Vnode(revenue1.supplier_no) as $expr2] }
         └── Chain { table: revenue1, columns: [revenue1.total_revenue, revenue1.supplier_no], pk: [revenue1.supplier_no], dist: UpstreamHashShard(revenue1.supplier_no) } { state table: 14 }
             ├── Upstream
@@ -2660,7 +2663,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [item.i_name, $expr2, item.i_price, count(distinct $expr3)] }
         └── StreamHashAgg { group_key: [item.i_name, $expr2, item.i_price], aggs: [count(distinct $expr3), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: [ (distinct key: $expr3, table id: 1) ]
             └── StreamExchange Hash([0, 1, 2]) from 1
@@ -2825,7 +2828,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [(sum(sum(order_line.ol_amount)) / 2.0:Decimal) as $expr3] }
         └── StreamSimpleAgg { aggs: [sum(sum(order_line.ol_amount)), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -2837,7 +2840,7 @@
             └── StreamHashJoin { type: Inner, predicate: order_line.ol_i_id = item.i_id, output: all } { left table: 1, right table: 3, left degree table: 2, right degree table: 4 }
                 ├── StreamExchange Hash([0]) from 2
                 └── StreamProject { exprs: [item.i_id, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr2] }
-                    └── StreamHashAgg { group_key: [item.i_id], aggs: [sum(order_line.ol_quantity), count(order_line.ol_quantity), count] } { result table: 6, state tables: [], distinct tables: [] }
+                    └── StreamHashAgg { group_key: [item.i_id], aggs: [sum(order_line.ol_quantity), count(order_line.ol_quantity), count] } { intermediate state table: 6, state tables: [], distinct tables: [] }
                         └── StreamHashJoin { type: Inner, predicate: item.i_id = order_line.ol_i_id, output: [item.i_id, order_line.ol_quantity, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
                             ├── left table: 7
                             ├── right table: 9
@@ -2956,7 +2959,7 @@
     └── StreamProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount), sum(order_line.ol_amount), orders.o_id, orders.o_d_id, orders.o_w_id] }
         └── StreamFilter { predicate: (sum(order_line.ol_amount) > 200:Decimal) }
             └── StreamProject { exprs: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount)] }
-                └── StreamHashAgg { group_key: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt], aggs: [sum(order_line.ol_amount), count] } { result table: 0, state tables: [], distinct tables: [] }
+                └── StreamHashAgg { group_key: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt], aggs: [sum(order_line.ol_amount), count] } { intermediate state table: 0, state tables: [], distinct tables: [] }
                     └── StreamHashJoin { type: Inner, predicate: orders.o_w_id = order_line.ol_w_id AND orders.o_d_id = order_line.ol_d_id AND orders.o_id = order_line.ol_o_id, output: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt, order_line.ol_amount, customer.c_w_id, customer.c_d_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
                         ├── left table: 1
                         ├── right table: 3
@@ -3060,7 +3063,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum(sum(order_line.ol_amount))] }
         └── StreamSimpleAgg { aggs: [sum(sum(order_line.ol_amount)), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -3218,7 +3221,7 @@
     StreamProject { exprs: [((stock.s_i_id * stock.s_w_id) % 10000:Int32)::Int64 as $expr1, stock.s_i_id, stock.s_w_id, stock.s_quantity] }
     └── StreamFilter { predicate: ((2:Int32 * stock.s_quantity) > sum(order_line.ol_quantity)) }
         └── StreamProject { exprs: [stock.s_i_id, stock.s_w_id, stock.s_quantity, sum(order_line.ol_quantity)] }
-            └── StreamHashAgg { group_key: [stock.s_i_id, stock.s_w_id, stock.s_quantity], aggs: [sum(order_line.ol_quantity), count] } { result table: 10, state tables: [], distinct tables: [] }
+            └── StreamHashAgg { group_key: [stock.s_i_id, stock.s_w_id, stock.s_quantity], aggs: [sum(order_line.ol_quantity), count] } { intermediate state table: 10, state tables: [], distinct tables: [] }
                 └── StreamHashJoin { type: LeftSemi, predicate: stock.s_i_id = item.i_id, output: all } { left table: 11, right table: 13, left degree table: 12, right degree table: 14 }
                     ├── StreamHashJoin { type: Inner, predicate: stock.s_i_id = order_line.ol_i_id, output: [stock.s_i_id, stock.s_w_id, stock.s_quantity, order_line.ol_quantity, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
                     │   ├── left table: 15
@@ -3389,7 +3392,7 @@
     StreamMaterialize { columns: [s_name, numwait], stream_key: [s_name], pk_columns: [numwait, s_name], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamHashAgg { group_key: [supplier.s_name], aggs: [count] }
-        ├── result table: 0
+        ├── intermediate state table: 0
         ├── state tables: []
         ├── distinct tables: []
         └── StreamExchange Hash([0]) from 1

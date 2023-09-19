@@ -50,9 +50,9 @@ use crate::model::{
 };
 use crate::storage::{MetaStore, Transaction};
 
-impl<S: MetaStore> HummockManager<S> {
+impl HummockManager {
     pub(super) async fn build_compaction_group_manager(
-        env: &MetaSrvEnv<S>,
+        env: &MetaSrvEnv,
     ) -> Result<RwLock<CompactionGroupManager>> {
         let default_config = match env.opts.compaction_config.as_ref() {
             None => CompactionConfigBuilder::new().build(),
@@ -62,7 +62,7 @@ impl<S: MetaStore> HummockManager<S> {
     }
 
     pub(super) async fn build_compaction_group_manager_with_config(
-        env: &MetaSrvEnv<S>,
+        env: &MetaSrvEnv,
         default_config: CompactionConfig,
     ) -> Result<RwLock<CompactionGroupManager>> {
         let compaction_group_manager = RwLock::new(CompactionGroupManager {
@@ -106,7 +106,7 @@ impl<S: MetaStore> HummockManager<S> {
             == Some(true);
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
-            if internal_tables.drain_filter(|t| *t == mv_table).count() > 0 {
+            if internal_tables.extract_if(|t| *t == mv_table).count() > 0 {
                 tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
             }
             // materialized_view
@@ -149,8 +149,8 @@ impl<S: MetaStore> HummockManager<S> {
     }
 
     /// Unregisters stale members and groups
-    /// The caller should ensure [`table_fragments_list`] remain unchanged during [`purge`].
-    /// Currently [`purge`] is only called during meta service start ups.
+    /// The caller should ensure `table_fragments_list` remain unchanged during `purge`.
+    /// Currently `purge` is only called during meta service start ups.
     #[named]
     pub async fn purge(&self, valid_ids: &[u32]) -> Result<()> {
         let registered_members =
@@ -165,8 +165,8 @@ impl<S: MetaStore> HummockManager<S> {
         Ok(())
     }
 
-    /// Prefer using [`register_table_fragments`].
-    /// Use [`register_table_ids`] only when [`TableFragments`] is unavailable.
+    /// Prefer using `register_table_fragments`.
+    /// Use `register_table_ids` only when [`TableFragments`] is unavailable.
     /// The implementation acquires `versioning` lock.
     #[named]
     pub async fn register_table_ids(
@@ -180,7 +180,7 @@ impl<S: MetaStore> HummockManager<S> {
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
 
-        for (table_id, _) in pairs.iter() {
+        for (table_id, _) in pairs {
             if let Some(old_group) =
                 try_get_compaction_group_id_by_table_id(current_version, *table_id)
             {
@@ -198,7 +198,7 @@ impl<S: MetaStore> HummockManager<S> {
             build_version_delta_after_version(current_version),
         );
 
-        for (table_id, raw_group_id) in pairs.iter() {
+        for (table_id, raw_group_id) in pairs {
             let mut group_id = *raw_group_id;
             if group_id == StaticCompactionGroupId::NewCompactionGroup as u64 {
                 let mut is_group_init = false;
@@ -250,14 +250,14 @@ impl<S: MetaStore> HummockManager<S> {
                 })),
             });
         }
+        let mut current_version = versioning.current_version.clone();
+        let sst_split_info = current_version.apply_version_delta(&new_version_delta);
+        assert!(sst_split_info.is_empty());
 
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
         self.env.meta_store().txn(trx).await?;
-        let sst_split_info = versioning
-            .current_version
-            .apply_version_delta(&new_version_delta);
-        assert!(sst_split_info.is_empty());
+        versioning.current_version = current_version;
         new_version_delta.commit();
 
         self.notify_last_version_delta(versioning);
@@ -265,8 +265,8 @@ impl<S: MetaStore> HummockManager<S> {
         Ok(())
     }
 
-    /// Prefer using [`unregister_table_fragments_vec`].
-    /// Only Use [`unregister_table_ids`] only when [`TableFragments`] is unavailable.
+    /// Prefer using `unregister_table_fragments_vec`.
+    /// Only use `unregister_table_ids` when [`TableFragments`] is unavailable.
     /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
     #[named]
     pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
@@ -345,6 +345,9 @@ impl<S: MetaStore> HummockManager<S> {
                 delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
             });
         }
+        let mut current_version = versioning.current_version.clone();
+        let sst_split_info = current_version.apply_version_delta(&new_version_delta);
+        assert!(sst_split_info.is_empty());
 
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
@@ -358,10 +361,7 @@ impl<S: MetaStore> HummockManager<S> {
             remove_compaction_group_in_sst_stat(&self.metrics, *group_id, max_level);
         }
 
-        let sst_split_info = versioning
-            .current_version
-            .apply_version_delta(&new_version_delta);
-        assert!(sst_split_info.is_empty());
+        versioning.current_version = current_version;
         new_version_delta.commit();
         branched_ssts.commit_memory();
 
@@ -564,11 +564,7 @@ impl<S: MetaStore> HummockManager<S> {
                     .await
                     .default_compaction_config();
                 config.split_by_state_table = allow_split_by_table;
-                if !allow_split_by_table {
-                    // TODO: remove it after we increase `max_bytes_for_level_base` for all group.
-                    config.max_bytes_for_level_base *= 4;
-                    config.split_weight_by_vnode = weight_split_by_vnode;
-                }
+                config.split_weight_by_vnode = weight_split_by_vnode;
 
                 new_version_delta.group_deltas.insert(
                     new_compaction_group_id,
@@ -601,6 +597,8 @@ impl<S: MetaStore> HummockManager<S> {
                 new_compaction_group_id
             }
         };
+        let mut current_version = versioning.current_version.clone();
+        let sst_split_info = current_version.apply_version_delta(&new_version_delta);
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
@@ -620,9 +618,7 @@ impl<S: MetaStore> HummockManager<S> {
         } else {
             self.env.meta_store().txn(trx).await?;
         }
-        let sst_split_info = versioning
-            .current_version
-            .apply_version_delta(&new_version_delta);
+        versioning.current_version = current_version;
         // Updates SST split info
         let mut changed_sst_ids: HashSet<u64> = HashSet::default();
         for (object_id, sst_id, parent_old_sst_id, parent_new_sst_id) in sst_split_info {
@@ -919,8 +915,8 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::Level0MaxCompactFileNumber(c) => {
                 target.level0_max_compact_file_number = *c;
             }
-            MutableConfig::Level0StopWriteThresholdMergeIterCount(c) => {
-                target.level0_stop_write_threshold_merge_iter_count = *c;
+            MutableConfig::EnableEmergencyPicker(c) => {
+                target.enable_emergency_picker = *c;
             }
             MutableConfig::Level0StopWriteThresholdOverlappingFileCount(c) => {
                 target.level0_stop_write_threshold_overlapping_file_count = *c;

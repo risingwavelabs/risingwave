@@ -16,6 +16,7 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::ddl_service::StreamJobExecutionMode;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
@@ -23,7 +24,7 @@ use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::catalog::CatalogError;
+use crate::catalog::{check_valid_column_name, CatalogError};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
@@ -107,6 +108,9 @@ pub fn gen_create_mv_plan(
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
+        for name in &col_names {
+            check_valid_column_name(name)?;
+        }
         plan_root.set_out_names(col_names)?;
     }
     let materialize =
@@ -185,6 +189,7 @@ It only indicates the physical clustering of the data, which may improve the per
         (table, graph)
     };
 
+    // Ensure writes to `StreamJobTracker` are atomic.
     let _job_guard =
         session
             .env()
@@ -196,9 +201,17 @@ It only indicates the physical clustering of the data, which may improve the per
                 table.name.clone(),
             ));
 
+    let run_in_background = session.config().get_background_ddl();
+    let stream_job_execution_mode = if run_in_background {
+        StreamJobExecutionMode::Background
+    } else {
+        StreamJobExecutionMode::Foreground
+    };
+
+    let session = session.clone();
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_materialized_view(table, graph)
+        .create_materialized_view(table, graph, stream_job_execution_mode)
         .await?;
 
     Ok(PgResponse::empty_result(

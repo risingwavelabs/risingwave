@@ -16,7 +16,9 @@ use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::JoinType;
 
-use crate::expr::{try_derive_watermark, ExprRewriter, FunctionCall, InputRef};
+use crate::expr::{
+    try_derive_watermark, ExprRewriter, FunctionCall, InputRef, WatermarkDerivation,
+};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalNow};
 use crate::optimizer::rule::{BoxedRule, Rule};
@@ -44,7 +46,10 @@ impl Rule for FilterWithNowToJoinRule {
 
                 // as a sanity check, ensure that this expression will derive a watermark
                 // on the output of the now executor
-                debug_assert_eq!(try_derive_watermark(&now_expr), Some(lhs_len));
+                debug_assert_eq!(
+                    try_derive_watermark(&now_expr),
+                    WatermarkDerivation::Watermark(lhs_len)
+                );
 
                 now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap());
             } else {

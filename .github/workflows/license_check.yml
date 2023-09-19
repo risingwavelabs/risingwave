@@ -6,7 +6,7 @@ on:
     - main
     - "forks/*"
   pull_request:
-    branches: 
+    branches:
     - main
     - "v*.*.*-rc"
   merge_group:

@@ -48,6 +48,7 @@ pub struct UpdateExecutor {
     identity: String,
     returning: bool,
     txn_id: TxnId,
+    update_column_indices: Vec<usize>,
 }
 
 impl UpdateExecutor {
@@ -61,13 +62,8 @@ impl UpdateExecutor {
         chunk_size: usize,
         identity: String,
         returning: bool,
+        update_column_indices: Vec<usize>,
     ) -> Self {
-        assert_eq!(
-            child.schema().data_types(),
-            exprs.iter().map(|e| e.return_type()).collect_vec(),
-            "bad update schema"
-        );
-
         let chunk_size = chunk_size.next_multiple_of(2);
         let table_schema = child.schema().clone();
         let txn_id = dml_manager.gen_txn_id();
@@ -89,6 +85,7 @@ impl UpdateExecutor {
             identity,
             returning,
             txn_id,
+            update_column_indices,
         }
     }
 }
@@ -110,14 +107,34 @@ impl Executor for UpdateExecutor {
 impl UpdateExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        let data_types = self.child.schema().data_types();
-        let mut builder = DataChunkBuilder::new(data_types.clone(), self.chunk_size);
-
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
-        let mut write_handle = table_dml_handle.write_handle(self.txn_id)?;
 
+        let data_types = table_dml_handle
+            .column_descs()
+            .iter()
+            .map(|c| c.data_type.clone())
+            .collect_vec();
+
+        assert_eq!(
+            data_types,
+            self.exprs.iter().map(|e| e.return_type()).collect_vec(),
+            "bad update schema"
+        );
+        assert_eq!(
+            data_types,
+            self.update_column_indices
+                .iter()
+                .map(|i: &usize| self.child.schema()[*i].data_type.clone())
+                .collect_vec(),
+            "bad update schema"
+        );
+
+        let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
+
+        let mut write_handle: risingwave_source::WriteHandle =
+            table_dml_handle.write_handle(self.txn_id)?;
         write_handle.begin()?;
 
         // Transform the data chunk to a stream chunk, then write to the source.
@@ -152,15 +169,17 @@ impl UpdateExecutor {
                     columns.push(column);
                 }
 
-                DataChunk::new(columns, data_chunk.vis().clone())
+                DataChunk::new(columns, data_chunk.visibility().clone())
             };
 
             if self.returning {
                 yield updated_data_chunk.clone();
             }
 
-            for (row_delete, row_insert) in
-                data_chunk.rows().zip_eq_debug(updated_data_chunk.rows())
+            for (row_delete, row_insert) in data_chunk
+                .project(&self.update_column_indices)
+                .rows()
+                .zip_eq_debug(updated_data_chunk.rows())
             {
                 let None = builder.append_one_row(row_delete) else {
                     unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
@@ -174,7 +193,6 @@ impl UpdateExecutor {
         if let Some(chunk) = builder.consume_all() {
             rows_updated += write_txn_data(chunk).await?;
         }
-
         write_handle.end().await?;
 
         // Create ret value
@@ -211,6 +229,12 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             .map(build_from_prost)
             .try_collect()?;
 
+        let update_column_indices = update_node
+            .update_column_indices
+            .iter()
+            .map(|x| *x as usize)
+            .collect_vec();
+
         Ok(Box::new(Self::new(
             table_id,
             update_node.table_version_id,
@@ -220,6 +244,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             source.context.get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             update_node.returning,
+            update_column_indices,
         )))
     }
 }
@@ -294,6 +319,7 @@ mod tests {
             5,
             "UpdateExecutor".to_string(),
             false,
+            vec![0, 1],
         ));
 
         let handle = tokio::spawn(async move {

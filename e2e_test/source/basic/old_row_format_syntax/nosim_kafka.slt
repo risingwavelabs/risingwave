@@ -8,7 +8,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_avro_json')
-ROW FORMAT UPSERT_AVRO 
+ROW FORMAT UPSERT_AVRO
 row schema location confluent schema registry 'http://message_queue:8081'
 
 
@@ -19,7 +19,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_student_key_not_subset_of_value_avro_json')
-ROW FORMAT UPSERT_AVRO 
+ROW FORMAT UPSERT_AVRO
 row schema location confluent schema registry 'http://message_queue:8081'
 
 
@@ -29,7 +29,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_student_avro_json')
-ROW FORMAT UPSERT_AVRO 
+ROW FORMAT UPSERT_AVRO
 row schema location confluent schema registry 'http://message_queue:8081'
 
 
@@ -41,7 +41,7 @@ WITH (
 connector = 'kafka',
  properties.bootstrap.server = 'message_queue:29092',
 topic = 'upsert_avro_json')
-ROW FORMAT UPSERT_AVRO 
+ROW FORMAT UPSERT_AVRO
 row schema location confluent schema registry 'http://message_queue:8081'
 
 # Just ignore the kafka key, it works
@@ -53,7 +53,7 @@ WITH (
 	connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_avro_json')
-ROW FORMAT UPSERT_AVRO 
+ROW FORMAT UPSERT_AVRO
 row schema location confluent schema registry 'http://message_queue:8081'
 
 statement ok
@@ -147,7 +147,7 @@ select count(*) from debezium_compact;
 ----
 2
 
-statement ok 
+statement ok
 DROP TABLE upsert_avro_json_default_key;
 
 statement ok

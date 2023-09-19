@@ -9,7 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 enum-as-inner = "0.6"
-pbjson = "0.5"
+pbjson = "0.6"
 prost = "0.11"
 prost-helpers = { path = "helpers" }
 serde = { version = "1", features = ["derive"] }
@@ -19,11 +19,16 @@ tonic = { workspace = true }
 workspace-hack = { path = "../workspace-hack" }
 
 [build-dependencies]
+fs-err = "2.9"
 pbjson-build = "0.5"
 tonic-build = { workspace = true }
+walkdir = "2"
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack"]
 
 [package.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack"]
+
+[lints]
+workspace = true

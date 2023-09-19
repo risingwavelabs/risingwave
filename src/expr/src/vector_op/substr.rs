@@ -19,7 +19,7 @@ use risingwave_expr_macro::function;
 use crate::{ExprError, Result};
 
 #[function("substr(varchar, int32) -> varchar")]
-pub fn substr_start(s: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
+pub fn substr_start(s: &str, start: i32, writer: &mut impl Write) -> Result<()> {
     let skip = start.saturating_sub(1).max(0) as usize;
 
     let substr = s.chars().skip(skip);
@@ -31,11 +31,11 @@ pub fn substr_start(s: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
 }
 
 #[function("substr(varchar, int32, int32) -> varchar")]
-pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut dyn Write) -> Result<()> {
+pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut impl Write) -> Result<()> {
     if count < 0 {
         return Err(ExprError::InvalidParam {
             name: "length",
-            reason: "negative substring length not allowed".to_string(),
+            reason: "negative substring length not allowed".into(),
         });
     }
 

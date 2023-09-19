@@ -16,71 +16,49 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
     GetClusterInfoRequest, GetClusterInfoResponse, GetReschedulePlanRequest,
-    GetReschedulePlanResponse, PauseRequest, PauseResponse, Reschedule, RescheduleRequest,
-    RescheduleResponse, ResumeRequest, ResumeResponse,
+    GetReschedulePlanResponse, Reschedule, RescheduleRequest, RescheduleResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
 
-use crate::barrier::{BarrierScheduler, Command};
+use crate::barrier::BarrierManagerRef;
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::model::MetadataModel;
-use crate::storage::MetaStore;
 use crate::stream::{
     GlobalStreamManagerRef, ParallelUnitReschedule, RescheduleOptions, SourceManagerRef,
 };
 
-pub struct ScaleServiceImpl<S: MetaStore> {
-    barrier_scheduler: BarrierScheduler<S>,
-    fragment_manager: FragmentManagerRef<S>,
-    cluster_manager: ClusterManagerRef<S>,
-    source_manager: SourceManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
-    stream_manager: GlobalStreamManagerRef<S>,
+pub struct ScaleServiceImpl {
+    fragment_manager: FragmentManagerRef,
+    cluster_manager: ClusterManagerRef,
+    source_manager: SourceManagerRef,
+    catalog_manager: CatalogManagerRef,
+    stream_manager: GlobalStreamManagerRef,
+    barrier_manager: BarrierManagerRef,
 }
 
-impl<S> ScaleServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl ScaleServiceImpl {
     pub fn new(
-        barrier_scheduler: BarrierScheduler<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        source_manager: SourceManagerRef<S>,
-        catalog_manager: CatalogManagerRef<S>,
-        stream_manager: GlobalStreamManagerRef<S>,
+        fragment_manager: FragmentManagerRef,
+        cluster_manager: ClusterManagerRef,
+        source_manager: SourceManagerRef,
+        catalog_manager: CatalogManagerRef,
+        stream_manager: GlobalStreamManagerRef,
+        barrier_manager: BarrierManagerRef,
     ) -> Self {
         Self {
-            barrier_scheduler,
             fragment_manager,
             cluster_manager,
             source_manager,
             catalog_manager,
             stream_manager,
+            barrier_manager,
         }
     }
 }
 
 #[async_trait::async_trait]
-impl<S> ScaleService for ScaleServiceImpl<S>
-where
-    S: MetaStore,
-{
-    #[cfg_attr(coverage, no_coverage)]
-    async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
-        self.barrier_scheduler.run_command(Command::pause()).await?;
-        Ok(Response::new(PauseResponse {}))
-    }
-
-    #[cfg_attr(coverage, no_coverage)]
-    async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
-        self.barrier_scheduler
-            .run_command(Command::resume())
-            .await?;
-        Ok(Response::new(ResumeResponse {}))
-    }
-
+impl ScaleService for ScaleServiceImpl {
     #[cfg_attr(coverage, no_coverage)]
     async fn get_cluster_info(
         &self,
@@ -90,9 +68,10 @@ where
 
         let table_fragments = self
             .fragment_manager
-            .list_table_fragments()
+            .get_fragment_read_guard()
             .await
-            .iter()
+            .table_fragments()
+            .values()
             .map(|tf| tf.to_protobuf())
             .collect();
 
@@ -136,6 +115,12 @@ where
         &self,
         request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
+        if !self.barrier_manager.is_running().await {
+            return Err(Status::unavailable(
+                "Rescheduling is unavailable for now. Likely the cluster is starting or recovering.",
+            ));
+        }
+
         let RescheduleRequest {
             reschedules,
             revision,
@@ -195,6 +180,12 @@ where
         request: Request<GetReschedulePlanRequest>,
     ) -> Result<Response<GetReschedulePlanResponse>, Status> {
         let req = request.into_inner();
+
+        if !self.barrier_manager.is_running().await {
+            return Err(Status::unavailable(
+                "Rescheduling is unavailable for now. Likely the cluster is starting or recovering.",
+            ));
+        }
 
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 

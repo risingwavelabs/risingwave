@@ -61,7 +61,7 @@ impl ValuesExecutor {
             progress,
             barrier_receiver,
             rows: rows.into_iter(),
-            pk_indices: vec![schema.len()],
+            pk_indices: vec![schema.len() - 1], // the last one column is pk
             identity: format!("ValuesExecutor {:X}", executor_id),
             schema,
         }
@@ -218,6 +218,7 @@ mod tests {
             adds: Default::default(),
             added_actors: maplit::hashset! {actor_id},
             splits: Default::default(),
+            pause: false,
         });
         tx.send(first_message).unwrap();
 

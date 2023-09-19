@@ -13,23 +13,25 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::user::grant_privilege::Object;
 
-use crate::catalog::system_catalog::{
-    get_acl_items, SysCatalogReaderImpl, SystemCatalogColumnsDef,
+use crate::catalog::system_catalog::{get_acl_items, BuiltinTable, SysCatalogReaderImpl};
+
+pub const RW_SCHEMAS: BuiltinTable = BuiltinTable {
+    name: "rw_schemas",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "id"),
+        (DataType::Varchar, "name"),
+        (DataType::Int32, "owner"),
+        (DataType::Varchar, "acl"),
+    ],
+    pk: &[0],
 };
-
-pub const RW_SCHEMAS_TABLE_NAME: &str = "rw_schemas";
-
-pub const RW_SCHEMAS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "id"),
-    (DataType::Varchar, "name"),
-    (DataType::Int32, "owner"),
-    (DataType::Varchar, "acl"),
-];
 
 impl SysCatalogReaderImpl {
     pub fn read_rw_schema_info(&self) -> Result<Vec<OwnedRow>> {
@@ -46,7 +48,8 @@ impl SysCatalogReaderImpl {
                     Some(ScalarImpl::Utf8(schema.name().into())),
                     Some(ScalarImpl::Int32(schema.owner() as i32)),
                     Some(ScalarImpl::Utf8(
-                        get_acl_items(&Object::SchemaId(schema.id()), &users, username_map).into(),
+                        get_acl_items(&Object::SchemaId(schema.id()), false, &users, username_map)
+                            .into(),
                     )),
                 ])
             })

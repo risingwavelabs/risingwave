@@ -33,12 +33,12 @@
 - sql: |
     select ARRAY[]::int[];
   logical_plan: |-
-    LogicalProject { exprs: [Array::List(Int32) as $expr1] }
+    LogicalProject { exprs: [Array as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select ARRAY[]::int[][];
   logical_plan: |-
-    LogicalProject { exprs: [Array::List(List(Int32)) as $expr1] }
+    LogicalProject { exprs: [Array as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select ARRAY[]::int;
@@ -48,6 +48,24 @@
     Caused by:
       Bind error: cannot determine type of empty array
     HINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].
+- sql: |
+    select ARRAY[]::timestamptz[];
+  logical_plan: |-
+    LogicalProject { exprs: [Array as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  batch_plan: 'BatchValues { rows: [[ARRAY[]:List(Timestamptz)]] }'
+  stream_plan: |-
+    StreamMaterialize { columns: [array, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+    └─StreamValues { rows: [[Array, 0:Int64]] }
+- sql: |
+    select ARRAY[]::STRUCT<f1 INT>[];
+  logical_plan: |-
+    LogicalProject { exprs: [Array as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  batch_plan: 'BatchValues { rows: [[ARRAY[]:List(Struct(StructType { field_names: ["f1"], field_types: [Int32] }))]] }'
+  stream_plan: |-
+    StreamMaterialize { columns: [array, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+    └─StreamValues { rows: [[Array, 0:Int64]] }
 - sql: |
     select array_cat(array[66], array[123]);
   logical_plan: |-

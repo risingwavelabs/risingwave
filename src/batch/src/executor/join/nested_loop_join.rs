@@ -125,12 +125,12 @@ impl NestedLoopJoinExecutor {
             self.right_child,
             self.shutdown_rx.clone(),
         ) {
-            yield chunk?.reorder_columns(&self.output_indices)
+            yield chunk?.project(&self.output_indices)
         }
 
         // Handle remaining chunk
         if let Some(chunk) = chunk_builder.consume_all() {
-            yield chunk.reorder_columns(&self.output_indices)
+            yield chunk.project(&self.output_indices)
         }
     }
 }
@@ -389,7 +389,7 @@ impl NestedLoopJoinExecutor {
                 .await?;
                 if chunk.cardinality() > 0 {
                     // chunk.visibility() must be Some(_)
-                    matched = &matched | chunk.visibility().unwrap();
+                    matched = &matched | chunk.visibility();
                     for spilled in chunk_builder.append_chunk(chunk) {
                         yield spilled
                     }
@@ -433,7 +433,7 @@ impl NestedLoopJoinExecutor {
                 .await?;
                 if chunk.cardinality() > 0 {
                     // chunk.visibility() must be Some(_)
-                    matched = &matched | chunk.visibility().unwrap();
+                    matched = &matched | chunk.visibility();
                 }
             }
             if ANTI_JOIN {
@@ -475,7 +475,7 @@ impl NestedLoopJoinExecutor {
                 .await?;
                 if chunk.cardinality() > 0 {
                     left_matched.set(left_row_idx, true);
-                    right_matched = &right_matched | chunk.visibility().unwrap();
+                    right_matched = &right_matched | chunk.visibility();
                     for spilled in chunk_builder.append_chunk(chunk) {
                         yield spilled
                     }

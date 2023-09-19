@@ -12,28 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use serde_json::json;
 
-use crate::catalog::system_catalog::{SysCatalogReaderImpl, SystemCatalogColumnsDef};
+use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-pub const RW_RELATION_INFO_TABLE_NAME: &str = "rw_relation_info";
-
-pub const RW_RELATION_INFO_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Varchar, "schemaname"),
-    (DataType::Varchar, "relationname"),
-    (DataType::Int32, "relationowner"),
-    (DataType::Varchar, "definition"),
-    (DataType::Varchar, "relationtype"),
-    (DataType::Int32, "relationid"),
-    (DataType::Varchar, "relationtimezone"), /* The timezone used to interpret ambiguous
-                                              * dates/timestamps as tstz */
-    (DataType::Varchar, "fragments"), // fragments is json encoded fragment infos.
-    (DataType::Timestamptz, "initialized_at"),
-    (DataType::Timestamptz, "created_at"),
-];
+// TODO: `rw_relation_info` contains some extra streaming meta info that's only meaningful for
+// streaming jobs, we'd better query relation infos from `rw_relations` and move these streaming
+// infos into anther system table.
+pub const RW_RELATION_INFO: BuiltinTable = BuiltinTable {
+    name: "rw_relation_info",
+    schema: RW_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Varchar, "schemaname"),
+        (DataType::Varchar, "relationname"),
+        (DataType::Int32, "relationowner"),
+        (DataType::Varchar, "definition"),
+        (DataType::Varchar, "relationtype"),
+        (DataType::Int32, "relationid"),
+        (DataType::Varchar, "relationtimezone"), /* The timezone used to interpret ambiguous
+                                                  * dates/timestamps as tstz */
+        (DataType::Varchar, "fragments"), // fragments is json encoded fragment infos.
+        (DataType::Timestamptz, "initialized_at"),
+        (DataType::Timestamptz, "created_at"),
+    ],
+    pk: &[0, 1],
+};
 
 impl SysCatalogReaderImpl {
     pub async fn read_relation_info(&self) -> Result<Vec<OwnedRow>> {

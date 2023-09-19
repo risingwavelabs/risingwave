@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Range;
+
 use super::data_chunk_iter::DataChunkRefIter;
 use super::stream_record::Record;
 use super::RowRef;
@@ -22,7 +24,7 @@ impl StreamChunk {
     pub fn records(&self) -> StreamChunkRefIter<'_> {
         StreamChunkRefIter {
             chunk: self,
-            inner: self.data.rows(),
+            inner: self.data_chunk().rows(),
         }
     }
 
@@ -30,13 +32,25 @@ impl StreamChunk {
     ///
     /// Should consider using [`StreamChunk::records`] if possible.
     pub fn rows(&self) -> impl Iterator<Item = (Op, RowRef<'_>)> {
-        self.data.rows().map(|row| {
+        self.rows_in(0..self.capacity())
+    }
+
+    /// Return an iterator on rows of this stream chunk in a range.
+    pub fn rows_in(&self, range: Range<usize>) -> impl Iterator<Item = (Op, RowRef<'_>)> {
+        self.data_chunk().rows_in(range).map(|row| {
             (
                 // SAFETY: index is checked since we are in the iterator.
                 unsafe { *self.ops().get_unchecked(row.index()) },
                 row,
             )
         })
+    }
+
+    /// Random access a row at `pos`. Return the op, data and whether the row is visible.
+    pub fn row_at(&self, pos: usize) -> (Op, RowRef<'_>, bool) {
+        let op = self.ops()[pos];
+        let (row, visible) = self.data_chunk().row_at(pos);
+        (op, row, visible)
     }
 }
 

@@ -344,7 +344,8 @@
     create table t2(x int, y int);
     select * from t1 where exists(select * from t2 where t1.x = t2.x order by x limit 1);
   expected_outputs:
-  - optimizer_error
+  - batch_plan
+  - stream_plan
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -413,5 +414,30 @@
     create table t3 (e int, f int, other int);
     select * from t1 where exists (select t2.d, t3.f from t2 join t3 on t2.c = t3.e and t1.a = t2.c and t1.b = t3.e);
   expected_outputs:
-    - optimized_logical_plan_for_batch
-    - optimized_logical_plan_for_stream
+  - optimized_logical_plan_for_batch
+  - optimized_logical_plan_for_stream
+- name: test ApplyTopNTransposeRule case 1
+  sql: |
+    create table t1 (v1 int, k1 int);
+    create table t2 (v2 int, k2 int);
+    select * from t1 where v1 in ( select v2 from t2 where k2 = k1 order by v2 limit 1);
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- name: test ApplyTopNTransposeRule case 2
+  sql: |
+    create table t1 (v1 int, k1 int);
+    create table t2 (v2 int, k2 int);
+    select * from t1 where v1 in ( select v2 from t2 order by v2 limit 1);
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- name: test ApplyLimitTransposeRule case 1
+  sql: |
+    create table t1 (v1 int, k1 int);
+    create table t2 (v2 int, k2 int);
+    select * from t1 where v1 in ( select v2 from t2 where k2 = k1 limit 1);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+

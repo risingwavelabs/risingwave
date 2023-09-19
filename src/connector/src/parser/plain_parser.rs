@@ -17,8 +17,8 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::unified::util::apply_row_accessor_on_stream_chunk_writer;
 use super::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParserProperties,
-    SourceStreamChunkRowWriter, WriteGuard,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
+    SourceStreamChunkRowWriter, SpecificParserConfig, WriteGuard,
 };
 use crate::only_parse_payload;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
@@ -32,7 +32,7 @@ pub struct PlainParser {
 
 impl PlainParser {
     pub async fn new(
-        props: ParserProperties,
+        props: SpecificParserConfig,
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {

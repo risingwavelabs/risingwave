@@ -12,28 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::ErrorCode::{self, ProtocolError};
-use risingwave_common::error::{Result, RwError};
+use std::collections::HashMap;
 
-use super::unified::json::JsonParseOptions;
-use super::unified::util::apply_row_accessor_on_stream_chunk_writer;
-use super::unified::AccessImpl;
-use super::{AccessBuilder, ByteStreamSourceParser};
-use crate::parser::unified::json::JsonAccess;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
+use apache_avro::Schema;
+use jst::{convert_avro, Context};
+use risingwave_common::error::ErrorCode::{self, InternalError, ProtocolError};
+use risingwave_common::error::{Result, RwError};
+use risingwave_common::try_match_expand;
+use risingwave_pb::plan_common::ColumnDesc;
+
+use super::avro::schema_resolver::ConfluentSchemaResolver;
+use super::schema_registry::Client;
+use super::util::{get_kafka_topic, read_schema_from_http, read_schema_from_local};
+use super::{EncodingProperties, SchemaRegistryAuth, SpecificParserConfig};
+use crate::parser::avro::util::avro_schema_to_column_descs;
+use crate::parser::schema_registry::handle_sr_list;
+use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::parser::unified::util::apply_row_accessor_on_stream_chunk_writer;
+use crate::parser::unified::AccessImpl;
+use crate::parser::{
+    AccessBuilder, ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard,
+};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
 pub struct JsonAccessBuilder {
     value: Option<Vec<u8>>,
+    payload_start_idx: usize,
 }
 
 impl AccessBuilder for JsonAccessBuilder {
     #[allow(clippy::unused_async)]
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> Result<AccessImpl<'_, '_>> {
         self.value = Some(payload);
-        let value = simd_json::to_borrowed_value(self.value.as_mut().unwrap())
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let value = simd_json::to_borrowed_value(
+            &mut self.value.as_mut().unwrap()[self.payload_start_idx..],
+        )
+        .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         Ok(AccessImpl::Json(JsonAccess::new_with_options(
             value,
             // Debezium and Canal have their special json access builder and will not
@@ -44,8 +59,11 @@ impl AccessBuilder for JsonAccessBuilder {
 }
 
 impl JsonAccessBuilder {
-    pub fn new() -> Result<Self> {
-        Ok(Self { value: None })
+    pub fn new(use_schema_registry: bool) -> Result<Self> {
+        Ok(Self {
+            value: None,
+            payload_start_idx: if use_schema_registry { 5 } else { 0 },
+        })
     }
 }
 
@@ -54,13 +72,26 @@ impl JsonAccessBuilder {
 pub struct JsonParser {
     rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
+    // If schema registry is used, the starting index of payload is 5.
+    payload_start_idx: usize,
 }
 
 impl JsonParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
+    pub fn new(
+        props: SpecificParserConfig,
+        rw_columns: Vec<SourceColumnDesc>,
+        source_ctx: SourceContextRef,
+    ) -> Result<Self> {
+        let json_config = try_match_expand!(props.encoding_config, EncodingProperties::Json)?;
+        let payload_start_idx = if json_config.use_schema_registry {
+            5
+        } else {
+            0
+        };
         Ok(Self {
             rw_columns,
             source_ctx,
+            payload_start_idx,
         })
     }
 
@@ -68,6 +99,7 @@ impl JsonParser {
         Ok(Self {
             rw_columns,
             source_ctx: Default::default(),
+            payload_start_idx: 0,
         })
     }
 
@@ -82,8 +114,9 @@ impl JsonParser {
                 "Empty payload with nonempty key for non-upsert".into(),
             )));
         }
-        let value = simd_json::to_borrowed_value(payload.as_mut().unwrap())
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let value =
+            simd_json::to_borrowed_value(&mut payload.as_mut().unwrap()[self.payload_start_idx..])
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         let values = if let simd_json::BorrowedValue::Array(arr) = value {
             arr
         } else {
@@ -111,6 +144,40 @@ impl JsonParser {
             ))))
         }
     }
+}
+
+pub async fn schema_to_columns(
+    schema_location: &str,
+    use_schema_registry: bool,
+    props: &HashMap<String, String>,
+) -> anyhow::Result<Vec<ColumnDesc>> {
+    let url = handle_sr_list(schema_location)?;
+    let schema_content = if use_schema_registry {
+        let schema_registry_auth = SchemaRegistryAuth::from(props);
+        let client = Client::new(url, &schema_registry_auth)?;
+        let topic = get_kafka_topic(props)?;
+        let resolver = ConfluentSchemaResolver::new(client);
+        resolver
+            .get_raw_schema_by_subject_name(&format!("{}-value", topic))
+            .await?
+            .content
+    } else {
+        let url = url.get(0).unwrap();
+        match url.scheme() {
+            "file" => read_schema_from_local(url.path()),
+            "https" | "http" => read_schema_from_http(url).await,
+            scheme => Err(RwError::from(ProtocolError(format!(
+                "path scheme {} is not supported",
+                scheme
+            )))),
+        }?
+    };
+    let json_schema = serde_json::from_str(&schema_content)?;
+    let context = Context::default();
+    let avro_schema = convert_avro(&json_schema, context).to_string();
+    let schema = Schema::parse_str(&avro_schema)
+        .map_err(|e| RwError::from(InternalError(format!("Avro schema parse error {}", e))))?;
+    avro_schema_to_column_descs(&schema)
 }
 
 impl ByteStreamSourceParser for JsonParser {
@@ -145,10 +212,11 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
 
+    use super::JsonParser;
     use crate::parser::upsert_parser::UpsertParser;
     use crate::parser::{
-        EncodingProperties, JsonParser, JsonProperties, ParserProperties, ProtocolProperties,
-        SourceColumnDesc, SourceStreamChunkBuilder,
+        EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
+        SourceStreamChunkBuilder, SpecificParserConfig,
     };
 
     fn get_payload() -> Vec<Vec<u8>> {
@@ -178,7 +246,12 @@ mod tests {
             SourceColumnDesc::simple("decimal", DataType::Decimal, 10.into()),
         ];
 
-        let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();
+        let parser = JsonParser::new(
+            SpecificParserConfig::DEFAULT_PLAIN_JSON,
+            descs.clone(),
+            Default::default(),
+        )
+        .unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
@@ -277,7 +350,12 @@ mod tests {
             SourceColumnDesc::simple("v2", DataType::Int16, 1.into()),
             SourceColumnDesc::simple("v3", DataType::Varchar, 2.into()),
         ];
-        let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();
+        let parser = JsonParser::new(
+            SpecificParserConfig::DEFAULT_PLAIN_JSON,
+            descs.clone(),
+            Default::default(),
+        )
+        .unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 3);
 
         // Parse a correct record.
@@ -292,7 +370,8 @@ mod tests {
             let writer = builder.row_writer();
             // `v2` overflowed.
             let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#.to_vec();
-            assert!(parser.parse_inner(Some(payload), writer).await.is_err());
+            // ignored the error, and fill None at v2.
+            parser.parse_inner(Some(payload), writer).await.unwrap();
         }
 
         // Parse a correct record.
@@ -304,8 +383,10 @@ mod tests {
 
         let chunk = builder.finish();
         assert!(chunk.valid());
+        assert_eq!(chunk.cardinality(), 3);
 
-        assert_eq!(chunk.cardinality(), 2);
+        let row_vec = chunk.rows().collect_vec();
+        assert_eq!(row_vec[1].1.datum_at(1), None);
     }
 
     #[tokio::test]
@@ -340,7 +421,12 @@ mod tests {
         .map(SourceColumnDesc::from)
         .collect_vec();
 
-        let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();
+        let parser = JsonParser::new(
+            SpecificParserConfig::DEFAULT_PLAIN_JSON,
+            descs.clone(),
+            Default::default(),
+        )
+        .unwrap();
         let payload = br#"
         {
             "data": {
@@ -391,6 +477,51 @@ mod tests {
         ];
         assert_eq!(row, expected.into());
     }
+
+    #[tokio::test]
+    async fn test_json_parse_struct_from_string() {
+        let descs = vec![ColumnDesc::new_struct(
+            "struct",
+            0,
+            "",
+            vec![
+                ColumnDesc::new_atomic(DataType::Varchar, "varchar", 1),
+                ColumnDesc::new_atomic(DataType::Boolean, "boolean", 2),
+            ],
+        )]
+        .iter()
+        .map(SourceColumnDesc::from)
+        .collect_vec();
+
+        let parser = JsonParser::new(
+            SpecificParserConfig::DEFAULT_PLAIN_JSON,
+            descs.clone(),
+            Default::default(),
+        )
+        .unwrap();
+        let payload = br#"
+        {
+            "struct": "{\"varchar\": \"varchar\", \"boolean\": true}"
+        }
+        "#
+        .to_vec();
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
+        {
+            let writer = builder.row_writer();
+            parser.parse_inner(Some(payload), writer).await.unwrap();
+        }
+        let chunk = builder.finish();
+        let (op, row) = chunk.rows().next().unwrap();
+        assert_eq!(op, Op::Insert);
+        let row = row.into_owned_row().into_inner();
+
+        let expected = vec![Some(ScalarImpl::Struct(StructValue::new(vec![
+            Some(ScalarImpl::Utf8("varchar".into())),
+            Some(ScalarImpl::Bool(true)),
+        ])))];
+        assert_eq!(row, expected.into());
+    }
+
     #[tokio::test]
     async fn test_json_upsert_parser() {
         let items = [
@@ -404,9 +535,11 @@ mod tests {
             SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("b", DataType::Int32, 1.into()),
         ];
-        let props = ParserProperties {
+        let props = SpecificParserConfig {
             key_encoding_config: None,
-            encoding_config: EncodingProperties::Json(JsonProperties {}),
+            encoding_config: EncodingProperties::Json(JsonProperties {
+                use_schema_registry: false,
+            }),
             protocol_config: ProtocolProperties::Upsert,
         };
         let mut parser = UpsertParser::new(props, descs.clone(), Default::default())

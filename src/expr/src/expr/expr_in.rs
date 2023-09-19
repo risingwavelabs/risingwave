@@ -76,7 +76,7 @@ impl Expression for InExpression {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let input_array = self.left.eval_checked(input).await?;
         let mut output_array = BoolArrayBuilder::new(input_array.len());
-        for (data, vis) in input_array.iter().zip_eq_fast(input.vis().iter()) {
+        for (data, vis) in input_array.iter().zip_eq_fast(input.visibility().iter()) {
             if vis {
                 let ret = self.exists(&data.to_owned_datum());
                 output_array.append(ret);
@@ -172,7 +172,7 @@ mod tests {
             },
         ];
         let mut in_children = vec![input_ref_expr_node];
-        in_children.extend(constant_values.into_iter());
+        in_children.extend(constant_values);
         let call = FunctionCall {
             children: in_children,
         };
@@ -233,7 +233,7 @@ mod tests {
                 .eval(&data_chunks[i])
                 .await
                 .unwrap()
-                .compact(vis.unwrap(), expected[i].len());
+                .compact(vis, expected[i].len());
 
             for (i, expect) in expected[i].iter().enumerate() {
                 assert_eq!(res.datum_at(i), expect.map(ScalarImpl::Bool));

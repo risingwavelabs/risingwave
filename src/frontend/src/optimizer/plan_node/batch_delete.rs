@@ -23,7 +23,7 @@ use super::{
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
-/// `BatchDelete` implements [`LogicalDelete`]
+/// `BatchDelete` implements [`super::LogicalDelete`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchDelete {
     pub base: PlanBase,
@@ -32,10 +32,10 @@ pub struct BatchDelete {
 
 impl BatchDelete {
     pub fn new(logical: generic::Delete<PlanRef>) -> Self {
-        let base = PlanBase::new_batch(
-            logical.ctx(),
-            logical.schema().clone(),
-            Distribution::Single,
+        assert_eq!(logical.input.distribution(), &Distribution::Single);
+        let base: PlanBase = PlanBase::new_batch_from_logical(
+            &logical,
+            logical.input.distribution().clone(),
             Order::any(),
         );
         Self { base, logical }

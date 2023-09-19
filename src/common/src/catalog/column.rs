@@ -15,11 +15,12 @@
 use std::borrow::Cow;
 
 use itertools::Itertools;
+use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
 use super::row_id_column_desc;
-use crate::catalog::{Field, ROW_ID_COLUMN_ID};
+use crate::catalog::{offset_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::error::ErrorCode;
 use crate::types::DataType;
 
@@ -282,6 +283,17 @@ impl ColumnCatalog {
         self.column_desc.is_generated()
     }
 
+    /// If the column is a generated column
+    pub fn generated_expr(&self) -> Option<&ExprNode> {
+        if let Some(GeneratedOrDefaultColumn::GeneratedColumn(desc)) =
+            &self.column_desc.generated_or_default_column
+        {
+            Some(desc.expr.as_ref().unwrap())
+        } else {
+            None
+        }
+    }
+
     /// If the column is a column with default expr
     pub fn is_default(&self) -> bool {
         self.column_desc.is_default()
@@ -314,6 +326,13 @@ impl ColumnCatalog {
     pub fn row_id_column() -> Self {
         Self {
             column_desc: row_id_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn offset_column() -> Self {
+        Self {
+            column_desc: offset_column_desc(),
             is_hidden: true,
         }
     }

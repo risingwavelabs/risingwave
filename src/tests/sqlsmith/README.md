@@ -24,7 +24,7 @@ This test will be run as a unit test:
 
 ## Running with Madsim
 
-You can check [`ci/scripts/build-simulation.sh`](../../../ci/scripts/build-simulation.sh) 
+You can check [`ci/scripts/build-simulation.sh`](../../../ci/scripts/build-simulation.sh)
 for the latest madsim build instructions.
 
 You can adjust the sample size. Below `100` batch and stream queries are generated (`--sqlsmith 100`).

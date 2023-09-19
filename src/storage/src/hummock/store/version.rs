@@ -31,8 +31,7 @@ use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 use sync_point::sync_point;
 use tracing::Instrument;
 
-use super::memtable::{ImmId, ImmutableMemtable};
-use super::state_store::StagingDataIterator;
+use super::StagingDataIterator;
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
     ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
@@ -41,7 +40,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::store::state_store::HummockStorageIterator;
+use crate::hummock::store::HummockStorageIterator;
 use crate::hummock::utils::{
     check_subset_preserve_order, filter_single_sst, prune_nonoverlapping_ssts,
     prune_overlapping_ssts, range_overlap, search_sst_idx,
@@ -50,6 +49,7 @@ use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, Sstable,
     SstableDeleteRangeIterator, SstableIterator,
 };
+use crate::mem_table::{ImmId, ImmutableMemtable};
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
 };
@@ -112,7 +112,6 @@ impl StagingSstableInfo {
 
 #[derive(Clone)]
 pub enum StagingData {
-    // ImmMem(Arc<Memtable>),
     ImmMem(ImmutableMemtable),
     MergedImmMem(ImmutableMemtable),
     Sst(StagingSstableInfo),
@@ -583,7 +582,7 @@ impl HummockVersionReader {
 
         let full_key = FullKey::new(read_options.table_id, TableKey(table_key.clone()), epoch);
         for local_sst in &uncommitted_ssts {
-            local_stats.staging_imm_get_count += 1;
+            local_stats.staging_sst_get_count += 1;
             if let Some((data, data_epoch)) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 local_sst,
@@ -702,6 +701,15 @@ impl HummockVersionReader {
             }
             staging_iters.push(HummockIteratorUnion::First(imm.into_forward_iter()));
         }
+
+        // 2. build iterator from committed
+        // Because SST meta records encoded key range,
+        // the filter key range needs to be encoded as well.
+        let user_key_range = bound_table_key_range(read_options.table_id, &table_key_range);
+        let user_key_range_ref = (
+            user_key_range.0.as_ref().map(UserKey::as_ref),
+            user_key_range.1.as_ref().map(UserKey::as_ref),
+        );
         let mut staging_sst_iter_count = 0;
         // encode once
         let bloom_filter_prefix_hash = read_options
@@ -727,7 +735,12 @@ impl HummockVersionReader {
                     .add_sst_iter(SstableDeleteRangeIterator::new(table_holder.clone()));
             }
             if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
-                if !hit_sstable_bloom_filter(table_holder.value(), *prefix_hash, &mut local_stats) {
+                if !hit_sstable_bloom_filter(
+                    table_holder.value(),
+                    &user_key_range_ref,
+                    *prefix_hash,
+                    &mut local_stats,
+                ) {
                     continue;
                 }
             }
@@ -742,14 +755,6 @@ impl HummockVersionReader {
         local_stats.staging_sst_iter_count = staging_sst_iter_count;
         let staging_iter: StagingDataIterator = OrderedMergeIteratorInner::new(staging_iters);
 
-        // 2. build iterator from committed
-        // Because SST meta records encoded key range,
-        // the filter key range needs to be encoded as well.
-        let user_key_range = bound_table_key_range(read_options.table_id, &table_key_range);
-        let user_key_range_ref = (
-            user_key_range.0.as_ref().map(UserKey::as_ref),
-            user_key_range.1.as_ref().map(UserKey::as_ref),
-        );
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
         let timer = self
@@ -814,8 +819,12 @@ impl HummockVersionReader {
                             .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
                     }
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
-                        {
+                        if !hit_sstable_bloom_filter(
+                            sstable.value(),
+                            &user_key_range_ref,
+                            *dist_hash,
+                            &mut local_stats,
+                        ) {
                             continue;
                         }
                     }
@@ -856,8 +865,12 @@ impl HummockVersionReader {
                             .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
                     }
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
-                        {
+                        if !hit_sstable_bloom_filter(
+                            sstable.value(),
+                            &user_key_range_ref,
+                            *dist_hash,
+                            &mut local_stats,
+                        ) {
                             continue;
                         }
                     }
@@ -993,6 +1006,7 @@ impl HummockVersionReader {
                     .sstable(local_sst, &mut stats_guard.local_stats)
                     .await?
                     .value(),
+                &user_key_range_ref,
                 bloom_filter_prefix_hash,
                 &mut stats_guard.local_stats,
             ) {
@@ -1019,6 +1033,7 @@ impl HummockVersionReader {
                                 .sstable(sstable_info, &mut stats_guard.local_stats)
                                 .await?
                                 .value(),
+                            &user_key_range_ref,
                             bloom_filter_prefix_hash,
                             &mut stats_guard.local_stats,
                         ) {
@@ -1037,6 +1052,7 @@ impl HummockVersionReader {
                                 .sstable(table_info, &mut stats_guard.local_stats)
                                 .await?
                                 .value(),
+                            &user_key_range_ref,
                             bloom_filter_prefix_hash,
                             &mut stats_guard.local_stats,
                         ) {

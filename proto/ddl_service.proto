@@ -59,9 +59,19 @@ message CreateSourceResponse {
 
 message DropSourceRequest {
   uint32 source_id = 1;
+  bool cascade = 2;
 }
 
 message DropSourceResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message AlterSourceRequest {
+  catalog.Source source = 1;
+}
+
+message AlterSourceResponse {
   common.Status status = 1;
   uint64 version = 2;
 }
@@ -79,6 +89,7 @@ message CreateSinkResponse {
 
 message DropSinkRequest {
   uint32 sink_id = 1;
+  bool cascade = 2;
 }
 
 message DropSinkResponse {
@@ -86,9 +97,16 @@ message DropSinkResponse {
   uint64 version = 2;
 }
 
+enum StreamJobExecutionMode {
+  STREAM_JOB_EXECUTION_MODE_UNSPECIFIED = 0;
+  BACKGROUND = 1;
+  FOREGROUND = 2;
+}
+
 message CreateMaterializedViewRequest {
   catalog.Table materialized_view = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
+  StreamJobExecutionMode stream_job_execution_mode = 3;
 }
 
 message CreateMaterializedViewResponse {
@@ -99,6 +117,7 @@ message CreateMaterializedViewResponse {
 
 message DropMaterializedViewRequest {
   uint32 table_id = 1;
+  bool cascade = 2;
 }
 
 message DropMaterializedViewResponse {
@@ -118,6 +137,7 @@ message CreateViewResponse {
 
 message DropViewRequest {
   uint32 view_id = 1;
+  bool cascade = 2;
 }
 
 message DropViewResponse {
@@ -179,6 +199,7 @@ message DropTableRequest {
     uint32 id = 1;
   }
   uint32 table_id = 2;
+  bool cascade = 3;
 }
 
 message DropTableResponse {
@@ -208,6 +229,7 @@ message CreateIndexResponse {
 
 message DropIndexRequest {
   uint32 index_id = 1;
+  bool cascade = 2;
 }
 
 message DropIndexResponse {
@@ -224,6 +246,8 @@ message ReplaceTablePlanRequest {
   stream_plan.StreamFragmentGraph fragment_graph = 2;
   // The mapping from the old columns to the new columns of the table.
   catalog.ColIndexMapping table_col_index_mapping = 3;
+  // Source catalog of table's associated source
+  catalog.Source source = 4;
 }
 
 message ReplaceTablePlanResponse {
@@ -310,6 +334,7 @@ service DdlService {
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
   rpc AlterRelationName(AlterRelationNameRequest) returns (AlterRelationNameResponse);
+  rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);

@@ -37,12 +37,14 @@ public class SinkUtils {
                 return new FileSinkFactory();
             case "jdbc":
                 return new JDBCSinkFactory();
-            case "iceberg":
+            case "iceberg_java":
                 return new IcebergSinkFactory();
             case "deltalake":
                 return new DeltaLakeSinkFactory();
-            case "elasticsearch-7":
-                return new EsSink7Factory();
+            case "elasticsearch":
+                return new EsSinkFactory();
+            case "cassandra":
+                return new CassandraFactory();
             default:
                 throw UNIMPLEMENTED
                         .withDescription("unknown sink type: " + sinkName)

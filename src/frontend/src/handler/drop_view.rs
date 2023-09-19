@@ -25,6 +25,7 @@ pub async fn handle_drop_view(
     handler_args: HandlerArgs,
     table_name: ObjectName,
     if_exists: bool,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -56,7 +57,7 @@ pub async fn handle_drop_view(
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_view(view_id).await?;
+    catalog_writer.drop_view(view_id, cascade).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_VIEW))
 }

@@ -217,23 +217,8 @@ impl ToBatch for LogicalProject {
             .rewrite_provided_order(required_order);
         let new_input = self.input().to_batch_with_order_required(&input_order)?;
         let mut new_logical = self.core.clone();
-        new_logical.input = new_input.clone();
-        let batch_project = if let Some(input_proj) = new_input.as_batch_project() {
-            let outer_project = new_logical;
-            let inner_project = input_proj.as_logical();
-            let mut subst = Substitute {
-                mapping: inner_project.exprs.clone(),
-            };
-            let exprs = outer_project
-                .exprs
-                .iter()
-                .cloned()
-                .map(|expr| subst.rewrite_expr(expr))
-                .collect();
-            BatchProject::new(generic::Project::new(exprs, inner_project.input.clone()))
-        } else {
-            BatchProject::new(new_logical)
-        };
+        new_logical.input = new_input;
+        let batch_project = BatchProject::new(new_logical);
         required_order.enforce_if_not_satisfies(batch_project.into())
     }
 }
@@ -262,23 +247,8 @@ impl ToStream for LogicalProject {
             .input()
             .to_stream_with_dist_required(&input_required, ctx)?;
         let mut new_logical = self.core.clone();
-        new_logical.input = new_input.clone();
-        let stream_plan = if let Some(input_proj) = new_input.as_stream_project() {
-            let outer_project = new_logical;
-            let inner_project = input_proj.as_logical();
-            let mut subst = Substitute {
-                mapping: inner_project.exprs.clone(),
-            };
-            let exprs = outer_project
-                .exprs
-                .iter()
-                .cloned()
-                .map(|expr| subst.rewrite_expr(expr))
-                .collect();
-            StreamProject::new(generic::Project::new(exprs, inner_project.input.clone()))
-        } else {
-            StreamProject::new(new_logical)
-        };
+        new_logical.input = new_input;
+        let stream_plan = StreamProject::new(new_logical);
         required_dist.enforce_if_not_satisfies(stream_plan.into(), &Order::any())
     }
 

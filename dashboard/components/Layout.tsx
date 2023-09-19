@@ -99,13 +99,11 @@ function Layout({ children }: { children: React.ReactNode }) {
           <Box height="50px" width="full">
             <HStack spacing={0}>
               <Link href="/" passHref>
-                <a>
-                  <Image
-                    boxSize="50px"
-                    src="/risingwave.svg"
-                    alt="RisingWave Logo"
-                  />
-                </a>
+                <Image
+                  boxSize="50px"
+                  src="/risingwave.svg"
+                  alt="RisingWave Logo"
+                />
               </Link>
               <Text fontSize="xl">
                 <b>RisingWave</b> Dashboard
@@ -142,6 +140,7 @@ function Layout({ children }: { children: React.ReactNode }) {
           <VStack width="full" alignItems="flex-start" px={3}>
             <NavTitle>Debug</NavTitle>
             <NavButton href="/await_tree/">Await Tree Dump</NavButton>
+            <NavButton href="/heap_profiling/">Heap Profiling</NavButton>
           </VStack>
           <VStack mb={3}></VStack>
           <NavButton href="/settings/">Settings</NavButton>

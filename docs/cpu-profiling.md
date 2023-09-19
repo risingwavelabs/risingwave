@@ -9,7 +9,7 @@ Record samples:
 nperf record -p `pidof compute-node` -o perf.data
 ```
 
-Generate flamegraph: 
+Generate flamegraph:
 
 ```shell
 nperf flamegraph --merge-threads perf.data > perf.svg
@@ -18,7 +18,7 @@ nperf flamegraph --merge-threads perf.data > perf.svg
 ## Profiling remote compute nodes
 You can profile remote compute nodes from a local machine by simply type the following command.
 ```shell
-./risedev ctl profile --sleep [seconds]
+./risedev ctl profile cpu --sleep [seconds]
 ```
 All compute nodes will be profile for a given `seconds` time and generated flame graph will be transferred to your local machine `.risingwave/profiling/`.
 

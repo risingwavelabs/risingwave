@@ -19,7 +19,7 @@ clap = { version = "4", features = ["derive"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 prometheus = { version = "0.13" }
 regex = "1"
-risingwave_rt = { path = "../../utils/runtime" }
+risingwave_rt = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_with = "3"
 tokio = { version = "0.2", package = "madsim-tokio" }
@@ -34,3 +34,6 @@ workspace-hack = { path = "../../workspace-hack" }
 [[bin]]
 name = "risingwave_state_cleaning_test"
 path = "src/bin/main.rs"
+
+[lints]
+workspace = true

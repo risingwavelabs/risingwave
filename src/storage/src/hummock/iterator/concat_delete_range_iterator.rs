@@ -211,7 +211,7 @@ mod tests {
             builder.add_delete_events(create_monotonic_events(vec![range]));
         }
 
-        let compaction_delete_range = builder.build_for_compaction(false);
+        let compaction_delete_range = builder.build_for_compaction();
         let ranges1 = compaction_delete_range.get_tombstone_between(
             test_user_key(b"aaaa").as_ref(),
             test_user_key(b"bbbb").as_ref(),

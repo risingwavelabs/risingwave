@@ -38,7 +38,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{
     BasicSerde, ValueRowDeserializer, ValueRowSerializer,
 };
-use risingwave_hummock_sdk::key::next_key;
+use risingwave_hummock_sdk::key::{next_key, TableKey};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
@@ -174,7 +174,7 @@ impl LogStoreRowSerde {
         seq_id: SeqIdType,
         op: Op,
         row: impl Row,
-    ) -> (VirtualNode, Bytes, Bytes) {
+    ) -> (VirtualNode, TableKey<Bytes>, Bytes) {
         let pk = [
             Some(ScalarImpl::Int64(Self::encode_epoch(epoch))),
             Some(ScalarImpl::Int32(seq_id)),
@@ -200,7 +200,7 @@ impl LogStoreRowSerde {
         epoch: u64,
         vnode: VirtualNode,
         is_checkpoint: bool,
-    ) -> (Bytes, Bytes) {
+    ) -> (TableKey<Bytes>, Bytes) {
         let pk = [Some(ScalarImpl::Int64(Self::encode_epoch(epoch))), None];
 
         let op_code = if is_checkpoint {
@@ -218,7 +218,7 @@ impl LogStoreRowSerde {
         (key_bytes, value_bytes)
     }
 
-    pub(crate) fn serialize_epoch(&self, vnode: VirtualNode, epoch: u64) -> Bytes {
+    pub(crate) fn serialize_epoch(&self, vnode: VirtualNode, epoch: u64) -> TableKey<Bytes> {
         serialize_pk_with_vnode(
             [Some(ScalarImpl::Int64(Self::encode_epoch(epoch)))],
             &self.epoch_serde,
@@ -231,7 +231,7 @@ impl LogStoreRowSerde {
         vnode: VirtualNode,
         epoch: u64,
         seq_id: SeqIdType,
-    ) -> Bytes {
+    ) -> TableKey<Bytes> {
         serialize_pk_with_vnode(
             [
                 Some(ScalarImpl::Int64(Self::encode_epoch(epoch))),
@@ -580,7 +580,7 @@ mod tests {
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_hummock_sdk::key::{FullKey, TableKey};
+    use risingwave_hummock_sdk::key::FullKey;
     use risingwave_storage::store::StateStoreReadIterStream;
     use risingwave_storage::table::DEFAULT_VNODE;
     use tokio::sync::oneshot;
@@ -622,7 +622,7 @@ mod tests {
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
-            assert!(key < delete_range_right1);
+            assert!(key.as_ref() < delete_range_right1);
             serialized_keys.push(key);
             let (decoded_epoch, row_op) = serde.deserialize(value).unwrap();
             assert_eq!(decoded_epoch, epoch);
@@ -647,7 +647,7 @@ mod tests {
             }
             _ => unreachable!(),
         }
-        assert!(key < delete_range_right1);
+        assert!(key.as_ref() < delete_range_right1);
         serialized_keys.push(key);
 
         seq_id = 1;
@@ -657,8 +657,8 @@ mod tests {
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
-            assert!(key >= delete_range_right1);
-            assert!(key < delete_range_right2);
+            assert!(key.as_ref() >= delete_range_right1);
+            assert!(key.as_ref() < delete_range_right2);
             serialized_keys.push(key);
             let (decoded_epoch, row_op) = serde.deserialize(value).unwrap();
             assert_eq!(decoded_epoch, epoch);
@@ -683,8 +683,8 @@ mod tests {
             }
             _ => unreachable!(),
         }
-        assert!(key >= delete_range_right1);
-        assert!(key < delete_range_right2);
+        assert!(key.as_ref() >= delete_range_right1);
+        assert!(key.as_ref() < delete_range_right2);
         serialized_keys.push(key);
 
         assert_eq!(serialized_keys.len(), 2 * rows.len() + 2);
@@ -757,11 +757,11 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         let row_data = ops
             .into_iter()
-            .zip_eq(rows.into_iter())
+            .zip_eq(rows)
             .map(|(op, row)| {
                 let (_, key, value) = serde.serialize_data_row(epoch, *seq_id, op, row);
                 *seq_id += 1;
-                Ok((FullKey::new(TEST_TABLE_ID, TableKey(key), epoch), value))
+                Ok((FullKey::new(TEST_TABLE_ID, key, epoch), value))
             })
             .collect_vec();
         (
@@ -790,14 +790,14 @@ mod tests {
             let serde = serde.clone();
             async move {
                 let (key, value) = serde.serialize_barrier(EPOCH1, DEFAULT_VNODE, false);
-                Ok((FullKey::new(TEST_TABLE_ID, TableKey(key), EPOCH1), value))
+                Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH1), value))
             }
         }));
         let (row_stream, tx2) = gen_row_stream(serde.clone(), ops, rows, EPOCH2, seq_id);
         let stream = stream.chain(row_stream).chain(stream::once({
             async move {
                 let (key, value) = serde.serialize_barrier(EPOCH2, DEFAULT_VNODE, true);
-                Ok((FullKey::new(TEST_TABLE_ID, TableKey(key), EPOCH2), value))
+                Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH2), value))
             }
         }));
         (stream, tx1, tx2)
@@ -944,7 +944,7 @@ mod tests {
                     assert_eq!(row.to_owned_row(), rows[i]);
                 }
             }
-            LogStoreReadItem::Barrier { .. } => unreachable!(),
+            _ => unreachable!(),
         }
 
         let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
@@ -957,7 +957,7 @@ mod tests {
                     assert_eq!(row.to_owned_row(), rows[i + CHUNK_SIZE]);
                 }
             }
-            LogStoreReadItem::Barrier { .. } => unreachable!(),
+            _ => unreachable!(),
         }
 
         let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
@@ -967,6 +967,7 @@ mod tests {
             LogStoreReadItem::Barrier { is_checkpoint } => {
                 assert!(!is_checkpoint);
             }
+            _ => unreachable!(),
         }
 
         assert!(poll_fn(|cx| Poll::Ready(stream.poll_next_unpin(cx)))
@@ -985,7 +986,7 @@ mod tests {
                     assert_eq!(row.to_owned_row(), rows[i]);
                 }
             }
-            LogStoreReadItem::Barrier { .. } => unreachable!(),
+            _ => unreachable!(),
         }
 
         let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
@@ -998,7 +999,7 @@ mod tests {
                     assert_eq!(row.to_owned_row(), rows[i + CHUNK_SIZE]);
                 }
             }
-            LogStoreReadItem::Barrier { .. } => unreachable!(),
+            _ => unreachable!(),
         }
 
         let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
@@ -1008,6 +1009,7 @@ mod tests {
             LogStoreReadItem::Barrier { is_checkpoint } => {
                 assert!(is_checkpoint);
             }
+            _ => unreachable!(),
         }
 
         assert!(stream.next().await.is_none());

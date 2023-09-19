@@ -28,14 +28,17 @@ use risingwave_sqlparser::ast::*;
 use self::util::DataChunkToRowSetAdapter;
 use self::variable::handle_set_time_zone;
 use crate::catalog::table_catalog::TableType;
+use crate::handler::cancel_job::handle_cancel;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 mod alter_relation_rename;
+mod alter_source_column;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
+pub mod cancel_job;
 pub mod create_connection;
 mod create_database;
 pub mod create_function;
@@ -245,11 +248,13 @@ pub async fn handle(
                 )
                 .await;
             }
-            // TODO(st1page): refacor it
-            let notice = Default::default();
-            let source_schema =
-                source_schema.map(|source_schema| source_schema.into_source_schema_v2());
-
+            let (source_schema, notice) = match source_schema {
+                Some(s) => {
+                    let (s, notice) = s.into_source_schema_v2();
+                    (Some(s), notice)
+                }
+                None => (None, None),
+            };
             create_table::handle_create_table(
                 handler_args,
                 name,
@@ -280,7 +285,10 @@ pub async fn handle(
             handle_privilege::handle_revoke_privilege(handler_args, stmt).await
         }
         Statement::Describe { name } => describe::handle_describe(handler_args, name),
-        Statement::ShowObjects(show_object) => show::handle_show_object(handler_args, show_object),
+        Statement::ShowObjects {
+            object: show_object,
+            filter,
+        } => show::handle_show_object(handler_args, show_object, filter).await,
         Statement::ShowCreateObject { create_type, name } => {
             show::handle_show_create_object(handler_args, create_type, name)
         }
@@ -290,26 +298,47 @@ pub async fn handle(
             if_exists,
             drop_mode,
         }) => {
+            let mut cascade = false;
             if let AstOption::Some(DropMode::Cascade) = drop_mode {
-                return Err(
-                    ErrorCode::NotImplemented("DROP CASCADE".to_string(), None.into()).into(),
-                );
+                match object_type {
+                    ObjectType::MaterializedView
+                    | ObjectType::View
+                    | ObjectType::Sink
+                    | ObjectType::Source
+                    | ObjectType::Index
+                    | ObjectType::Table => {
+                        cascade = true;
+                    }
+                    ObjectType::Schema
+                    | ObjectType::Database
+                    | ObjectType::User
+                    | ObjectType::Connection => {
+                        return Err(ErrorCode::NotImplemented(
+                            "DROP CASCADE".to_string(),
+                            None.into(),
+                        )
+                        .into());
+                    }
+                };
             };
             match object_type {
                 ObjectType::Table => {
-                    drop_table::handle_drop_table(handler_args, object_name, if_exists).await
+                    drop_table::handle_drop_table(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
                 ObjectType::MaterializedView => {
-                    drop_mv::handle_drop_mv(handler_args, object_name, if_exists).await
+                    drop_mv::handle_drop_mv(handler_args, object_name, if_exists, cascade).await
                 }
                 ObjectType::Index => {
-                    drop_index::handle_drop_index(handler_args, object_name, if_exists).await
+                    drop_index::handle_drop_index(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
                 ObjectType::Source => {
-                    drop_source::handle_drop_source(handler_args, object_name, if_exists).await
+                    drop_source::handle_drop_source(handler_args, object_name, if_exists, cascade)
+                        .await
                 }
                 ObjectType::Sink => {
-                    drop_sink::handle_drop_sink(handler_args, object_name, if_exists).await
+                    drop_sink::handle_drop_sink(handler_args, object_name, if_exists, cascade).await
                 }
                 ObjectType::Database => {
                     drop_database::handle_drop_database(
@@ -339,7 +368,7 @@ pub async fn handle(
                     .await
                 }
                 ObjectType::View => {
-                    drop_view::handle_drop_view(handler_args, object_name, if_exists).await
+                    drop_view::handle_drop_view(handler_args, object_name, if_exists, cascade).await
                 }
                 ObjectType::Connection => {
                     drop_connection::handle_drop_connection(handler_args, object_name, if_exists)
@@ -470,6 +499,10 @@ pub async fn handle(
             name,
             operation: AlterSourceOperation::RenameSource { source_name },
         } => alter_relation_rename::handle_rename_source(handler_args, name, source_name).await,
+        Statement::AlterSource {
+            name,
+            operation: operation @ AlterSourceOperation::AddColumn { .. },
+        } => alter_source_column::handle_alter_source_column(handler_args, name, operation).await,
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }
@@ -489,6 +522,7 @@ pub async fn handle(
             snapshot,
             session,
         } => transaction::handle_set(handler_args, modes, snapshot, session).await,
+        Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
         _ => Err(
             ErrorCode::NotImplemented(format!("Unhandled statement: {}", stmt), None.into()).into(),
         ),

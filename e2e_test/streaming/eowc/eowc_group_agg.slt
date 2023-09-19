@@ -15,13 +15,12 @@ statement ok
 set streaming_parallelism = 0;
 
 statement ok
-create materialized view mv
-emit on window close
-as
+create materialized view mv as
 select
     window_start, max(foo)
 from tumble(t, tm, interval '1 hour')
-group by window_start;
+group by window_start
+emit on window close;
 
 statement ok
 insert into t values

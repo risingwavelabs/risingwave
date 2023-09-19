@@ -219,7 +219,9 @@ impl RearrangedChainExecutor {
                 #[for_await]
                 for msg in rearranged {
                     let msg: RearrangedMessage = msg?;
-                    let Some(msg) = msg.phantom_into() else { continue };
+                    let Some(msg) = msg.phantom_into() else {
+                        continue;
+                    };
                     if let Some(barrier) = msg.as_barrier() {
                         self.progress.finish(barrier.epoch.curr);
                     }

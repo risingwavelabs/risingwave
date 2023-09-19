@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 use risingwave_common::types::DataTypeName;
 
 use super::FuncSigDebug;
-use crate::agg::{AggCall, AggKind, BoxedAggState};
+use crate::agg::{AggCall, AggKind, BoxedAggregateFunction};
 use crate::Result;
 
 pub static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| unsafe {
@@ -36,8 +36,10 @@ pub static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| unsafe {
 pub struct AggFuncSig {
     pub func: AggKind,
     pub inputs_type: &'static [DataTypeName],
+    pub state_type: DataTypeName,
     pub ret_type: DataTypeName,
-    pub build: fn(agg: AggCall) -> Result<BoxedAggState>,
+    pub build: fn(agg: &AggCall) -> Result<BoxedAggregateFunction>,
+    pub append_only: bool,
 }
 
 impl fmt::Debug for AggFuncSig {
@@ -48,6 +50,7 @@ impl fmt::Debug for AggFuncSig {
             ret_type: self.ret_type,
             set_returning: false,
             deprecated: false,
+            append_only: self.append_only,
         }
         .fmt(f)
     }
@@ -58,21 +61,32 @@ impl fmt::Debug for AggFuncSig {
 pub struct AggFuncSigMap(HashMap<(AggKind, usize), Vec<AggFuncSig>>);
 
 impl AggFuncSigMap {
+    /// Inserts a function signature into the map.
     fn insert(&mut self, sig: AggFuncSig) {
         let arity = sig.inputs_type.len();
         self.0.entry((sig.func, arity)).or_default().push(sig);
     }
 
-    /// Returns a function signature with the given type, argument types and return type.
+    /// Returns a function signature with the given type, argument types, return type.
+    ///
+    /// The `append_only` flag only works when both append-only and retractable version exist.
+    /// Otherwise, return the signature of the only version.
     pub fn get(
         &self,
         ty: AggKind,
         args: &[DataTypeName],
         ret: DataTypeName,
+        append_only: bool,
     ) -> Option<&AggFuncSig> {
         let v = self.0.get(&(ty, args.len()))?;
-        v.iter()
-            .find(|d| d.inputs_type == args && d.ret_type == ret)
+        let mut iter = v
+            .iter()
+            .filter(|d| d.inputs_type == args && d.ret_type == ret);
+        if iter.clone().count() == 2 {
+            iter.find(|d| d.append_only == append_only)
+        } else {
+            iter.next()
+        }
     }
 
     /// Returns the return type for the given function and arguments.

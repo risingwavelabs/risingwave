@@ -43,6 +43,7 @@ org_role = Admin
         )
     }
 
+    /// `risedev-prometheus.yml`
     pub fn gen_prometheus_datasource_yml(&self, config: &GrafanaConfig) -> Result<String> {
         let provide_prometheus = config.provide_prometheus.as_ref().unwrap();
         if provide_prometheus.len() != 1 {
@@ -76,6 +77,7 @@ datasources:
         Ok(yml)
     }
 
+    /// `risedev-tempo.yml`
     pub fn gen_tempo_datasource_yml(&self, config: &GrafanaConfig) -> Result<String> {
         let provide_tempo = config.provide_tempo.as_ref().unwrap();
         if provide_tempo.len() != 1 {
@@ -85,7 +87,7 @@ datasources:
             ));
         }
         let tempo = &provide_tempo[0];
-        let tempo_host = &tempo.listen_address;
+        let tempo_host = &tempo.address;
         let tempo_port = &tempo.port;
 
         let yml = format!(
@@ -106,6 +108,7 @@ datasources:
         Ok(yml)
     }
 
+    /// `grafana-risedev-dashboard.yml`
     pub fn gen_dashboard_yml(
         &self,
         config: &GrafanaConfig,
@@ -186,7 +189,7 @@ providers:
     folderUid: ''
     type: file
     disableDeletion: false
-    updateIntervalSeconds: 60 
+    updateIntervalSeconds: 60
     allowUiUpdates: true
     options:
       path: {s3_dashboard_path}

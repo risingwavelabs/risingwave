@@ -60,7 +60,7 @@ pub fn build_compaction_config_vec(
     max_space_reclaim_bytes: Option<u64>,
     level0_max_compact_file_number: Option<u64>,
     level0_overlapping_sub_level_compact_level_count: Option<u32>,
-    level0_stop_write_threshold_merge_iter_count: Option<u64>,
+    enable_emergency_picker: Option<bool>,
     level0_stop_write_threshold_overlapping_file_count: Option<u64>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
@@ -103,14 +103,15 @@ pub fn build_compaction_config_vec(
     if let Some(c) = level0_overlapping_sub_level_compact_level_count {
         configs.push(MutableConfig::Level0OverlappingSubLevelCompactLevelCount(c))
     }
-    if let Some(c) = level0_stop_write_threshold_merge_iter_count {
-        configs.push(MutableConfig::Level0StopWriteThresholdMergeIterCount(c))
+    if let Some(c) = enable_emergency_picker {
+        configs.push(MutableConfig::EnableEmergencyPicker(c))
     }
     if let Some(c) = level0_stop_write_threshold_overlapping_file_count {
         configs.push(MutableConfig::Level0StopWriteThresholdOverlappingFileCount(
             c,
         ))
     }
+
     configs
 }
 
@@ -180,7 +181,7 @@ pub async fn list_compaction_status(context: &CtlContext, verbose: bool) -> anyh
         for a in assignment {
             assignment_lite
                 .entry(a.context_id)
-                .or_insert(vec![])
+                .or_default()
                 .push(a.compact_task.unwrap().task_id);
         }
         for (k, v) in assignment_lite {

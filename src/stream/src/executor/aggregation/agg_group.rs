@@ -17,20 +17,18 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use risingwave_common::array::stream_record::{Record, RecordType};
-use risingwave_common::array::{ArrayRef, Op, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::agg::{AggCall, BoxedAggregateFunction};
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
 use crate::common::table::state_table::StateTable;
-use crate::common::StreamChunkBuilder;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
@@ -160,15 +158,15 @@ pub struct AggGroup<S: StateStore, Strtg: Strategy> {
     group_key: Option<GroupKey>,
 
     /// Current managed states for all [`AggCall`]s.
-    states: Vec<AggState<S>>,
+    states: Vec<AggState>,
 
-    /// Previous outputs of managed states. Initializing with `None`.
+    /// Previous outputs of aggregate functions. Initializing with `None`.
     prev_outputs: Option<OwnedRow>,
 
     /// Index of row count agg call (`count(*)`) in the call list.
     row_count_index: usize,
 
-    _phantom: PhantomData<Strtg>,
+    _phantom: PhantomData<(S, Strtg)>,
 }
 
 impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
@@ -196,38 +194,82 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     pub async fn create(
         group_key: Option<GroupKey>,
         agg_calls: &[AggCall],
+        agg_funcs: &[BoxedAggregateFunction],
         storages: &[AggStateStorage<S>],
-        result_table: &StateTable<S>,
+        intermediate_state_table: &StateTable<S>,
         pk_indices: &PkIndices,
         row_count_index: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
-    ) -> StreamExecutorResult<AggGroup<S, Strtg>> {
-        let prev_outputs: Option<OwnedRow> = result_table
+    ) -> StreamExecutorResult<Self> {
+        let encoded_states = intermediate_state_table
             .get_row(group_key.as_ref().map(GroupKey::table_pk))
             .await?;
-        if let Some(prev_outputs) = &prev_outputs {
-            assert_eq!(prev_outputs.len(), agg_calls.len());
+        if let Some(encoded_states) = &encoded_states {
+            assert_eq!(encoded_states.len(), agg_calls.len());
         }
 
-        let states =
-            futures::future::try_join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
-                AggState::create(
-                    agg_call,
-                    &storages[idx],
-                    prev_outputs.as_ref().map(|outputs| &outputs[idx]),
-                    pk_indices,
-                    group_key.as_ref(),
-                    extreme_cache_size,
-                    input_schema,
-                )
-            }))
-            .await?;
+        let mut states = Vec::with_capacity(agg_calls.len());
+        for (idx, (agg_call, agg_func)) in agg_calls.iter().zip_eq_fast(agg_funcs).enumerate() {
+            let state = AggState::create(
+                agg_call,
+                agg_func,
+                &storages[idx],
+                encoded_states.as_ref().map(|outputs| &outputs[idx]),
+                pk_indices,
+                extreme_cache_size,
+                input_schema,
+            )?;
+            states.push(state);
+        }
+
+        let mut this = Self {
+            group_key,
+            states,
+            prev_outputs: None, // will be initialized later
+            row_count_index,
+            _phantom: PhantomData,
+        };
+
+        if encoded_states.is_some() {
+            let (_, outputs) = this.get_outputs(storages, agg_funcs).await?;
+            this.prev_outputs = Some(outputs);
+        }
+
+        Ok(this)
+    }
+
+    /// Create a group from encoded states for EOWC. The previous output is set to `None`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_eowc(
+        group_key: Option<GroupKey>,
+        agg_calls: &[AggCall],
+        agg_funcs: &[BoxedAggregateFunction],
+        storages: &[AggStateStorage<S>],
+        encoded_states: &OwnedRow,
+        pk_indices: &PkIndices,
+        row_count_index: usize,
+        extreme_cache_size: usize,
+        input_schema: &Schema,
+    ) -> StreamExecutorResult<Self> {
+        let mut states = Vec::with_capacity(agg_calls.len());
+        for (idx, (agg_call, agg_func)) in agg_calls.iter().zip_eq_fast(agg_funcs).enumerate() {
+            let state = AggState::create(
+                agg_call,
+                agg_func,
+                &storages[idx],
+                Some(&encoded_states[idx]),
+                pk_indices,
+                extreme_cache_size,
+                input_schema,
+            )?;
+            states.push(state);
+        }
 
         Ok(Self {
             group_key,
             states,
-            prev_outputs,
+            prev_outputs: None,
             row_count_index,
             _phantom: PhantomData,
         })
@@ -237,14 +279,42 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         self.group_key.as_ref()
     }
 
+    pub fn group_key_row(&self) -> OwnedRow {
+        self.group_key
+            .as_ref()
+            .map(GroupKey::table_row)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     fn prev_row_count(&self) -> usize {
         match &self.prev_outputs {
             Some(states) => states[self.row_count_index]
                 .as_ref()
-                .map(|x| *x.as_int64() as usize)
+                .map(|x| {
+                    TryInto::try_into(*x.as_int64()).expect("row count should be non-negative")
+                })
                 .unwrap_or(0),
             None => 0,
         }
+    }
+
+    /// Get current row count of this group.
+    fn curr_row_count(&self) -> usize {
+        let row_count_state = must_match!(
+            self.states[self.row_count_index],
+            AggState::Value(ref state) => state
+        );
+        let row_count = *row_count_state
+            .as_datum()
+            .as_ref()
+            .expect("row count state should not be NULL")
+            .as_int64();
+        if row_count < 0 {
+            tracing::error!(group = ?self.group_key_row(), "bad row count");
+            panic!("row count should be non-negative")
+        }
+        row_count.try_into().unwrap()
     }
 
     pub(crate) fn is_uninitialized(&self) -> bool {
@@ -252,100 +322,104 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     }
 
     /// Apply input chunk to all managed agg states.
+    ///
+    /// `mappings` contains the column mappings from input chunk to each agg call.
     /// `visibilities` contains the row visibility of the input chunk for each agg call.
-    pub fn apply_chunk(
+    pub async fn apply_chunk(
         &mut self,
-        storages: &mut [AggStateStorage<S>],
-        ops: &[Op],
-        columns: &[ArrayRef],
-        visibilities: Vec<Option<Bitmap>>,
-        materialized: &Bitmap,
+        chunk: &StreamChunk,
+        calls: &[AggCall],
+        funcs: &[BoxedAggregateFunction],
+        visibilities: Vec<Bitmap>,
     ) -> StreamExecutorResult<()> {
-        for (((state, storage), visibility), materialized) in self
-            .states
-            .iter_mut()
-            .zip_eq_fast(storages)
-            .zip_eq_fast(visibilities)
-            .zip_eq_fast(materialized.iter())
-        {
-            state.apply_chunk(ops, visibility.as_ref(), columns, storage, materialized)?;
+        if self.curr_row_count() == 0 {
+            tracing::trace!(group = ?self.group_key_row(), "first time see this group");
         }
-        Ok(())
-    }
+        for (((state, call), func), visibility) in (self.states.iter_mut())
+            .zip_eq_fast(calls)
+            .zip_eq_fast(funcs)
+            .zip_eq_fast(visibilities)
+        {
+            state.apply_chunk(chunk, call, func, visibility).await?;
+        }
 
-    /// Flush in-memory state into state table if needed.
-    /// The calling order of this method and `get_outputs` doesn't matter, but this method
-    /// must be called before committing state tables.
-    pub async fn flush_state_if_needed(
-        &self,
-        storages: &mut [AggStateStorage<S>],
-    ) -> StreamExecutorResult<()> {
-        futures::future::try_join_all(self.states.iter().zip_eq_fast(storages).filter_map(
-            |(state, storage)| match state {
-                AggState::Table(state) => Some(state.flush_state_if_needed(
-                    must_match!(storage, AggStateStorage::Table { table } => table),
-                    self.group_key(),
-                )),
-                _ => None,
-            },
-        ))
-        .await?;
+        if self.curr_row_count() == 0 {
+            tracing::trace!(group = ?self.group_key_row(), "last time see this group");
+        }
+
         Ok(())
     }
 
     /// Reset all in-memory states to their initial state, i.e. to reset all agg state structs to
     /// the status as if they are just created, no input applied and no row in state table.
-    fn reset(&mut self) {
-        self.states.iter_mut().for_each(|state| state.reset());
+    fn reset(&mut self, funcs: &[BoxedAggregateFunction]) {
+        for (state, func) in self.states.iter_mut().zip_eq_fast(funcs) {
+            state.reset(func);
+        }
+    }
+
+    /// Encode intermediate states.
+    pub fn encode_states(
+        &self,
+        funcs: &[BoxedAggregateFunction],
+    ) -> StreamExecutorResult<OwnedRow> {
+        let mut encoded_states = Vec::with_capacity(self.states.len());
+        for (state, func) in self.states.iter().zip_eq_fast(funcs) {
+            let encoded = match state {
+                AggState::Value(s) => func.encode_state(s)?,
+                // For minput state, we don't need to store it in state table.
+                AggState::MaterializedInput(_) => None,
+            };
+            encoded_states.push(encoded);
+        }
+        let states = self
+            .group_key()
+            .map(GroupKey::table_row)
+            .chain(OwnedRow::new(encoded_states))
+            .into_owned_row();
+        Ok(states)
     }
 
     /// Get the outputs of all managed agg states, without group key prefix.
     /// Possibly need to read/sync from state table if the state not cached in memory.
     /// This method is idempotent, i.e. it can be called multiple times and the outputs are
     /// guaranteed to be the same.
-    pub async fn get_outputs(
+    async fn get_outputs(
         &mut self,
         storages: &[AggStateStorage<S>],
-    ) -> StreamExecutorResult<OwnedRow> {
-        // Row count doesn't need I/O, so the following statement is supposed to be fast.
-        let row_count = self.states[self.row_count_index]
-            .get_output(&storages[self.row_count_index], self.group_key.as_ref())
-            .await?
-            .as_ref()
-            .map(|x| *x.as_int64() as usize)
-            .expect("row count should not be None");
+        funcs: &[BoxedAggregateFunction],
+    ) -> StreamExecutorResult<(usize, OwnedRow)> {
+        let row_count = self.curr_row_count();
         if row_count == 0 {
             // Reset all states (in fact only value states will be reset).
             // This is important because for some agg calls (e.g. `sum`), if no row is applied,
             // they should output NULL, for some other calls (e.g. `sum0`), they should output 0.
             // FIXME(rc): Deciding whether to reset states according to `row_count` is not precisely
             // correct, see https://github.com/risingwavelabs/risingwave/issues/7412 for bug description.
-            self.reset();
+            self.reset(funcs);
         }
         futures::future::try_join_all(
             self.states
                 .iter_mut()
                 .zip_eq_fast(storages)
-                .map(|(state, storage)| state.get_output(storage, self.group_key.as_ref())),
+                .zip_eq_fast(funcs)
+                .map(|((state, storage), func)| {
+                    state.get_output(storage, func, self.group_key.as_ref())
+                }),
         )
         .await
-        .map(OwnedRow::new)
+        .map(|row| (row_count, OwnedRow::new(row)))
     }
 
     /// Build aggregation result change, according to previous and current agg outputs.
     /// The saved previous outputs will be updated to the latest outputs after this method.
-    pub fn build_change(&mut self, curr_outputs: OwnedRow) -> Option<Record<OwnedRow>> {
+    pub async fn build_change(
+        &mut self,
+        storages: &[AggStateStorage<S>],
+        funcs: &[BoxedAggregateFunction],
+    ) -> StreamExecutorResult<Option<Record<OwnedRow>>> {
         let prev_row_count = self.prev_row_count();
-        let curr_row_count = curr_outputs[self.row_count_index]
-            .as_ref()
-            .map(|x| *x.as_int64() as usize)
-            .expect("row count should not be None");
-
-        trace!(
-            "prev_row_count = {}, curr_row_count = {}",
-            prev_row_count,
-            curr_row_count
-        );
+        let (curr_row_count, curr_outputs) = self.get_outputs(storages, funcs).await?;
 
         let change_type = Strtg::infer_change_type(
             prev_row_count,
@@ -354,7 +428,15 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             &curr_outputs,
         );
 
-        change_type.map(|change_type| match change_type {
+        tracing::trace!(
+            group = ?self.group_key_row(),
+            prev_row_count,
+            curr_row_count,
+            change_type = ?change_type,
+            "build change"
+        );
+
+        Ok(change_type.map(|change_type| match change_type {
             RecordType::Insert => {
                 let new_row = self
                     .group_key()
@@ -387,48 +469,6 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                     .into_owned_row();
                 Record::Update { old_row, new_row }
             }
-        })
-    }
-}
-
-// TODO(rc): split logic of `StreamChunkBuilder` to chunk builder and row merger.
-/// A wrapper of [`StreamChunkBuilder`] that provides a more convenient API.
-pub struct ChunkBuilder {
-    inner: StreamChunkBuilder,
-}
-
-impl ChunkBuilder {
-    pub fn new(capacity: usize, data_types: &[DataType]) -> Self {
-        Self {
-            inner: StreamChunkBuilder::new(
-                capacity,
-                data_types,
-                (0..data_types.len()).map(|x| (x, x)).collect(),
-                vec![],
-            ),
-        }
-    }
-
-    /// Append a row to the builder, return a chunk if the builder is full.
-    #[must_use]
-    pub fn append_row(&mut self, op: Op, row: impl Row) -> Option<StreamChunk> {
-        self.inner.append_row_update(op, row)
-    }
-
-    /// Append a record to the builder, return a chunk if the builder is full.
-    pub fn append_record(&mut self, record: Record<impl Row>) -> Option<StreamChunk> {
-        match record {
-            Record::Insert { new_row } => self.append_row(Op::Insert, new_row),
-            Record::Delete { old_row } => self.append_row(Op::Delete, old_row),
-            Record::Update { old_row, new_row } => {
-                let _none = self.append_row(Op::UpdateDelete, old_row);
-                self.append_row(Op::UpdateInsert, new_row)
-            }
-        }
-    }
-
-    /// Take remaining rows and build a chunk.
-    pub fn take(&mut self) -> Option<StreamChunk> {
-        self.inner.take()
+        }))
     }
 }

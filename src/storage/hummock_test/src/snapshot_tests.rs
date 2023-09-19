@@ -11,13 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
+use risingwave_hummock_sdk::key::{map_table_key_range, TableKey};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -27,6 +27,7 @@ use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
 };
 
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
 
 macro_rules! assert_count_range_scan {
@@ -39,16 +40,12 @@ macro_rules! assert_count_range_scan {
         );
         let it = $storage
             .iter(
-                bounds,
+                map_table_key_range(bounds),
                 $epoch,
                 ReadOptions {
-                    ignore_range_tombstone: false,
-                    prefix_hint: None,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
+                    ..Default::default()
                 },
             )
             .await
@@ -110,12 +107,12 @@ async fn test_snapshot_inner(
         .await;
 
     let epoch1: u64 = 1;
-    local.init(epoch1);
+    local.init_for_test(epoch1).await.unwrap();
     local
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_put("test")),
-                (Bytes::from("2"), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("1")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("2")), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {
@@ -149,9 +146,9 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_delete()),
-                (Bytes::from("3"), StorageValue::new_put("test")),
-                (Bytes::from("4"), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("1")), StorageValue::new_delete()),
+                (TableKey(Bytes::from("3")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("4")), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {
@@ -186,9 +183,9 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (Bytes::from("2"), StorageValue::new_delete()),
-                (Bytes::from("3"), StorageValue::new_delete()),
-                (Bytes::from("4"), StorageValue::new_delete()),
+                (TableKey(Bytes::from("2")), StorageValue::new_delete()),
+                (TableKey(Bytes::from("3")), StorageValue::new_delete()),
+                (TableKey(Bytes::from("4")), StorageValue::new_delete()),
             ],
             vec![],
             WriteOptions {
@@ -231,15 +228,15 @@ async fn test_snapshot_range_scan_inner(
     let mut local = hummock_storage
         .new_local(NewLocalOptions::for_test(Default::default()))
         .await;
-    local.init(epoch);
+    local.init_for_test(epoch).await.unwrap();
 
     local
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_put("test")),
-                (Bytes::from("2"), StorageValue::new_put("test")),
-                (Bytes::from("3"), StorageValue::new_put("test")),
-                (Bytes::from("4"), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("1")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("2")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("3")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("4")), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {

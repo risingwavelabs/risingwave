@@ -29,12 +29,14 @@
     - eowc_stream_plan
 - sql: |
     create table t (tm timestamp, foo int, bar int, watermark for tm as tm - interval '5 minutes') append only;
-    explain create sink s1 emit on window close as select
+    explain create sink s1 as
+    select
       tm, foo, bar,
       lag(foo, 2) over (partition by bar order by tm),
       max(foo) over (partition by bar order by tm rows between 1 preceding and 1 following),
       sum(foo) over (partition by bar order by tm rows 2 preceding exclude current row)
-      from t WITH (connector = 'blackhole');
+    from t
+    emit on window close
+    WITH (connector = 'blackhole');
   expected_outputs:
     - explain_output
-  

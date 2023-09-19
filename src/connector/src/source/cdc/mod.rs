@@ -15,34 +15,69 @@
 pub mod enumerator;
 pub mod source;
 pub mod split;
-
 use std::collections::HashMap;
+use std::marker::PhantomData;
 
-use anyhow::anyhow;
 pub use enumerator::*;
-use risingwave_pb::connector_service::{SourceType, TableSchema};
-use serde::Deserialize;
+use paste::paste;
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
 pub use source::*;
 pub use split::*;
 
-pub const MYSQL_CDC_CONNECTOR: &str = "mysql-cdc";
-pub const POSTGRES_CDC_CONNECTOR: &str = "postgres-cdc";
-pub const CITUS_CDC_CONNECTOR: &str = "citus-cdc";
+use crate::impl_cdc_source_type;
+use crate::source::{ConnectorProperties, SourceProperties, SplitImpl};
 
-#[derive(Clone, Debug, Deserialize, Default)]
-pub struct CdcProperties {
-    /// Type of the cdc source, e.g. mysql, postgres
-    pub source_type: String,
+pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
+
+pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
+pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
+pub const CITUS_CDC_CONNECTOR: &str = Citus::CDC_CONNECTOR_NAME;
+
+pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
+    const CDC_CONNECTOR_NAME: &'static str;
+    fn source_type() -> CdcSourceType;
+}
+
+impl_cdc_source_type!({ Mysql, "mysql" }, { Postgres, "postgres" }, { Citus, "citus" });
+
+#[derive(Clone, Debug, Default)]
+pub struct CdcProperties<T: CdcSourceTypeTrait> {
     /// Properties specified in the WITH clause by user
     pub props: HashMap<String, String>,
 
     /// Schema of the source specified by users
-    pub table_schema: Option<TableSchema>,
+    pub table_schema: TableSchema,
+
+    pub _phantom: PhantomData<T>,
 }
 
-impl CdcProperties {
-    pub fn get_source_type_pb(&self) -> anyhow::Result<SourceType> {
-        SourceType::from_str_name(&self.source_type.to_ascii_uppercase())
-            .ok_or_else(|| anyhow!("unknown source type: {}", self.source_type))
+impl<T: CdcSourceTypeTrait> SourceProperties for CdcProperties<T>
+where
+    DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>,
+    DebeziumSplitEnumerator<T>: ListCdcSplits<CdcSourceType = T>,
+{
+    type Split = DebeziumCdcSplit<T>;
+    type SplitEnumerator = DebeziumSplitEnumerator<T>;
+    type SplitReader = CdcSplitReader<T>;
+
+    const SOURCE_NAME: &'static str = T::CDC_CONNECTOR_NAME;
+}
+
+impl<T: CdcSourceTypeTrait> CdcProperties<T> {
+    pub fn get_source_type_pb(&self) -> SourceType {
+        SourceType::from(T::source_type())
+    }
+
+    pub fn schema(&self) -> Schema {
+        Schema {
+            fields: self
+                .table_schema
+                .columns
+                .iter()
+                .map(ColumnDesc::from)
+                .map(Field::from)
+                .collect(),
+        }
     }
 }

@@ -69,7 +69,11 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                     .iter()
                     .map(|idx| t.sys_table_catalog.columns[*idx].clone())
                     .collect_vec();
-                (t.sys_table_catalog.columns, pk_column_catalogs, vec![])
+                (
+                    t.sys_table_catalog.columns.clone(),
+                    pk_column_catalogs,
+                    vec![],
+                )
             }
             _ => {
                 return Err(
@@ -79,13 +83,13 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
         };
         (
             column_catalogs
-                .iter()
+                .into_iter()
                 .filter(|c| !c.is_hidden)
-                .map(|c| c.column_desc.clone())
+                .map(|c| c.column_desc)
                 .collect(),
             pk_column_catalogs
-                .iter()
-                .map(|c| c.column_desc.clone())
+                .into_iter()
+                .map(|c| c.column_desc)
                 .collect(),
             indices,
         )
@@ -204,7 +208,7 @@ mod tests {
             "v3".into() => "integer".into(),
             "v4".into() => "integer".into(),
             "primary key".into() => "v3".into(),
-            "idx1".into() => "index(v1 DESC, v2 ASC, v3 ASC) include(v4) distributed by(v1, v2)".into(),
+            "idx1".into() => "index(v1 DESC, v2 ASC, v3 ASC) include(v4) distributed by(v1)".into(),
         };
 
         assert_eq!(columns, expected_columns);

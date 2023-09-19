@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 public class ConnectorService {
     private static final Logger LOG = LoggerFactory.getLogger(ConnectorService.class);
     static final int DEFAULT_PORT = 50051;
+    static final String DEFAULT_PROMETHEUS_HOST = "0.0.0.0";
     static final int DEFAULT_PROMETHEUS_PORT = 50052;
     static final String PORT_ENV_NAME = "RW_CONNECTOR_NODE_PORT";
     static final String PROMETHEUS_PORT_ENV_NAME = "RW_CONNECTOR_NODE_PROMETHEUS_PORT";
@@ -32,6 +33,7 @@ public class ConnectorService {
     public static void main(String[] args) throws Exception {
         Options options = new Options();
         options.addOption("p", "port", true, "listening port of connector service");
+        options.addOption("P", "prometheus-http-host", true, "host of prometheus HTTP server");
         CommandLineParser parser = new DefaultParser();
         CommandLine cmd = parser.parse(options, args);
 
@@ -46,9 +48,12 @@ public class ConnectorService {
         System.setProperty(DbzConnectorConfig.WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS, "1000");
 
         int port = DEFAULT_PORT;
+        String prometheusHttpHost = DEFAULT_PROMETHEUS_HOST;
         if (cmd.hasOption("p")) {
             var portVal = cmd.getOptionValue("p");
             port = Integer.parseInt(portVal);
+        } else if (cmd.hasOption("prometheus-http-host")) {
+            prometheusHttpHost = cmd.getOptionValue("prometheus-http-host");
         } else if (System.getenv().containsKey(PORT_ENV_NAME)) {
             port = Integer.parseInt(System.getenv(PORT_ENV_NAME));
         }
@@ -60,8 +65,11 @@ public class ConnectorService {
         if (System.getenv().containsKey(PROMETHEUS_PORT_ENV_NAME)) {
             prometheusPort = Integer.parseInt(System.getenv(PROMETHEUS_PORT_ENV_NAME));
         }
-        ConnectorNodeMetrics.startHTTPServer(prometheusPort);
-        LOG.info("Prometheus metrics server started, listening on {}", prometheusPort);
+        ConnectorNodeMetrics.startHTTPServer(prometheusHttpHost, prometheusPort);
+        LOG.info(
+                "Prometheus metrics server started, https://{}:{}",
+                prometheusHttpHost,
+                prometheusPort);
         server.awaitTermination();
     }
 }

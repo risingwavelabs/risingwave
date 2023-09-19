@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
 use arc_swap::ArcSwap;
-use itertools::Itertools;
 use risingwave_backup::error::BackupError;
 use risingwave_backup::storage::{BoxedMetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
 use risingwave_backup::{MetaBackupJobId, MetaSnapshotId, MetaSnapshotManifest};
@@ -33,7 +33,6 @@ use crate::backup_restore::metrics::BackupManagerMetrics;
 use crate::hummock::{HummockManagerRef, HummockVersionSafePoint};
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub enum BackupJobResult {
@@ -59,14 +58,14 @@ impl BackupJobHandle {
     }
 }
 
-pub type BackupManagerRef<S> = Arc<BackupManager<S>>;
+pub type BackupManagerRef = Arc<BackupManager>;
 /// (url, dir)
 type StoreConfig = (String, String);
 
 /// `BackupManager` manages lifecycle of all existent backups and the running backup job.
-pub struct BackupManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
-    hummock_manager: HummockManagerRef<S>,
+pub struct BackupManager {
+    env: MetaSrvEnv,
+    hummock_manager: HummockManagerRef,
     backup_store: ArcSwap<(BoxedMetaSnapshotStorage, StoreConfig)>,
     /// Tracks the running backup job. Concurrent jobs is not supported.
     running_backup_job: tokio::sync::Mutex<Option<BackupJobHandle>>,
@@ -74,10 +73,10 @@ pub struct BackupManager<S: MetaStore> {
     meta_metrics: Arc<MetaMetrics>,
 }
 
-impl<S: MetaStore> BackupManager<S> {
+impl BackupManager {
     pub async fn new(
-        env: MetaSrvEnv<S>,
-        hummock_manager: HummockManagerRef<S>,
+        env: MetaSrvEnv,
+        hummock_manager: HummockManagerRef,
         metrics: Arc<MetaMetrics>,
         store_url: &str,
         store_dir: &str,
@@ -139,8 +138,8 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     fn with_store(
-        env: MetaSrvEnv<S>,
-        hummock_manager: HummockManagerRef<S>,
+        env: MetaSrvEnv,
+        hummock_manager: HummockManagerRef,
         meta_metrics: Arc<MetaMetrics>,
         backup_store: (BoxedMetaSnapshotStorage, StoreConfig),
     ) -> Self {
@@ -149,7 +148,7 @@ impl<S: MetaStore> BackupManager<S> {
             hummock_manager,
             backup_store: ArcSwap::from_pointee(backup_store),
             running_backup_job: tokio::sync::Mutex::new(None),
-            metrics: BackupManagerMetrics::new(meta_metrics.registry.clone()),
+            metrics: BackupManagerMetrics::default(),
             meta_metrics,
         }
     }
@@ -167,11 +166,11 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     #[cfg(test)]
-    pub fn for_test(env: MetaSrvEnv<S>, hummock_manager: HummockManagerRef<S>) -> Self {
+    pub fn for_test(env: MetaSrvEnv, hummock_manager: HummockManagerRef) -> Self {
         Self::with_store(
             env,
             hummock_manager,
-            Arc::new(MetaMetrics::new()),
+            Arc::new(MetaMetrics::default()),
             (
                 Box::<risingwave_backup::storage::DummyMetaSnapshotStorage>::default(),
                 StoreConfig::default(),
@@ -308,7 +307,7 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     /// List all `SSTables` required by backups.
-    pub fn list_pinned_ssts(&self) -> Vec<HummockSstableObjectId> {
+    pub fn list_pinned_ssts(&self) -> HashSet<HummockSstableObjectId> {
         self.backup_store
             .load()
             .0
@@ -316,8 +315,7 @@ impl<S: MetaStore> BackupManager<S> {
             .snapshot_metadata
             .iter()
             .flat_map(|s| s.ssts.clone())
-            .dedup()
-            .collect_vec()
+            .collect()
     }
 
     pub fn manifest(&self) -> Arc<MetaSnapshotManifest> {
@@ -326,12 +324,12 @@ impl<S: MetaStore> BackupManager<S> {
 }
 
 /// `BackupWorker` creates a database snapshot.
-struct BackupWorker<S: MetaStore> {
-    backup_manager: BackupManagerRef<S>,
+struct BackupWorker {
+    backup_manager: BackupManagerRef,
 }
 
-impl<S: MetaStore> BackupWorker<S> {
-    fn new(backup_manager: BackupManagerRef<S>) -> Self {
+impl BackupWorker {
+    fn new(backup_manager: BackupManagerRef) -> Self {
         Self { backup_manager }
     }
 

@@ -16,16 +16,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::future::try_join_all;
+use futures::stream::pending;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::util::select_all;
+use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, Column, ConnectorProperties, ConnectorState, SourceColumnDesc,
-    SourceContext, SplitReaderImpl,
+    create_split_reader, BoxSourceWithStateStream, Column, ConnectorProperties, ConnectorState,
+    SourceColumnDesc, SourceContext, SplitReader,
 };
 
 #[derive(Clone, Debug)]
@@ -74,50 +76,74 @@ impl ConnectorSource {
 
     pub async fn stream_reader(
         &self,
-        splits: ConnectorState,
+        state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
     ) -> Result<BoxSourceWithStateStream> {
+        let Some(splits) = state else {
+            return Ok(pending().boxed());
+        };
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
 
-        let to_reader_splits = match splits {
-            Some(vec_split_impl) => vec_split_impl
-                .into_iter()
-                .map(|split| Some(vec![split]))
-                .collect::<Vec<ConnectorState>>(),
-            None => vec![None],
-        };
-        let readers = try_join_all(to_reader_splits.into_iter().map(|state| {
-            tracing::debug!("spawning connector split reader for split {:?}", state);
-            let props = config.clone();
-            let columns = columns.clone();
-            let data_gen_columns = Some(
-                columns
-                    .iter()
-                    .map(|col| Column {
-                        name: col.name.clone(),
-                        data_type: col.data_type.clone(),
-                        is_visible: col.is_visible(),
-                    })
-                    .collect_vec(),
-            );
-            // TODO: is this reader split across multiple threads...? Realistically, we want
-            // source_ctx to live in a single actor.
-            let source_ctx = source_ctx.clone();
-            async move {
-                let parser_config = ParserConfig {
-                    specific: self.parser_config.clone(),
-                    common: CommonParserConfig {
-                        rw_columns: columns,
-                    },
-                };
-                SplitReaderImpl::create(props, state, parser_config, source_ctx, data_gen_columns)
-                    .await
-            }
-        }))
-        .await?;
+        let data_gen_columns = Some(
+            columns
+                .iter()
+                .map(|col| Column {
+                    name: col.name.clone(),
+                    data_type: col.data_type.clone(),
+                    is_visible: col.is_visible(),
+                })
+                .collect_vec(),
+        );
 
-        Ok(select_all(readers.into_iter().map(|r| r.into_stream())).boxed())
+        let parser_config = ParserConfig {
+            specific: self.parser_config.clone(),
+            common: CommonParserConfig {
+                rw_columns: columns,
+            },
+        };
+
+        let support_multiple_splits = config.support_multiple_splits();
+
+        dispatch_source_prop!(config, prop, {
+            let readers = if support_multiple_splits {
+                tracing::debug!(
+                    "spawning connector split reader for multiple splits {:?}",
+                    splits
+                );
+
+                let reader =
+                    create_split_reader(*prop, splits, parser_config, source_ctx, data_gen_columns)
+                        .await?;
+
+                vec![reader]
+            } else {
+                let to_reader_splits = splits.into_iter().map(|split| vec![split]);
+
+                try_join_all(to_reader_splits.into_iter().map(|splits| {
+                    tracing::debug!("spawning connector split reader for split {:?}", splits);
+                    let props = prop.clone();
+                    let data_gen_columns = data_gen_columns.clone();
+                    let parser_config = parser_config.clone();
+                    // TODO: is this reader split across multiple threads...? Realistically, we want
+                    // source_ctx to live in a single actor.
+                    let source_ctx = source_ctx.clone();
+                    async move {
+                        create_split_reader(
+                            *props,
+                            splits,
+                            parser_config,
+                            source_ctx,
+                            data_gen_columns,
+                        )
+                        .await
+                    }
+                }))
+                .await?
+            };
+
+            Ok(select_all(readers.into_iter().map(|r| r.into_stream())).boxed())
+        })
     }
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod over_window;
 mod query_mode;
 mod search_path;
 mod transaction_isolation_level;
@@ -23,6 +24,7 @@ use std::ops::Deref;
 use chrono_tz::Tz;
 use educe::{self, Educe};
 use itertools::Itertools;
+pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use tracing::info;
@@ -34,7 +36,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 28] = [
+const CONFIG_KEYS: [&str; 38] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -63,6 +65,16 @@ const CONFIG_KEYS: [&str; 28] = [
     "RW_FORCE_SPLIT_DISTINCT_AGG",
     "CLIENT_MIN_MESSAGES",
     "CLIENT_ENCODING",
+    "SINK_DECOUPLE",
+    "SYNCHRONIZE_SEQSCANS",
+    "STATEMENT_TIMEOUT",
+    "LOCK_TIMEOUT",
+    "ROW_SECURITY",
+    "STANDARD_CONFORMING_STRINGS",
+    "STREAMING_RATE_LIMIT",
+    "CDC_BACKFILL",
+    "RW_STREAMING_OVER_WINDOW_CACHE_POLICY",
+    "BACKGROUND_DDL",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -95,6 +107,16 @@ const SERVER_VERSION_NUM: usize = 24;
 const FORCE_SPLIT_DISTINCT_AGG: usize = 25;
 const CLIENT_MIN_MESSAGES: usize = 26;
 const CLIENT_ENCODING: usize = 27;
+const SINK_DECOUPLE: usize = 28;
+const SYNCHRONIZE_SEQSCANS: usize = 29;
+const STATEMENT_TIMEOUT: usize = 30;
+const LOCK_TIMEOUT: usize = 31;
+const ROW_SECURITY: usize = 32;
+const STANDARD_CONFORMING_STRINGS: usize = 33;
+const STREAMING_RATE_LIMIT: usize = 34;
+const CDC_BACKFILL: usize = 35;
+const STREAMING_OVER_WINDOW_CACHE_POLICY: usize = 36;
+const BACKGROUND_DDL: usize = 37;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -127,9 +149,17 @@ impl<const NAME: usize, const DEFAULT: bool> TryFrom<&[&str]> for ConfigBool<NAM
         }
 
         let s = value[0];
-        if s.eq_ignore_ascii_case("true") {
+        if s.eq_ignore_ascii_case("true")
+            || s.eq_ignore_ascii_case("on")
+            || s.eq_ignore_ascii_case("yes")
+            || s.eq_ignore_ascii_case("1")
+        {
             Ok(ConfigBool(true))
-        } else if s.eq_ignore_ascii_case("false") {
+        } else if s.eq_ignore_ascii_case("false")
+            || s.eq_ignore_ascii_case("off")
+            || s.eq_ignore_ascii_case("no")
+            || s.eq_ignore_ascii_case("0")
+        {
             Ok(ConfigBool(false))
         } else {
             Err(ErrorCode::InvalidConfigValue {
@@ -303,6 +333,15 @@ type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 90_500>;
 type ForceSplitDistinctAgg = ConfigBool<FORCE_SPLIT_DISTINCT_AGG, false>;
 type ClientMinMessages = ConfigString<CLIENT_MIN_MESSAGES>;
 type ClientEncoding = ConfigString<CLIENT_ENCODING>;
+type SinkDecouple = ConfigBool<SINK_DECOUPLE, false>;
+type SynchronizeSeqscans = ConfigBool<SYNCHRONIZE_SEQSCANS, false>;
+type StatementTimeout = ConfigI32<STATEMENT_TIMEOUT, 0>;
+type LockTimeout = ConfigI32<LOCK_TIMEOUT, 0>;
+type RowSecurity = ConfigBool<ROW_SECURITY, true>;
+type StandardConformingStrings = ConfigString<STANDARD_CONFORMING_STRINGS>;
+type StreamingRateLimit = ConfigU64<STREAMING_RATE_LIMIT, 0>;
+type CdcBackfill = ConfigBool<CDC_BACKFILL, false>;
+type BackgroundDdl = ConfigBool<BACKGROUND_DDL, false>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -415,6 +454,43 @@ pub struct ConfigMap {
     /// see <https://www.postgresql.org/docs/15/runtime-config-client.html#GUC-CLIENT-ENCODING>
     #[educe(Default(expression = "ConfigString::<CLIENT_ENCODING>(String::from(\"UTF8\"))"))]
     client_encoding: ClientEncoding,
+
+    /// Enable decoupling sink and internal streaming graph or not
+    sink_decouple: SinkDecouple,
+
+    /// See <https://www.postgresql.org/docs/current/runtime-config-compatible.html#RUNTIME-CONFIG-COMPATIBLE-VERSION>
+    /// Unused in RisingWave, support for compatibility.
+    synchronize_seqscans: SynchronizeSeqscans,
+
+    /// Abort any statement that takes more than the specified amount of time. If
+    /// log_min_error_statement is set to ERROR or lower, the statement that timed out will also be
+    /// logged. If this value is specified without units, it is taken as milliseconds. A value of
+    /// zero (the default) disables the timeout.
+    statement_timeout: StatementTimeout,
+
+    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-LOCK-TIMEOUT>
+    /// Unused in RisingWave, support for compatibility.
+    lock_timeout: LockTimeout,
+
+    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-ROW-SECURITY>.
+    /// Unused in RisingWave, support for compatibility.
+    row_security: RowSecurity,
+
+    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>
+    #[educe(Default(
+        expression = "ConfigString::<STANDARD_CONFORMING_STRINGS>(String::from(\"on\"))"
+    ))]
+    standard_conforming_strings: StandardConformingStrings,
+
+    streaming_rate_limit: StreamingRateLimit,
+
+    cdc_backfill: CdcBackfill,
+
+    /// Cache policy for partition cache in streaming over window.
+    /// Can be "full", "recent", "recent_first_n" or "recent_last_n".
+    streaming_over_window_cache_policy: OverWindowCachePolicy,
+
+    background_ddl: BackgroundDdl,
 }
 
 impl ConfigMap {
@@ -514,6 +590,26 @@ impl ConfigMap {
                 }
                 .into());
             }
+        } else if key.eq_ignore_ascii_case(SinkDecouple::entry_name()) {
+            self.sink_decouple = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(SynchronizeSeqscans::entry_name()) {
+            self.synchronize_seqscans = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StatementTimeout::entry_name()) {
+            self.statement_timeout = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(LockTimeout::entry_name()) {
+            self.lock_timeout = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(RowSecurity::entry_name()) {
+            self.row_security = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StandardConformingStrings::entry_name()) {
+            self.standard_conforming_strings = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StreamingRateLimit::entry_name()) {
+            self.streaming_rate_limit = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(CdcBackfill::entry_name()) {
+            self.cdc_backfill = val.as_slice().try_into()?
+        } else if key.eq_ignore_ascii_case(OverWindowCachePolicy::entry_name()) {
+            self.streaming_over_window_cache_policy = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(BackgroundDdl::entry_name()) {
+            self.background_ddl = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -583,6 +679,26 @@ impl ConfigMap {
         } else if key.eq_ignore_ascii_case("bytea_output") {
             // TODO: We only support hex now.
             Ok("hex".to_string())
+        } else if key.eq_ignore_ascii_case(SinkDecouple::entry_name()) {
+            Ok(self.sink_decouple.to_string())
+        } else if key.eq_ignore_ascii_case(SynchronizeSeqscans::entry_name()) {
+            Ok(self.synchronize_seqscans.to_string())
+        } else if key.eq_ignore_ascii_case(StatementTimeout::entry_name()) {
+            Ok(self.statement_timeout.to_string())
+        } else if key.eq_ignore_ascii_case(LockTimeout::entry_name()) {
+            Ok(self.lock_timeout.to_string())
+        } else if key.eq_ignore_ascii_case(RowSecurity::entry_name()) {
+            Ok(self.row_security.to_string())
+        } else if key.eq_ignore_ascii_case(StandardConformingStrings::entry_name()) {
+            Ok(self.standard_conforming_strings.to_string())
+        } else if key.eq_ignore_ascii_case(StreamingRateLimit::entry_name()) {
+            Ok(self.streaming_rate_limit.to_string())
+        } else if key.eq_ignore_ascii_case(CdcBackfill::entry_name()) {
+            Ok(self.cdc_backfill.to_string())
+        } else if key.eq_ignore_ascii_case(OverWindowCachePolicy::entry_name()) {
+            Ok(self.streaming_over_window_cache_policy.to_string())
+        } else if key.eq_ignore_ascii_case(BackgroundDdl::entry_name()) {
+            Ok(self.background_ddl.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -729,7 +845,57 @@ impl ConfigMap {
                 name: "bytea_output".to_string(),
                 setting: "hex".to_string(),
                 description: "Sets the output format for bytea.".to_string(),
-            }
+            },
+            VariableInfo{
+                name: SinkDecouple::entry_name().to_lowercase(),
+                setting: self.sink_decouple.to_string(),
+                description: String::from("Enable decoupling sink and internal streaming graph or not")
+            },
+            VariableInfo{
+                name: SynchronizeSeqscans::entry_name().to_lowercase(),
+                setting: self.synchronize_seqscans.to_string(),
+                description: String::from("Unused in RisingWave")
+            },
+            VariableInfo{
+                name: StatementTimeout::entry_name().to_lowercase(),
+                setting: self.statement_timeout.to_string(),
+                description: String::from("Sets the maximum allowed duration of any statement, currently just a mock variable and not adopted in RW"),
+            },
+            VariableInfo{
+                name: LockTimeout::entry_name().to_lowercase(),
+                setting: self.lock_timeout.to_string(),
+                description: String::from("Unused in RisingWave"),
+            },
+            VariableInfo{
+                name: RowSecurity::entry_name().to_lowercase(),
+                setting: self.row_security.to_string(),
+                description: String::from("Unused in RisingWave"),
+            },
+            VariableInfo{
+                name: StandardConformingStrings::entry_name().to_lowercase(),
+                setting: self.standard_conforming_strings.to_string(),
+                description: String::from("Unused in RisingWave"),
+            },
+            VariableInfo{
+                name: StreamingRateLimit::entry_name().to_lowercase(),
+                setting: self.streaming_rate_limit.to_string(),
+                description: String::from("Set streaming rate limit (rows per second) for each parallelism for mv backfilling"),
+            },
+            VariableInfo{
+                name: CdcBackfill::entry_name().to_lowercase(),
+                setting: self.cdc_backfill.to_string(),
+                description: String::from("Enable backfill for CDC table to allow lock-free and incremental snapshot"),
+            },
+            VariableInfo{
+                name: OverWindowCachePolicy::entry_name().to_lowercase(),
+                setting: self.streaming_over_window_cache_policy.to_string(),
+                description: String::from(r#"Cache policy for partition cache in streaming over window. Can be "full", "recent", "recent_first_n" or "recent_last_n"."#),
+            },
+            VariableInfo{
+                name: BackgroundDdl::entry_name().to_lowercase(),
+                setting: self.background_ddl.to_string(),
+                description: String::from("Run DDL statements in background"),
+            },
         ]
     }
 
@@ -844,5 +1010,32 @@ impl ConfigMap {
 
     pub fn get_client_encoding(&self) -> &str {
         &self.client_encoding
+    }
+
+    pub fn get_sink_decouple(&self) -> bool {
+        self.sink_decouple.0
+    }
+
+    pub fn get_standard_conforming_strings(&self) -> &str {
+        &self.standard_conforming_strings
+    }
+
+    pub fn get_streaming_rate_limit(&self) -> Option<u32> {
+        if self.streaming_rate_limit.0 != 0 {
+            return Some(self.streaming_rate_limit.0 as u32);
+        }
+        None
+    }
+
+    pub fn get_cdc_backfill(&self) -> bool {
+        self.cdc_backfill.0
+    }
+
+    pub fn get_streaming_over_window_cache_policy(&self) -> OverWindowCachePolicy {
+        self.streaming_over_window_cache_policy
+    }
+
+    pub fn get_background_ddl(&self) -> bool {
+        self.background_ddl.0
     }
 }

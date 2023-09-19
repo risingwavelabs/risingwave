@@ -18,7 +18,8 @@
 //!
 //! ## Construction
 //!
-//! Expressions can be constructed by [`build()`] function, which returns a [`BoxedExpression`].
+//! Expressions can be constructed by [`build_func()`] function, which returns a
+//! [`BoxedExpression`].
 //!
 //! They can also be transformed from the prost [`ExprNode`] using the [`build_from_prost()`]
 //! function.
@@ -31,33 +32,21 @@
 //! [`eval`]: Expression::eval
 
 // These modules define concrete expression structures.
-mod expr_array_concat;
-mod expr_array_to_string;
+mod expr_array_transform;
 mod expr_binary_nonnull;
 mod expr_binary_nullable;
 mod expr_case;
 mod expr_coalesce;
-mod expr_concat_ws;
 mod expr_field;
 mod expr_in;
 mod expr_input_ref;
-mod expr_is_null;
-mod expr_jsonb_access;
 mod expr_literal;
-mod expr_nested_construct;
-mod expr_proctime;
-pub mod expr_regexp;
 mod expr_some_all;
-mod expr_to_char_const_tmpl;
-mod expr_to_timestamp_const_tmpl;
 pub(crate) mod expr_udf;
 mod expr_unary;
 mod expr_vnode;
 
 mod build;
-pub(crate) mod data_types;
-pub(crate) mod template;
-pub(crate) mod template_fast;
 pub mod test_utils;
 mod value;
 
@@ -74,7 +63,7 @@ pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
 pub use self::value::{ValueImpl, ValueRef};
-use super::{ExprError, Result};
+pub use super::{ExprError, Result};
 
 /// Interface of an expression.
 ///
@@ -186,9 +175,6 @@ impl dyn Expression {
 /// An owned dynamically typed [`Expression`].
 pub type BoxedExpression = Box<dyn Expression>;
 
-/// A reference to a dynamically typed [`Expression`].
-pub type ExpressionRef = Arc<dyn Expression>;
-
 /// Controls the behavior when a compute error happens.
 ///
 /// - If set to `false`, `NULL` will be inserted.
@@ -198,3 +184,20 @@ pub type ExpressionRef = Arc<dyn Expression>;
 /// See also <https://github.com/risingwavelabs/risingwave/issues/4625>.
 #[allow(dead_code)]
 const STRICT_MODE: bool = false;
+
+/// An optional context that can be used in a function.
+///
+/// # Example
+/// ```ignore
+/// #[function("foo(int32) -> int64")]
+/// fn foo(a: i32, ctx: &Context) -> i64 {
+///    assert_eq!(ctx.arg_types[0], DataType::Int32);
+///    assert_eq!(ctx.return_type, DataType::Int64);
+///    // ...
+/// }
+/// ```
+#[derive(Debug)]
+pub struct Context {
+    pub arg_types: Vec<DataType>,
+    pub return_type: DataType,
+}

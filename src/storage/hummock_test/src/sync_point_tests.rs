@@ -21,6 +21,7 @@ use bytes::Bytes;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
@@ -34,12 +35,12 @@ use risingwave_meta::hummock::test_utils::{
 };
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::LocalNotification;
-use risingwave_meta::storage::MemStore;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
-use risingwave_storage::hummock::{CachePolicy, SstableObjectIdManager};
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
+use risingwave_storage::hummock::compactor::compactor_runner::compact;
+use risingwave_storage::hummock::compactor::CompactorContext;
+use risingwave_storage::hummock::{CachePolicy, GetObjectId, SstableObjectIdManager};
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions, StateStoreRead};
 use risingwave_storage::StateStore;
 use serial_test::serial;
 
@@ -47,6 +48,8 @@ use super::compactor_tests::tests::{
     flush_and_commit, get_hummock_storage, prepare_compactor_and_filter,
 };
 use crate::get_notification_client_for_test;
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
+use crate::test_utils::gen_key_from_bytes;
 
 #[tokio::test]
 #[cfg(feature = "sync_point")]
@@ -72,7 +75,7 @@ async fn test_syncpoints_sstable_object_id_manager() {
     });
 
     // Start the task that fetches new ids.
-    let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+    let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
     let leader_task = tokio::spawn(async move {
         sstable_object_id_manager_clone
             .get_new_sst_object_id()
@@ -89,7 +92,7 @@ async fn test_syncpoints_sstable_object_id_manager() {
     // Start tasks that waits to be notified.
     let mut follower_tasks = vec![];
     for _ in 0..3 {
-        let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+        let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
             sstable_object_id_manager_clone
                 .get_new_sst_object_id()
@@ -136,7 +139,7 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
     });
 
     // Start the task that fetches new ids.
-    let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+    let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
     let leader_task = tokio::spawn(async move {
         fail::cfg("get_new_sst_ids_err", "return").unwrap();
         sstable_object_id_manager_clone
@@ -152,7 +155,7 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
     // Start tasks that waits to be notified.
     let mut follower_tasks = vec![];
     for _ in 0..3 {
-        let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+        let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
             sstable_object_id_manager_clone
                 .get_new_sst_object_id()
@@ -227,8 +230,9 @@ async fn test_syncpoints_test_local_notification_receiver() {
 }
 
 pub async fn compact_once(
-    hummock_manager_ref: HummockManagerRef<MemStore>,
-    compact_ctx: Arc<CompactorContext>,
+    hummock_manager_ref: HummockManagerRef,
+    compact_ctx: CompactorContext,
+    sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) {
     // 2. get compact task
     let manual_compcation_option = ManualCompactionOption {
@@ -250,8 +254,13 @@ pub async fn compact_once(
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    let (mut result_task, task_stats) =
-        Compactor::compact(compact_ctx, compact_task.clone(), rx).await;
+    let (mut result_task, task_stats) = compact(
+        compact_ctx,
+        compact_task.clone(),
+        rx,
+        Box::new(sstable_object_id_manager),
+    )
+    .await;
 
     hummock_manager_ref
         .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
@@ -282,10 +291,14 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         TableId::from(existing_table_id),
     )
     .await;
-    let compact_ctx = Arc::new(prepare_compactor_and_filter(
-        &storage,
-        &hummock_meta_client,
-        existing_table_id,
+    let compact_ctx = prepare_compactor_and_filter(&storage, existing_table_id);
+
+    let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+        hummock_meta_client.clone(),
+        storage
+            .storage_opts()
+            .clone()
+            .sstable_id_remote_fetch_number,
     ));
 
     let mut local = storage
@@ -296,37 +309,62 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let val0 = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
     let val1 = Bytes::from(b"1"[..].repeat(1 << 10)); // 1024 Byte value
 
-    local.init(100);
-    let mut start_key = b"\0\0aaa".to_vec();
+    local.init_for_test(100).await.unwrap();
+    let mut start_key = b"aaa".to_vec();
     for _ in 0..10 {
         local
             .insert(
-                Bytes::copy_from_slice(start_key.as_slice()),
+                gen_key_from_bytes(VirtualNode::ZERO, start_key.as_slice()),
                 val0.clone(),
                 None,
             )
             .unwrap();
-        start_key = next_key(&start_key);
+        start_key = next_key(start_key.as_slice());
     }
     local
-        .insert(Bytes::from(b"\0\0ggg".as_slice()), val0.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"ggg"),
+            val0.clone(),
+            None,
+        )
         .unwrap();
     local
-        .insert(Bytes::from(b"\0\0hhh".as_slice()), val0.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"hhh"),
+            val0.clone(),
+            None,
+        )
         .unwrap();
     local
-        .insert(Bytes::from(b"\0\0kkk".as_slice()), val0.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"kkk"),
+            val0.clone(),
+            None,
+        )
         .unwrap();
     local.flush(Vec::new()).await.unwrap();
     local.seal_current_epoch(101);
     flush_and_commit(&hummock_meta_client, &storage, 100).await;
-    compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
+    compact_once(
+        hummock_manager_ref.clone(),
+        compact_ctx.clone(),
+        sstable_object_id_manager.clone(),
+    )
+    .await;
 
     local
-        .insert(Bytes::from(b"\0\0aaa".as_slice()), val1.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"aaa"),
+            val1.clone(),
+            None,
+        )
         .unwrap();
     local
-        .insert(Bytes::from(b"\0\0bbb".as_slice()), val1.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"bbb"),
+            val1.clone(),
+            None,
+        )
         .unwrap();
     local
         .flush(vec![(
@@ -337,13 +375,26 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .unwrap();
     local.seal_current_epoch(102);
     flush_and_commit(&hummock_meta_client, &storage, 101).await;
-    compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
+    compact_once(
+        hummock_manager_ref.clone(),
+        compact_ctx.clone(),
+        sstable_object_id_manager.clone(),
+    )
+    .await;
 
     local
-        .insert(Bytes::from(b"\0\0hhh".as_slice()), val1.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"hhh"),
+            val1.clone(),
+            None,
+        )
         .unwrap();
     local
-        .insert(Bytes::from(b"\0\0iii".as_slice()), val1.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"iii"),
+            val1.clone(),
+            None,
+        )
         .unwrap();
     local
         .flush(vec![(
@@ -355,19 +406,37 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     local.seal_current_epoch(103);
     flush_and_commit(&hummock_meta_client, &storage, 102).await;
     // move this two file to the same level.
-    compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
+    compact_once(
+        hummock_manager_ref.clone(),
+        compact_ctx.clone(),
+        sstable_object_id_manager.clone(),
+    )
+    .await;
 
     local
-        .insert(Bytes::from(b"\0\0lll".as_slice()), val1.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"lll"),
+            val1.clone(),
+            None,
+        )
         .unwrap();
     local
-        .insert(Bytes::from(b"\0\0mmm".as_slice()), val1.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"mmm"),
+            val1.clone(),
+            None,
+        )
         .unwrap();
     local.flush(Vec::new()).await.unwrap();
     local.seal_current_epoch(u64::MAX);
     flush_and_commit(&hummock_meta_client, &storage, 103).await;
     // move this two file to the same level.
-    compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
+    compact_once(
+        hummock_manager_ref.clone(),
+        compact_ctx.clone(),
+        sstable_object_id_manager.clone(),
+    )
+    .await;
 
     // 4. get the latest version and check
     let version = hummock_manager_ref.get_current_version().await;
@@ -388,32 +457,43 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     );
     storage.wait_version(version).await;
     let read_options = ReadOptions {
-        ignore_range_tombstone: false,
-
-        prefix_hint: None,
         table_id: TableId::from(existing_table_id),
-        retention_seconds: None,
-        read_version_from_backup: false,
-        prefetch_options: Default::default(),
         cache_policy: CachePolicy::Fill(CachePriority::High),
+        ..Default::default()
     };
     let get_result = storage
-        .get(Bytes::from("\0\0hhh"), 120, read_options.clone())
+        .get(
+            gen_key_from_bytes(VirtualNode::ZERO, b"hhh"),
+            120,
+            read_options.clone(),
+        )
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val1);
     let get_result = storage
-        .get(Bytes::from("\0\0ggg"), 120, read_options.clone())
+        .get(
+            gen_key_from_bytes(VirtualNode::ZERO, b"ggg"),
+            120,
+            read_options.clone(),
+        )
         .await
         .unwrap();
     assert!(get_result.is_none());
     let get_result = storage
-        .get(Bytes::from("\0\0aaa"), 120, read_options.clone())
+        .get(
+            gen_key_from_bytes(VirtualNode::ZERO, b"aaa"),
+            120,
+            read_options.clone(),
+        )
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val1);
     let get_result = storage
-        .get(Bytes::from("\0\0aab"), 120, read_options.clone())
+        .get(
+            gen_key_from_bytes(VirtualNode::ZERO, b"aab"),
+            120,
+            read_options.clone(),
+        )
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val0);
@@ -426,7 +506,11 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         }
     });
     let get_result = storage
-        .get(Bytes::from("\0\0kkk"), 120, read_options.clone())
+        .get(
+            gen_key_from_bytes(VirtualNode::ZERO, b"kkk"),
+            120,
+            read_options.clone(),
+        )
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val0);

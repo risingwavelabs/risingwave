@@ -17,14 +17,14 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableOption;
+use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+    Connection, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source, Table, View,
 };
 
 use super::{ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
 use crate::manager::{IndexId, MetaSrvEnv, TableId};
 use crate::model::MetadataModel;
-use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
 
 pub type Catalog = (
@@ -78,7 +78,7 @@ pub struct DatabaseManager {
 }
 
 impl DatabaseManager {
-    pub async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+    pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let databases = Database::list(env.meta_store()).await?;
         let schemas = Schema::list(env.meta_store()).await?;
         let sources = Source::list(env.meta_store()).await?;
@@ -147,14 +147,41 @@ impl DatabaseManager {
         (
             self.databases.values().cloned().collect_vec(),
             self.schemas.values().cloned().collect_vec(),
-            self.tables.values().cloned().collect_vec(),
+            self.tables
+                .values()
+                .filter(|t| t.stream_job_status == PbStreamJobStatus::Created as i32)
+                .cloned()
+                .collect_vec(),
             self.sources.values().cloned().collect_vec(),
-            self.sinks.values().cloned().collect_vec(),
-            self.indexes.values().cloned().collect_vec(),
+            self.sinks
+                .values()
+                .filter(|s| s.stream_job_status == PbStreamJobStatus::Created as i32)
+                .cloned()
+                .collect_vec(),
+            self.indexes
+                .values()
+                .filter(|i| i.stream_job_status == PbStreamJobStatus::Created as i32)
+                .cloned()
+                .collect_vec(),
             self.views.values().cloned().collect_vec(),
             self.functions.values().cloned().collect_vec(),
             self.connections.values().cloned().collect_vec(),
         )
+    }
+
+    pub fn get_table_name_and_type_mapping(&self) -> HashMap<TableId, (String, String)> {
+        self.tables
+            .values()
+            .map(|table| {
+                (
+                    table.id,
+                    (
+                        table.name.clone(),
+                        table.table_type().as_str_name().to_string(),
+                    ),
+                )
+            })
+            .collect()
     }
 
     pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
@@ -244,10 +271,22 @@ impl DatabaseManager {
             .collect()
     }
 
-    pub fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+    pub fn list_readonly_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
         self.tables
             .values()
-            .filter(|table| table.schema_id == schema_id)
+            .filter(|table| {
+                table.schema_id == schema_id && table.table_type != TableType::Table as i32
+            })
+            .map(|table| table.id)
+            .collect_vec()
+    }
+
+    pub fn list_dml_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
+        self.tables
+            .values()
+            .filter(|table| {
+                table.schema_id == schema_id && table.table_type == TableType::Table as i32
+            })
             .map(|table| table.id)
             .collect_vec()
     }

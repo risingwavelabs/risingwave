@@ -29,10 +29,10 @@
   sql: |
     explain create table t1 (proc_time TIMESTAMP AS proctime());
   explain_output: |
-    StreamMaterialize { columns: [proc_time, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
+    StreamMaterialize { columns: [proc_time, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite, watermark_columns: [proc_time] }
     └─StreamExchange { dist: HashShard(_row_id) }
       └─StreamRowIdGen { row_id_index: 1 }
-        └─StreamProject { exprs: [AtTimeZone(Proctime, 'UTC':Varchar) as $expr1, _row_id] }
+        └─StreamProject { exprs: [AtTimeZone(Proctime, 'UTC':Varchar) as $expr1, _row_id], output_watermarks: [$expr1] }
           └─StreamDml { columns: [_row_id] }
             └─StreamSource
 - name: watermark on generated column
@@ -41,7 +41,7 @@
   explain_output: |
     StreamMaterialize { columns: [v, w, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [w] }
     └─StreamRowIdGen { row_id_index: 2 }
-      └─StreamWatermarkFilter { watermark_descs: [Desc { idx: 1, expr: $expr1 }] }
+      └─StreamWatermarkFilter { watermark_descs: [Desc { column: $expr1, expr: $expr1 }], output_watermarks: [$expr1] }
         └─StreamProject { exprs: [v, (v + 1:Int32) as $expr1, _row_id] }
           └─StreamDml { columns: [v, _row_id] }
             └─StreamSource

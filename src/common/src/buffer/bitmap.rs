@@ -48,10 +48,26 @@ use crate::estimate_size::EstimateSize;
 pub struct BitmapBuilder {
     len: usize,
     data: Vec<usize>,
-    count_ones: usize,
 }
 
 const BITS: usize = usize::BITS as usize;
+
+impl From<Bitmap> for BitmapBuilder {
+    fn from(bitmap: Bitmap) -> Self {
+        let len = bitmap.len();
+        if let Some(bits) = bitmap.bits {
+            BitmapBuilder {
+                len,
+                data: bits.into_vec(),
+            }
+        } else if bitmap.count_ones == 0 {
+            Self::zeroed(bitmap.len())
+        } else {
+            debug_assert!(bitmap.len() == bitmap.count_ones());
+            Self::filled(bitmap.len())
+        }
+    }
+}
 
 impl BitmapBuilder {
     /// Creates a new empty bitmap with at least the specified capacity.
@@ -59,7 +75,6 @@ impl BitmapBuilder {
         BitmapBuilder {
             len: 0,
             data: Vec::with_capacity(Bitmap::vec_len(capacity)),
-            count_ones: 0,
         }
     }
 
@@ -68,8 +83,17 @@ impl BitmapBuilder {
         BitmapBuilder {
             len,
             data: vec![0; Bitmap::vec_len(len)],
-            count_ones: 0,
         }
+    }
+
+    /// Creates a new bitmap with all bits set to 1.
+    pub fn filled(len: usize) -> BitmapBuilder {
+        let vec_len = Bitmap::vec_len(len);
+        let mut data = vec![usize::MAX; vec_len];
+        if vec_len >= 1 && len % BITS != 0 {
+            data[vec_len - 1] = (1 << (len % BITS)) - 1;
+        }
+        BitmapBuilder { len, data }
     }
 
     /// Writes a new value into a single bit.
@@ -78,16 +102,10 @@ impl BitmapBuilder {
 
         let byte = &mut self.data[n / BITS];
         let mask = 1 << (n % BITS);
-        match (*byte & mask != 0, val) {
-            (true, false) => {
-                *byte &= !mask;
-                self.count_ones -= 1;
-            }
-            (false, true) => {
-                *byte |= mask;
-                self.count_ones += 1;
-            }
-            _ => {}
+        if val {
+            *byte |= mask;
+        } else {
+            *byte &= !mask;
         }
     }
 
@@ -105,7 +123,6 @@ impl BitmapBuilder {
             self.data.push(0);
         }
         self.data[self.len / BITS] |= (bit_set as usize) << (self.len % BITS);
-        self.count_ones += bit_set as usize;
         self.len += 1;
         self
     }
@@ -124,9 +141,6 @@ impl BitmapBuilder {
         if bit_set && self.len % BITS != 0 {
             // remove tailing 1s
             *self.data.last_mut().unwrap() &= (1 << (self.len % BITS)) - 1;
-        }
-        if bit_set {
-            self.count_ones += n;
         }
         self
     }
@@ -148,21 +162,21 @@ impl BitmapBuilder {
     pub fn append_bitmap(&mut self, other: &Bitmap) -> &mut Self {
         if self.len % BITS == 0 {
             // fast path: self is aligned
-            match &other.bits {
+            self.len += other.len();
+            if let Some(bits) = &other.bits {
                 // append the bytes
-                Some(bits) => self.data.extend_from_slice(bits),
+                self.data.extend_from_slice(bits);
+            } else if other.count_ones == 0 {
+                // append 0s
+                self.data.resize(Bitmap::vec_len(self.len), 0);
+            } else {
                 // append 1s
-                None => {
-                    let new_len = self.data.len() + (other.num_bits + BITS - 1) / BITS;
-                    self.data.resize(new_len, usize::MAX);
-                    if other.num_bits % BITS != 0 {
-                        // remove tailing 1s
-                        self.data[new_len - 1] = (1 << (other.num_bits % BITS)) - 1;
-                    }
+                self.data.resize(Bitmap::vec_len(self.len), usize::MAX);
+                if self.len % BITS != 0 {
+                    // remove tailing 1s
+                    *self.data.last_mut().unwrap() = (1 << (self.len % BITS)) - 1;
                 }
             }
-            self.len += other.len();
-            self.count_ones += other.count_ones;
         } else {
             // slow path: append bits one by one
             for bit in other.iter() {
@@ -174,10 +188,11 @@ impl BitmapBuilder {
 
     /// Finishes building and returns the bitmap.
     pub fn finish(self) -> Bitmap {
+        let count_ones = self.data.iter().map(|&x| x.count_ones()).sum::<u32>() as usize;
         Bitmap {
             num_bits: self.len(),
-            count_ones: self.count_ones,
-            bits: (self.count_ones != 0 && self.count_ones != self.len).then(|| self.data.into()),
+            count_ones,
+            bits: (count_ones != 0 && count_ones != self.len).then(|| self.data.into()),
         }
     }
 
@@ -404,6 +419,12 @@ impl Bitmap {
     }
 }
 
+impl From<usize> for Bitmap {
+    fn from(val: usize) -> Self {
+        Self::ones(val)
+    }
+}
+
 impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
     type Output = Bitmap;
 
@@ -450,6 +471,12 @@ impl BitAnd for Bitmap {
 
 impl BitAndAssign<&Bitmap> for Bitmap {
     fn bitand_assign(&mut self, rhs: &Bitmap) {
+        *self = &*self & rhs;
+    }
+}
+
+impl BitAndAssign<Bitmap> for Bitmap {
+    fn bitand_assign(&mut self, rhs: Bitmap) {
         *self = &*self & rhs;
     }
 }
@@ -786,6 +813,24 @@ mod tests {
     }
 
     #[test]
+    fn test_builder_append_bitmap() {
+        let mut builder = BitmapBuilder::default();
+        builder.append_bitmap(&Bitmap::zeros(64));
+        builder.append_bitmap(&Bitmap::ones(64));
+        builder.append_bitmap(&Bitmap::from_bytes(&[0b1010_1010]));
+        builder.append_bitmap(&Bitmap::zeros(8));
+        builder.append_bitmap(&Bitmap::ones(8));
+        let bitmap = builder.finish();
+        assert_eq!(
+            bitmap,
+            Bitmap::from_vec_with_len(
+                vec![0, usize::MAX, 0b1111_1111_0000_0000_1010_1010],
+                64 + 64 + 8 + 8 + 8
+            ),
+        );
+    }
+
+    #[test]
     fn test_bitmap_get_size() {
         let bitmap1 = {
             let mut builder = BitmapBuilder::default();
@@ -968,23 +1013,20 @@ mod tests {
     #[test]
     fn test_bitmap_set() {
         let mut b = BitmapBuilder::zeroed(10);
-        assert_eq!(b.count_ones, 0);
 
         b.set(0, true);
         b.set(7, true);
         b.set(8, true);
         b.set(9, true);
-        assert_eq!(b.count_ones, 4);
 
         b.set(7, false);
         b.set(8, false);
-        assert_eq!(b.count_ones, 2);
 
         b.append(true);
-        assert_eq!(b.len, 11);
-        assert_eq!(b.count_ones, 3);
+        assert_eq!(b.len(), 11);
 
         let b = b.finish();
+        assert_eq!(b.count_ones(), 3);
         assert_eq!(&b.bits.unwrap()[..], &[0b0110_0000_0001]);
     }
 
