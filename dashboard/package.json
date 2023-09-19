@@ -4,7 +4,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "build-static": "next build && next export",
+    "build-static": "next build",
     "gen-proto": "./scripts/generate_proto.sh",
     "lint": "prettier --check . && next lint",
     "format": "prettier --write . && next lint --fix",

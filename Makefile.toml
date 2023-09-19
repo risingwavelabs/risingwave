@@ -381,7 +381,15 @@ git worktree add "${PREFIX_UI}" origin/dashboard-artifact
 private = true
 category = "RiseDev - Build"
 description = "Build dashboard"
-condition = { env_set = ["ENABLE_BUILD_DASHBOARD"] }
+condition = { env_set = [
+  "ENABLE_BUILD_DASHBOARD",
+], files_modified = { input = [
+  "./dashboard/**/*.js",
+  "./dashboard/package.json",
+  "./dashboard/next.config.js",
+], output = [
+  "./dashboard/out/**/*.html",
+] } }
 script = """
 #!/usr/bin/env bash
 set -e
