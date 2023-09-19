@@ -259,10 +259,15 @@ impl DatabaseManager {
     }
 
     pub fn list_creating_tables(&self) -> Vec<Table> {
-        self.in_progress_creating_tables
+        self.tables
             .values()
             .cloned()
+            .filter(|t| t.stream_job_status == PbStreamJobStatus::Creating as i32)
             .collect_vec()
+        // self.in_progress_creating_tables
+        //     .values()
+        //     .cloned()
+        //     .collect_vec()
     }
 
     pub fn list_tables(&self) -> Vec<Table> {
