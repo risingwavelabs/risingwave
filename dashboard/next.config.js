@@ -28,7 +28,7 @@ const nextConfig = {
         destination: "http://localhost:32333/:path*",
       },
     ]
-  }
+  },
 }
 
 module.exports = nextConfig
