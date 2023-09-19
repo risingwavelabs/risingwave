@@ -86,6 +86,16 @@ impl From<PbDatabase> for database::ActiveModel {
     }
 }
 
+impl From<PbSchema> for schema::ActiveModel {
+    fn from(schema: PbSchema) -> Self {
+        Self {
+            schema_id: ActiveValue::Set(schema.id as _),
+            name: ActiveValue::Set(schema.name),
+            database_id: ActiveValue::Set(schema.database_id as _),
+        }
+    }
+}
+
 impl From<ObjectModel<schema::Model>> for PbSchema {
     fn from(value: ObjectModel<schema::Model>) -> Self {
         Self {

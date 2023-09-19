@@ -16,7 +16,7 @@ use std::iter;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
-use risingwave_pb::catalog::PbDatabase;
+use risingwave_pb::catalog::{PbDatabase, PbSchema};
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
@@ -84,21 +84,8 @@ impl CatalogController {
 }
 
 impl CatalogController {
-    pub async fn snapshot(&self) -> MetaResult<Vec<PbDatabase>> {
-        let inner = self.inner.read().await;
-        let dbs = Database::find()
-            .find_also_related(Object)
-            .all(&inner.db)
-            .await?;
-        let _tables = Table::find()
-            .find_also_related(Object)
-            .all(&inner.db)
-            .await?;
-
-        Ok(dbs
-            .into_iter()
-            .map(|(db, obj)| ObjectModel(db, obj.unwrap()).into())
-            .collect())
+    pub async fn snapshot(&self) -> MetaResult<()> {
+        todo!("snapshot")
     }
 
     async fn create_object(
@@ -346,6 +333,27 @@ impl CatalogController {
             },
             version,
         ))
+    }
+
+    pub async fn create_schema(&self, schema: PbSchema) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let owner_id = schema.owner;
+
+        // todo: whether to check existence of database and user, or let the database do it?
+        let schema_obj = Self::create_object(&txn, ObjectType::Schema, owner_id).await?;
+        let mut schema: schema::ActiveModel = schema.into();
+        schema.schema_id = ActiveValue::Set(schema_obj.oid);
+        let schema = schema.insert(&txn).await?;
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Add,
+                NotificationInfo::Schema(ObjectModel(schema, schema_obj).into()),
+            )
+            .await;
+        Ok(version)
     }
 }
 
