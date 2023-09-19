@@ -1453,9 +1453,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "cfg-or-panic"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf85d5384815558275789d91d1895d1d9919a6e2534d6144650f036ac65691a6"
+checksum = "bc7cb2538d4ecc42b6c3b57a83094d8c69894e74468d18cd045a09fdea807358"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6886,6 +6886,7 @@ dependencies = [
  "async-trait",
  "auto_enums",
  "await-tree",
+ "cfg-or-panic",
  "chrono",
  "chrono-tz",
  "criterion",
@@ -7589,6 +7590,7 @@ dependencies = [
  "arrow-flight",
  "arrow-schema",
  "arrow-select",
+ "cfg-or-panic",
  "futures-util",
  "madsim-tokio",
  "madsim-tonic",
@@ -9901,11 +9903,9 @@ dependencies = [
  "aws-credential-types",
  "aws-sdk-s3",
  "aws-smithy-client",
- "axum",
  "base64 0.21.3",
  "bit-vec",
  "bitflags 2.4.0",
- "byteorder",
  "bytes",
  "cc",
  "chrono",
@@ -9944,18 +9944,12 @@ dependencies = [
  "log",
  "madsim-rdkafka",
  "madsim-tokio",
- "memchr",
- "mime_guess",
- "miniz_oxide",
  "mio",
  "multimap",
  "nom",
  "num-bigint",
  "num-integer",
  "num-traits",
- "once_cell",
- "openssl-sys",
- "opentelemetry",
  "opentelemetry_api",
  "opentelemetry_sdk",
  "parking_lot 0.12.1",
@@ -9970,15 +9964,12 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rand_core",
- "rdkafka-sys",
  "regex",
  "regex-automata 0.3.8",
  "regex-syntax 0.7.5",
  "reqwest",
  "ring",
  "rust_decimal",
- "rustix 0.38.11",
- "rustls 0.21.7",
  "scopeguard",
  "serde",
  "serde_json",
@@ -9987,8 +9978,6 @@ dependencies = [
  "subtle",
  "syn 1.0.109",
  "syn 2.0.33",
- "tikv-jemalloc-sys",
- "tikv-jemallocator",
  "time",
  "time-macros",
  "tinyvec",
@@ -10000,7 +9989,6 @@ dependencies = [
  "toml_edit",
  "tonic",
  "tower",
- "tower-http",
  "tracing",
  "tracing-core",
  "tracing-subscriber",
@@ -10008,7 +9996,6 @@ dependencies = [
  "unicode-normalization",
  "url",
  "uuid",
- "zstd-sys",
 ]
 
 [[package]]
