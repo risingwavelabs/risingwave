@@ -36,6 +36,7 @@ run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
 run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql
 run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
 run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
+run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
 
 wait
 
