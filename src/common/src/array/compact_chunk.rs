@@ -121,9 +121,6 @@ impl StreamChunkCompactor {
         let mut op_row_map: OpRowMap<'_, '_> = new_prehashed_map_with_capacity(estimate_size);
         for (hash_values, c) in &mut chunks {
             for (row, mut op_row) in c.to_rows_mut() {
-                if !op_row.vis() {
-                    continue;
-                }
                 op_row.set_op(op_row.op().normalize_update());
                 let hash = hash_values[row.index()];
                 let stream_key = row.project(&key_indices);
