@@ -26,6 +26,7 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{compact_task, CompactionConfig, LevelType};
 
 use super::picker::{
+    CompactionTaskValidator, EmergencyCompactionPicker, IntraCompactionPicker,
     SpaceReclaimCompactionPicker, SpaceReclaimPickerState, TtlPickerState,
     TtlReclaimCompactionPicker,
 };
@@ -43,6 +44,23 @@ use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
 
 pub const SCORE_BASE: u64 = 100;
+
+#[derive(Debug, Default, Clone)]
+pub enum PickerType {
+    Tier,
+    Intra,
+    ToBase,
+    #[default]
+    BottomLevel,
+}
+
+#[derive(Default, Debug)]
+pub struct PickerInfo {
+    score: u64,
+    select_level: usize,
+    target_level: usize,
+    picker_type: PickerType,
+}
 
 pub trait LevelSelector: Sync + Send {
     fn pick_compaction(
@@ -71,7 +89,7 @@ pub struct SelectContext {
     // size of the files in  `base_level` reaches its capacity, we will place data in a higher
     // level, which equals to `base_level -= 1;`.
     pub base_level: usize,
-    pub score_levels: Vec<(u64, usize, usize)>,
+    pub score_levels: Vec<PickerInfo>,
 }
 
 pub struct DynamicLevelSelectorCore {
@@ -92,28 +110,34 @@ impl DynamicLevelSelectorCore {
 
     fn create_compaction_picker(
         &self,
-        select_level: usize,
-        target_level: usize,
+        picker_info: &PickerInfo,
         overlap_strategy: Arc<dyn OverlapStrategy>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
     ) -> Box<dyn CompactionPicker> {
-        if select_level == 0 {
-            if target_level == 0 {
-                Box::new(TierCompactionPicker::new(self.config.clone()))
-            } else {
-                Box::new(LevelCompactionPicker::new(
-                    target_level,
-                    self.config.clone(),
+        match picker_info.picker_type {
+            PickerType::Tier => Box::new(TierCompactionPicker::new_with_validator(
+                self.config.clone(),
+                compaction_task_validator,
+            )),
+            PickerType::ToBase => Box::new(LevelCompactionPicker::new_with_validator(
+                picker_info.target_level,
+                self.config.clone(),
+                compaction_task_validator,
+            )),
+            PickerType::Intra => Box::new(IntraCompactionPicker::new_with_validator(
+                self.config.clone(),
+                compaction_task_validator,
+            )),
+            PickerType::BottomLevel => {
+                assert_eq!(picker_info.select_level + 1, picker_info.target_level);
+                Box::new(MinOverlappingPicker::new(
+                    picker_info.select_level,
+                    picker_info.target_level,
+                    self.config.max_bytes_for_level_base,
+                    self.config.split_by_state_table,
+                    overlap_strategy,
                 ))
             }
-        } else {
-            assert_eq!(select_level + 1, target_level);
-            Box::new(MinOverlappingPicker::new(
-                select_level,
-                target_level,
-                self.config.max_bytes_for_level_base,
-                self.config.split_by_state_table,
-                overlap_strategy,
-            ))
         }
     }
 
@@ -212,8 +236,12 @@ impl DynamicLevelSelectorCore {
                     std::cmp::min(idle_file_count, overlapping_file_count) as u64 * SCORE_BASE
                         / self.config.level0_tier_compact_file_number;
                 // Reduce the level num of l0 overlapping sub_level
-                ctx.score_levels
-                    .push((std::cmp::max(l0_overlapping_score, SCORE_BASE + 1), 0, 0));
+                ctx.score_levels.push(PickerInfo {
+                    score: std::cmp::max(l0_overlapping_score, SCORE_BASE + 1),
+                    select_level: 0,
+                    target_level: 0,
+                    picker_type: PickerType::Tier,
+                })
             }
 
             // The read query at the non-overlapping level only selects ssts that match the query
@@ -249,8 +277,24 @@ impl DynamicLevelSelectorCore {
             };
 
             // Reduce the level num of l0 non-overlapping sub_level
-            ctx.score_levels
-                .push((non_overlapping_score, 0, ctx.base_level));
+            ctx.score_levels.push({
+                PickerInfo {
+                    score: non_overlapping_score,
+                    select_level: 0,
+                    target_level: ctx.base_level,
+                    picker_type: PickerType::ToBase,
+                }
+            });
+
+            // FIXME: more accurate score calculation algorithm will be introduced (#11903)
+            ctx.score_levels.push({
+                PickerInfo {
+                    score: non_overlapping_score,
+                    select_level: 0,
+                    target_level: 0,
+                    picker_type: PickerType::Intra,
+                }
+            });
         }
 
         // The bottommost level can not be input level.
@@ -270,16 +314,23 @@ impl DynamicLevelSelectorCore {
             if total_size == 0 {
                 continue;
             }
-            ctx.score_levels.push((
-                total_size * SCORE_BASE / ctx.level_max_bytes[level_idx],
-                level_idx,
-                level_idx + 1,
-            ));
+
+            ctx.score_levels.push({
+                PickerInfo {
+                    score: total_size * SCORE_BASE / ctx.level_max_bytes[level_idx],
+                    select_level: level_idx,
+                    target_level: level_idx + 1,
+                    picker_type: PickerType::BottomLevel,
+                }
+            });
         }
 
         // sort reverse to pick the largest one.
-        ctx.score_levels
-            .sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.2.cmp(&b.2)));
+        ctx.score_levels.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then_with(|| a.target_level.cmp(&b.target_level))
+        });
         ctx
     }
 
@@ -374,15 +425,20 @@ impl LevelSelector for DynamicLevelSelector {
         let overlap_strategy =
             create_overlap_strategy(compaction_group.compaction_config.compaction_mode());
         let ctx = dynamic_level_core.get_priority_levels(levels, level_handlers);
-        for (score, select_level, target_level) in ctx.score_levels {
-            if score <= SCORE_BASE {
+        // TODO: Determine which rule to enable by write limit
+        let compaction_task_validator = Arc::new(CompactionTaskValidator::new(
+            compaction_group.compaction_config.clone(),
+        ));
+        for picker_info in &ctx.score_levels {
+            if picker_info.score <= SCORE_BASE {
                 return None;
             }
             let mut picker = dynamic_level_core.create_compaction_picker(
-                select_level,
-                target_level,
+                picker_info,
                 overlap_strategy.clone(),
+                compaction_task_validator.clone(),
             );
+
             let mut stats = LocalPickerStatistic::default();
             if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
                 ret.add_pending_task(task_id, level_handlers);
@@ -393,9 +449,11 @@ impl LevelSelector for DynamicLevelSelector {
                     self.task_type(),
                 ));
             }
-            selector_stats
-                .skip_picker
-                .push((select_level, target_level, stats));
+            selector_stats.skip_picker.push((
+                picker_info.select_level,
+                picker_info.target_level,
+                stats,
+            ));
         }
         None
     }
@@ -491,10 +549,7 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
             levels.member_table_ids.iter().cloned().collect(),
         );
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
-        let state = self
-            .state
-            .entry(group.group_id)
-            .or_insert_with(SpaceReclaimPickerState::default);
+        let state = self.state.entry(group.group_id).or_default();
 
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
         compaction_input.add_pending_task(task_id, level_handlers);
@@ -537,10 +592,7 @@ impl LevelSelector for TtlCompactionSelector {
             group.compaction_config.max_space_reclaim_bytes,
             table_id_to_options,
         );
-        let state = self
-            .state
-            .entry(group.group_id)
-            .or_insert_with(TtlPickerState::default);
+        let state = self.state.entry(group.group_id).or_default();
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
         compaction_input.add_pending_task(task_id, level_handlers);
 
@@ -563,6 +615,50 @@ impl LevelSelector for TtlCompactionSelector {
 
 pub fn default_level_selector() -> Box<dyn LevelSelector> {
     Box::<DynamicLevelSelector>::default()
+}
+
+#[derive(Default)]
+pub struct EmergencySelector {}
+
+impl LevelSelector for EmergencySelector {
+    fn pick_compaction(
+        &mut self,
+        task_id: HummockCompactionTaskId,
+        group: &CompactionGroup,
+        levels: &Levels,
+        level_handlers: &mut [LevelHandler],
+        selector_stats: &mut LocalSelectorStatistic,
+        _table_id_to_options: HashMap<u32, TableOption>,
+    ) -> Option<CompactionTask> {
+        let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
+        let ctx = dynamic_level_core.calculate_level_base_size(levels);
+        let picker =
+            EmergencyCompactionPicker::new(ctx.base_level, group.compaction_config.clone());
+
+        let mut stats = LocalPickerStatistic::default();
+        if let Some(compaction_input) = picker.pick_compaction(levels, level_handlers, &mut stats) {
+            compaction_input.add_pending_task(task_id, level_handlers);
+
+            return Some(create_compaction_task(
+                group.compaction_config.as_ref(),
+                compaction_input,
+                ctx.base_level,
+                self.task_type(),
+            ));
+        }
+
+        selector_stats.skip_picker.push((0, ctx.base_level, stats));
+
+        None
+    }
+
+    fn name(&self) -> &'static str {
+        "EmergencyCompaction"
+    }
+
+    fn task_type(&self) -> compact_task::TaskType {
+        compact_task::TaskType::Emergency
+    }
 }
 
 #[cfg(test)]

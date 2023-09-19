@@ -41,7 +41,6 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferVersionedEntry,
 };
 use crate::hummock::sstable::CompactionDeleteRangesBuilder;
-use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -49,13 +48,14 @@ use crate::hummock::{
     CompactionDeleteRanges, GetObjectId, HummockError, HummockResult, SstableBuilderOptions,
     SstableObjectIdManagerRef,
 };
+use crate::mem_table::ImmutableMemtable;
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
 const GC_WATERMARK_FOR_FLUSH: u64 = 0;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
-    context: Arc<CompactorContext>,
+    context: CompactorContext,
     sstable_object_id_manager: SstableObjectIdManagerRef,
     payload: UploadTaskPayload,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
@@ -75,7 +75,7 @@ pub async fn compact(
         };
         grouped_payload
             .entry(compaction_group_id)
-            .or_insert_with(std::vec::Vec::new)
+            .or_default()
             .push(imm);
     }
 
@@ -110,7 +110,7 @@ pub async fn compact(
 
 /// For compaction from shared buffer to level 0, this is the only function gets called.
 async fn compact_shared_buffer(
-    context: Arc<CompactorContext>,
+    context: CompactorContext,
     sstable_object_id_manager: SstableObjectIdManagerRef,
     mut payload: UploadTaskPayload,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
@@ -453,7 +453,7 @@ impl SharedBufferCompactRunner {
     pub fn new(
         split_index: usize,
         key_range: KeyRange,
-        context: Arc<CompactorContext>,
+        context: CompactorContext,
         sub_compaction_sstable_size: usize,
         split_weight_by_vnode: u32,
         use_block_based_filter: bool,

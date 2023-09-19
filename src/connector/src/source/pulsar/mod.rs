@@ -17,127 +17,32 @@ pub mod source;
 pub mod split;
 pub mod topic;
 
-use std::collections::HashMap;
-use std::io::Write;
-
-use anyhow::{anyhow, Result};
 pub use enumerator::*;
-use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
-use pulsar::{Authentication, Pulsar, TokioExecutor};
-use risingwave_common::error::ErrorCode::InvalidParameterValue;
-use risingwave_common::error::RwError;
 use serde::Deserialize;
 pub use split::*;
-use tempfile::NamedTempFile;
-use url::Url;
 
-use crate::aws_auth::AwsAuthProps;
-use crate::aws_utils::load_file_descriptor_from_s3;
+use crate::common::PulsarCommon;
+use crate::source::pulsar::source::reader::PulsarSplitReader;
+use crate::source::SourceProperties;
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
 
-#[derive(Clone, Debug, Deserialize)]
-pub struct PulsarOauth {
-    #[serde(rename = "oauth.issuer.url")]
-    pub issuer_url: String,
+impl SourceProperties for PulsarProperties {
+    type Split = PulsarSplit;
+    type SplitEnumerator = PulsarSplitEnumerator;
+    type SplitReader = PulsarSplitReader;
 
-    #[serde(rename = "oauth.credentials.url")]
-    pub credentials_url: String,
-
-    #[serde(rename = "oauth.audience")]
-    pub audience: String,
-
-    #[serde(rename = "oauth.scope")]
-    pub scope: Option<String>,
-
-    #[serde(flatten)]
-    /// required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
-    pub s3_credentials: HashMap<String, String>,
+    const SOURCE_NAME: &'static str = PULSAR_CONNECTOR;
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct PulsarProperties {
-    #[serde(rename = "topic", alias = "pulsar.topic")]
-    pub topic: String,
-
-    #[serde(rename = "service.url", alias = "pulsar.service.url")]
-    pub service_url: String,
-
     #[serde(rename = "scan.startup.mode", alias = "pulsar.scan.startup.mode")]
     pub scan_startup_mode: Option<String>,
 
     #[serde(rename = "scan.startup.timestamp_millis", alias = "pulsar.time.offset")]
     pub time_offset: Option<String>,
 
-    #[serde(rename = "auth.token")]
-    pub auth_token: Option<String>,
-
     #[serde(flatten)]
-    pub oauth: Option<PulsarOauth>,
-}
-
-impl PulsarProperties {
-    pub async fn build_pulsar_client(&self) -> Result<Pulsar<TokioExecutor>> {
-        let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
-        let mut temp_file = None;
-        if let Some(oauth) = &self.oauth {
-            let url = Url::parse(&oauth.credentials_url)?;
-            match url.scheme() {
-                "s3" => {
-                    let credentials = load_file_descriptor_from_s3(
-                        &url,
-                        &AwsAuthProps::from_pairs(
-                            oauth
-                                .s3_credentials
-                                .iter()
-                                .map(|(k, v)| (k.as_str(), v.as_str())),
-                        ),
-                    )
-                    .await?;
-                    let mut f = NamedTempFile::new()?;
-                    f.write_all(&credentials)?;
-                    f.as_file().sync_all()?;
-                    temp_file = Some(f);
-                }
-                "file" => {}
-                _ => {
-                    return Err(RwError::from(InvalidParameterValue(String::from(
-                        "invalid credentials_url, only file url and s3 url are supported",
-                    )))
-                    .into());
-                }
-            }
-
-            let auth_params = OAuth2Params {
-                issuer_url: oauth.issuer_url.clone(),
-                credentials_url: if temp_file.is_none() {
-                    oauth.credentials_url.clone()
-                } else {
-                    let mut raw_path = temp_file
-                        .as_ref()
-                        .unwrap()
-                        .path()
-                        .to_str()
-                        .unwrap()
-                        .to_string();
-                    raw_path.insert_str(0, "file://");
-                    raw_path
-                },
-                audience: Some(oauth.audience.clone()),
-                scope: oauth.scope.clone(),
-            };
-
-            pulsar_builder = pulsar_builder
-                .with_auth_provider(OAuth2Authentication::client_credentials(auth_params));
-        } else if let Some(auth_token) = &self.auth_token {
-            pulsar_builder = pulsar_builder.with_auth(Authentication {
-                name: "token".to_string(),
-                data: Vec::from(auth_token.as_str()),
-            });
-        }
-
-        let res = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;
-        drop(temp_file);
-        Ok(res)
-    }
+    pub common: PulsarCommon,
 }

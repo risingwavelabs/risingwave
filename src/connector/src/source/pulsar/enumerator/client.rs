@@ -46,8 +46,8 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         properties: PulsarProperties,
         _context: SourceEnumeratorContextRef,
     ) -> Result<PulsarSplitEnumerator> {
-        let pulsar = properties.build_pulsar_client().await?;
-        let topic = properties.topic;
+        let pulsar = properties.common.build_client().await?;
+        let topic = properties.common.topic;
         let parsed_topic = parse_topic(&topic)?;
 
         let mut scan_start_offset = match properties

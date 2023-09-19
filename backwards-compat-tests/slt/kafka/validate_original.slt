@@ -1,0 +1,12 @@
+query I rowsort
+SELECT * FROM kafka_mv1;
+----
+6786745ge 6 NULL NULL 3 NULL
+erwerhghj 4 NULL NULL 2 NULL
+fgbgfnyyy 7 NULL NULL 3 NULL
+fsdfgerrg 2 NULL NULL 1 NULL
+gtrgretrg 1 NULL NULL 1 NULL
+kiku7ikkk 5 NULL NULL 2 NULL
+sdfergtth 3 NULL NULL 1 NULL
+werwerwwe 8 NULL NULL 4 NULL
+yjtyjtyyy 9 NULL NULL 4 NULL

@@ -22,6 +22,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.11.0"
 lru = "0.10.1"
+moka = { version = "0.12", features = ["future"] }
 rand = "0.8"
 risingwave_common = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
@@ -44,5 +45,7 @@ tracing = "0.1"
 url = "2.4.1"
 
 [target.'cfg(not(madsim))'.dependencies]
-moka = { version = "0.11", features = ["future"] }
 workspace-hack = { path = "../workspace-hack" }
+
+[lints]
+workspace = true

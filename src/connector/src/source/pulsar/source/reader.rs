@@ -16,24 +16,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, ensure, Result};
 use async_trait::async_trait;
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
-use risingwave_common::try_match_expand;
 
-use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
-    SplitMetaData, SplitReader,
+    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
+    SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
-
-impl_common_split_reader_logic!(PulsarSplitReader, PulsarProperties);
 
 pub struct PulsarSplitReader {
     pulsar: Pulsar<TokioExecutor>,
@@ -90,17 +86,18 @@ fn parse_message_id(id: &str) -> Result<MessageIdData> {
 #[async_trait]
 impl SplitReader for PulsarSplitReader {
     type Properties = PulsarProperties;
+    type Split = PulsarSplit;
 
     async fn new(
         props: PulsarProperties,
-        splits: Vec<SplitImpl>,
+        splits: Vec<PulsarSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         ensure!(splits.len() == 1, "only support single split");
-        let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::Pulsar)?;
-        let pulsar = props.build_pulsar_client().await?;
+        let split = splits.into_iter().next().unwrap();
+        let pulsar = props.common.build_client().await?;
         let topic = split.topic.to_string();
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
@@ -170,13 +167,15 @@ impl SplitReader for PulsarSplitReader {
     }
 
     fn into_stream(self) -> BoxSourceWithStateStream {
-        self.into_chunk_stream()
+        let parser_config = self.parser_config.clone();
+        let source_context = self.source_ctx.clone();
+        into_chunk_stream(self, parser_config, source_context)
     }
 }
 
-impl PulsarSplitReader {
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    pub(crate) async fn into_data_stream(self) {
+impl CommonSplitReader for PulsarSplitReader {
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    async fn into_data_stream(self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
         #[for_await]
         for msgs in self.consumer.ready_chunks(max_chunk_size) {

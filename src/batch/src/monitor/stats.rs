@@ -63,7 +63,7 @@ pub static GLOBAL_BATCH_TASK_METRICS: LazyLock<BatchTaskMetrics> =
 impl BatchTaskMetrics {
     /// The created [`BatchTaskMetrics`] is already registered to the `registry`.
     fn new(registry: &Registry) -> Self {
-        let task_labels = vec!["query_id", "stage_id", "task_id"];
+        let task_labels = ["query_id", "stage_id", "task_id"];
         let mut descs = Vec::with_capacity(8);
 
         let task_first_poll_delay = GaugeVec::new(opts!(

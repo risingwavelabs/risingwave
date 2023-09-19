@@ -195,7 +195,7 @@ impl HopWindowExecutor {
                     let data_types = chunks[0].data_types();
                     let mut chunk_builder = StreamChunkBuilder::new(chunk_size, data_types);
 
-                    for &op in ops.iter() {
+                    for &op in &*ops {
                         // Since there could be multiple rows for the same input row, we need to
                         // transform the `U-`/`U+` into `-`/`+` and then duplicate it.
                         let op = match op {

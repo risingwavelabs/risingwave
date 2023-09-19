@@ -18,6 +18,7 @@ use std::sync::Arc;
 use bytes::{BufMut, Bytes};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -33,7 +34,8 @@ use risingwave_storage::store::{
 use risingwave_storage::StateStore;
 
 use crate::get_notification_client_for_test;
-use crate::test_utils::TestIngestBatch;
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
+use crate::test_utils::{gen_key_from_str, TestIngestBatch};
 
 #[tokio::test]
 #[ignore]
@@ -61,20 +63,26 @@ async fn test_failpoints_state_store_read_upload() {
 
     let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
 
-    let anchor = Bytes::from("aa");
+    let anchor = gen_key_from_str(VirtualNode::ZERO, "aa");
     let mut batch1 = vec![
         (anchor.clone(), StorageValue::new_put("111")),
-        (Bytes::from("cc"), StorageValue::new_put("222")),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "aa"),
+            StorageValue::new_put("222"),
+        ),
     ];
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     let mut batch2 = vec![
-        (Bytes::from("cc"), StorageValue::new_put("333")),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "aa"),
+            StorageValue::new_put("333"),
+        ),
         (anchor.clone(), StorageValue::new_delete()),
     ];
     // Make sure the batch is sorted.
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    local.init(1);
+    local.init_for_test(1).await.unwrap();
     local
         .ingest_batch(
             batch1,
@@ -161,7 +169,10 @@ async fn test_failpoints_state_store_read_upload() {
     assert!(result.is_err());
     let result = hummock_storage
         .iter(
-            (Bound::Unbounded, Bound::Included(Bytes::from("ee"))),
+            (
+                Bound::Unbounded,
+                Bound::Included(gen_key_from_str(VirtualNode::ZERO, "ee")),
+            ),
             2,
             ReadOptions {
                 table_id: Default::default(),
@@ -180,7 +191,7 @@ async fn test_failpoints_state_store_read_upload() {
     };
     let value = hummock_storage
         .get(
-            Bytes::from("ee"),
+            gen_key_from_str(VirtualNode::ZERO, "ee"),
             2,
             ReadOptions {
                 prefix_hint: Some(Bytes::from(bee_prefix_hint)),
@@ -232,7 +243,10 @@ async fn test_failpoints_state_store_read_upload() {
     assert_eq!(value, Bytes::from("111"));
     let iters = hummock_storage
         .iter(
-            (Bound::Unbounded, Bound::Included(Bytes::from("ee"))),
+            (
+                Bound::Unbounded,
+                Bound::Included(gen_key_from_str(VirtualNode::ZERO, "ee")),
+            ),
             5,
             ReadOptions {
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),

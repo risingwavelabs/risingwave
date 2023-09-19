@@ -20,8 +20,7 @@ use risingwave_common::types::{Datum, DefaultOrdered};
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use smallvec::SmallVec;
 
-use super::WindowFuncCall;
-use crate::function::window::WindowFuncKind;
+use super::{WindowFuncCall, WindowFuncKind};
 use crate::sig::FuncSigDebug;
 use crate::{ExprError, Result};
 
@@ -128,6 +127,7 @@ pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState 
                     ret_type: call.return_type.clone().into(),
                     set_returning: false,
                     deprecated: false,
+                    append_only: false,
                 }
             )));
         }

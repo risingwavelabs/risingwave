@@ -298,7 +298,7 @@ mod tests {
                 SourceColumnDesc::simple("O_DATE", DataType::Date, ColumnId::from(8)),
                 SourceColumnDesc::simple("O_TIME", DataType::Time, ColumnId::from(9)),
                 SourceColumnDesc::simple("O_DATETIME", DataType::Timestamp, ColumnId::from(10)),
-                SourceColumnDesc::simple("O_TIMESTAMP", DataType::Timestamp, ColumnId::from(11)),
+                SourceColumnDesc::simple("O_TIMESTAMP", DataType::Timestamptz, ColumnId::from(11)),
                 SourceColumnDesc::simple("O_JSON", DataType::Jsonb, ColumnId::from(12)),
             ]
         }
@@ -333,9 +333,9 @@ mod tests {
             assert!(row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "1970-01-01T00:00:00".parse().unwrap()
             )))));
-            assert!(row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
-                "1970-01-01T00:00:01".parse().unwrap()
-            )))));
+            assert!(row[11].eq(&Some(ScalarImpl::Timestamptz(
+                "1970-01-01T00:00:01Z".parse().unwrap()
+            ))));
             assert_json_eq(&row[12], "{\"k1\": \"v1\", \"k2\": 11}");
         }
 
@@ -368,9 +368,9 @@ mod tests {
             assert!(row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "1970-01-01T00:00:00".parse().unwrap()
             )))));
-            assert!(row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
-                "1970-01-01T00:00:01".parse().unwrap()
-            )))));
+            assert!(row[11].eq(&Some(ScalarImpl::Timestamptz(
+                "1970-01-01T00:00:01Z".parse().unwrap()
+            ))));
             assert_json_eq(&row[12], "{\"k1\": \"v1\", \"k2\": 11}");
         }
 
@@ -404,9 +404,9 @@ mod tests {
             assert!(row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "5138-11-16T09:46:39".parse().unwrap()
             )))));
-            assert!(row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
-                "2038-01-09T03:14:07".parse().unwrap()
-            )))));
+            assert!(row[11].eq(&Some(ScalarImpl::Timestamptz(
+                "2038-01-09T03:14:07Z".parse().unwrap()
+            ))));
             assert_json_eq(&row[12], "{\"k1\":\"v1_updated\",\"k2\":33}");
         }
 
@@ -441,9 +441,9 @@ mod tests {
             assert!(row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "5138-11-16T09:46:39".parse().unwrap()
             )))));
-            assert!(row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
-                "2038-01-09T03:14:07".parse().unwrap()
-            )))));
+            assert!(row[11].eq(&Some(ScalarImpl::Timestamptz(
+                "2038-01-09T03:14:07Z".parse().unwrap()
+            ))));
             assert_json_eq(&row[12], "{\"k1\": \"v1_updated\", \"k2\": 33}");
         }
 

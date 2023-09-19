@@ -64,8 +64,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_neg() {
-        let input = vec![Some(1), Some(0), Some(-1)];
-        let target = vec![Some(-1), Some(0), Some(1)];
+        let input = [Some(1), Some(0), Some(-1)];
+        let target = [Some(-1), Some(0), Some(1)];
 
         let col1 = I32Array::from_iter(&input).into_ref();
         let data_chunk = DataChunk::new(vec![col1], 3);

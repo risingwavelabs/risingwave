@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
 
@@ -21,7 +20,7 @@ use parking_lot::RwLock;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::{map_table_key_range, FullKey, UserKey, TABLE_PREFIX_LEN};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TABLE_PREFIX_LEN};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::store::version::{read_filter_for_batch, read_filter_for_local};
 use risingwave_storage::hummock::CachePolicy;
@@ -29,7 +28,8 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 use risingwave_storage::StateStore;
 
-use crate::test_utils::{prepare_hummock_test_env, TestIngestBatch};
+use crate::local_state_store_test_utils::LocalStateStoreTestExt;
+use crate::test_utils::{gen_key_from_str, prepare_hummock_test_env, TestIngestBatch};
 
 #[tokio::test]
 async fn test_storage_basic() {
@@ -40,15 +40,14 @@ async fn test_storage_basic() {
         .storage
         .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
         .await;
-
     // First batch inserts the anchor and others.
     let mut batch1 = vec![
         (
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "aa"),
             StorageValue::new_put("111"),
         ),
         (
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "bb"),
             StorageValue::new_put("222"),
         ),
     ];
@@ -59,11 +58,11 @@ async fn test_storage_basic() {
     // Second batch modifies the anchor.
     let mut batch2 = vec![
         (
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "cc"),
             StorageValue::new_put("333"),
         ),
         (
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "aa"),
             StorageValue::new_put("111111"),
         ),
     ];
@@ -74,15 +73,15 @@ async fn test_storage_basic() {
     // Third batch deletes the anchor
     let mut batch3 = vec![
         (
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"dd"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "dd"),
             StorageValue::new_put("444"),
         ),
         (
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"ee"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "ee"),
             StorageValue::new_put("555"),
         ),
         (
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "aa"),
             StorageValue::new_delete(),
         ),
     ];
@@ -92,7 +91,7 @@ async fn test_storage_basic() {
 
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
-    hummock_storage.init(epoch1);
+    hummock_storage.init_for_test(epoch1).await.unwrap();
 
     // Write the first batch.
     hummock_storage
@@ -111,7 +110,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "aa"),
             epoch1,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
@@ -127,7 +126,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch1,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
@@ -144,7 +143,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"ab"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "ab"),
             epoch1,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
@@ -174,7 +173,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "aa"),
             epoch2,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
@@ -207,7 +206,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "aa"),
             epoch3,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
@@ -223,7 +222,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"ff"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "ff"),
             epoch3,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
@@ -242,9 +241,7 @@ async fn test_storage_basic() {
         .iter(
             (
                 Unbounded,
-                Included(Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"ee"].concat(),
-                )),
+                Included(gen_key_from_str(VirtualNode::ZERO, "ee")),
             ),
             epoch1,
             ReadOptions {
@@ -259,11 +256,9 @@ async fn test_storage_basic() {
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "aa"),
                 epoch1
             ),
             Bytes::copy_from_slice(&b"111"[..])
@@ -272,11 +267,9 @@ async fn test_storage_basic() {
     );
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "bb"),
                 epoch1
             ),
             Bytes::copy_from_slice(&b"222"[..])
@@ -289,7 +282,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "aa"),
             epoch1,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
@@ -307,7 +300,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "aa"),
             epoch2,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
@@ -326,9 +319,7 @@ async fn test_storage_basic() {
         .iter(
             (
                 Unbounded,
-                Included(Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"ee"].concat(),
-                )),
+                Included(gen_key_from_str(VirtualNode::ZERO, "ee")),
             ),
             epoch2,
             ReadOptions {
@@ -342,11 +333,9 @@ async fn test_storage_basic() {
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "aa"),
                 epoch2
             ),
             Bytes::copy_from_slice(&b"111111"[..])
@@ -355,11 +344,9 @@ async fn test_storage_basic() {
     );
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "bb"),
                 epoch1
             ),
             Bytes::copy_from_slice(&b"222"[..])
@@ -368,11 +355,9 @@ async fn test_storage_basic() {
     );
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "cc"),
                 epoch2
             ),
             Bytes::copy_from_slice(&b"333"[..])
@@ -387,9 +372,7 @@ async fn test_storage_basic() {
         .iter(
             (
                 Unbounded,
-                Included(Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"ee"].concat(),
-                )),
+                Included(gen_key_from_str(VirtualNode::ZERO, "ee")),
             ),
             epoch3,
             ReadOptions {
@@ -403,11 +386,9 @@ async fn test_storage_basic() {
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "bb"),
                 epoch1
             ),
             Bytes::copy_from_slice(&b"222"[..])
@@ -416,11 +397,9 @@ async fn test_storage_basic() {
     );
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "cc"),
                 epoch2
             ),
             Bytes::copy_from_slice(&b"333"[..])
@@ -429,11 +408,9 @@ async fn test_storage_basic() {
     );
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"dd".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "dd"),
                 epoch3
             ),
             Bytes::copy_from_slice(&b"444"[..])
@@ -442,11 +419,9 @@ async fn test_storage_basic() {
     );
     assert_eq!(
         Some((
-            FullKey::for_test(
+            FullKey::new(
                 TEST_TABLE_ID,
-                Bytes::from(
-                    [VirtualNode::ZERO.to_be_bytes().as_slice(), b"ee".as_slice()].concat()
-                ),
+                gen_key_from_str(VirtualNode::ZERO, "ee"),
                 epoch3
             ),
             Bytes::copy_from_slice(&b"555"[..])
@@ -471,16 +446,16 @@ async fn test_state_store_sync() {
     let read_version = hummock_storage.read_version();
 
     let epoch1 = read_version.read().committed().max_committed_epoch() + 1;
-    hummock_storage.init(epoch1);
+    hummock_storage.init_for_test(epoch1).await.unwrap();
 
     // ingest 16B batch
     let mut batch1 = vec![
         (
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aaaa"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "aaaa"),
             StorageValue::new_put("1111"),
         ),
         (
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"bbbb"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "bbbb"),
             StorageValue::new_put("2222"),
         ),
     ];
@@ -501,15 +476,15 @@ async fn test_state_store_sync() {
     // ingest 24B batch
     let mut batch2 = vec![
         (
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"cccc"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "cccc"),
             StorageValue::new_put("3333"),
         ),
         (
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"dddd"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "dddd"),
             StorageValue::new_put("4444"),
         ),
         (
-            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"eeee"].concat()),
+            gen_key_from_str(VirtualNode::ZERO, "eeee"),
             StorageValue::new_put("5555"),
         ),
     ];
@@ -531,7 +506,7 @@ async fn test_state_store_sync() {
 
     // ingest more 8B then will trigger a sync behind the scene
     let mut batch3 = vec![(
-        Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"eeee"].concat()),
+        gen_key_from_str(VirtualNode::ZERO, "eeee"),
         StorageValue::new_put("6666"),
     )];
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
@@ -563,26 +538,11 @@ async fn test_state_store_sync() {
 
     {
         let kv_map = [
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aaaa"].concat()),
-                "1111",
-            ),
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"bbbb"].concat()),
-                "2222",
-            ),
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"cccc"].concat()),
-                "3333",
-            ),
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"dddd"].concat()),
-                "4444",
-            ),
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"eeee"].concat()),
-                "5555",
-            ),
+            (gen_key_from_str(VirtualNode::ZERO, "aaaa"), "1111"),
+            (gen_key_from_str(VirtualNode::ZERO, "bbbb"), "2222"),
+            (gen_key_from_str(VirtualNode::ZERO, "cccc"), "3333"),
+            (gen_key_from_str(VirtualNode::ZERO, "dddd"), "4444"),
+            (gen_key_from_str(VirtualNode::ZERO, "eeee"), "5555"),
         ];
 
         for (k, v) in kv_map {
@@ -620,26 +580,11 @@ async fn test_state_store_sync() {
 
     {
         let kv_map = [
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aaaa"].concat()),
-                "1111",
-            ),
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"bbbb"].concat()),
-                "2222",
-            ),
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"cccc"].concat()),
-                "3333",
-            ),
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"dddd"].concat()),
-                "4444",
-            ),
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"eeee"].concat()),
-                "6666",
-            ),
+            (gen_key_from_str(VirtualNode::ZERO, "aaaa"), "1111"),
+            (gen_key_from_str(VirtualNode::ZERO, "bbbb"), "2222"),
+            (gen_key_from_str(VirtualNode::ZERO, "cccc"), "3333"),
+            (gen_key_from_str(VirtualNode::ZERO, "dddd"), "4444"),
+            (gen_key_from_str(VirtualNode::ZERO, "eeee"), "6666"),
         ];
 
         for (k, v) in kv_map {
@@ -668,9 +613,7 @@ async fn test_state_store_sync() {
             .iter(
                 (
                     Unbounded,
-                    Included(Bytes::from(
-                        [VirtualNode::ZERO.to_be_bytes().as_slice(), b"eeee"].concat(),
-                    )),
+                    Included(gen_key_from_str(VirtualNode::ZERO, "eeee")),
                 ),
                 epoch1,
                 ReadOptions {
@@ -684,38 +627,18 @@ async fn test_state_store_sync() {
         futures::pin_mut!(iter);
 
         let kv_map = [
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aaaa"].concat()),
-                "1111",
-                epoch1,
-            ),
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"bbbb"].concat()),
-                "2222",
-                epoch1,
-            ),
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"cccc"].concat()),
-                "3333",
-                epoch1,
-            ),
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"dddd"].concat()),
-                "4444",
-                epoch1,
-            ),
-            (
-                Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"eeee"].concat()),
-                "5555",
-                epoch1,
-            ),
+            (gen_key_from_str(VirtualNode::ZERO, "aaaa"), "1111", epoch1),
+            (gen_key_from_str(VirtualNode::ZERO, "bbbb"), "2222", epoch1),
+            (gen_key_from_str(VirtualNode::ZERO, "cccc"), "3333", epoch1),
+            (gen_key_from_str(VirtualNode::ZERO, "dddd"), "4444", epoch1),
+            (gen_key_from_str(VirtualNode::ZERO, "eeee"), "5555", epoch1),
         ];
 
         for (k, v, e) in kv_map {
             let result = iter.try_next().await.unwrap();
             assert_eq!(
                 result,
-                Some((FullKey::for_test(TEST_TABLE_ID, k, e), Bytes::from(v)))
+                Some((FullKey::new(TEST_TABLE_ID, k, e), Bytes::from(v)))
             );
         }
 
@@ -728,9 +651,7 @@ async fn test_state_store_sync() {
             .iter(
                 (
                     Unbounded,
-                    Included(Bytes::from(
-                        [VirtualNode::ZERO.to_be_bytes().as_slice(), b"eeee"].concat(),
-                    )),
+                    Included(gen_key_from_str(VirtualNode::ZERO, "eeee")),
                 ),
                 epoch2,
                 ReadOptions {
@@ -745,11 +666,11 @@ async fn test_state_store_sync() {
         futures::pin_mut!(iter);
 
         let kv_map = [
-            (b"aaaa", "1111", epoch1),
-            (b"bbbb", "2222", epoch1),
-            (b"cccc", "3333", epoch1),
-            (b"dddd", "4444", epoch1),
-            (b"eeee", "6666", epoch2),
+            ("aaaa", "1111", epoch1),
+            ("bbbb", "2222", epoch1),
+            ("cccc", "3333", epoch1),
+            ("dddd", "4444", epoch1),
+            ("eeee", "6666", epoch2),
         ];
 
         for (k, v, e) in kv_map {
@@ -757,13 +678,7 @@ async fn test_state_store_sync() {
             assert_eq!(
                 result,
                 Some((
-                    FullKey::for_test(
-                        TEST_TABLE_ID,
-                        Bytes::from(
-                            [VirtualNode::ZERO.to_be_bytes().as_slice(), k.as_slice()].concat()
-                        ),
-                        e
-                    ),
+                    FullKey::new(TEST_TABLE_ID, gen_key_from_str(VirtualNode::ZERO, k), e),
                     Bytes::from(v)
                 ))
             );
@@ -789,10 +704,16 @@ async fn test_delete_get() {
 
     let epoch1 = initial_epoch + 1;
 
-    hummock_storage.init(epoch1);
+    hummock_storage.init_for_test(epoch1).await.unwrap();
     let batch1 = vec![
-        (Bytes::from("aa"), StorageValue::new_put("111")),
-        (Bytes::from("bb"), StorageValue::new_put("222")),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "aa"),
+            StorageValue::new_put("111"),
+        ),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "bb"),
+            StorageValue::new_put("222"),
+        ),
     ];
     hummock_storage
         .ingest_batch(
@@ -814,7 +735,10 @@ async fn test_delete_get() {
         .unwrap();
     let epoch2 = initial_epoch + 2;
     hummock_storage.seal_current_epoch(epoch2);
-    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
+    let batch2 = vec![(
+        gen_key_from_str(VirtualNode::ZERO, "bb"),
+        StorageValue::new_delete(),
+    )];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -836,7 +760,7 @@ async fn test_delete_get() {
     assert!(test_env
         .storage
         .get(
-            Bytes::from("bb"),
+            gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch2,
             ReadOptions {
                 prefix_hint: None,
@@ -866,10 +790,16 @@ async fn test_multiple_epoch_sync() {
         .max_committed_epoch();
 
     let epoch1 = initial_epoch + 1;
-    hummock_storage.init(epoch1);
+    hummock_storage.init_for_test(epoch1).await.unwrap();
     let batch1 = vec![
-        (Bytes::from("aa"), StorageValue::new_put("111")),
-        (Bytes::from("bb"), StorageValue::new_put("222")),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "bb"),
+            StorageValue::new_put("111"),
+        ),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "bb"),
+            StorageValue::new_put("222"),
+        ),
     ];
     hummock_storage
         .ingest_batch(
@@ -885,7 +815,10 @@ async fn test_multiple_epoch_sync() {
 
     let epoch2 = initial_epoch + 2;
     hummock_storage.seal_current_epoch(epoch2);
-    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
+    let batch2 = vec![(
+        gen_key_from_str(VirtualNode::ZERO, "bb"),
+        StorageValue::new_delete(),
+    )];
     hummock_storage
         .ingest_batch(
             batch2,
@@ -901,8 +834,14 @@ async fn test_multiple_epoch_sync() {
     let epoch3 = initial_epoch + 3;
     hummock_storage.seal_current_epoch(epoch3);
     let batch3 = vec![
-        (Bytes::from("aa"), StorageValue::new_put("444")),
-        (Bytes::from("bb"), StorageValue::new_put("555")),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "bb"),
+            StorageValue::new_put("444"),
+        ),
+        (
+            gen_key_from_str(VirtualNode::ZERO, "bb"),
+            StorageValue::new_put("555"),
+        ),
     ];
     hummock_storage
         .ingest_batch(
@@ -921,7 +860,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        Bytes::from("bb"),
+                        gen_key_from_str(VirtualNode::ZERO, "bb"),
                         epoch1,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
@@ -936,7 +875,7 @@ async fn test_multiple_epoch_sync() {
             );
             assert!(hummock_storage_clone
                 .get(
-                    Bytes::from("bb"),
+                    gen_key_from_str(VirtualNode::ZERO, "bb"),
                     epoch2,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
@@ -951,7 +890,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        Bytes::from("bb"),
+                        gen_key_from_str(VirtualNode::ZERO, "bb"),
                         epoch3,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
@@ -1000,21 +939,18 @@ async fn test_iter_with_min_epoch() {
 
     let epoch1 = (31 * 1000) << 16;
 
-    let gen_key = |index: usize| -> String { format!("\0\0key_{}", index) };
+    let gen_key = |index: usize| -> TableKey<Bytes> {
+        gen_key_from_str(VirtualNode::ZERO, format!("\0\0key_{}", index).as_str())
+    };
 
     let gen_val = |index: usize| -> String { format!("val_{}", index) };
 
     // epoch 1 write
-    let batch_epoch1: Vec<(Bytes, StorageValue)> = (0..10)
-        .map(|index| {
-            (
-                Bytes::from(gen_key(index)),
-                StorageValue::new_put(gen_val(index)),
-            )
-        })
+    let batch_epoch1: Vec<(TableKey<Bytes>, StorageValue)> = (0..10)
+        .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
-    hummock_storage.init(epoch1);
+    hummock_storage.init_for_test(epoch1).await.unwrap();
 
     hummock_storage
         .ingest_batch(
@@ -1031,13 +967,8 @@ async fn test_iter_with_min_epoch() {
     let epoch2 = (32 * 1000) << 16;
     hummock_storage.seal_current_epoch(epoch2);
     // epoch 2 write
-    let batch_epoch2: Vec<(Bytes, StorageValue)> = (20..30)
-        .map(|index| {
-            (
-                Bytes::from(gen_key(index)),
-                StorageValue::new_put(gen_val(index)),
-            )
-        })
+    let batch_epoch2: Vec<(TableKey<Bytes>, StorageValue)> = (20..30)
+        .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
     hummock_storage
@@ -1219,43 +1150,30 @@ async fn test_hummock_version_reader() {
 
     let epoch1 = (31 * 1000) << 16;
 
-    let gen_key = |index: usize| -> String { format!("\0\0key_{}", index) };
+    let gen_key = |index: usize| -> TableKey<Bytes> {
+        gen_key_from_str(VirtualNode::ZERO, format!("\0\0key_{}", index).as_str())
+    };
 
     let gen_val = |index: usize| -> String { format!("val_{}", index) };
 
     // epoch 1 write
-    let batch_epoch1: Vec<(Bytes, StorageValue)> = (0..10)
-        .map(|index| {
-            (
-                Bytes::from(gen_key(index)),
-                StorageValue::new_put(gen_val(index)),
-            )
-        })
+    let batch_epoch1: Vec<(TableKey<Bytes>, StorageValue)> = (0..10)
+        .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
     let epoch2 = (32 * 1000) << 16;
     // epoch 2 write
-    let batch_epoch2: Vec<(Bytes, StorageValue)> = (20..30)
-        .map(|index| {
-            (
-                Bytes::from(gen_key(index)),
-                StorageValue::new_put(gen_val(index)),
-            )
-        })
+    let batch_epoch2: Vec<(TableKey<Bytes>, StorageValue)> = (20..30)
+        .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
     let epoch3 = (33 * 1000) << 16;
     // epoch 3 write
-    let batch_epoch3: Vec<(Bytes, StorageValue)> = (40..50)
-        .map(|index| {
-            (
-                Bytes::from(gen_key(index)),
-                StorageValue::new_put(gen_val(index)),
-            )
-        })
+    let batch_epoch3: Vec<(TableKey<Bytes>, StorageValue)> = (40..50)
+        .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
     {
-        hummock_storage.init(epoch1);
+        hummock_storage.init_for_test(epoch1).await.unwrap();
         hummock_storage
             .ingest_batch(
                 batch_epoch1,
@@ -1565,10 +1483,10 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let start_key = Bytes::from(gen_key(25));
-                let end_key = Bytes::from(gen_key(50));
+                let start_key = gen_key(25);
+                let end_key = gen_key(50);
 
-                let key_range = map_table_key_range((Included(start_key), Excluded(end_key)));
+                let key_range = (Included(start_key), Excluded(end_key));
 
                 {
                     let read_snapshot = {
@@ -1657,22 +1575,17 @@ async fn test_get_with_min_epoch() {
         .await;
 
     let epoch1 = (31 * 1000) << 16;
-    hummock_storage.init(epoch1);
+    hummock_storage.init_for_test(epoch1).await.unwrap();
 
-    let gen_key = |index: usize| -> Vec<u8> {
-        UserKey::for_test(TEST_TABLE_ID, format!("key_{}", index)).encode()
+    let gen_key = |index: usize| -> TableKey<Bytes> {
+        gen_key_from_str(VirtualNode::ZERO, format!("key_{}", index).as_str())
     };
 
     let gen_val = |index: usize| -> String { format!("val_{}", index) };
 
     // epoch 1 write
-    let batch_epoch1: Vec<(Bytes, StorageValue)> = (0..10)
-        .map(|index| {
-            (
-                Bytes::from(gen_key(index)),
-                StorageValue::new_put(gen_val(index)),
-            )
-        })
+    let batch_epoch1: Vec<(TableKey<Bytes>, StorageValue)> = (0..10)
+        .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
     hummock_storage
@@ -1690,13 +1603,8 @@ async fn test_get_with_min_epoch() {
     let epoch2 = (32 * 1000) << 16;
     hummock_storage.seal_current_epoch(epoch2);
     // epoch 2 write
-    let batch_epoch2: Vec<(Bytes, StorageValue)> = (20..30)
-        .map(|index| {
-            (
-                Bytes::from(gen_key(index)),
-                StorageValue::new_put(gen_val(index)),
-            )
-        })
+    let batch_epoch2: Vec<(TableKey<Bytes>, StorageValue)> = (20..30)
+        .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
     hummock_storage
@@ -1713,7 +1621,7 @@ async fn test_get_with_min_epoch() {
 
     {
         // test before sync
-        let k = Bytes::from(gen_key(0));
+        let k = gen_key(0);
         let prefix_hint = {
             let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + k.len());
             ret.put_u32(TEST_TABLE_ID.table_id());
@@ -1811,7 +1719,7 @@ async fn test_get_with_min_epoch() {
         .unwrap();
 
     test_env.storage.try_wait_epoch_for_test(epoch2).await;
-    let k = Bytes::from(gen_key(0));
+    let k = gen_key(0);
     let prefix_hint = {
         let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + k.len());
         ret.put_u32(TEST_TABLE_ID.table_id());
@@ -1857,7 +1765,7 @@ async fn test_get_with_min_epoch() {
     }
 
     {
-        let k = Bytes::from(gen_key(0));
+        let k = gen_key(0);
         let v = test_env
             .storage
             .get(
@@ -1876,7 +1784,7 @@ async fn test_get_with_min_epoch() {
     }
 
     {
-        let k = Bytes::from(gen_key(0));
+        let k = gen_key(0);
         let v = test_env
             .storage
             .get(

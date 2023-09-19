@@ -20,7 +20,6 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
@@ -39,9 +38,9 @@ use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use tonic::Status;
 use tracing::{error, warn};
 
+use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::iceberg::REMOTE_ICEBERG_SINK;
-use crate::sink::utils::{record_to_json, TimestampHandlingMode};
 use crate::sink::SinkError::Remote;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkCommitCoordinator, SinkError, SinkParam,
@@ -49,8 +48,13 @@ use crate::sink::{
 };
 use crate::ConnectorParams;
 
-pub const VALID_REMOTE_SINKS: [&str; 4] =
-    ["jdbc", REMOTE_ICEBERG_SINK, "deltalake", "elasticsearch-7"];
+pub const VALID_REMOTE_SINKS: [&str; 5] = [
+    "jdbc",
+    REMOTE_ICEBERG_SINK,
+    "deltalake",
+    "elasticsearch",
+    "cassandra",
+];
 
 pub fn is_valid_remote_sink(connector_type: &str) -> bool {
     VALID_REMOTE_SINKS.contains(&connector_type)
@@ -347,12 +351,9 @@ where
         let payload = match self.payload_format {
             SinkPayloadFormat::Json => {
                 let mut row_ops = vec![];
+                let enc = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::String);
                 for (op, row_ref) in chunk.rows() {
-                    let map = record_to_json(
-                        row_ref,
-                        &self.schema.fields,
-                        TimestampHandlingMode::String,
-                    )?;
+                    let map = enc.encode(row_ref)?;
                     let row_op = RowOp {
                         op_type: op.to_protobuf() as i32,
                         line: serde_json::to_string(&map)
@@ -408,15 +409,6 @@ where
             self.stream_handle.barrier(epoch).await?;
             Ok(<Self as HandleBarrierResponse>::non_checkpoint_return_value())
         }
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
-        // TODO: handle scaling
-        Ok(())
     }
 }
 

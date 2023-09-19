@@ -19,7 +19,7 @@ mod block;
 
 use std::collections::BTreeSet;
 use std::fmt::{Debug, Formatter};
-use std::ops::{BitXor, Bound};
+use std::ops::{BitXor, Bound, Range};
 
 pub use block::*;
 mod block_iterator;
@@ -33,7 +33,6 @@ pub mod builder;
 pub use builder::*;
 pub mod writer;
 use risingwave_common::catalog::TableId;
-use risingwave_object_store::object::BlockLocation;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
@@ -260,14 +259,12 @@ impl Sstable {
         !self.filter_reader.is_empty()
     }
 
-    pub fn calculate_block_info(&self, block_index: usize) -> (BlockLocation, usize) {
+    pub fn calculate_block_info(&self, block_index: usize) -> (Range<usize>, usize) {
         let block_meta = &self.meta.block_metas[block_index];
-        let block_loc = BlockLocation {
-            offset: block_meta.offset as usize,
-            size: block_meta.len as usize,
-        };
+        let range =
+            block_meta.offset as usize..block_meta.offset as usize + block_meta.len as usize;
         let uncompressed_capacity = block_meta.uncompressed_size as usize;
-        (block_loc, uncompressed_capacity)
+        (range, uncompressed_capacity)
     }
 
     #[inline(always)]
@@ -329,7 +326,7 @@ impl BlockMeta {
     /// Format:
     ///
     /// ```plain
-    /// | offset (4B) | len (4B) | smallest key len (4B) | smallest key |
+    /// | offset (4B) | len (4B) | uncompressed size (4B) | smallest key len (4B) | smallest key |
     /// ```
     pub fn encode(&self, buf: &mut Vec<u8>) {
         buf.put_u32_le(self.offset);
@@ -433,7 +430,7 @@ impl SstableMeta {
         buf.put_u32_le(MAGIC);
     }
 
-    pub fn decode(buf: &mut &[u8]) -> HummockResult<Self> {
+    pub fn decode(buf: &[u8]) -> HummockResult<Self> {
         let mut cursor = buf.len();
 
         cursor -= 4;
@@ -561,7 +558,7 @@ mod tests {
         let sz = meta.encoded_size();
         let buf = meta.encode_to_bytes();
         assert_eq!(sz, buf.len());
-        let decoded_meta = SstableMeta::decode(&mut &buf[..]).unwrap();
+        let decoded_meta = SstableMeta::decode(&buf[..]).unwrap();
         assert_eq!(decoded_meta, meta);
     }
 }

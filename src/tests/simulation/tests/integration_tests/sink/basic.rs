@@ -57,17 +57,6 @@ impl SinkWriter for TestWriter {
         sleep(Duration::from_millis(100)).await;
         Ok(())
     }
-
-    async fn abort(&mut self) -> risingwave_connector::sink::Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(
-        &mut self,
-        _vnode_bitmap: Bitmap,
-    ) -> risingwave_connector::sink::Result<()> {
-        Ok(())
-    }
 }
 
 impl Drop for TestWriter {

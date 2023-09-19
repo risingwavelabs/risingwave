@@ -51,7 +51,7 @@ fn bench_limit(c: &mut Criterion) {
                 let chunk_num = SIZE / chunk_size;
                 b.to_async(&rt).iter_batched(
                     || create_limit_executor(chunk_size, chunk_num, 128, 128),
-                    |e| execute_executor(e),
+                    execute_executor,
                     BatchSize::SmallInput,
                 );
             },

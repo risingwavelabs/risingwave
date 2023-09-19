@@ -17,15 +17,14 @@ use std::sync::Arc;
 
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
-use reqwest::Url;
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
+use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::avro::util::avro_schema_to_column_descs;
-use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::schema_registry::{extract_schema_id, handle_sr_list, Client};
 use crate::parser::unified::avro::{
     avro_extract_field_schema, avro_schema_skip_union, AvroAccess, AvroParseOptions,
 };
@@ -107,9 +106,7 @@ impl DebeziumAvroParserConfig {
         let schema_location = &avro_config.row_schema_location;
         let client_config = &avro_config.client_config;
         let kafka_topic = &avro_config.topic;
-        let url = Url::parse(schema_location).map_err(|e| {
-            InternalError(format!("failed to parse url ({}): {}", schema_location, e))
-        })?;
+        let url = handle_sr_list(schema_location)?;
         let client = Client::new(url, client_config)?;
         let raw_schema = client
             .get_schema_by_subject(format!("{}-key", &kafka_topic).as_str())

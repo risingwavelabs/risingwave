@@ -38,6 +38,13 @@ impl ArrowFlightUdfClient {
         Ok(Self { client })
     }
 
+    /// Connect to a UDF service lazily (i.e. only when the first request is sent).
+    pub fn connect_lazy(addr: &str) -> Result<Self> {
+        let conn = tonic::transport::Endpoint::new(addr.to_string())?.connect_lazy();
+        let client = FlightServiceClient::new(conn);
+        Ok(Self { client })
+    }
+
     /// Check if the function is available and the schema is match.
     pub async fn check(&self, id: &str, args: &Schema, returns: &Schema) -> Result<()> {
         let descriptor = FlightDescriptor::new_path(vec![id.into()]);
@@ -49,6 +56,15 @@ impl ArrowFlightUdfClient {
         let input_num = info.total_records as usize;
         let full_schema = Schema::try_from(info)
             .map_err(|e| FlightError::DecodeError(format!("Error decoding schema: {e}")))?;
+        if input_num > full_schema.fields.len() {
+            return Err(Error::ServiceError(format!(
+                "function {:?} schema info not consistency: input_num: {}, total_fields: {}",
+                id,
+                input_num,
+                full_schema.fields.len()
+            )));
+        }
+
         let (input_fields, return_fields) = full_schema.fields.split_at(input_num);
         let actual_input_types: Vec<_> = input_fields.iter().map(|f| f.data_type()).collect();
         let actual_result_types: Vec<_> = return_fields.iter().map(|f| f.data_type()).collect();

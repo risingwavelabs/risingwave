@@ -20,6 +20,7 @@ use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tokio::time::Instant;
 use tracing::error;
@@ -79,19 +80,18 @@ pub(crate) fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreI
     input
 }
 
-pub type MonitoredStateStoreIterStream<'s, S: StateStoreIterItemStream + 's> =
-    impl StateStoreIterItemStream + 's;
+pub type MonitoredStateStoreIterStream<S: StateStoreIterItemStream> = impl StateStoreIterItemStream;
 
 // Note: it is important to define the `MonitoredStateStoreIterStream` type alias, as it marks that
 // the return type of `monitored_iter` only captures the lifetime `'s` and has nothing to do with
 // `'a`. If we simply use `impl StateStoreIterItemStream + 's`, the rust compiler will also capture
 // the lifetime `'a` in the scope defined in the scope.
 impl<S> MonitoredStateStore<S> {
-    async fn monitored_iter<'a, 's, St: StateStoreIterItemStream + 's>(
+    async fn monitored_iter<'a, St: StateStoreIterItemStream + 'a>(
         &'a self,
         table_id: TableId,
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
-    ) -> StorageResult<MonitoredStateStoreIterStream<'s, St>> {
+    ) -> StorageResult<MonitoredStateStoreIterStream<St>> {
         // start time takes iterator build time into account
         let start_time = Instant::now();
         let table_id_label = table_id.to_string();
@@ -176,7 +176,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 
     fn get(
         &self,
-        key: Bytes,
+        key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<Bytes>>> + '_ {
@@ -187,7 +187,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 
     fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
@@ -204,7 +204,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 
     async fn may_exist(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<bool> {
         let table_id_label = read_options.table_id.to_string();
@@ -224,7 +224,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 
     fn get(
         &self,
-        key: Bytes,
+        key: TableKey<Bytes>,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
         let table_id = read_options.table_id;
@@ -235,7 +235,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 
     fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
         let table_id = read_options.table_id;
@@ -244,12 +244,17 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
             .map_ok(identity)
     }
 
-    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
+    fn insert(
+        &mut self,
+        key: TableKey<Bytes>,
+        new_val: Bytes,
+        old_val: Option<Bytes>,
+    ) -> StorageResult<()> {
         // TODO: collect metrics
         self.inner.insert(key, new_val, old_val)
     }
 
-    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+    fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
         // TODO: collect metrics
         self.inner.delete(key, old_val)
     }
@@ -271,9 +276,8 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.is_dirty()
     }
 
-    fn init(&mut self, epoch: u64) {
-        // TODO: may collect metrics
-        self.inner.init(epoch)
+    async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+        self.inner.init(options).await
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -397,7 +401,7 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
         drop(stats);
     }
 
-    fn into_stream(self) -> impl StateStoreIterItemStream {
+    fn into_stream(self) -> MonitoredStateStoreIterStream<S> {
         Self::into_stream_inner(self).instrument(tracing::trace_span!("store_iter"))
     }
 }

@@ -103,6 +103,13 @@ impl UdfExpression {
         };
         let mut array = ArrayImpl::try_from(arrow_array)?;
         array.set_bitmap(array.null_bitmap() & vis);
+        if !array.data_type().equals_datatype(&self.return_type) {
+            bail!(
+                "UDF returned {:?}, but expected {:?}",
+                array.data_type(),
+                self.return_type,
+            );
+        }
         Ok(Arc::new(array))
     }
 }
@@ -157,9 +164,7 @@ pub(crate) fn get_or_create_client(link: &str) -> Result<Arc<ArrowFlightUdfClien
         Ok(client)
     } else {
         // create new client
-        let client = Arc::new(tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(ArrowFlightUdfClient::connect(link))
-        })?);
+        let client = Arc::new(ArrowFlightUdfClient::connect_lazy(link)?);
         clients.insert(link.into(), Arc::downgrade(&client));
         Ok(client)
     }

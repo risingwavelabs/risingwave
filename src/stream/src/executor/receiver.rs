@@ -116,6 +116,7 @@ impl Executor for ReceiverExecutor {
     fn execute(mut self: Box<Self>) -> BoxedMessageStream {
         let actor_id = self.actor_context.id;
         let actor_id_str = actor_id.to_string();
+        let fragment_id_str = self.fragment_id.to_string();
         let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
         let stream = #[try_stream]
@@ -124,7 +125,11 @@ impl Executor for ReceiverExecutor {
             while let Some(msg) = self.input.next().await {
                 self.metrics
                     .actor_input_buffer_blocking_duration_ns
-                    .with_label_values(&[&actor_id_str, &upstream_fragment_id_str])
+                    .with_label_values(&[
+                        &actor_id_str,
+                        &fragment_id_str,
+                        &upstream_fragment_id_str,
+                    ])
                     .inc_by(start_time.elapsed().as_nanos() as u64);
                 let mut msg: Message = msg?;
 
@@ -140,7 +145,7 @@ impl Executor for ReceiverExecutor {
                     }
                     Message::Barrier(barrier) => {
                         tracing::trace!(
-                            target: "events::barrier::path",
+                            target: "events::stream::barrier::path",
                             actor_id = actor_id,
                             "receiver receives barrier from path: {:?}",
                             barrier.passed_actors

@@ -40,7 +40,7 @@ use uuid::Uuid;
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::storage::{MetaStore, MetaStoreError, Transaction, DEFAULT_COLUMN_FAMILY};
+use crate::storage::{MetaStore, MetaStoreError, MetaStoreRef, Transaction, DEFAULT_COLUMN_FAMILY};
 use crate::stream::GlobalStreamManager;
 use crate::{MetaError, MetaResult};
 
@@ -56,10 +56,7 @@ impl From<TableRevision> for u64 {
 }
 
 impl TableRevision {
-    pub async fn get<S>(store: &S) -> MetaResult<Self>
-    where
-        S: MetaStore,
-    {
+    pub async fn get(store: &MetaStoreRef) -> MetaResult<Self> {
         let version = match store
             .get_cf(DEFAULT_COLUMN_FAMILY, TABLE_REVISION_KEY)
             .await
@@ -349,10 +346,7 @@ pub(crate) fn rebalance_actor_vnode(
     result
 }
 
-impl<S> GlobalStreamManager<S>
-where
-    S: MetaStore,
-{
+impl GlobalStreamManager {
     /// Build the context for rescheduling and do some validation for the request.
     async fn build_reschedule_context(
         &self,
@@ -388,7 +382,7 @@ where
             })
             .collect();
 
-        for (fragment_id, reschedule) in reschedule.iter() {
+        for (fragment_id, reschedule) in &*reschedule {
             for parallel_unit_id in &reschedule.added_parallel_units {
                 if let Some(worker_id) = unschedulable_parallel_unit_ids.get(parallel_unit_id) {
                     bail!(
@@ -481,7 +475,7 @@ where
                 added_parallel_units,
                 removed_parallel_units,
             },
-        ) in reschedule.iter()
+        ) in &*reschedule
         {
             let fragment = fragment_map
                 .get(fragment_id)
@@ -688,7 +682,7 @@ where
                     if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
                         fragment_dispatcher_map
                             .entry(actor.fragment_id as FragmentId)
-                            .or_insert(HashMap::new())
+                            .or_default()
                             .insert(
                                 downstream_actor.fragment_id as FragmentId,
                                 dispatcher.r#type(),
@@ -1555,7 +1549,7 @@ where
                     {
                         dispatcher
                             .downstream_actor_id
-                            .drain_filter(|id| downstream_actors_to_remove.contains_key(id));
+                            .retain(|id| !downstream_actors_to_remove.contains_key(id));
                     }
 
                     if let Some(downstream_actors_to_create) = downstream_fragment_actors_to_create
@@ -1595,10 +1589,7 @@ where
     }
 }
 
-impl<S> GlobalStreamManager<S>
-where
-    S: MetaStore,
-{
+impl GlobalStreamManager {
     async fn generate_stable_resize_plan(
         &self,
         policy: StableResizePolicy,
@@ -1911,8 +1902,8 @@ where
             }
         }
 
-        target_plan.drain_filter(|_, plan| {
-            plan.added_parallel_units.is_empty() && plan.removed_parallel_units.is_empty()
+        target_plan.retain(|_, plan| {
+            !(plan.added_parallel_units.is_empty() && plan.removed_parallel_units.is_empty())
         });
 
         Ok(target_plan)

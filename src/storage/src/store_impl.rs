@@ -29,8 +29,8 @@ use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError, HummockStorage, MemoryLimiter,
-    SstableObjectIdManagerRef, SstableStore,
+    set_foyer_metrics_registry, FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError,
+    HummockStorage, MemoryLimiter, SstableObjectIdManagerRef, SstableStore,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -230,6 +230,7 @@ pub mod verify {
     use bytes::Bytes;
     use futures::{pin_mut, TryStreamExt};
     use futures_async_stream::try_stream;
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
@@ -274,7 +275,7 @@ pub mod verify {
 
         async fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>> {
@@ -294,7 +295,7 @@ pub mod verify {
         #[allow(clippy::manual_async_fn)]
         fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
@@ -340,7 +341,7 @@ pub mod verify {
     impl<A: StateStoreWrite, E: StateStoreWrite> StateStoreWrite for VerifyStateStore<A, E> {
         async fn ingest_batch(
             &self,
-            kv_pairs: Vec<(Bytes, StorageValue)>,
+            kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
             write_options: WriteOptions,
         ) -> StorageResult<usize> {
@@ -379,13 +380,17 @@ pub mod verify {
         // be consistent across different state store backends.
         fn may_exist(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
             self.actual.may_exist(key_range, read_options)
         }
 
-        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
+        async fn get(
+            &self,
+            key: TableKey<Bytes>,
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>> {
             let actual = self.actual.get(key.clone(), read_options.clone()).await;
             if let Some(expected) = &self.expected {
                 let expected = expected.get(key, read_options).await;
@@ -397,7 +402,7 @@ pub mod verify {
         #[allow(clippy::manual_async_fn)]
         fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
             async move {
@@ -417,7 +422,7 @@ pub mod verify {
 
         fn insert(
             &mut self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()> {
@@ -429,7 +434,7 @@ pub mod verify {
             Ok(())
         }
 
-        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
             if let Some(expected) = &mut self.expected {
                 expected.delete(key.clone(), old_val.clone())?;
             }
@@ -454,11 +459,12 @@ pub mod verify {
             self.actual.try_flush().await
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.actual.init(epoch);
+        async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+            self.actual.init(options.clone()).await?;
             if let Some(expected) = &mut self.expected {
-                expected.init(epoch);
+                expected.init(options).await?;
             }
+            Ok(())
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -548,12 +554,15 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
+        set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
+
         let data_file_cache = if opts.data_file_cache_dir.is_empty() {
             FileCache::none()
         } else {
             const MB: usize = 1024 * 1024;
 
             let foyer_store_config = FoyerStoreConfig {
+                name: "data".to_string(),
                 dir: PathBuf::from(opts.data_file_cache_dir.clone()),
                 capacity: opts.data_file_cache_capacity_mb * MB,
                 file_capacity: opts.data_file_cache_file_capacity_mb * MB,
@@ -569,8 +578,6 @@ impl StateStoreImpl {
                 reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
                 event_listener: vec![],
-                prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.clone()),
-                prometheus_namespace: Some("data".to_string()),
                 enable_filter: !opts.cache_refill_data_refill_levels.is_empty(),
             };
             let config = FoyerRuntimeConfig {
@@ -588,6 +595,7 @@ impl StateStoreImpl {
             const MB: usize = 1024 * 1024;
 
             let foyer_store_config = FoyerStoreConfig {
+                name: "meta".to_string(),
                 dir: PathBuf::from(opts.meta_file_cache_dir.clone()),
                 capacity: opts.meta_file_cache_capacity_mb * MB,
                 file_capacity: opts.meta_file_cache_file_capacity_mb * MB,
@@ -603,8 +611,6 @@ impl StateStoreImpl {
                 reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
                 event_listener: vec![],
-                prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.clone()),
-                prometheus_namespace: Some("meta".to_string()),
                 enable_filter: false,
             };
             let config = FoyerRuntimeConfig {
@@ -743,6 +749,7 @@ pub mod boxed_state_store {
     use bytes::Bytes;
     use futures::stream::BoxStream;
     use futures::StreamExt;
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
@@ -758,14 +765,14 @@ pub mod boxed_state_store {
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
         async fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>>;
 
         async fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIterStream>;
@@ -775,7 +782,7 @@ pub mod boxed_state_store {
     impl<S: StateStoreRead> DynamicDispatchedStateStoreRead for S {
         async fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>> {
@@ -784,7 +791,7 @@ pub mod boxed_state_store {
 
         async fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIterStream> {
@@ -798,26 +805,30 @@ pub mod boxed_state_store {
     pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
         async fn may_exist(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<bool>;
 
-        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>>;
+        async fn get(
+            &self,
+            key: TableKey<Bytes>,
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>>;
 
         async fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>>;
 
         fn insert(
             &mut self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()>;
 
-        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
+        fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()>;
 
         async fn flush(
             &mut self,
@@ -830,7 +841,7 @@ pub mod boxed_state_store {
 
         fn is_dirty(&self) -> bool;
 
-        fn init(&mut self, epoch: u64);
+        async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
         fn seal_current_epoch(&mut self, next_epoch: u64);
     }
@@ -839,19 +850,23 @@ pub mod boxed_state_store {
     impl<S: LocalStateStore> DynamicDispatchedLocalStateStore for S {
         async fn may_exist(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<bool> {
             self.may_exist(key_range, read_options).await
         }
 
-        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
+        async fn get(
+            &self,
+            key: TableKey<Bytes>,
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>> {
             self.get(key, read_options).await
         }
 
         async fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>> {
             Ok(self.iter(key_range, read_options).await?.boxed())
@@ -859,14 +874,14 @@ pub mod boxed_state_store {
 
         fn insert(
             &mut self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()> {
             self.insert(key, new_val, old_val)
         }
 
-        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
             self.delete(key, old_val)
         }
 
@@ -889,8 +904,8 @@ pub mod boxed_state_store {
             self.is_dirty()
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.init(epoch)
+        async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+            self.init(options).await
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -905,7 +920,7 @@ pub mod boxed_state_store {
 
         fn may_exist(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
             self.deref().may_exist(key_range, read_options)
@@ -913,7 +928,7 @@ pub mod boxed_state_store {
 
         fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
             self.deref().get(key, read_options)
@@ -921,7 +936,7 @@ pub mod boxed_state_store {
 
         fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
             self.deref().iter(key_range, read_options)
@@ -929,14 +944,14 @@ pub mod boxed_state_store {
 
         fn insert(
             &mut self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()> {
             self.deref_mut().insert(key, new_val, old_val)
         }
 
-        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
             self.deref_mut().delete(key, old_val)
         }
 
@@ -959,8 +974,11 @@ pub mod boxed_state_store {
             self.deref().is_dirty()
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.deref_mut().init(epoch)
+        fn init(
+            &mut self,
+            options: InitOptions,
+        ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            self.deref_mut().init(options)
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -1019,7 +1037,7 @@ pub mod boxed_state_store {
 
         fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
@@ -1028,7 +1046,7 @@ pub mod boxed_state_store {
 
         fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
