@@ -208,8 +208,14 @@ impl StreamTableScan {
 
         let stream_key = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
 
+        let mut cdc_upstream = false;
+
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.chain_type {
+            ChainType::CdcBackfill => {
+                cdc_upstream = true;
+                self.logical.output_and_pk_column_ids()
+            }
             // For backfill, we additionally need the primary key columns.
             ChainType::Backfill => self.logical.output_and_pk_column_ids(),
             ChainType::Chain | ChainType::Rearrange | ChainType::UpstreamOnly => {
@@ -263,7 +269,10 @@ impl StreamTableScan {
             input: vec![
                 // The merge node body will be filled by the `ActorBuilder` on the meta service.
                 PbStreamNode {
-                    node_body: Some(PbNodeBody::Merge(Default::default())),
+                    node_body: Some(PbNodeBody::Merge(MergeNode {
+                        cdc_upstream,
+                        ..Default::default()
+                    })),
                     identity: "Upstream".into(),
                     fields: upstream_schema.clone(),
                     stream_key: vec![], // not used

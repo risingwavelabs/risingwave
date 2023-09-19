@@ -20,8 +20,10 @@ use anyhow::anyhow;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_connector::parser::{DebeziumParser, SourceStreamChunkBuilder};
 use tokio::time::Instant;
+use risingwave_connector::source::SourceColumnDesc;
 
 use super::error::StreamExecutorError;
 use super::exchange::input::BoxedInput;
@@ -49,6 +51,8 @@ pub struct MergeExecutor {
     /// Logical Operator Info
     info: ExecutorInfo,
 
+    parser: Option<DebeziumParser>,
+
     /// Shared context of the stream manager.
     context: Arc<SharedContext>,
 
@@ -60,6 +64,7 @@ impl MergeExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         schema: Schema,
+        cdc_upstream: bool,
         pk_indices: PkIndices,
         ctx: ActorContextRef,
         fragment_id: FragmentId,
@@ -79,6 +84,7 @@ impl MergeExecutor {
                 schema,
                 pk_indices,
                 identity: format!("MergeExecutor {:X}", executor_id),
+                cdc_upstream,
             },
             context,
             metrics,
@@ -92,6 +98,7 @@ impl MergeExecutor {
 
         Self::new(
             schema,
+            false,
             vec![],
             ActorContext::create(114),
             514,
@@ -108,7 +115,7 @@ impl MergeExecutor {
         )
     }
 
-    #[try_stream(ok = Message, error = StreamExecutorError)]
+    // #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
         // Futures of all active upstreams.
         let select_all = SelectReceivers::new(self.actor_context.id, self.upstreams);
@@ -135,6 +142,26 @@ impl MergeExecutor {
                         .actor_in_record_cnt
                         .with_label_values(&[&actor_id_str])
                         .inc_by(chunk.cardinality() as _);
+
+                    if self.info.cdc_upstream && let Some(parser) = self.parser.as_ref() {
+                        // TODO: transform the input debezium json chunk to a table chunk
+                        let column_descs = self.info.schema.fields.iter().map(|field| {
+                            let column_desc = ColumnDesc::named(field.name.clone(), ColumnId::placeholder(), field.data_type.clone());
+                            SourceColumnDesc::from(&column_desc)
+                        }).collect_vec();
+
+                        let mut builder = SourceStreamChunkBuilder::with_capacity(column_descs, chunk.capacity());
+
+                        for row in chunk.data_chunk().rows() {
+
+
+
+                        }
+
+
+
+
+                    }
                 }
                 Message::Barrier(barrier) => {
                     tracing::trace!(

@@ -30,6 +30,7 @@ use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 
+use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
 use super::filesystem::{FsSplit, S3Properties, S3_CONNECTOR};
 use super::google_pubsub::GooglePubsubMeta;
@@ -418,6 +419,7 @@ pub enum SourceMeta {
     Nexmark(NexmarkMeta),
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),
+    DebeziumCdc(DebeziumCdcMeta),
     // For the source that doesn't have meta data.
     Empty,
 }

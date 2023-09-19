@@ -98,9 +98,16 @@ public class DbzCdcEventConsumer
             } catch (IOException e) {
                 LOG.warn("failed to serialize debezium offset", e);
             }
+
+            // Topic naming conventions
+            // - PG: serverName.schemaName.tableName
+            // - MySQL: serverName.databaseName.tableName
+            // We can extract the full table name from the topic
+            var fullTableName = record.topic().substring(record.topic().indexOf('.'));
             var message =
                     CdcMessage.newBuilder()
                             .setOffset(offsetStr)
+                            .setTableName(fullTableName)
                             .setPartition(String.valueOf(sourceId))
                             .setPayload(new String(payload, StandardCharsets.UTF_8))
                             .build();

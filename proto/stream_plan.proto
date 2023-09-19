@@ -407,6 +407,8 @@ message MergeNode {
   DispatcherType upstream_dispatcher_type = 3;
   // The schema of input columns. TODO: remove this field.
   repeated plan_common.Field fields = 4;
+  // Whether the upstream is a CDC stream, used in chaining a Table job with a CDC source job.
+  bool cdc_upstream = 5;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
@@ -429,6 +431,8 @@ enum ChainType {
 
   // UPSTREAM_ONLY is corresponding to the chain executor, but doesn't consume the snapshot.
   UPSTREAM_ONLY = 4;
+
+  CDC_BACKFILL = 5;
 }
 
 // ChainNode is used for mv on mv.
@@ -712,6 +716,8 @@ message Dispatcher {
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
+  // The full table name of the downstream CDC table.
+  optional string downstream_table_name = 7;
 }
 
 // A StreamActor is a running fragment of the overall stream graph,

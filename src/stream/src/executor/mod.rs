@@ -167,6 +167,8 @@ pub struct ExecutorInfo {
 
     /// See [`Executor::identity`].
     pub identity: String,
+
+    pub cdc_upstream: bool,
 }
 
 /// `Executor` supports handling of control messages.

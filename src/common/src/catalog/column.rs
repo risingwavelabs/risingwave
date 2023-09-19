@@ -20,7 +20,10 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
 use super::row_id_column_desc;
-use crate::catalog::{offset_column_desc, Field, ROW_ID_COLUMN_ID};
+use crate::catalog::{
+    offset_column_desc, table_id_column_desc, table_name_column_desc, table_name_column_name,
+    Field, ROW_ID_COLUMN_ID,
+};
 use crate::error::ErrorCode;
 use crate::types::DataType;
 
@@ -109,6 +112,17 @@ impl ColumnDesc {
             data_type,
             column_id,
             name: String::new(),
+            field_descs: vec![],
+            type_name: String::new(),
+            generated_or_default_column: None,
+        }
+    }
+
+    pub fn named(name: String, column_id: ColumnId, data_type: DataType) -> ColumnDesc {
+        ColumnDesc {
+            data_type,
+            column_id,
+            name,
             field_descs: vec![],
             type_name: String::new(),
             generated_or_default_column: None,
@@ -333,6 +347,20 @@ impl ColumnCatalog {
     pub fn offset_column() -> Self {
         Self {
             column_desc: offset_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn table_id_column() -> Self {
+        Self {
+            column_desc: table_id_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn table_name_column() -> Self {
+        Self {
+            column_desc: table_name_column_desc(),
             is_hidden: true,
         }
     }

@@ -16,6 +16,7 @@ use std::fmt::Debug;
 
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, KAFKA_TIMESTAMP_COLUMN_NAME, OFFSET_COLUMN_NAME, ROWID_PREFIX,
+    TABLE_NAME_COLUMN_NAME,
 };
 use risingwave_common::types::DataType;
 
@@ -51,7 +52,8 @@ pub enum SourceColumnType {
 
 impl SourceColumnType {
     pub fn from_name(name: &str) -> Self {
-        if name.starts_with(KAFKA_TIMESTAMP_COLUMN_NAME) {
+        if name.starts_with(KAFKA_TIMESTAMP_COLUMN_NAME) || name.starts_with(TABLE_NAME_COLUMN_NAME)
+        {
             Self::Meta
         } else if name == (ROWID_PREFIX) {
             Self::RowId

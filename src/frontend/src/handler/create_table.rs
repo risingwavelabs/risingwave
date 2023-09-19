@@ -744,9 +744,10 @@ fn gen_create_table_plan_for_cdc_source(
     source_name: ObjectName,
     table_name: ObjectName,
     external_table_name: String,
-    columns: Vec<ColumnCatalog>, // columns defined in the create table from DDL
-    pk_column_ids: Vec<ColumnId>, // will used to derive pk column indices
-    definition: String,
+    column_defs: Vec<ColumnDef>,
+    // mut columns: Vec<ColumnCatalog>, // columns defined in the create table from DDL
+    // pk_column_ids: Vec<ColumnId>, // will used to derive pk column indices
+    // definition: String,
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
@@ -760,6 +761,20 @@ fn gen_create_table_plan_for_cdc_source(
 
     let source_name = source_name.real_value();
     let source = session.get_source_by_name(schema_name, &source_name)?;
+
+    let mut columns = bind_sql_columns(&column_defs)?;
+    // Add `_rw_offset` hidden column for storing upstream cdc offset
+    columns.push(ColumnCatalog::offset_column());
+    // columns.push(ColumnCatalog::table_id_column());
+
+    for c in &mut columns {
+        c.column_desc.column_id = col_id_gen.generate(c.name())
+    }
+
+    let pk_names = bind_pk_names(&column_defs, &constraints)?;
+    let (columns, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names)?;
+
+    let definition = context.normalized_sql().to_owned();
 
     let pk_column_indices = {
         let mut id_to_idx = HashMap::new();
@@ -892,26 +907,14 @@ pub async fn handle_create_table(
                 source_watermarks,
                 append_only,
             )?,
-            (None, Some(cdc_source)) => {
-                let definition = context.normalized_sql().to_owned();
-                let mut columns = bind_sql_columns(&column_defs)?;
-                for c in &mut columns {
-                    c.column_desc.column_id = col_id_gen.generate(c.name())
-                }
-
-                let pk_names = bind_pk_names(&column_defs, &constraints)?;
-                let (columns, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names)?;
-                gen_create_table_plan_for_cdc_source(
-                    context.into(),
-                    cdc_source,
-                    table_name.clone(),
-                    external_table.unwrap_or(table_name.real_value()),
-                    columns,
-                    pk_column_ids,
-                    definition,
-                    None,
-                )?
-            }
+            (None, Some(source_name)) => gen_create_table_plan_for_cdc_source(
+                context.into(),
+                source_name.clone(),
+                table_name.clone(),
+                external_table.unwrap_or(table_name.real_value()),
+                column_defs,
+                None,
+            )?,
             (Some(_), Some(_)) => return Err(ErrorCode::NotSupported(
                 "Data format and encoding format doesn't apply to table created from a CDC source"
                     .into(),
@@ -922,10 +925,14 @@ pub async fn handle_create_table(
 
         // TODO: gen stream graph for table
         let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
+        graph.parallelism = if cdc_source.is_none() {
+            session
+                .config()
+                .get_streaming_parallelism()
+                .map(|parallelism| Parallelism { parallelism })
+        } else {
+            Some(Parallelism { parallelism: 1 })
+        };
         (graph, source, table)
     };
 

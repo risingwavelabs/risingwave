@@ -147,6 +147,7 @@ message CdcMessage {
   string payload = 1;
   string partition = 2;
   string offset = 3;
+  string full_table_name = 4;
 }
 
 enum SourceType {

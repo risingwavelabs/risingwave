@@ -350,6 +350,7 @@ impl DispatcherImpl {
                     output_indices,
                     hash_mapping,
                     dispatcher.dispatcher_id,
+                    dispatcher.downstream_table_name,
                 ))
             }
             Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
@@ -535,6 +536,7 @@ pub struct HashDataDispatcher {
     /// different downstream actors.
     hash_mapping: ExpandedActorMapping,
     dispatcher_id: DispatcherId,
+    downstream_table_name: Option<String>,
 }
 
 impl Debug for HashDataDispatcher {
@@ -554,6 +556,7 @@ impl HashDataDispatcher {
         output_indices: Vec<usize>,
         hash_mapping: ExpandedActorMapping,
         dispatcher_id: DispatcherId,
+        downstream_table_name: Option<String>,
     ) -> Self {
         Self {
             outputs,
@@ -561,6 +564,7 @@ impl HashDataDispatcher {
             output_indices,
             hash_mapping,
             dispatcher_id,
+            downstream_table_name,
         }
     }
 }
@@ -608,15 +612,27 @@ impl Dispatcher for HashDataDispatcher {
         // Apply output indices after calculating the vnode.
         let chunk = chunk.project(&self.output_indices);
 
-        for ((vnode, &op), visible) in vnodes
+        for ((vnode, &op), visible, row) in vnodes
             .iter()
             .copied()
             .zip_eq_fast(chunk.ops())
             .zip_eq_fast(chunk.vis().iter())
+            .zip_eq_fast(chunk.data_chunk().rows_with_holes())
         {
             // Build visibility map for every output chunk.
             for (output, vis_map) in self.outputs.iter().zip_eq_fast(vis_maps.iter_mut()) {
-                vis_map.append(visible && self.hash_mapping[vnode.to_index()] == output.actor_id());
+                let should_emit = if let Some(full_table_name) = self.downstream_table_name {
+                    let last_column_idx = chunk.data_chunk().dimension() - 1;
+                    let table_name_datum = row.datum_at(last_column_idx).unwrap();
+                    table_name_datum == full_table_name
+                } else {
+                    true
+                };
+                vis_map.append(
+                    visible
+                        && self.hash_mapping[vnode.to_index()] == output.actor_id()
+                        && should_emit,
+                );
             }
 
             if !visible {

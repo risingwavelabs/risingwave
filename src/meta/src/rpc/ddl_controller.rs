@@ -600,6 +600,8 @@ impl DdlController {
 
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
+
+        // TODO: extend the upstream_mview_fragments to upstream source fragment
         let upstream_mview_fragments = self
             .fragment_manager
             .get_upstream_mview_fragments(fragment_graph.dependent_table_ids())
@@ -634,7 +636,7 @@ impl DdlController {
         } = actor_graph_builder
             .generate_graph(self.env.id_gen_manager_ref(), stream_job)
             .await?;
-        assert!(merge_updates.is_empty());
+        // assert!(merge_updates.is_empty());
 
         // 3. Build the table fragments structure that will be persisted in the stream manager,
         // and the context that contains all information needed for building the

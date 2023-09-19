@@ -478,6 +478,7 @@ pub struct CompleteStreamFragmentGraph {
 
 pub struct FragmentGraphUpstreamContext {
     upstream_mview_fragments: HashMap<TableId, Fragment>,
+    upstream_source_fragments: Option<HashMap<TableId, Fragment>>,
 }
 
 pub struct FragmentGraphDownstreamContext {
@@ -508,6 +509,7 @@ impl CompleteStreamFragmentGraph {
             graph,
             Some(FragmentGraphUpstreamContext {
                 upstream_mview_fragments,
+                upstream_source_fragments: None,
             }),
             None,
         )
@@ -541,66 +543,88 @@ impl CompleteStreamFragmentGraph {
 
         if let Some(FragmentGraphUpstreamContext {
             upstream_mview_fragments,
+            upstream_source_fragments,
         }) = upstream_ctx
         {
             // Build the extra edges between the upstream `Materialize` and the downstream `Chain`
             // of the new materialized view.
             for (&id, fragment) in &graph.fragments {
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
-                    let mview_fragment = upstream_mview_fragments
-                        .get(&upstream_table_id)
-                        .context("upstream materialized view fragment not found")?;
-                    let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
+                    if let Some(source_fragment) = upstream_source_fragments
+                        .as_ref()
+                        .and_then(|map| map.get(&upstream_table_id))
+                    {
+                        let source_fragment_id = GlobalFragmentId::new(source_fragment.fragment_id);
 
-                    // Resolve the required output columns from the upstream materialized view.
-                    let output_indices = {
-                        let nodes = mview_fragment.actors[0].get_nodes().unwrap();
-                        let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
-                        let all_column_ids = mview_node
-                            .get_table()
-                            .unwrap()
-                            .columns
-                            .iter()
-                            .map(|c| c.column_desc.as_ref().unwrap().column_id)
-                            .collect_vec();
+                        // TODO: shall we store a (table_id -> table desc) mapping in the source node body?
 
-                        output_columns
-                            .iter()
-                            .map(|c| {
-                                all_column_ids
-                                    .iter()
-                                    .position(|&id| id == *c)
-                                    .map(|i| i as u32)
-                            })
-                            .collect::<Option<Vec<_>>>()
-                            .context("column not found in the upstream materialized view")?
-                    };
+                        StreamFragmentEdge {
+                            id: EdgeId::UpstreamExternal {
+                                upstream_table_id,
+                                downstream_fragment_id: id,
+                            },
+                            dispatch_strategy: DispatchStrategy {
+                                r#type: DispatcherType::Hash as _, /* there may have multiple downstream table jobs, so we use `Hash` here */
+                                dist_key_indices: vec![],          // not used for `NoShuffle`
+                                output_indices: vec![], /* require all columns from the upstream source */
+                            },
+                        }
+                    } else {
+                        let mview_fragment = upstream_mview_fragments
+                            .get(&upstream_table_id)
+                            .context("upstream materialized view fragment not found")?;
+                        let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
 
-                    let edge = StreamFragmentEdge {
-                        id: EdgeId::UpstreamExternal {
-                            upstream_table_id,
-                            downstream_fragment_id: id,
-                        },
-                        // We always use `NoShuffle` for the exchange between the upstream
-                        // `Materialize` and the downstream `Chain` of the
-                        // new materialized view.
-                        dispatch_strategy: DispatchStrategy {
-                            r#type: DispatcherType::NoShuffle as _,
-                            dist_key_indices: vec![], // not used for `NoShuffle`
-                            output_indices,
-                        },
-                    };
+                        // Resolve the required output columns from the upstream materialized view.
+                        let output_indices = {
+                            let nodes = mview_fragment.actors[0].get_nodes().unwrap();
+                            let mview_node =
+                                nodes.get_node_body().unwrap().as_materialize().unwrap();
+                            let all_column_ids = mview_node
+                                .get_table()
+                                .unwrap()
+                                .columns
+                                .iter()
+                                .map(|c| c.column_desc.as_ref().unwrap().column_id)
+                                .collect_vec();
 
-                    extra_downstreams
-                        .entry(mview_id)
-                        .or_insert_with(HashMap::new)
-                        .try_insert(id, edge.clone())
-                        .unwrap();
-                    extra_upstreams
-                        .entry(id)
-                        .or_insert_with(HashMap::new)
-                        .try_insert(mview_id, edge)
-                        .unwrap();
+                            output_columns
+                                .iter()
+                                .map(|c| {
+                                    all_column_ids
+                                        .iter()
+                                        .position(|&id| id == *c)
+                                        .map(|i| i as u32)
+                                })
+                                .collect::<Option<Vec<_>>>()
+                                .context("column not found in the upstream materialized view")?
+                        };
+                        let edge = StreamFragmentEdge {
+                            id: EdgeId::UpstreamExternal {
+                                upstream_table_id,
+                                downstream_fragment_id: id,
+                            },
+                            // We always use `NoShuffle` for the exchange between the upstream
+                            // `Materialize` and the downstream `Chain` of the
+                            // new materialized view.
+                            dispatch_strategy: DispatchStrategy {
+                                r#type: DispatcherType::NoShuffle as _,
+                                dist_key_indices: vec![], // not used for `NoShuffle`
+                                output_indices,
+                            },
+                        };
+
+                        extra_downstreams
+                            .entry(mview_id)
+                            .or_insert_with(HashMap::new)
+                            .try_insert(id, edge.clone())
+                            .unwrap();
+                        extra_upstreams
+                            .entry(id)
+                            .or_insert_with(HashMap::new)
+                            .try_insert(mview_id, edge)
+                            .unwrap();
+                    }
                 }
             }
 

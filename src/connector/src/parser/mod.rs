@@ -26,7 +26,7 @@ use itertools::{Either, Itertools};
 pub use json_parser::*;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
-use risingwave_common::catalog::KAFKA_TIMESTAMP_COLUMN_NAME;
+use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
@@ -385,7 +385,7 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
-#[try_stream(ok = StreamChunkWithState, error = RwError)]
+// #[try_stream(ok = StreamChunkWithState, error = RwError)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
 
@@ -458,18 +458,23 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     for _ in old_op_num..new_op_num {
                         let f =
                             |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
-                                if desc.is_meta() && let SourceMeta::Kafka(kafka_meta) = &msg.meta {
-                                    match desc.name.as_str() {
-                                        KAFKA_TIMESTAMP_COLUMN_NAME => {
-                                            Some(kafka_meta.timestamp.map(|ts| {
-                                                risingwave_common::cast::i64_to_timestamptz(ts)
-                                                    .unwrap()
-                                                    .into()
-                                            }))
-                                        }
+                                if desc.is_meta() {
+                                    match (&msg.meta, desc.name.as_str()) {
+                                        (
+                                            SourceMeta::DebeziumCdc(cdc_meta),
+                                            TABLE_NAME_COLUMN_NAME,
+                                        ) => Some(cdc_meta.full_table_name.as_str().into()),
+                                        (
+                                            SourceMeta::Kafka(kafka_meta),
+                                            KAFKA_TIMESTAMP_COLUMN_NAME,
+                                        ) => Some(kafka_meta.timestamp.map(|ts| {
+                                            risingwave_common::cast::i64_to_timestamptz(ts)
+                                                .unwrap()
+                                                .into()
+                                        })),
                                         _ => {
                                             unreachable!(
-                                                "kafka will not have this meta column: {}",
+                                                "unexpected source message meta column: {}",
                                                 desc.name
                                             )
                                         }
