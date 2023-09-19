@@ -66,6 +66,7 @@ mysql_common = { version = "0.30", default-features = false, features = [
     "chrono",
 ] }
 nexmark = { version = "0.2", features = ["serde"] }
+nkeys = "0.3.2"
 num-bigint = "0.4"
 opendal = "0.39"
 parking_lot = "0.12"
@@ -101,6 +102,7 @@ serde_with = { version = "3", features = ["json"] }
 simd-json = "0.10.6"
 tempfile = "3"
 thiserror = "1"
+time = "0.3.28"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -117,6 +119,7 @@ tonic = { workspace = true }
 tracing = "0.1"
 url = "2"
 urlencoding = "2"
+
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
