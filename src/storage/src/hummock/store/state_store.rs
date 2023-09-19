@@ -48,12 +48,10 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::StateStoreIter;
 
-const AVALIABLE_EPOCH_GAP: u64 = 256;
 const MEM_TABLE_SPILL_THRESHOLD: usize = 64 * 1024 * 1024;
 pub struct LocalHummockStorage {
     mem_table: MemTable,
 
-    prev_epoch: Option<u64>,
     epoch: Option<u64>,
 
     table_id: TableId,
@@ -93,10 +91,6 @@ impl LocalHummockStorage {
     /// See `HummockReadVersion::update` for more details.
     pub fn update(&self, info: VersionUpdate) {
         self.read_version.write().update(info)
-    }
-
-    fn prev_epoch(&self) -> u64 {
-        self.prev_epoch.expect("should have set the prev epoch")
     }
 
     pub async fn get_inner(
@@ -349,21 +343,12 @@ impl LocalStateStore for LocalHummockStorage {
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
-
-        assert!(
-            self.prev_epoch.replace(epoch).is_none(),
-            "local state store of table id {:?} is init for more than once",
-            self.table_id
-        );
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {
         assert!(!self.is_dirty());
         let prev_epoch = self
             .epoch
-            .replace(next_epoch)
-            .expect("should have init epoch before seal the first epoch");
-        self.prev_epoch
             .replace(next_epoch)
             .expect("should have init epoch before seal the first epoch");
         assert!(
@@ -473,7 +458,6 @@ impl LocalHummockStorage {
         let stats = hummock_version_reader.stats().clone();
         Self {
             mem_table: MemTable::new(option.is_consistent_op),
-            prev_epoch: None,
             epoch: None,
             table_id: option.table_id,
             is_consistent_op: option.is_consistent_op,

@@ -1031,8 +1031,9 @@ where
         Ok(())
     }
 
-    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+    pub async fn try_flush(&mut self, next_epoch: u64) -> StreamExecutorResult<()> {
         self.local_store.try_flush().await?;
+        self.local_store.seal_current_epoch(next_epoch);
         Ok(())
     }
 }
