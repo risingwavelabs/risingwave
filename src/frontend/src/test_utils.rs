@@ -34,9 +34,10 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
-use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
+use risingwave_pb::ddl_service::{create_connection_request, DdlProgress, StreamJobExecutionMode};
+use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    BranchedObject, HummockSnapshot, HummockVersion, HummockVersionDelta,
+    BranchedObject, CompactionGroupInfo, HummockSnapshot, HummockVersion, HummockVersionDelta,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -234,6 +235,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         mut table: PbTable,
         _graph: StreamFragmentGraph,
+        _stream_job_execution_mode: StreamJobExecutionMode,
     ) -> Result<()> {
         table.id = self.gen_id();
         self.catalog.write().create_table(&table);
@@ -259,7 +261,8 @@ impl CatalogWriter for MockCatalogWriter {
             table.optional_associated_source_id =
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
-        self.create_materialized_view(table, graph).await?;
+        self.create_materialized_view(table, graph, StreamJobExecutionMode::Foreground)
+            .await?;
         Ok(())
     }
 
@@ -848,6 +851,18 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_branched_objects(&self) -> RpcResult<Vec<BranchedObject>> {
+        unimplemented!()
+    }
+
+    async fn list_hummock_compaction_group_configs(&self) -> RpcResult<Vec<CompactionGroupInfo>> {
+        unimplemented!()
+    }
+
+    async fn list_hummock_active_write_limits(&self) -> RpcResult<HashMap<u64, WriteLimit>> {
+        unimplemented!()
+    }
+
+    async fn list_hummock_meta_configs(&self) -> RpcResult<HashMap<String, String>> {
         unimplemented!()
     }
 }

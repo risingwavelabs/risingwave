@@ -329,7 +329,7 @@ impl BlockMeta {
     /// Format:
     ///
     /// ```plain
-    /// | offset (4B) | len (4B) | smallest key len (4B) | smallest key |
+    /// | offset (4B) | len (4B) | uncompressed size (4B) | smallest key len (4B) | smallest key |
     /// ```
     pub fn encode(&self, buf: &mut Vec<u8>) {
         buf.put_u32_le(self.offset);

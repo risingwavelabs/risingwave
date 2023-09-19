@@ -24,8 +24,8 @@ aws-credential-types = { version = "0.55", default-features = false, features = 
 aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
 aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
 base64 = { version = "0.21", features = ["alloc"] }
+bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["std"] }
-byteorder = { version = "1", features = ["i128"] }
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", features = ["alloc", "serde"] }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
@@ -111,7 +111,6 @@ unicode-bidi = { version = "0.3" }
 unicode-normalization = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
-zeroize = { version = "1", features = ["zeroize_derive"] }
 
 [build-dependencies]
 ahash = { version = "0.8" }
@@ -121,8 +120,8 @@ aws-credential-types = { version = "0.55", default-features = false, features = 
 aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
 aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
 base64 = { version = "0.21", features = ["alloc"] }
+bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["std"] }
-byteorder = { version = "1", features = ["i128"] }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4", features = ["alloc", "serde"] }
@@ -213,6 +212,5 @@ unicode-bidi = { version = "0.3" }
 unicode-normalization = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
-zeroize = { version = "1", features = ["zeroize_derive"] }
 
 ### END HAKARI SECTION
