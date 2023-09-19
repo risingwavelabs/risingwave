@@ -376,8 +376,8 @@ pub enum SinkError {
     Kinesis(anyhow::Error),
     #[error("Remote sink error: {0}")]
     Remote(anyhow::Error),
-    #[error("Json parse error: {0}")]
-    JsonParse(String),
+    #[error("Encode error: {0}")]
+    Encode(String),
     #[error("Iceberg error: {0}")]
     Iceberg(anyhow::Error),
     #[error("config error: {0}")]
