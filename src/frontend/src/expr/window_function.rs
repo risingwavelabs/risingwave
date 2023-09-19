@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
-use risingwave_expr::function::window::{Frame, WindowFuncKind};
+use risingwave_expr::window_function::{Frame, WindowFuncKind};
 
 use super::{AggCall, Expr, ExprImpl, OrderBy, RwResult};
 

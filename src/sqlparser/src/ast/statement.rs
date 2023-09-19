@@ -215,6 +215,7 @@ impl SourceSchema {
 
 impl fmt::Display for SourceSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ROW FORMAT ")?;
         match self {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
@@ -481,6 +482,7 @@ impl fmt::Display for CompatibleSourceSchema {
 }
 
 impl CompatibleSourceSchema {
+    #[deprecated]
     pub fn into_source_schema(
         self,
     ) -> Result<(SourceSchema, Vec<SqlOption>, Option<String>), ParserError> {
@@ -496,10 +498,12 @@ impl CompatibleSourceSchema {
         }
     }
 
-    pub fn into_source_schema_v2(self) -> SourceSchemaV2 {
+    pub fn into_source_schema_v2(self) -> (SourceSchemaV2, Option<String>) {
         match self {
-            CompatibleSourceSchema::RowFormat(inner) => inner.into_source_schema_v2(),
-            CompatibleSourceSchema::V2(inner) => inner,
+            CompatibleSourceSchema::RowFormat(inner) => (
+                inner.into_source_schema_v2(),
+                Some("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.".to_string())),
+            CompatibleSourceSchema::V2(inner) => (inner, None),
         }
     }
 }

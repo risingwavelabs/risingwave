@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableOption;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+    Connection, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source, Table, View,
 };
 
 use super::{ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
@@ -147,10 +147,22 @@ impl DatabaseManager {
         (
             self.databases.values().cloned().collect_vec(),
             self.schemas.values().cloned().collect_vec(),
-            self.tables.values().cloned().collect_vec(),
+            self.tables
+                .values()
+                .filter(|t| t.stream_job_status == PbStreamJobStatus::Created as i32)
+                .cloned()
+                .collect_vec(),
             self.sources.values().cloned().collect_vec(),
-            self.sinks.values().cloned().collect_vec(),
-            self.indexes.values().cloned().collect_vec(),
+            self.sinks
+                .values()
+                .filter(|s| s.stream_job_status == PbStreamJobStatus::Created as i32)
+                .cloned()
+                .collect_vec(),
+            self.indexes
+                .values()
+                .filter(|i| i.stream_job_status == PbStreamJobStatus::Created as i32)
+                .cloned()
+                .collect_vec(),
             self.views.values().cloned().collect_vec(),
             self.functions.values().cloned().collect_vec(),
             self.connections.values().cloned().collect_vec(),

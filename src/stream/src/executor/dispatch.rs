@@ -51,6 +51,7 @@ struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherImpl>,
     actor_id: u32,
     actor_id_str: String,
+    fragment_id_str: String,
     context: Arc<SharedContext>,
     metrics: Arc<StreamingMetrics>,
 }
@@ -66,24 +67,50 @@ impl DispatchExecutorInner {
     }
 
     async fn dispatch(&mut self, msg: Message) -> StreamResult<()> {
-        let start_time = Instant::now();
         match msg {
             Message::Watermark(watermark) => {
                 for dispatcher in &mut self.dispatchers {
+                    let start_time = Instant::now();
                     dispatcher.dispatch_watermark(watermark.clone()).await?;
+                    self.metrics
+                        .actor_output_buffer_blocking_duration_ns
+                        .with_label_values(&[
+                            &self.actor_id_str,
+                            &self.fragment_id_str,
+                            dispatcher.dispatcher_id_str(),
+                        ])
+                        .inc_by(start_time.elapsed().as_nanos() as u64);
                 }
             }
             Message::Chunk(chunk) => {
                 self.metrics
                     .actor_out_record_cnt
-                    .with_label_values(&[&self.actor_id_str])
+                    .with_label_values(&[&self.actor_id_str, &self.fragment_id_str])
                     .inc_by(chunk.cardinality() as _);
                 if self.dispatchers.len() == 1 {
                     // special clone optimization when there is only one downstream dispatcher
+                    let start_time = Instant::now();
                     self.single_inner_mut().dispatch_data(chunk).await?;
+                    self.metrics
+                        .actor_output_buffer_blocking_duration_ns
+                        .with_label_values(&[
+                            &self.actor_id_str,
+                            &self.fragment_id_str,
+                            self.dispatchers[0].dispatcher_id_str(),
+                        ])
+                        .inc_by(start_time.elapsed().as_nanos() as u64);
                 } else {
                     for dispatcher in &mut self.dispatchers {
+                        let start_time = Instant::now();
                         dispatcher.dispatch_data(chunk.clone()).await?;
+                        self.metrics
+                            .actor_output_buffer_blocking_duration_ns
+                            .with_label_values(&[
+                                &self.actor_id_str,
+                                &self.fragment_id_str,
+                                dispatcher.dispatcher_id_str(),
+                            ])
+                            .inc_by(start_time.elapsed().as_nanos() as u64);
                     }
                 }
             }
@@ -91,15 +118,20 @@ impl DispatchExecutorInner {
                 let mutation = barrier.mutation.clone();
                 self.pre_mutate_dispatchers(&mutation)?;
                 for dispatcher in &mut self.dispatchers {
+                    let start_time = Instant::now();
                     dispatcher.dispatch_barrier(barrier.clone()).await?;
+                    self.metrics
+                        .actor_output_buffer_blocking_duration_ns
+                        .with_label_values(&[
+                            &self.actor_id_str,
+                            &self.fragment_id_str,
+                            dispatcher.dispatcher_id_str(),
+                        ])
+                        .inc_by(start_time.elapsed().as_nanos() as u64);
                 }
                 self.post_mutate_dispatchers(&mutation)?;
             }
         };
-        self.metrics
-            .actor_output_buffer_blocking_duration_ns
-            .with_label_values(&[&self.actor_id_str])
-            .inc_by(start_time.elapsed().as_nanos() as u64);
         Ok(())
     }
 
@@ -253,6 +285,7 @@ impl DispatchExecutor {
         input: BoxedExecutor,
         dispatchers: Vec<DispatcherImpl>,
         actor_id: u32,
+        fragment_id: u32,
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -262,6 +295,7 @@ impl DispatchExecutor {
                 dispatchers,
                 actor_id,
                 actor_id_str: actor_id.to_string(),
+                fragment_id_str: fragment_id.to_string(),
                 context,
                 metrics,
             },
@@ -411,6 +445,12 @@ macro_rules! impl_dispatcher {
                 }
             }
 
+            pub fn dispatcher_id_str(&self) -> &str {
+                match self {
+                    $(Self::$variant_name(inner) => inner.dispatcher_id_str(), )*
+                }
+            }
+
             pub fn is_empty(&self) -> bool {
                 match self {
                     $(Self::$variant_name(inner) => inner.is_empty(), )*
@@ -450,7 +490,13 @@ pub trait Dispatcher: Debug + 'static {
 
     /// The ID of the dispatcher. A [`DispatchExecutor`] may have multiple dispatchers with
     /// different IDs.
+    ///
+    /// Note that the dispatcher id is always equal to the downstream fragment id.
+    /// See also `proto/stream_plan.proto`.
     fn dispatcher_id(&self) -> DispatcherId;
+
+    /// Dispatcher id in string. See [`Dispatcher::dispatcher_id`].
+    fn dispatcher_id_str(&self) -> &str;
 
     /// Whether the dispatcher has no outputs. If so, it'll be cleaned up from the
     /// [`DispatchExecutor`].
@@ -463,6 +509,7 @@ pub struct RoundRobinDataDispatcher {
     output_indices: Vec<usize>,
     cur: usize,
     dispatcher_id: DispatcherId,
+    dispatcher_id_str: String,
 }
 
 impl RoundRobinDataDispatcher {
@@ -476,6 +523,7 @@ impl RoundRobinDataDispatcher {
             output_indices,
             cur: 0,
             dispatcher_id,
+            dispatcher_id_str: dispatcher_id.to_string(),
         }
     }
 }
@@ -522,6 +570,10 @@ impl Dispatcher for RoundRobinDataDispatcher {
         self.dispatcher_id
     }
 
+    fn dispatcher_id_str(&self) -> &str {
+        &self.dispatcher_id_str
+    }
+
     fn is_empty(&self) -> bool {
         self.outputs.is_empty()
     }
@@ -535,6 +587,7 @@ pub struct HashDataDispatcher {
     /// different downstream actors.
     hash_mapping: ExpandedActorMapping,
     dispatcher_id: DispatcherId,
+    dispatcher_id_str: String,
 }
 
 impl Debug for HashDataDispatcher {
@@ -561,6 +614,7 @@ impl HashDataDispatcher {
             output_indices,
             hash_mapping,
             dispatcher_id,
+            dispatcher_id_str: dispatcher_id.to_string(),
         }
     }
 }
@@ -674,6 +728,10 @@ impl Dispatcher for HashDataDispatcher {
         self.dispatcher_id
     }
 
+    fn dispatcher_id_str(&self) -> &str {
+        &self.dispatcher_id_str
+    }
+
     fn is_empty(&self) -> bool {
         self.outputs.is_empty()
     }
@@ -685,6 +743,7 @@ pub struct BroadcastDispatcher {
     outputs: HashMap<ActorId, BoxedOutput>,
     output_indices: Vec<usize>,
     dispatcher_id: DispatcherId,
+    dispatcher_id_str: String,
 }
 
 impl BroadcastDispatcher {
@@ -697,6 +756,7 @@ impl BroadcastDispatcher {
             outputs: Self::into_pairs(outputs).collect(),
             output_indices,
             dispatcher_id,
+            dispatcher_id_str: dispatcher_id.to_string(),
         }
     }
 
@@ -749,6 +809,10 @@ impl Dispatcher for BroadcastDispatcher {
         self.dispatcher_id
     }
 
+    fn dispatcher_id_str(&self) -> &str {
+        &self.dispatcher_id_str
+    }
+
     fn is_empty(&self) -> bool {
         self.outputs.is_empty()
     }
@@ -773,6 +837,7 @@ pub struct SimpleDispatcher {
     output: SmallVec<[BoxedOutput; 2]>,
     output_indices: Vec<usize>,
     dispatcher_id: DispatcherId,
+    dispatcher_id_str: String,
 }
 
 impl SimpleDispatcher {
@@ -785,6 +850,7 @@ impl SimpleDispatcher {
             output: smallvec![output],
             output_indices,
             dispatcher_id,
+            dispatcher_id_str: dispatcher_id.to_string(),
         }
     }
 }
@@ -834,6 +900,10 @@ impl Dispatcher for SimpleDispatcher {
 
     fn dispatcher_id(&self) -> DispatcherId {
         self.dispatcher_id
+    }
+
+    fn dispatcher_id_str(&self) -> &str {
+        &self.dispatcher_id_str
     }
 
     fn is_empty(&self) -> bool {
@@ -970,6 +1040,7 @@ mod tests {
         let _schema = Schema { fields: vec![] };
         let (tx, rx) = channel_for_test();
         let actor_id = 233;
+        let fragment_id = 666;
         let input = Box::new(ReceiverExecutor::for_test(rx));
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
@@ -1017,6 +1088,7 @@ mod tests {
             input,
             vec![broadcast_dispatcher, simple_dispatcher],
             actor_id,
+            fragment_id,
             ctx.clone(),
             metrics,
         ))

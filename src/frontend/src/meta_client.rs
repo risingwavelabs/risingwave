@@ -18,8 +18,9 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    BranchedObject, HummockSnapshot, HummockVersion, HummockVersionDelta,
+    BranchedObject, CompactionGroupInfo, HummockSnapshot, HummockVersion, HummockVersionDelta,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -86,6 +87,12 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_version_deltas(&self) -> Result<Vec<HummockVersionDelta>>;
 
     async fn list_branched_objects(&self) -> Result<Vec<BranchedObject>>;
+
+    async fn list_hummock_compaction_group_configs(&self) -> Result<Vec<CompactionGroupInfo>>;
+
+    async fn list_hummock_active_write_limits(&self) -> Result<HashMap<u64, WriteLimit>>;
+
+    async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -213,5 +220,17 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_branched_objects(&self) -> Result<Vec<BranchedObject>> {
         self.0.list_branched_object().await
+    }
+
+    async fn list_hummock_compaction_group_configs(&self) -> Result<Vec<CompactionGroupInfo>> {
+        self.0.risectl_list_compaction_group().await
+    }
+
+    async fn list_hummock_active_write_limits(&self) -> Result<HashMap<u64, WriteLimit>> {
+        self.0.list_active_write_limit().await
+    }
+
+    async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>> {
+        self.0.list_hummock_meta_config().await
     }
 }
