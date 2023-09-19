@@ -20,7 +20,6 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::future::try_join_all;
 use futures::TryFutureExt;
-use futures_async_stream::for_await;
 use pulsar::producer::{Message, SendFuture};
 use pulsar::{Producer, ProducerOptions, Pulsar, TokioExecutor};
 use risingwave_common::array::StreamChunk;
@@ -30,16 +29,13 @@ use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
 use super::encoder::{JsonEncoder, TimestampHandlingMode};
+use super::formatter::{AppendOnlyFormatter, UpsertFormatter};
 use super::{
-    Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam, SINK_TYPE_APPEND_ONLY,
+    FormattedSink, Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam, SINK_TYPE_APPEND_ONLY,
     SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::PulsarCommon;
 use crate::deserialize_duration_from_string;
-use crate::sink::utils::{
-    gen_append_only_message_stream, gen_upsert_message_stream, AppendOnlyAdapterOpts,
-    UpsertAdapterOpts,
-};
 use crate::sink::{DummySinkCommitCoordinator, Result};
 
 pub const PULSAR_SINK: &str = "pulsar";
@@ -266,15 +262,14 @@ impl PulsarSinkWriter {
         }
     }
 
-    async fn write_json_objects(
+    async fn write_inner(
         &mut self,
-        event_key_object: Option<serde_json::Value>,
-        event_object: Option<serde_json::Value>,
+        event_key_object: Option<String>,
+        event_object: Option<Vec<u8>>,
     ) -> Result<()> {
         let message = Message {
-            partition_key: event_key_object.map(|key| key.to_string()),
-            payload: serde_json::to_vec(&event_object)
-                .map_err(|e| SinkError::Pulsar(anyhow!(e)))?,
+            partition_key: event_key_object,
+            payload: event_object.unwrap_or_default(),
             ..Default::default()
         };
 
@@ -290,20 +285,10 @@ impl PulsarSinkWriter {
             JsonEncoder::new(&schema, Some(&downstream_pk), TimestampHandlingMode::Milli);
         let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
-        let append_only_stream = gen_append_only_message_stream(
-            chunk,
-            AppendOnlyAdapterOpts::default(),
-            key_encoder,
-            val_encoder,
-        );
+        // Initialize the append_only_stream
+        let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
 
-        #[for_await]
-        for msg in append_only_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
-        }
-        Ok(())
+        self.write_chunk(chunk, f).await
     }
 
     async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -314,20 +299,10 @@ impl PulsarSinkWriter {
             JsonEncoder::new(&schema, Some(&downstream_pk), TimestampHandlingMode::Milli);
         let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
-        let upsert_stream = gen_upsert_message_stream(
-            chunk,
-            UpsertAdapterOpts::default(),
-            key_encoder,
-            val_encoder,
-        );
+        // Initialize the upsert_stream
+        let f = UpsertFormatter::new(key_encoder, val_encoder);
 
-        #[for_await]
-        for msg in upsert_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
-        }
-        Ok(())
+        self.write_chunk(chunk, f).await
     }
 
     async fn commit_inner(&mut self) -> Result<()> {
@@ -343,6 +318,15 @@ impl PulsarSinkWriter {
         .await?;
 
         Ok(())
+    }
+}
+
+impl FormattedSink for PulsarSinkWriter {
+    type K = String;
+    type V = Vec<u8>;
+
+    async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
+        self.write_inner(k, v).await
     }
 }
 
