@@ -936,7 +936,7 @@ impl HummockManager {
             if is_trivial_reclaim {
                 compact_task.set_task_status(TaskStatus::Success);
                 trivial_task_vec.push(compact_task);
-            } else if is_trivial_move {
+            } else if is_trivial_move && can_trivial_move {
                 compact_task.set_task_status(TaskStatus::Success);
                 compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
                 trivial_task_vec.push(compact_task);

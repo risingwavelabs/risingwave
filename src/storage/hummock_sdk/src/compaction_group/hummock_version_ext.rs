@@ -496,7 +496,7 @@ impl HummockVersionUpdateExt for HummockVersion {
             .expect("compaction group should exist");
         let mut moving_tables = levels
             .member_table_ids
-            .drain_filter(|t| group_table_change.table_ids.contains(t))
+            .extract_if(|t| group_table_change.table_ids.contains(t))
             .collect_vec();
         self.levels
             .get_mut(&compaction_group_id)
