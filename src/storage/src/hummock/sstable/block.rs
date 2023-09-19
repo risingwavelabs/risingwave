@@ -600,38 +600,9 @@ impl BlockBuilder {
         ));
 
         self.buf.put_u32_le(self.table_id.unwrap());
-        match self.compression_algorithm {
-            CompressionAlgorithm::None => (),
-            CompressionAlgorithm::Lz4 => {
-                let mut encoder = lz4::EncoderBuilder::new()
-                    .level(4)
-                    .build(BytesMut::with_capacity(self.buf.len()).writer())
-                    .map_err(HummockError::encode_error)
-                    .unwrap();
-                encoder
-                    .write_all(&self.buf[..])
-                    .map_err(HummockError::encode_error)
-                    .unwrap();
-                let (writer, result) = encoder.finish();
-                result.map_err(HummockError::encode_error).unwrap();
-                self.buf = writer.into_inner();
-            }
-            CompressionAlgorithm::Zstd => {
-                let mut encoder =
-                    zstd::Encoder::new(BytesMut::with_capacity(self.buf.len()).writer(), 4)
-                        .map_err(HummockError::encode_error)
-                        .unwrap();
-                encoder
-                    .write_all(&self.buf[..])
-                    .map_err(HummockError::encode_error)
-                    .unwrap();
-                let writer = encoder
-                    .finish()
-                    .map_err(HummockError::encode_error)
-                    .unwrap();
-                self.buf = writer.into_inner();
-            }
-        };
+        if self.compression_algorithm != CompressionAlgorithm::None {
+            self.buf = Self::compress(&self.buf[..], self.compression_algorithm);
+        }
 
         self.compression_algorithm.encode(&mut self.buf);
         let checksum = xxhash64_checksum(&self.buf);
@@ -639,6 +610,60 @@ impl BlockBuilder {
         assert!(self.buf.len() < (u32::MAX) as usize);
 
         self.buf.as_ref()
+    }
+
+    pub fn compress_block(
+        buf: Bytes,
+        target_compression: CompressionAlgorithm,
+    ) -> HummockResult<Bytes> {
+        // Verify checksum.
+        let checksum = (&buf[buf.len() - 8..]).get_u64_le();
+        xxhash64_verify(&buf[..buf.len() - 8], checksum)?;
+        // Decompress.
+        let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
+        let compressed_data = &buf[..buf.len() - 9];
+        assert_eq!(compression, CompressionAlgorithm::None);
+        let mut writer = Self::compress(compressed_data, target_compression);
+
+        target_compression.encode(&mut writer);
+        let checksum = xxhash64_checksum(&writer);
+        writer.put_u64_le(checksum);
+        Ok(writer.freeze())
+    }
+
+    pub fn compress(buf: &[u8], compression_algorithm: CompressionAlgorithm) -> BytesMut {
+        match compression_algorithm {
+            CompressionAlgorithm::None => unreachable!(),
+            CompressionAlgorithm::Lz4 => {
+                let mut encoder = lz4::EncoderBuilder::new()
+                    .level(4)
+                    .build(BytesMut::with_capacity(buf.len()).writer())
+                    .map_err(HummockError::encode_error)
+                    .unwrap();
+                encoder
+                    .write_all(buf)
+                    .map_err(HummockError::encode_error)
+                    .unwrap();
+                let (writer, result) = encoder.finish();
+                result.map_err(HummockError::encode_error).unwrap();
+                writer.into_inner()
+            }
+            CompressionAlgorithm::Zstd => {
+                let mut encoder =
+                    zstd::Encoder::new(BytesMut::with_capacity(buf.len()).writer(), 4)
+                        .map_err(HummockError::encode_error)
+                        .unwrap();
+                encoder
+                    .write_all(buf)
+                    .map_err(HummockError::encode_error)
+                    .unwrap();
+                let writer = encoder
+                    .finish()
+                    .map_err(HummockError::encode_error)
+                    .unwrap();
+                writer.into_inner()
+            }
+        }
     }
 
     /// Approximate block len (uncompressed).

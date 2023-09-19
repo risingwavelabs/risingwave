@@ -34,8 +34,8 @@ use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFacto
 use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    Block, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder, CachePolicy,
-    CompressionAlgorithm, GetObjectId, HummockResult, SstableBuilderOptions,
+    Block, BlockBuilder, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder,
+    CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult, SstableBuilderOptions,
     StreamingSstableWriterFactory, TableHolder,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
@@ -394,7 +394,7 @@ impl CompactorRunner {
                     }
                     let smallest_key = smallest_key.to_vec();
 
-                    let (block, filter_data, meta) = first
+                    let (mut block, filter_data, mut meta) = first
                         .current_sstable()
                         .download_next_block()
                         .await?
@@ -403,10 +403,8 @@ impl CompactorRunner {
                     if algorithm == CompressionAlgorithm::None
                         && algorithm != self.compression_algorithm
                     {
-                        first
-                            .current_sstable()
-                            .init_block_iter(block, meta.uncompressed_size as usize)?;
-                        break;
+                        block = BlockBuilder::compress_block(block, self.compression_algorithm)?;
+                        meta.len = block.len() as u32;
                     }
 
                     skip_raw_block_size += block.len() as u64;
