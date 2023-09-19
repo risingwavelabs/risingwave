@@ -199,7 +199,7 @@ impl CatalogWriter for CatalogWriterImpl {
             .await?;
         if matches!(
             stream_job_execution_mode,
-            StreamJobExecutionMode::Foreground
+            StreamJobExecutionMode::Foreground | StreamJobExecutionMode::Unspecified
         ) {
             self.wait_version(version).await?
         }

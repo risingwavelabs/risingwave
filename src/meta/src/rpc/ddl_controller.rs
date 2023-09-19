@@ -432,33 +432,52 @@ impl DdlController {
         // Update the corresponding 'initiated_at' field.
         stream_job.mark_initialized();
 
-        let (ctx, table_fragments) = self
-            .build_stream_job(env, &stream_job, fragment_graph)
-            .await?;
+        let mut internal_tables = vec![];
+        let result = try {
+            let (ctx, table_fragments) = self
+                .build_stream_job(env, &stream_job, fragment_graph)
+                .await?;
 
-        match stream_job {
-            StreamingJob::Table(Some(ref source), _) => {
-                // Register the source on the connector node.
-                self.source_manager.register_source(source).await?;
+            internal_tables = ctx.internal_tables();
+
+            match stream_job {
+                StreamingJob::Table(Some(ref source), _) => {
+                    // Register the source on the connector node.
+                    self.source_manager.register_source(source).await?;
+                }
+                StreamingJob::Sink(ref sink) => {
+                    // Validate the sink on the connector node.
+                    validate_sink(sink, self.env.connector_client()).await?;
+                }
+                _ => {}
             }
-            StreamingJob::Sink(ref sink) => {
-                // Validate the sink on the connector node.
-                validate_sink(sink, self.env.connector_client()).await?;
+            (ctx, table_fragments)
+        };
+
+        let (ctx, table_fragments) = match result {
+            Ok(r) => r,
+            Err(e) => {
+                self.cancel_stream_job(&stream_job, internal_tables).await;
+                return Err(e);
             }
-            _ => {}
-        }
+        };
 
         match stream_job_execution_mode {
             StreamJobExecutionMode::Foreground | StreamJobExecutionMode::Unspecified => {
-                self.create_streaming_job_inner(stream_job, table_fragments, ctx)
+                self.create_streaming_job_inner(stream_job, table_fragments, ctx, internal_tables)
                     .await
             }
             StreamJobExecutionMode::Background => {
-                let ctrl: DdlController = self.clone();
+                let ctrl = self.clone();
                 let definition = stream_job.definition();
                 let fut = async move {
                     let result = ctrl
-                        .create_streaming_job_inner(stream_job, table_fragments, ctx)
+                        .create_streaming_job_inner(
+                            stream_job,
+                            table_fragments,
+                            ctx,
+                            internal_tables,
+                        )
                         .await;
                     match result {
                         Err(e) => tracing::error!(definition, error = ?e, "stream_job_error"),
@@ -478,9 +497,8 @@ impl DdlController {
         stream_job: StreamingJob,
         table_fragments: TableFragments,
         ctx: CreateStreamingJobContext,
+        internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
-        let internal_tables = ctx.internal_tables();
-
         let result = self
             .stream_manager
             .create_streaming_job(table_fragments, ctx)

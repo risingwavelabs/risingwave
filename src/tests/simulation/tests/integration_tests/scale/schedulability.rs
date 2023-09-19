@@ -107,7 +107,6 @@ async fn test_cordon_no_shuffle_failed() -> Result<()> {
         .await;
 
     assert!(result.is_err());
-    println!("First mv should fail to be created");
 
     session
         .run("create materialized view mv2 as select * from t2;")
