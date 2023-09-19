@@ -21,17 +21,16 @@ use std::time::Instant;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{can_concat, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{CompactTask, SstableInfo};
 
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::task_progress::TaskProgress;
-use crate::hummock::compactor::{CompactorContext, RemoteBuilderFactory, TaskConfig};
-use crate::hummock::multi_builder::{
-    CapacitySplitTableBuilder, SplitTableOutput, TableBuilderFactory,
-};
+use crate::hummock::compactor::{Compactor, CompactorContext, RemoteBuilderFactory, TaskConfig};
+use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -39,7 +38,7 @@ use crate::hummock::{
     CompressionAlgorithm, GetObjectId, HummockResult, SstableBuilderOptions,
     StreamingSstableWriterFactory, TableHolder,
 };
-use crate::monitor::StoreLocalStatistic;
+use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
 /// Iterates over the KV-pairs of an SST while downloading it.
 pub struct BlockStreamIterator {
@@ -280,6 +279,8 @@ pub struct CompactorRunner {
         RemoteBuilderFactory<StreamingSstableWriterFactory, BlockedXor16FilterBuilder>,
     >,
     compression_algorithm: CompressionAlgorithm,
+    metrics: Arc<CompactorMetrics>,
+    task_progress: Arc<TaskProgress>,
 }
 
 impl CompactorRunner {
@@ -338,7 +339,7 @@ impl CompactorRunner {
         let right = Box::new(ConcatSstableIterator::new(
             task.input_ssts[1].table_infos.clone(),
             context.sstable_store,
-            task_progress,
+            task_progress.clone(),
         ));
 
         Self {
@@ -346,11 +347,13 @@ impl CompactorRunner {
             left,
             right,
             task_id: task.task_id,
+            metrics: context.compactor_metrics.clone(),
             compression_algorithm,
+            task_progress,
         }
     }
 
-    pub async fn run(mut self) -> HummockResult<Vec<SplitTableOutput>> {
+    pub async fn run(mut self) -> HummockResult<Vec<LocalSstableInfo>> {
         self.left.rewind().await?;
         self.right.rewind().await?;
         let mut skip_raw_block_count = 0;
@@ -434,14 +437,12 @@ impl CompactorRunner {
             }
         }
         let rest_data = if !self.left.is_valid() {
-            if !self.right.is_valid() {
-                return self.executor.builder.finish().await;
-            }
             &mut self.right
         } else {
             &mut self.left
         };
-        {
+        if rest_data.is_valid() {
+            // compact rest keys of the current block.
             let sstable_iter = rest_data.sstable_iter.as_mut().unwrap();
             let target_key = FullKey::decode(&sstable_iter.sstable.value().meta.largest_key);
             if let Some(iter) = sstable_iter.iter.as_mut() {
@@ -474,6 +475,9 @@ impl CompactorRunner {
         for sst in &self.right.sstables {
             total_read_bytes += sst.file_size;
         }
+        self.metrics
+            .write_build_l0_bytes
+            .inc_by(skip_raw_block_size);
         tracing::info!(
             "OPTIMIZATION: skip {} blocks for task-{}, optimize {}% data compression",
             skip_raw_block_count,
@@ -481,7 +485,17 @@ impl CompactorRunner {
             skip_raw_block_size * 100 / total_read_bytes,
         );
 
-        self.executor.builder.finish().await
+        let outputs = self.executor.builder.finish().await?;
+        let ssts = Compactor::report_progress(
+            self.metrics.clone(),
+            Some(self.task_progress.clone()),
+            outputs,
+            false,
+        )
+        .await?;
+        let sst_infos = ssts.iter().map(|sst| sst.sst_info.clone()).collect_vec();
+        assert!(can_concat(&sst_infos));
+        Ok(ssts)
     }
 }
 

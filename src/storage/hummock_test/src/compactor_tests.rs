@@ -51,7 +51,7 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::compactor::compactor_runner::{compact, CompactorRunner};
     use risingwave_storage::hummock::compactor::fast_compactor_runner::CompactorRunner as FastCompactorRunner;
     use risingwave_storage::hummock::compactor::{
-        CompactionExecutor, Compactor, CompactorContext, DummyCompactionFilter, TaskProgress,
+        CompactionExecutor, CompactorContext, DummyCompactionFilter, TaskProgress,
     };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::iterator::UserIterator;
@@ -1324,6 +1324,7 @@ pub(crate) mod tests {
         data1: Vec<KeyValue>,
         data2: Vec<KeyValue>,
         data3: Vec<KeyValue>,
+        data4: Vec<KeyValue>,
     ) {
         let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
@@ -1354,7 +1355,8 @@ pub(crate) mod tests {
         let sst1 = gen_test_sstable_info(options.clone(), 1, data1, sstable_store.clone()).await;
         let sst2 = gen_test_sstable_info(options.clone(), 2, data2, sstable_store.clone()).await;
         options.compression_algorithm = CompressionAlgorithm::Lz4;
-        let sst3 = gen_test_sstable_info(options, 3, data3, sstable_store.clone()).await;
+        let sst3 = gen_test_sstable_info(options.clone(), 3, data3, sstable_store.clone()).await;
+        let sst4 = gen_test_sstable_info(options, 4, data4, sstable_store.clone()).await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
 
         let task = CompactTask {
@@ -1362,12 +1364,12 @@ pub(crate) mod tests {
                 InputLevel {
                     level_idx: 5,
                     level_type: 1,
-                    table_infos: vec![sst1.clone()],
+                    table_infos: vec![sst1, sst2],
                 },
                 InputLevel {
                     level_idx: 6,
                     level_type: 1,
-                    table_infos: vec![sst2, sst3],
+                    table_infos: vec![sst3, sst4],
                 },
             ],
             existing_table_ids: vec![1],
@@ -1390,7 +1392,7 @@ pub(crate) mod tests {
             compact_ctx.clone(),
             task.clone(),
             Box::new(SharedComapctorObjectIdManager::new(VecDeque::from_iter([
-                4, 5, 6, 7,
+                5, 6, 7, 8, 9,
             ]))),
         );
         let fast_compact_runner = FastCompactorRunner::new(
@@ -1398,7 +1400,7 @@ pub(crate) mod tests {
             task.clone(),
             multi_filter_key_extractor.clone(),
             Box::new(SharedComapctorObjectIdManager::new(VecDeque::from_iter([
-                8, 9, 10, 11,
+                10, 11, 12, 13, 14,
             ]))),
             Arc::new(TaskProgress::default()),
         );
@@ -1411,10 +1413,7 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
-        let fast_ret = fast_compact_runner.run().await.unwrap();
-        let mut fast_ret = Compactor::report_progress(compact_ctx.clone(), None, fast_ret)
-            .await
-            .unwrap();
+        let mut fast_ret = fast_compact_runner.run().await.unwrap();
         assert_eq!(ret1.len(), 1);
         assert_eq!(fast_ret.len(), 1);
         let normal_ret = ret1.pop().unwrap();
@@ -1513,7 +1512,6 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_fast_compact() {
         const KEY_COUNT: usize = 10000;
-        let mut data1 = Vec::with_capacity(KEY_COUNT);
         let mut last_k: u64 = 0;
         let mut rng = rand::rngs::StdRng::seed_from_u64(
             std::time::SystemTime::now()
@@ -1521,14 +1519,18 @@ pub(crate) mod tests {
                 .unwrap()
                 .as_secs(),
         );
+        let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
+        let mut data = Vec::with_capacity(KEY_COUNT);
+        let mut last_epoch = 400;
         for _ in 0..KEY_COUNT {
             let rand_v = rng.next_u32() % 100;
-            let k = if rand_v == 0 {
-                last_k + 2000
+            let (k, epoch) = if rand_v == 0 {
+                (last_k + 2000, 400)
+            } else if rand_v < 5 {
+                (last_k, last_epoch - 1)
             } else {
-                last_k + 1
+                (last_k + 1, 400)
             };
-            let epoch = 400;
             let key = k.to_be_bytes().to_vec();
             let key = FullKey::new(TableId::new(1), TableKey(key), epoch);
             let rand_v = rng.next_u32() % 10;
@@ -1537,32 +1539,40 @@ pub(crate) mod tests {
             } else {
                 HummockValue::put(format!("sst1-{}", epoch).into_bytes())
             };
-            data1.push((key, v));
+            if last_k != k && data1.is_empty() && data.len() >= KEY_COUNT / 2 {
+                std::mem::swap(&mut data, &mut data1);
+            }
+            data.push((key, v));
             last_k = k;
+            last_epoch = epoch;
         }
-        let mut data2 = Vec::with_capacity(KEY_COUNT);
+        let data2 = data;
         let mut data3 = Vec::with_capacity(KEY_COUNT);
+        let mut data = Vec::with_capacity(KEY_COUNT);
         let mut last_k: u64 = 0;
+        let max_epoch = std::cmp::min(300, last_epoch - 1);
+        last_epoch = max_epoch;
 
         for _ in 0..KEY_COUNT * 2 {
             let rand_v = rng.next_u32() % 100;
-            let k = if rand_v == 0 {
-                last_k + 1100
+            let (k, epoch) = if rand_v == 0 {
+                (last_k + 1100, max_epoch)
+            } else if rand_v < 5 {
+                (last_k, last_epoch - 1)
             } else {
-                last_k + 1
+                (last_k + 1, max_epoch)
             };
-            let epoch = 300;
             let key = k.to_be_bytes().to_vec();
             let key = FullKey::new(TableId::new(1), TableKey(key), epoch);
             let v = HummockValue::put(format!("sst2-{}", epoch).into_bytes());
-            if data2.len() + 1 < KEY_COUNT {
-                data2.push((key, v));
-            } else {
-                data3.push((key, v));
+            if last_k != k && data3.is_empty() && data.len() >= KEY_COUNT {
+                std::mem::swap(&mut data, &mut data3);
             }
+            data.push((key, v));
             last_k = k;
+            last_epoch = epoch;
         }
-
-        test_fast_compact_impl(data1, data2, data3).await;
+        let data4 = data;
+        test_fast_compact_impl(data1, data2, data3, data4).await;
     }
 }
