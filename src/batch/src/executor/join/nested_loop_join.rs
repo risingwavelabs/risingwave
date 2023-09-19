@@ -389,7 +389,7 @@ impl NestedLoopJoinExecutor {
                 .await?;
                 if chunk.cardinality() > 0 {
                     // chunk.visibility() must be Some(_)
-                    matched = &matched | chunk.visibility().unwrap();
+                    matched = &matched | chunk.visibility();
                     for spilled in chunk_builder.append_chunk(chunk) {
                         yield spilled
                     }
@@ -433,7 +433,7 @@ impl NestedLoopJoinExecutor {
                 .await?;
                 if chunk.cardinality() > 0 {
                     // chunk.visibility() must be Some(_)
-                    matched = &matched | chunk.visibility().unwrap();
+                    matched = &matched | chunk.visibility();
                 }
             }
             if ANTI_JOIN {
@@ -475,7 +475,7 @@ impl NestedLoopJoinExecutor {
                 .await?;
                 if chunk.cardinality() > 0 {
                     left_matched.set(left_row_idx, true);
-                    right_matched = &right_matched | chunk.visibility().unwrap();
+                    right_matched = &right_matched | chunk.visibility();
                     for spilled in chunk_builder.append_chunk(chunk) {
                         yield spilled
                     }

@@ -38,7 +38,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{
     BasicSerde, ValueRowDeserializer, ValueRowSerializer,
 };
-use risingwave_hummock_sdk::key::next_key;
+use risingwave_hummock_sdk::key::{next_key, TableKey};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::StorageError;
 use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
@@ -175,7 +175,7 @@ impl LogStoreRowSerde {
         seq_id: SeqIdType,
         op: Op,
         row: impl Row,
-    ) -> (VirtualNode, Bytes, Bytes) {
+    ) -> (VirtualNode, TableKey<Bytes>, Bytes) {
         let pk = [
             Some(ScalarImpl::Int64(Self::encode_epoch(epoch))),
             Some(ScalarImpl::Int32(seq_id)),
@@ -201,7 +201,7 @@ impl LogStoreRowSerde {
         epoch: u64,
         vnode: VirtualNode,
         is_checkpoint: bool,
-    ) -> (Bytes, Bytes) {
+    ) -> (TableKey<Bytes>, Bytes) {
         let pk = [Some(ScalarImpl::Int64(Self::encode_epoch(epoch))), None];
 
         let op_code = if is_checkpoint {
@@ -219,7 +219,7 @@ impl LogStoreRowSerde {
         (key_bytes, value_bytes)
     }
 
-    pub(crate) fn serialize_epoch(&self, vnode: VirtualNode, epoch: u64) -> Bytes {
+    pub(crate) fn serialize_epoch(&self, vnode: VirtualNode, epoch: u64) -> TableKey<Bytes> {
         serialize_pk_with_vnode(
             [Some(ScalarImpl::Int64(Self::encode_epoch(epoch)))],
             &self.epoch_serde,
@@ -232,7 +232,7 @@ impl LogStoreRowSerde {
         vnode: VirtualNode,
         epoch: u64,
         seq_id: SeqIdType,
-    ) -> Bytes {
+    ) -> TableKey<Bytes> {
         serialize_pk_with_vnode(
             [
                 Some(ScalarImpl::Int64(Self::encode_epoch(epoch))),
@@ -681,7 +681,7 @@ mod tests {
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_hummock_sdk::key::{FullKey, TableKey};
+    use risingwave_hummock_sdk::key::FullKey;
     use risingwave_storage::store::StateStoreReadIterStream;
     use risingwave_storage::table::DEFAULT_VNODE;
     use tokio::sync::oneshot;
@@ -728,7 +728,7 @@ mod tests {
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
-            let key = remove_vnode_prefix(&key);
+            let key = remove_vnode_prefix(&key.0);
             assert!(key < delete_range_right1);
             serialized_keys.push(key);
             let (decoded_epoch, row_op) = serde.deserialize(value).unwrap();
@@ -747,7 +747,7 @@ mod tests {
         }
 
         let (key, encoded_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, false);
-        let key = remove_vnode_prefix(&key);
+        let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(encoded_barrier).unwrap() {
             (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
                 assert!(!is_checkpoint);
@@ -755,7 +755,7 @@ mod tests {
             }
             _ => unreachable!(),
         }
-        assert!(key < delete_range_right1);
+        assert!(key.as_ref() < delete_range_right1);
         serialized_keys.push(key);
 
         seq_id = 1;
@@ -766,7 +766,7 @@ mod tests {
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
-            let key = remove_vnode_prefix(&key);
+            let key = remove_vnode_prefix(&key.0);
             assert!(key >= delete_range_right1);
             assert!(key < delete_range_right2);
             serialized_keys.push(key);
@@ -786,7 +786,7 @@ mod tests {
         }
 
         let (key, encoded_checkpoint_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, true);
-        let key = remove_vnode_prefix(&key);
+        let key = remove_vnode_prefix(&key.0);
         match serde.deserialize(encoded_checkpoint_barrier).unwrap() {
             (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
                 assert_eq!(decoded_epoch, epoch);
@@ -794,8 +794,8 @@ mod tests {
             }
             _ => unreachable!(),
         }
-        assert!(key >= delete_range_right1);
-        assert!(key < delete_range_right2);
+        assert!(key.as_ref() >= delete_range_right1);
+        assert!(key.as_ref() < delete_range_right2);
         serialized_keys.push(key);
 
         assert_eq!(serialized_keys.len(), 2 * rows.len() + 2);
@@ -871,7 +871,7 @@ mod tests {
             .map(|(op, row)| {
                 let (_, key, value) = serde.serialize_data_row(epoch, *seq_id, op, row);
                 *seq_id += 1;
-                Ok((FullKey::new(TEST_TABLE_ID, TableKey(key), epoch), value))
+                Ok((FullKey::new(TEST_TABLE_ID, key, epoch), value))
             })
             .collect_vec();
         (
@@ -898,7 +898,7 @@ mod tests {
         let (ops, rows) = gen_test_data(base);
         let first_barrier = {
             let (key, value) = serde.serialize_barrier(EPOCH0, DEFAULT_VNODE, true);
-            Ok((FullKey::new(TEST_TABLE_ID, TableKey(key), EPOCH0), value))
+            Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH0), value))
         };
         let stream = stream::once(async move { first_barrier });
         let (row_stream, tx1) =
@@ -908,7 +908,7 @@ mod tests {
             let serde = serde.clone();
             async move {
                 let (key, value) = serde.serialize_barrier(EPOCH1, DEFAULT_VNODE, false);
-                Ok((FullKey::new(TEST_TABLE_ID, TableKey(key), EPOCH1), value))
+                Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH1), value))
             }
         }));
         let (row_stream, tx2) =
@@ -916,7 +916,7 @@ mod tests {
         let stream = stream.chain(row_stream).chain(stream::once({
             async move {
                 let (key, value) = serde.serialize_barrier(EPOCH2, DEFAULT_VNODE, true);
-                Ok((FullKey::new(TEST_TABLE_ID, TableKey(key), EPOCH2), value))
+                Ok((FullKey::new(TEST_TABLE_ID, key, EPOCH2), value))
             }
         }));
         (stream, tx1, tx2, ops, rows)

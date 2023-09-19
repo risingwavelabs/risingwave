@@ -467,7 +467,7 @@ mod tests {
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         // The number of items in `ops` is the epoch count.
         let ops = vec![Op::Insert; epoch as usize];
-        StreamChunk::new(ops, vec![], None)
+        StreamChunk::new(ops, vec![])
     }
 
     #[tokio::test]
