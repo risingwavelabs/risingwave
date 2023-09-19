@@ -3208,7 +3208,7 @@ def section_memory_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_ms(
-                    "LRU manager latest evicted watermark time (ms) for actors",
+                    "LRU manager diff between current watermark and evicted watermark time (ms) for actors",
                     "",
                     [
                         panels.target(
