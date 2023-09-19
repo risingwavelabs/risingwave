@@ -1293,6 +1293,22 @@ where
     }
 }
 
+impl<
+        S,
+        SD,
+        const IS_REPLICATED: bool,
+        W: WatermarkBufferStrategy,
+        const USE_WATERMARK_CACHE: bool,
+    > StateTableInner<S, SD, IS_REPLICATED, W, USE_WATERMARK_CACHE>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
+    pub fn get_schema_len(&self) -> usize {
+        self.pk_indices.len() + self.value_indices.as_ref().map_or(0, |v| v.len())
+    }
+}
+
 pub type KeyedRowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
     impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
 

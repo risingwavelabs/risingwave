@@ -35,8 +35,7 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     check_all_vnode_finished, compute_bounds, construct_initial_finished_state, get_new_pos,
-    get_row_count, get_row_count_state, iter_chunks, mapping_chunk, mapping_message, mark_chunk,
-    owned_row_iter,
+    get_row_count_state, iter_chunks, mapping_chunk, mapping_message, mark_chunk, owned_row_iter,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -127,9 +126,18 @@ where
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
+
         // schema: | vnode | pk ... | backfill_finished | row_count |
         // +1 for vnode, +1 for backfill_finished, +1 for row_count.
         let state_len = pk_in_output_indices.len() + 3;
+
+        // Handle backwards compatibility of old schema:
+        // | vnode | pk ... | backfill_finished |
+        let row_count_is_persisted = if let Some(state_table) = self.state_table.as_ref() {
+            state_table.get_schema_len() == state_len
+        } else {
+            false
+        };
 
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
 
@@ -144,7 +152,7 @@ where
             state_table.init_epoch(first_barrier.epoch);
         }
 
-        let is_finished = if let Some(state_table) = self.state_table.as_mut() {
+        let is_finished = if let Some(state_table) = self.state_table.as_ref() {
             let is_finished = check_all_vnode_finished(state_table).await?;
             if is_finished {
                 assert!(!first_barrier.is_newly_added(self.actor_id));
@@ -220,9 +228,10 @@ where
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 =
-            if let Some(state_table) = self.state_table.as_ref() {
+            if let Some(state_table) = self.state_table.as_ref() && row_count_is_persisted {
                 get_row_count_state(state_table).await?
             } else {
+                // Maintain backwards compatibility with no state_table.
                 0
             };
 
