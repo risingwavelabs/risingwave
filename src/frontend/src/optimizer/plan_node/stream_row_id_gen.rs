@@ -43,6 +43,7 @@ impl StreamRowIdGen {
         Self::new_with_dist_helper(input, row_id_index, None)
     }
 
+    /// Create a new `StreamRowIdGen` with a custom distribution.
     pub fn new_with_dist(input: PlanRef, row_id_index: usize, distribution: Distribution) -> Self {
         Self::new_with_dist_helper(input, row_id_index, Some(distribution))
     }

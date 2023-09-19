@@ -38,7 +38,9 @@ pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
-use risingwave_common::catalog::{ColumnCatalog, ColumnId, ConflictBehavior, Field, Schema};
+use risingwave_common::catalog::{
+    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema,
+};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -463,7 +465,31 @@ impl PlanRoot {
             Ok(node)
         }
 
-        #[derive(PartialEq, Debug)]
+        fn inject_dml_node(
+            columns: &[ColumnCatalog],
+            append_only: bool,
+            stream_plan: PlanRef,
+            pk_column_indices: &[usize],
+            kind: PrimaryKeyKind,
+            column_descs: Vec<ColumnDesc>,
+        ) -> Result<PlanRef> {
+            let mut dml_node = StreamDml::new(stream_plan, append_only, column_descs).into();
+
+            // Add generated columns.
+            dml_node = inject_project_if_needed(columns, dml_node)?;
+
+            dml_node = match kind {
+                PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::RowIdAsPrimaryKey => {
+                    RequiredDist::hash_shard(pk_column_indices)
+                        .enforce_if_not_satisfies(dml_node, &Order::any())?
+                }
+                PrimaryKeyKind::AppendOnly => StreamExchange::new_no_shuffle(dml_node).into(),
+            };
+
+            Ok(dml_node)
+        }
+
+        #[derive(PartialEq, Debug, Copy, Clone)]
         enum PrimaryKeyKind {
             UserDefinedPrimaryKey,
             RowIdAsPrimaryKey,
@@ -497,10 +523,7 @@ impl PlanRoot {
                     RequiredDist::hash_shard(&pk_column_indices)
                         .enforce_if_not_satisfies(external_source_node, &Order::any())?
                 }
-                PrimaryKeyKind::RowIdAsPrimaryKey => {
-                    StreamExchange::new_no_shuffle(external_source_node).into()
-                }
-                PrimaryKeyKind::AppendOnly => {
+                PrimaryKeyKind::RowIdAsPrimaryKey | PrimaryKeyKind::AppendOnly => {
                     StreamExchange::new_no_shuffle(external_source_node).into()
                 }
             };
@@ -515,19 +538,14 @@ impl PlanRoot {
             )
             .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
 
-            let mut dml_node: PlanRef =
-                StreamDml::new(dummy_source_node, append_only, column_descs).into();
-
-            // Add generated columns.
-            dml_node = inject_project_if_needed(&columns, dml_node)?;
-
-            dml_node = match kind {
-                PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::RowIdAsPrimaryKey => {
-                    RequiredDist::hash_shard(&pk_column_indices)
-                        .enforce_if_not_satisfies(dml_node, &Order::any())?
-                }
-                PrimaryKeyKind::AppendOnly => StreamExchange::new_no_shuffle(dml_node).into(),
-            };
+            let dml_node = inject_dml_node(
+                &columns,
+                append_only,
+                dummy_source_node,
+                &pk_column_indices,
+                kind,
+                column_descs,
+            )?;
 
             StreamUnion::new(Union {
                 all: true,
@@ -536,18 +554,14 @@ impl PlanRoot {
             })
             .into()
         } else {
-            let mut dml_node = StreamDml::new(stream_plan, append_only, column_descs).into();
-
-            // Add generated columns.
-            dml_node = inject_project_if_needed(&columns, dml_node)?;
-
-            dml_node = match kind {
-                PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::RowIdAsPrimaryKey => {
-                    RequiredDist::hash_shard(&pk_column_indices)
-                        .enforce_if_not_satisfies(dml_node, &Order::any())?
-                }
-                PrimaryKeyKind::AppendOnly => StreamExchange::new_no_shuffle(dml_node).into(),
-            };
+            let dml_node = inject_dml_node(
+                &columns,
+                append_only,
+                stream_plan,
+                &pk_column_indices,
+                kind,
+                column_descs,
+            )?;
 
             StreamUnion::new(Union {
                 all: true,
