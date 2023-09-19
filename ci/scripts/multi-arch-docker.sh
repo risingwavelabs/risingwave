@@ -17,11 +17,11 @@ dockerhubaddr="risingwavelabs/risingwave"
 
 arches=()
 
-if [ "${SKIP_TARGET_AMD64:-false}" != "true" ]; then 
+if [ "${SKIP_TARGET_AMD64:-false}" != "true" ]; then
   arches+=("x86_64")
 fi
 
-if [ "${SKIP_TARGET_AARCH64:-false}" != "true" ]; then 
+if [ "${SKIP_TARGET_AARCH64:-false}" != "true" ]; then
   arches+=("aarch64")
 fi
 
