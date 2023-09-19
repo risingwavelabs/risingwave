@@ -120,19 +120,7 @@ impl NotificationServiceImpl {
 
     async fn get_tables_and_creating_tables_snapshot(&self) -> (Vec<Table>, NotificationVersion) {
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        // FIXME: Can be combined 1+2
-        // 1
-        let mut tables = catalog_guard
-            .database
-            .list_tables()
-            .into_iter()
-            .filter(|t| {
-                t.stream_job_status == PbStreamJobStatus::Unspecified as i32
-                    || t.stream_job_status == PbStreamJobStatus::Created as i32
-            })
-            .collect_vec();
-        // 2
-        tables.extend(catalog_guard.database.list_creating_tables());
+        let tables = catalog_guard.database.list_tables();
         let notification_version = self.env.notification_manager().current_version().await;
         (tables, notification_version)
     }
