@@ -67,7 +67,7 @@ impl LocalBarrierManager {
 /// This is computed per `HummockVersion`, which is updated whenever a checkpoint is committed.
 /// The `total_key_count` figure just counts the number of storage keys.
 /// For example, if a key is inserted and then deleted,
-/// it results two storage entries in LSMt, so count=2.
+/// it results two storage entries in `LSMt`, so count=2.
 /// Only after compaction, the count will drop back to 0.
 ///
 /// So the total count could be more pessimistic, than actual progress.
@@ -77,7 +77,7 @@ impl LocalBarrierManager {
 ///
 /// TODO(kwannoel): Perhaps it is possible to get total key count of the replicated state table
 /// for arrangement backfill. We can use that to estimate the progress as well, and avoid recording
-/// row_count state for it.
+/// `row_count` state for it.
 pub struct CreateMviewProgress {
     barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>,
 

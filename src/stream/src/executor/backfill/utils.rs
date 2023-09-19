@@ -381,21 +381,26 @@ pub(crate) fn build_temporary_state_with_vnode(
     is_finished: bool,
     current_pos: &OwnedRow,
 ) {
-    build_temporary_state(row_state, is_finished, current_pos);
+    row_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
+    row_state[current_pos.len() + 1] = Some(is_finished.into());
     row_state[0] = Some(vnode.to_scalar().into());
 }
 
 /// We want to avoid allocating a row for every vnode.
 /// Instead we can just modify a single row, and dispatch it to state table to write.
-/// This builds the `current_pos` segment of the row.
-/// Vnode needs to be filled in as well.
+/// This builds the following segments of the row:
+/// 1. `current_pos`
+/// 2. `backfill_finished`
+/// 3. `row_count`
 pub(crate) fn build_temporary_state(
     row_state: &mut [Datum],
     is_finished: bool,
     current_pos: &OwnedRow,
+    row_count: u64,
 ) {
     row_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
     row_state[current_pos.len() + 1] = Some(is_finished.into());
+    row_state[current_pos.len() + 2] = Some((row_count as i64).into());
 }
 
 /// Update backfill pos by vnode.
@@ -560,12 +565,13 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     is_finished: bool,
     current_pos: &Option<OwnedRow>,
+    row_count: u64,
     old_state: &mut Option<Vec<Datum>>,
     current_state: &mut [Datum],
 ) -> StreamExecutorResult<()> {
     if let Some(current_pos_inner) = current_pos {
         // state w/o vnodes.
-        build_temporary_state(current_state, is_finished, current_pos_inner);
+        build_temporary_state(current_state, is_finished, current_pos_inner, row_count);
         flush_data(table, epoch, old_state, current_state).await?;
         *old_state = Some(current_state.into());
     } else {

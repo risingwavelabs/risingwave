@@ -126,7 +126,9 @@ where
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
-        let state_len = pk_in_output_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
+        // schema: | vnode | pk ... | backfill_finished | row_count |
+        // +1 for vnode, +1 for backfill_finished, +1 for row_count.
+        let state_len = pk_in_output_indices.len() + 3;
 
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
 
@@ -411,6 +413,7 @@ where
                     &mut self.state_table,
                     false,
                     &current_pos,
+                    total_snapshot_processed_rows,
                     &mut old_state,
                     &mut current_state,
                 )
@@ -454,6 +457,7 @@ where
                         &mut self.state_table,
                         true,
                         &current_pos,
+                        total_snapshot_processed_rows,
                         &mut old_state,
                         &mut current_state,
                     )
@@ -531,6 +535,7 @@ where
         table: &mut Option<StateTable<S>>,
         is_finished: bool,
         current_pos: &Option<OwnedRow>,
+        row_count: u64,
         old_state: &mut Option<Vec<Datum>>,
         current_state: &mut [Datum],
     ) -> StreamExecutorResult<()> {
@@ -541,6 +546,7 @@ where
             table,
             is_finished,
             current_pos,
+            row_count,
             old_state,
             current_state,
         )
