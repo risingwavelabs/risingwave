@@ -399,7 +399,7 @@ enum MetaCommands {
     /// ```
     /// Use ; to separate multiple fragment
     #[clap(verbatim_doc_comment)]
-    #[clap(group(clap::ArgGroup::new("input_group").required(true).args(& ["plan", "from"])))]
+    #[clap(group(clap::ArgGroup::new("input_group").required(true).args(&["plan", "from"])))]
     Reschedule {
         /// Plan of reschedule, needs to be used with `revision`
         #[clap(long, requires = "revision")]
