@@ -67,8 +67,10 @@ pub struct IcebergConfig {
     #[serde(rename = "database.name")]
     pub database_name: String, // Use as catalog name.
 
+    // Catalog type supported by iceberg, such as "storage", "rest".
+    // If not set, we use "storage" as default.
     #[serde(rename = "catalog.type")]
-    pub catalog_type: String, // Catalog type supported by iceberg, such as "storage", "rest"
+    pub catalog_type: Option<String>,
 
     #[serde(rename = "warehouse.path")]
     pub path: Option<String>, // Path of iceberg warehouse, only applicable in storage catalog.
@@ -108,7 +110,13 @@ impl IcebergConfig {
 
     fn build_iceberg_configs(&self) -> HashMap<String, String> {
         let mut iceberg_configs = HashMap::new();
-        iceberg_configs.insert(CATALOG_TYPE.to_string(), self.catalog_type.clone());
+        iceberg_configs.insert(
+            CATALOG_TYPE.to_string(),
+            self.catalog_type
+                .as_deref()
+                .unwrap_or("storage")
+                .to_string(),
+        );
         iceberg_configs.insert(
             CATALOG_NAME.to_string(),
             self.database_name.clone().to_string(),
