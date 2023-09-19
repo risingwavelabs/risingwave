@@ -16,6 +16,8 @@ pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
+pub mod encoder;
+pub mod formatter;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
@@ -46,6 +48,8 @@ pub use tracing;
 
 use self::catalog::SinkType;
 use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
+use self::encoder::SerTo;
+use self::formatter::SinkFormatter;
 use self::iceberg::{IcebergSink, ICEBERG_SINK, REMOTE_ICEBERG_SINK};
 use crate::sink::boxed::BoxSink;
 use crate::sink::catalog::{SinkCatalog, SinkId};
@@ -72,7 +76,7 @@ pub struct SinkParam {
     pub sink_id: SinkId,
     pub properties: HashMap<String, String>,
     pub columns: Vec<ColumnDesc>,
-    pub pk_indices: Vec<usize>,
+    pub downstream_pk: Vec<usize>,
     pub sink_type: SinkType,
     pub db_name: String,
     pub sink_from_name: String,
@@ -85,7 +89,7 @@ impl SinkParam {
             sink_id: SinkId::from(pb_param.sink_id),
             properties: pb_param.properties,
             columns: table_schema.columns.iter().map(ColumnDesc::from).collect(),
-            pk_indices: table_schema
+            downstream_pk: table_schema
                 .pk_indices
                 .iter()
                 .map(|i| *i as usize)
@@ -104,7 +108,7 @@ impl SinkParam {
             properties: self.properties.clone(),
             table_schema: Some(TableSchema {
                 columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
-                pk_indices: self.pk_indices.iter().map(|i| *i as u32).collect(),
+                pk_indices: self.downstream_pk.iter().map(|i| *i as u32).collect(),
             }),
             sink_type: self.sink_type.to_proto().into(),
             db_name: self.db_name.clone(),
@@ -129,7 +133,7 @@ impl From<SinkCatalog> for SinkParam {
             sink_id: sink_catalog.id,
             properties: sink_catalog.properties,
             columns,
-            pk_indices: sink_catalog.downstream_pk,
+            downstream_pk: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
@@ -199,6 +203,44 @@ pub trait SinkWriterV1: Send + 'static {
     // aborts the current transaction because some error happens. we should rollback to the last
     // commit point.
     async fn abort(&mut self) -> Result<()>;
+}
+
+/// A free-form sink that may output in multiple formats and encodings. Examples include kafka,
+/// kinesis, nats and redis.
+///
+/// The implementor specifies required key & value type (likely string or bytes), as well as how to
+/// write a single pair. The provided `write_chunk` method would handle the interaction with a
+/// `SinkFormatter`.
+///
+/// Currently kafka takes `&mut self` while kinesis takes `&self`. So we use `&mut self` in trait
+/// but implement it for `&Kinesis`. This allows us to hold `&mut &Kinesis` and `&Kinesis`
+/// simultaneously, preventing the schema clone issue propagating from kafka to kinesis.
+pub trait FormattedSink {
+    type K;
+    type V;
+    async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()>;
+
+    async fn write_chunk<F: SinkFormatter>(
+        &mut self,
+        chunk: StreamChunk,
+        formatter: F,
+    ) -> Result<()>
+    where
+        F::K: SerTo<Self::K>,
+        F::V: SerTo<Self::V>,
+    {
+        for r in formatter.format_chunk(&chunk) {
+            let (event_key_object, event_object) = r?;
+
+            self.write_one(
+                event_key_object.map(SerTo::ser_to).transpose()?,
+                event_object.map(SerTo::ser_to).transpose()?,
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
 }
 
 pub struct SinkWriterV1Adapter<W: SinkWriterV1> {
@@ -426,7 +468,7 @@ impl SinkImpl {
             SinkConfig::ClickHouse(cfg) => SinkImpl::ClickHouse(ClickHouseSink::new(
                 *cfg,
                 param.schema(),
-                param.pk_indices,
+                param.downstream_pk,
                 param.sink_type.is_append_only(),
             )?),
             SinkConfig::Iceberg(cfg) => SinkImpl::Iceberg(IcebergSink::new(cfg, param)?),

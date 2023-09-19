@@ -6,10 +6,10 @@ connection_pool_size = 16
 metrics_level = "Info"
 telemetry_enabled = true
 
-[server.auto_dump_heap_profile]
-enabled = true
-dir = ""
-threshold = 0.8999999761581421
+[server.heap_profiling]
+enable_auto = true
+threshold_auto = 0.8999999761581421
+dir = "./"
 
 [meta]
 min_sst_retention_time_sec = 86400
@@ -141,7 +141,7 @@ reclaim_rate_limit_mb = 0
 [storage.cache_refill]
 data_refill_levels = []
 timeout_ms = 6000
-concurrency = 100
+concurrency = 10
 
 [system]
 barrier_interval_ms = 1000
