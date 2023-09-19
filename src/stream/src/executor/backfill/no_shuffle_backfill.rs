@@ -35,7 +35,8 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     check_all_vnode_finished, compute_bounds, construct_initial_finished_state, get_new_pos,
-    iter_chunks, mapping_chunk, mapping_message, mark_chunk, owned_row_iter,
+    get_row_count, get_row_count_state, iter_chunks, mapping_chunk, mapping_message, mark_chunk,
+    owned_row_iter,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -218,7 +219,12 @@ where
         let mut snapshot_read_epoch = init_epoch;
 
         // Keep track of rows from the snapshot.
-        let mut total_snapshot_processed_rows: u64 = 0;
+        let mut total_snapshot_processed_rows: u64 =
+            if let Some(state_table) = self.state_table.as_ref() {
+                get_row_count_state(state_table).await?
+            } else {
+                0
+            };
 
         // Backfill Algorithm:
         //

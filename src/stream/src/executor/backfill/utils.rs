@@ -308,6 +308,32 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
     Ok(result)
 }
 
+pub(crate) fn get_backfill_finished(row: OwnedRow) -> Option<bool> {
+    let backfill_finished_idx = row.len() - 2;
+    row.datum_at(backfill_finished_idx).map(|d| d.into_bool())
+}
+
+pub(crate) fn get_row_count(row: OwnedRow) -> u64 {
+    match row.last() {
+        None => 0,
+        Some(d) => d.into_int64() as u64,
+    }
+}
+
+pub(crate) async fn get_row_count_state<S: StateStore, const IS_REPLICATED: bool>(
+    state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
+) -> StreamExecutorResult<u64> {
+    let mut vnodes = state_table.vnodes().iter_vnodes_scalar();
+    let vnode = vnodes.next().unwrap();
+    let key: &[Datum] = &[Some(vnode.into())];
+    let row = state_table.get_row(key).await?;
+    let row_count = match row {
+        None => 0,
+        Some(row) => get_row_count(row),
+    };
+    Ok(row_count)
+}
+
 /// All vnodes should be persisted with status finished.
 pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED: bool>(
     state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
@@ -320,9 +346,9 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
         let row = state_table.get_row(key).await?;
 
         let vnode_is_finished = if let Some(row) = row
-            && let Some(vnode_is_finished) = row.last()
+            && let Some(vnode_is_finished) = get_backfill_finished(row)
         {
-            vnode_is_finished.into_bool()
+            vnode_is_finished
         } else {
             false
         };
