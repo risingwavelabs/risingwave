@@ -76,6 +76,8 @@ pub struct StreamingMetrics {
     pub agg_distinct_cache_miss_count: GenericCounterVec<AtomicU64>,
     pub agg_distinct_total_cache_count: GenericCounterVec<AtomicU64>,
     pub agg_distinct_cached_entry_count: GenericGaugeVec<AtomicI64>,
+    pub agg_dirty_group_count: GenericGaugeVec<AtomicI64>,
+    pub agg_dirty_group_heap_size: GenericGaugeVec<AtomicI64>,
 
     // Streaming TopN
     pub group_top_n_cache_miss_count: GenericCounterVec<AtomicU64>,
@@ -472,6 +474,22 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let agg_dirty_group_count = register_int_gauge_vec_with_registry!(
+            "stream_agg_dirty_group_count",
+            "Total dirty group counts in aggregation executor",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_dirty_group_heap_size = register_int_gauge_vec_with_registry!(
+            "stream_agg_dirty_group_heap_size",
+            "Total dirty group heap size in aggregation executor",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
         let group_top_n_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_group_top_n_cache_miss_count",
             "Group top n executor cache miss count",
@@ -817,6 +835,8 @@ impl StreamingMetrics {
             agg_distinct_cache_miss_count,
             agg_distinct_total_cache_count,
             agg_distinct_cached_entry_count,
+            agg_dirty_group_count,
+            agg_dirty_group_heap_size,
             group_top_n_cache_miss_count,
             group_top_n_total_query_cache_count,
             group_top_n_cached_entry_count,
