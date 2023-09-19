@@ -1453,9 +1453,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "cfg-or-panic"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf85d5384815558275789d91d1895d1d9919a6e2534d6144650f036ac65691a6"
+checksum = "bc7cb2538d4ecc42b6c3b57a83094d8c69894e74468d18cd045a09fdea807358"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6886,6 +6886,7 @@ dependencies = [
  "async-trait",
  "auto_enums",
  "await-tree",
+ "cfg-or-panic",
  "chrono",
  "chrono-tz",
  "criterion",
@@ -7589,6 +7590,7 @@ dependencies = [
  "arrow-flight",
  "arrow-schema",
  "arrow-select",
+ "cfg-or-panic",
  "futures-util",
  "madsim-tokio",
  "madsim-tonic",
