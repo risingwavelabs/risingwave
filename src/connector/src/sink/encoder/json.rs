@@ -15,6 +15,7 @@
 use base64::engine::general_purpose;
 use base64::Engine as _;
 use chrono::{Datelike, Timelike};
+use indexmap::IndexMap;
 use risingwave_common::array::{ArrayError, ArrayResult};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
@@ -196,20 +197,41 @@ fn datum_to_json_object(
             json!(vec)
         }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
-            let mut map = Map::with_capacity(st.len());
-            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
-                st.iter()
-                    .map(|(name, dt)| Field::with_name(dt.clone(), name)),
-            ) {
-                let value = datum_to_json_object(
-                    &sub_field,
-                    sub_datum_ref,
-                    timestamp_handling_mode,
-                    custom_json_type,
-                )?;
-                map.insert(sub_field.name.clone(), value);
+            if let CustomJsonType::Doris(_) = custom_json_type {
+                let mut map = IndexMap::with_capacity(st.len());
+                for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
+                    st.iter()
+                        .map(|(name, dt)| Field::with_name(dt.clone(), name)),
+                ) {
+                    let value = datum_to_json_object(
+                        &sub_field,
+                        sub_datum_ref,
+                        timestamp_handling_mode,
+                        custom_json_type,
+                    )?;
+                    map.insert(sub_field.name.clone(), value);
+                }
+                Value::String(
+                    serde_json::to_string(&map).map_err(|err| {
+                        ArrayError::internal(format!("Json to string err{:?}", err))
+                    })?,
+                )
+            } else {
+                let mut map = Map::with_capacity(st.len());
+                for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
+                    st.iter()
+                        .map(|(name, dt)| Field::with_name(dt.clone(), name)),
+                ) {
+                    let value = datum_to_json_object(
+                        &sub_field,
+                        sub_datum_ref,
+                        timestamp_handling_mode,
+                        custom_json_type,
+                    )?;
+                    map.insert(sub_field.name.clone(), value);
+                }
+                json!(map)
             }
-            json!(map)
         }
         (data_type, scalar_ref) => {
             return Err(ArrayError::internal(
