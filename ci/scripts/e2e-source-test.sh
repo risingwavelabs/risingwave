@@ -73,6 +73,7 @@ wait_for_connector_node_start() {
 }
 
 echo "--- starting risingwave cluster with connector node"
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe-with-recovery
 ./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
 
@@ -100,6 +101,7 @@ psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc_insert.s
 echo "inserted new rows into mysql and postgres"
 
 # start cluster w/o clean-data
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 touch .risingwave/log/connector-node.log
 ./connector-node/start-service.sh -p $node_port >> .risingwave/log/connector-node.log 2>&1 &
 echo "(recovery) waiting for connector node to start"
@@ -117,6 +119,7 @@ cargo make ci-kill
 pkill -f connector-node
 
 echo "--- e2e, ci-1cn-1fe, protobuf schema registry"
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe
 python3 -m pip install requests protobuf confluent-kafka
 python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 20
@@ -126,6 +129,7 @@ echo "--- Kill cluster"
 cargo make ci-kill
 
 echo "--- e2e, ci-kafka-plus-pubsub, kafka and pubsub source"
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-pubsub
 ./scripts/source/prepare_ci_kafka.sh
 cargo run --bin prepare_ci_pubsub

@@ -1278,7 +1278,6 @@ category = "RiseDev - CI"
 dependencies = ["clean-data", "pre-start-dev"]
 command = "target/${BUILD_MODE_DIR}/risedev-dev"
 args = ["${@}"]
-env = { "RUST_LOG" = "info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" }
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.ci-kill]
