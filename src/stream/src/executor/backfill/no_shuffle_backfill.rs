@@ -77,6 +77,7 @@ pub struct BackfillExecutor<S: StateStore> {
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
 
+    /// PTAL at the docstring for `CreateMviewProgress` to understand how we compute it.
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
@@ -468,6 +469,8 @@ where
         // After progress finished + state persisted,
         // we can forward messages directly to the downstream,
         // as backfill is finished.
+        // We don't need to report backfill progress any longer, as it has finished.
+        // It will always be at 100%.
         #[for_await]
         for msg in upstream {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
