@@ -76,16 +76,6 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// Get the return data type.
     fn return_type(&self) -> DataType;
 
-    /// Eval the result with extra checks.
-    async fn eval_checked(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let res = self.eval(input).await?;
-
-        // TODO: Decide to use assert or debug_assert by benchmarks.
-        assert_eq!(res.len(), input.capacity());
-
-        Ok(res)
-    }
-
     /// Evaluate the expression in vectorized execution. Returns an array.
     ///
     /// The default implementation calls `eval_v2` and always converts the result to an array.

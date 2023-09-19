@@ -226,7 +226,7 @@ impl FunctionAttr {
             quote! {
                 let mut columns = Vec::with_capacity(self.children.len() - #num_args);
                 for child in &self.children[#num_args..] {
-                    columns.push(child.eval_checked(input).await?);
+                    columns.push(child.eval(input).await?);
                 }
                 let variadic_input = DataChunk::new(columns, input.visibility().clone());
             }
@@ -438,7 +438,7 @@ impl FunctionAttr {
                     }
                     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
                         #(
-                            let #array_refs = self.children[#children_indices].eval_checked(input).await?;
+                            let #array_refs = self.children[#children_indices].eval(input).await?;
                             let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
                         #eval_variadic
@@ -925,7 +925,7 @@ impl FunctionAttr {
                     #[try_stream(boxed, ok = DataChunk, error = ExprError)]
                     async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
                         #(
-                        let #array_refs = self.#child.eval_checked(input).await?;
+                        let #array_refs = self.#child.eval(input).await?;
                         let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
 
