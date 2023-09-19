@@ -39,11 +39,17 @@ macro_rules! define_context {
 
             impl $name {
                 /// A simple wrapper around [`LocalKey::try_with`], and only the `function_impl` mod can access the inner value.
-                pub(super) fn try_with<F, R>(f: F) -> Result<R, ContextUnavailable> where F: FnOnce(&$ty) -> R {
+                pub(super) fn try_with<F, R>(self, f: F) -> Result<R, ContextUnavailable>
+                where
+                    F: FnOnce(&$ty) -> R
+                {
                     local_keys::$name.try_with(f).map_err(|_| ContextUnavailable(stringify!($name)))
                 }
 
-                pub fn scope<F>(value: $ty, f: F) -> tokio::task::futures::TaskLocalFuture<$ty, F> where F: std::future::Future {
+                pub fn scope<F>(self, value: $ty, f: F) -> tokio::task::futures::TaskLocalFuture<$ty, F>
+                where
+                    F: std::future::Future
+                {
                     local_keys::$name.scope(value, f)
                 }
             }
