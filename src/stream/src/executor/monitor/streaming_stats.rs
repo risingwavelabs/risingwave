@@ -76,6 +76,8 @@ pub struct StreamingMetrics {
     pub agg_distinct_cache_miss_count: GenericCounterVec<AtomicU64>,
     pub agg_distinct_total_cache_count: GenericCounterVec<AtomicU64>,
     pub agg_distinct_cached_entry_count: GenericGaugeVec<AtomicI64>,
+    pub agg_dirty_group_count: GenericGaugeVec<AtomicI64>,
+    pub agg_dirty_group_heap_size: GenericGaugeVec<AtomicI64>,
 
     // Streaming TopN
     pub group_top_n_cache_miss_count: GenericCounterVec<AtomicU64>,
@@ -196,7 +198,7 @@ impl StreamingMetrics {
         let actor_output_buffer_blocking_duration_ns = register_int_counter_vec_with_registry!(
             "stream_actor_output_buffer_blocking_duration_ns",
             "Total blocking duration (ns) of output buffer",
-            &["actor_id"],
+            &["actor_id", "fragment_id", "downstream_fragment_id"],
             registry
         )
         .unwrap();
@@ -204,7 +206,7 @@ impl StreamingMetrics {
         let actor_input_buffer_blocking_duration_ns = register_int_counter_vec_with_registry!(
             "stream_actor_input_buffer_blocking_duration_ns",
             "Total blocking duration (ns) of input buffer",
-            &["actor_id", "upstream_fragment_id"],
+            &["actor_id", "fragment_id", "upstream_fragment_id"],
             registry
         )
         .unwrap();
@@ -308,7 +310,7 @@ impl StreamingMetrics {
         let actor_out_record_cnt = register_int_counter_vec_with_registry!(
             "stream_actor_out_record_cnt",
             "Total number of rows actor sent",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -467,6 +469,22 @@ impl StreamingMetrics {
         let agg_distinct_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_agg_distinct_cached_entry_count",
             "Total entry counts in distinct aggregation executor cache",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_dirty_group_count = register_int_gauge_vec_with_registry!(
+            "stream_agg_dirty_group_count",
+            "Total dirty group counts in aggregation executor",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_dirty_group_heap_size = register_int_gauge_vec_with_registry!(
+            "stream_agg_dirty_group_heap_size",
+            "Total dirty group heap size in aggregation executor",
             &["table_id", "actor_id"],
             registry
         )
@@ -817,6 +835,8 @@ impl StreamingMetrics {
             agg_distinct_cache_miss_count,
             agg_distinct_total_cache_count,
             agg_distinct_cached_entry_count,
+            agg_dirty_group_count,
+            agg_dirty_group_heap_size,
             group_top_n_cache_miss_count,
             group_top_n_total_query_cache_count,
             group_top_n_cached_entry_count,

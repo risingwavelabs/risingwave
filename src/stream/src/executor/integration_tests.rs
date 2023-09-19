@@ -111,6 +111,7 @@ async fn test_merger_sum_aggr() {
             0,
         ))],
         0,
+        0,
         ctx,
         metrics,
     );
