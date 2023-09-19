@@ -568,11 +568,6 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 "The size of mem table exceeds 64 Mb and spill occurs. table_id {}",
                 self.table_id.table_id()
             );
-            let gap_epoch = self.epoch() + 1;
-
-            self.epoch
-                .replace(gap_epoch)
-                .expect("should have init epoch before seal the first epoch");
             self.flush(vec![]).await?;
         }
 

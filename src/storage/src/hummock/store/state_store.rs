@@ -328,15 +328,8 @@ impl LocalStateStore for LocalHummockStorage {
                 "The size of mem table exceeds 64 Mb and spill occurs. table_id {}",
                 self.table_id.table_id()
             );
-            let gap_epoch = self.epoch() + 1;
-            if gap_epoch < self.prev_epoch() + AVALIABLE_EPOCH_GAP {
-                self.epoch
-                    .replace(gap_epoch)
-                    .expect("should have init epoch before seal the gap epoch");
-                self.flush(vec![]).await?;
-            } else {
-                tracing::warn!("No mem table spill occurs, the gap epoch exceeds available range.");
-            }
+
+            self.flush(vec![]).await?;
         }
 
         Ok(())
