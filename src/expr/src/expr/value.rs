@@ -15,7 +15,7 @@
 use either::Either;
 use risingwave_common::array::*;
 use risingwave_common::for_all_array_variants;
-use risingwave_common::types::{Datum, Scalar};
+use risingwave_common::types::{Datum, DatumRef, Scalar, ToDatumRef};
 
 /// The type-erased return value of an expression.
 ///
@@ -24,6 +24,24 @@ use risingwave_common::types::{Datum, Scalar};
 pub enum ValueImpl {
     Array(ArrayRef),
     Scalar { value: Datum, capacity: usize },
+}
+
+impl ValueImpl {
+    /// Number of scalars in this value.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.iter().len()
+    }
+
+    /// Iterates over all scalars in this value.
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> + '_ {
+        match self {
+            Self::Array(array) => Either::Left(array.iter()),
+            Self::Scalar { value, capacity } => {
+                Either::Right(itertools::repeat_n(value.to_datum_ref(), *capacity))
+            }
+        }
+    }
 }
 
 /// The generic reference type of [`ValueImpl`]. Used as the arguments of expressions.
@@ -37,13 +55,17 @@ pub enum ValueRef<'a, A: Array> {
 }
 
 impl<'a, A: Array> ValueRef<'a, A> {
+    /// Number of scalars in this value.
+    #[inline]
+    pub fn len(self) -> usize {
+        self.iter().len()
+    }
+
     /// Iterates over all scalars in this value.
-    pub fn iter(self) -> impl Iterator<Item = Option<A::RefItem<'a>>> + 'a {
+    pub fn iter(self) -> impl ExactSizeIterator<Item = Option<A::RefItem<'a>>> + 'a {
         match self {
             Self::Array(array) => Either::Left(array.iter()),
-            Self::Scalar { value, capacity } => {
-                Either::Right(std::iter::repeat(value).take(capacity))
-            }
+            Self::Scalar { value, capacity } => Either::Right(itertools::repeat_n(value, capacity)),
         }
     }
 }

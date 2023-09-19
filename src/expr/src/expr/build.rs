@@ -27,6 +27,7 @@ use super::expr_in::InExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
+use super::wrapper::CheckedExpression;
 use crate::expr::{
     BoxedExpression, Expression, InputRefExpression, LiteralExpression, TryFromExprNodeBoxed,
 };
@@ -34,8 +35,7 @@ use crate::sig::func::FUNC_SIG_MAP;
 use crate::sig::FuncSigDebug;
 use crate::{bail, ExprError, Result};
 
-/// Build an expression from protobuf.
-pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_node(prost: &ExprNode) -> Result<BoxedExpression> {
     use PbType as E;
 
     let func_call = match prost.get_rex_node()? {
@@ -68,6 +68,15 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             build_func(func_type, ret_type, children)
         }
     }
+}
+
+/// Build an expression from protobuf.
+pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
+    let expr = build_node(prost)?;
+
+    let checked = CheckedExpression(expr);
+
+    Ok(checked.boxed())
 }
 
 /// Build an expression in `FuncCall` variant.
