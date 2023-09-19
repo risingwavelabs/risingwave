@@ -183,7 +183,6 @@ impl FragmentManager {
 
     /// Gets the counts for each upstream relation that each stream job
     /// indicated by `table_ids` depends on.
-    /// FIXME: Modify `dependent_relations` and get it from there instead.
     pub async fn get_upstream_relation_counts(
         &self,
         table_ids: &[TableId],
