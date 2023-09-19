@@ -18,9 +18,7 @@ pub mod server;
 mod telemetry;
 
 use clap::Parser;
-use risingwave_common::config::{
-    AsyncStackTraceOption, CompactorMode, MetricLevel, OverrideConfig,
-};
+use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
 
 use crate::server::{compactor_serve, shared_compactor_serve};
 
@@ -90,8 +88,8 @@ pub struct CompactorOpts {
     #[override_opts(path = storage.object_store_read_timeout_ms)]
     pub object_store_read_timeout_ms: Option<u64>,
 
-    #[clap(long, env = "RW_COMPACTOR_MODE", value_enum)]
-    pub compactor_mode: CompactorMode,
+    #[clap(long, env = "RW_COMPACTOR_MODE", default_value = "dedicated")]
+    pub compactor_mode: String,
 
     #[clap(long, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
     pub proxy_rpc_endpoint: String,
@@ -103,8 +101,8 @@ use std::pin::Pin;
 pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
-    match opts.compactor_mode {
-        CompactorMode::Shared => Box::pin(async move {
+    match opts.compactor_mode.as_str() {
+        "shared" => Box::pin(async move {
             tracing::info!("Shared compactor pod options: {:?}", opts);
             tracing::info!("Proxy rpc endpoint: {}", opts.proxy_rpc_endpoint.clone());
 
@@ -115,7 +113,7 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
             join_handle.await.unwrap();
         }),
-        CompactorMode::Dedicated => Box::pin(async move {
+        "dedicated" => Box::pin(async move {
             tracing::info!("Compactor node options: {:?}", opts);
             tracing::info!("meta address: {}", opts.meta_address.clone());
 
@@ -138,5 +136,11 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             join_handle.await.unwrap();
             observer_join_handle.abort();
         }),
+        _ => {
+            panic!(
+                "Compactor mode {} is configured incorrectly",
+                opts.compactor_mode
+            );
+        }
     }
 }
