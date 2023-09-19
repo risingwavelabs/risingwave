@@ -357,7 +357,6 @@ impl LocalStateStore for LocalHummockStorage {
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {
-        assert!(!self.is_dirty());
         let prev_epoch = self
             .epoch
             .replace(next_epoch)
