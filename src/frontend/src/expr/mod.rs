@@ -46,6 +46,7 @@ pub use order_by_expr::{OrderBy, OrderByExpr};
 mod expr_mutator;
 mod expr_rewriter;
 mod expr_visitor;
+mod function_impl;
 mod session_timezone;
 mod type_inference;
 mod utils;

@@ -198,7 +198,7 @@ impl StreamingMetrics {
         let actor_output_buffer_blocking_duration_ns = register_int_counter_vec_with_registry!(
             "stream_actor_output_buffer_blocking_duration_ns",
             "Total blocking duration (ns) of output buffer",
-            &["actor_id"],
+            &["actor_id", "fragment_id", "downstream_fragment_id"],
             registry
         )
         .unwrap();
@@ -206,7 +206,7 @@ impl StreamingMetrics {
         let actor_input_buffer_blocking_duration_ns = register_int_counter_vec_with_registry!(
             "stream_actor_input_buffer_blocking_duration_ns",
             "Total blocking duration (ns) of input buffer",
-            &["actor_id", "upstream_fragment_id"],
+            &["actor_id", "fragment_id", "upstream_fragment_id"],
             registry
         )
         .unwrap();
@@ -310,7 +310,7 @@ impl StreamingMetrics {
         let actor_out_record_cnt = register_int_counter_vec_with_registry!(
             "stream_actor_out_record_cnt",
             "Total number of rows actor sent",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap();
