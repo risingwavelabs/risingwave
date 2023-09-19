@@ -17,7 +17,7 @@ use std::ops::Range;
 
 use either::Either;
 
-use crate::function::window::{Frame, FrameBounds, FrameExclusion};
+use crate::window_function::{Frame, FrameBounds, FrameExclusion};
 
 struct Entry<K: Ord, V> {
     key: K,
@@ -238,7 +238,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::function::window::{Frame, FrameBound};
+    use crate::window_function::{Frame, FrameBound};
 
     #[test]
     fn test_rows_frame_unbounded_preceding_to_current_row() {
