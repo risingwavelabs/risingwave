@@ -312,7 +312,7 @@ pub struct ScaleCommon {
 
     /// Specify the fragment ids that need to be scheduled.
     /// empty by default, which means all fragments will be scheduled
-    #[clap(long)]
+    #[clap(long, value_delimiter = ',')]
     fragments: Option<Vec<u32>>,
 }
 
@@ -325,13 +325,14 @@ pub struct ScaleVerticalCommands {
     /// supported
     #[clap(
         long,
+        required = true,
         value_delimiter = ',',
         value_name = "all or worker_id or worker_host, ..."
     )]
     workers: Option<Vec<String>>,
 
     /// The target parallelism per worker, requires `workers` to be set.
-    #[clap(long, requires = "workers")]
+    #[clap(long, required = true)]
     target_parallelism_per_worker: Option<u32>,
 }
 
@@ -398,7 +399,7 @@ enum MetaCommands {
     /// ```
     /// Use ; to separate multiple fragment
     #[clap(verbatim_doc_comment)]
-    #[clap(group(clap::ArgGroup::new("input_group").required(true).args(&["plan", "from"])))]
+    #[clap(group(clap::ArgGroup::new("input_group").required(true).args(& ["plan", "from"])))]
     Reschedule {
         /// Plan of reschedule, needs to be used with `revision`
         #[clap(long, requires = "revision")]
