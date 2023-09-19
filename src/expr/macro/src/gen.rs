@@ -70,6 +70,10 @@ impl FunctionAttr {
                 // infer as the type of "anyarray" argument
                 return Ok(quote! { |args| Ok(args[#i].clone()) });
             }
+            if let Some(i) = self.args.iter().position(|t| t == "any") {
+                // infer as the array type of "any" argument
+                return Ok(quote! { |args| Ok(DataType::List(Box::new(args[#i].clone()))) });
+            }
         } else if self.ret == "struct" {
             if let Some(i) = self.args.iter().position(|t| t == "struct") {
                 // infer as the type of "struct" argument

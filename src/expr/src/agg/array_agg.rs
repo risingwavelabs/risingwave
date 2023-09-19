@@ -16,10 +16,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::types::{Datum, ScalarRefImpl, ToOwnedDatum};
 use risingwave_expr_macro::aggregate;
 
-#[aggregate(
-    "array_agg(any) -> anyarray",
-    type_infer = "|args| Ok(DataType::List(Box::new(args[0].clone())))"
-)]
+#[aggregate("array_agg(any) -> anyarray")]
 fn array_agg(state: Option<ListValue>, value: Option<ScalarRefImpl<'_>>) -> ListValue {
     let mut state: Vec<Datum> = state.unwrap_or_default().into();
     state.push(value.to_owned_datum());
