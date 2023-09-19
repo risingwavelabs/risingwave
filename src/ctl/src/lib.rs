@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
-#![feature(hash_drain_filter)]
+#![feature(hash_extract_if)]
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -220,6 +220,8 @@ enum HummockCommands {
         level0_max_compact_file_number: Option<u64>,
         #[clap(long)]
         level0_overlapping_sub_level_compact_level_count: Option<u32>,
+        #[clap(long)]
+        enable_emergency_picker: Option<bool>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -239,6 +241,8 @@ enum HummockCommands {
         #[clap(short, long = "verbose", default_value_t = false)]
         verbose: bool,
     },
+    /// Validate the current HummockVersion.
+    ValidateVersion,
 }
 
 #[derive(Subcommand)]
@@ -464,7 +468,7 @@ pub enum ProfileCommands {
     Heap {
         /// The output directory of the dumped file
         #[clap(long = "dir")]
-        dir: String,
+        dir: Option<String>,
     },
 }
 
@@ -547,6 +551,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             max_space_reclaim_bytes,
             level0_max_compact_file_number,
             level0_overlapping_sub_level_compact_level_count,
+            enable_emergency_picker,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -565,6 +570,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     max_space_reclaim_bytes,
                     level0_max_compact_file_number,
                     level0_overlapping_sub_level_compact_level_count,
+                    enable_emergency_picker,
                 ),
             )
             .await?
@@ -587,6 +593,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Hummock(HummockCommands::ListCompactionStatus { verbose }) => {
             cmd_impl::hummock::list_compaction_status(context, verbose).await?;
+        }
+        Commands::Hummock(HummockCommands::ValidateVersion) => {
+            cmd_impl::hummock::validate_version(context).await?;
         }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?

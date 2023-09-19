@@ -69,6 +69,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
+        pk_indices: PkIndices,
     ) -> StreamResult<Self> {
         let info = input.info();
         Ok(TopNExecutorWrapper {
@@ -84,6 +85,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
                 state_table,
                 watermark_epoch,
                 ctx,
+                pk_indices,
             )?,
         })
     }
@@ -129,9 +131,11 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
         ctx: ActorContextRef,
+        pk_indices: PkIndices,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
-            pk_indices, schema, ..
+            schema: input_schema,
+            ..
         } = input_info;
 
         let metrics_info = MetricsInfo::new(
@@ -141,12 +145,13 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             "GroupTopN",
         );
 
-        let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &group_by);
+        let cache_key_serde =
+            create_cache_key_serde(&storage_key, &input_schema, &order_by, &group_by);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
         Ok(Self {
             info: ExecutorInfo {
-                schema,
+                schema: input_schema,
                 pk_indices,
                 identity: format!("AppendOnlyGroupTopNExecutor {:X}", executor_id),
             },

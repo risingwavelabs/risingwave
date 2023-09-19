@@ -21,6 +21,7 @@ use futures::stream::select_all;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
@@ -77,7 +78,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
     async fn init(&mut self) -> LogStoreResult<()> {
         let first_write_epoch = self.rx.init().await;
         let streams = try_join_all(self.serde.vnodes().iter_vnodes().map(|vnode| {
-            let range_start = Bytes::from(Vec::from(vnode.to_be_bytes()));
+            let range_start = TableKey(Bytes::from(Vec::from(vnode.to_be_bytes())));
             let range_end = self.serde.serialize_epoch(vnode, first_write_epoch);
             let table_id = self.table_id;
             let state_store = self.state_store.clone();
@@ -195,7 +196,6 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         })
     }
 
-    #[expect(clippy::unused_async)]
     async fn truncate(&mut self) -> LogStoreResult<()> {
         self.rx.truncate();
         Ok(())

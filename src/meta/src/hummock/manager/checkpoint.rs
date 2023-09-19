@@ -39,7 +39,7 @@ impl HummockManager {
         use prost::Message;
         let data = match self
             .object_store
-            .read(&self.version_checkpoint_path, None)
+            .read(&self.version_checkpoint_path, ..)
             .await
         {
             Ok(data) => data,

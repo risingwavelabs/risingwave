@@ -618,10 +618,7 @@ mod tests {
             OrderType::descending(),
         )
         .unwrap();
-        let concated_encoded_row1 = encoded_v10
-            .into_iter()
-            .chain(encoded_v11.into_iter())
-            .collect();
+        let concated_encoded_row1 = encoded_v10.into_iter().chain(encoded_v11).collect();
         assert_eq!(encoded_row1, concated_encoded_row1);
 
         let encoded_row2 = encode_row(row2.project(&order_col_indices), &order_types).unwrap();

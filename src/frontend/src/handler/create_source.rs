@@ -252,7 +252,7 @@ fn consume_string_from_options(
     ))))
 }
 
-fn get_json_schema_location(
+pub fn get_json_schema_location(
     row_options: &mut BTreeMap<String, String>,
 ) -> Result<Option<(AstString, bool)>> {
     let schema_location = try_consume_string_from_options(row_options, "schema.location");
@@ -1068,7 +1068,10 @@ pub async fn handle_create_source(
         )));
     }
 
-    let source_schema = stmt.source_schema.into_source_schema_v2();
+    let (source_schema, notice) = stmt.source_schema.into_source_schema_v2();
+    if let Some(notice) = notice {
+        session.notice_to_user(notice)
+    };
 
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
     validate_compatibility(&source_schema, &mut with_properties)?;
@@ -1107,7 +1110,13 @@ pub async fn handle_create_source(
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
 
-    bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
+    bind_sql_column_constraints(
+        &session,
+        name.clone(),
+        &mut columns,
+        stmt.columns,
+        &pk_column_ids,
+    )?;
 
     check_source_schema(&with_properties, row_id_index, &columns)?;
 

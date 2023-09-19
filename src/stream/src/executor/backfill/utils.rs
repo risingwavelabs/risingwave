@@ -170,10 +170,10 @@ pub(crate) fn mark_chunk_ref_by_vnode(
         new_visibility.append(v);
     }
     let (columns, _) = data.into_parts();
-    Ok(StreamChunk::new(
+    Ok(StreamChunk::with_visibility(
         ops,
         columns,
-        Some(new_visibility.finish()),
+        new_visibility.finish(),
     ))
 }
 
@@ -201,7 +201,7 @@ fn mark_chunk_inner(
         new_visibility.append(v);
     }
     let (columns, _) = data.into_parts();
-    StreamChunk::new(ops, columns, Some(new_visibility.finish()))
+    StreamChunk::with_visibility(ops, columns, new_visibility.finish())
 }
 
 fn mark_cdc_chunk_inner(
@@ -246,10 +246,10 @@ fn mark_cdc_chunk_inner(
     }
 
     let (columns, _) = data.into_parts();
-    Ok(StreamChunk::new(
+    Ok(StreamChunk::with_visibility(
         ops,
         columns,
-        Some(new_visibility.finish()),
+        new_visibility.finish(),
     ))
 }
 
@@ -257,7 +257,7 @@ fn mark_cdc_chunk_inner(
 pub(crate) fn mapping_chunk(chunk: StreamChunk, output_indices: &[usize]) -> StreamChunk {
     let (ops, columns, visibility) = chunk.into_inner();
     let mapped_columns = output_indices.iter().map(|&i| columns[i].clone()).collect();
-    StreamChunk::new(ops, mapped_columns, visibility.into_visibility())
+    StreamChunk::with_visibility(ops, mapped_columns, visibility)
 }
 
 fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {
@@ -335,6 +335,9 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
 }
 
 /// Flush the data
+// This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+// TODO: remove `allow` here after the issued is closed.
+#[expect(clippy::needless_pass_by_ref_mut)]
 pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     epoch: EpochPair,
@@ -502,7 +505,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     epoch: EpochPair,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     is_finished: bool,
-    backfill_state: &mut BackfillState,
+    backfill_state: &BackfillState,
     committed_progress: &mut HashMap<VirtualNode, Vec<Datum>>,
     temporary_state: &mut [Datum],
 ) -> StreamExecutorResult<()> {

@@ -206,7 +206,7 @@ pub async fn resize(ctl_ctx: &CtlContext, scale_ctx: ScaleCommandContext) -> any
             (_, Some(_)) if include_worker_ids.is_empty() => {
                 fail!("Cannot specify target parallelism per worker without including any worker")
             }
-            (Some(target), _) if target == 0 => fail!("Target parallelism must be greater than 0"),
+            (Some(0), _) => fail!("Target parallelism must be greater than 0"),
             _ => {}
         }
 

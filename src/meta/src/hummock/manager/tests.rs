@@ -881,8 +881,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     let _tx = compactor_manager.add_compactor(context_id);
 
-    let (join_handle, shutdown_tx) =
-        HummockManager::hummock_timer_task(hummock_manager.clone()).await;
+    let (join_handle, shutdown_tx) = HummockManager::hummock_timer_task(hummock_manager.clone());
 
     // No compaction task available.
     assert!(hummock_manager
@@ -994,8 +993,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     let _tx = compactor_manager.add_compactor(context_id);
 
-    let (join_handle, shutdown_tx) =
-        HummockManager::hummock_timer_task(hummock_manager.clone()).await;
+    let (join_handle, shutdown_tx) = HummockManager::hummock_timer_task(hummock_manager.clone());
 
     // No compaction task available.
     assert!(hummock_manager

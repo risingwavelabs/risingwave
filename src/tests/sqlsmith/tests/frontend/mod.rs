@@ -53,7 +53,7 @@ async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result
 }
 
 fn get_seed_table_sql() -> String {
-    let seed_files = vec![
+    let seed_files = [
         "tests/testdata/tpch.sql",
         "tests/testdata/nexmark.sql",
         "tests/testdata/alltypes.sql",

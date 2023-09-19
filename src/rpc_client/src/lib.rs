@@ -22,14 +22,12 @@
 #![feature(associated_type_defaults)]
 #![feature(generators)]
 #![feature(iterator_try_collect)]
-#![feature(hash_drain_filter)]
+#![feature(hash_extract_if)]
 #![feature(try_blocks)]
 #![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
 
 use std::any::type_name;
-#[cfg(madsim)]
-use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::iter::repeat;
@@ -40,15 +38,12 @@ use async_trait::async_trait;
 use futures::future::try_join_all;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
-#[cfg(not(madsim))]
 use moka::future::Cache;
 use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::heartbeat_request::extra_info;
 use tokio::sync::mpsc::{channel, Sender};
-#[cfg(madsim)]
-use tokio::sync::Mutex;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
@@ -84,12 +79,7 @@ pub trait RpcClient: Send + Sync + 'static + Clone {
 pub struct RpcClientPool<S> {
     connection_pool_size: u16,
 
-    #[cfg(not(madsim))]
     clients: Cache<HostAddr, Vec<S>>,
-
-    // moka::Cache internally uses system thread, so we can't use it in simulation
-    #[cfg(madsim)]
-    clients: Arc<Mutex<HashMap<HostAddr, S>>>,
 }
 
 impl<S> Default for RpcClientPool<S>
@@ -108,10 +98,7 @@ where
     pub fn new(connection_pool_size: u16) -> Self {
         Self {
             connection_pool_size,
-            #[cfg(not(madsim))]
             clients: Cache::new(u64::MAX),
-            #[cfg(madsim)]
-            clients: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -124,7 +111,6 @@ where
 
     /// Gets the RPC client for the given addr. If the connection is not established, a
     /// new client will be created and returned.
-    #[cfg(not(madsim))]
     pub async fn get_by_addr(&self, addr: HostAddr) -> Result<S> {
         Ok(self
             .clients
@@ -139,17 +125,6 @@ where
             .choose(&mut rand::thread_rng())
             .unwrap()
             .clone())
-    }
-
-    #[cfg(madsim)]
-    pub async fn get_by_addr(&self, addr: HostAddr) -> Result<S> {
-        let mut clients = self.clients.lock().await;
-        if let Some(client) = clients.get(&addr) {
-            return Ok(client.clone());
-        }
-        let client = S::new_client(addr.clone()).await?;
-        clients.insert(addr, client.clone());
-        Ok(client)
     }
 }
 

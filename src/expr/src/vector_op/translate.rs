@@ -18,7 +18,7 @@ use std::fmt::Write;
 use risingwave_expr_macro::function;
 
 #[function("translate(varchar, varchar, varchar) -> varchar")]
-pub fn translate(s: &str, match_str: &str, replace_str: &str, writer: &mut dyn Write) {
+pub fn translate(s: &str, match_str: &str, replace_str: &str, writer: &mut impl Write) {
     let mut char_map = HashMap::new();
     let mut match_chars = match_str.chars();
     let mut replace_chars = replace_str.chars();

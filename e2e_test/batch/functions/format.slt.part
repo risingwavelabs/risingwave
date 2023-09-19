@@ -7,3 +7,26 @@ query T
 SELECT format('Testing %s, %s, %s, %%', 'one', 'two', 'three');
 ----
 Testing one, two, three, %
+
+query T
+SELECT format('%s %s', a, b) from (values
+    ('Hello', 'World'),
+    ('Rising', 'Wave')
+) as t(a, b);
+----
+Hello World
+Rising Wave
+
+query T
+SELECT format(f, a, b) from (values
+    ('%s %s', 'Hello', 'World'),
+    ('%s%s', 'Hello', null),
+    (null, 'Hello', 'World')
+) as t(f, a, b);
+----
+Hello World
+Hello
+NULL
+
+query error too few arguments for format()
+SELECT format('%s %s', 'Hello');
