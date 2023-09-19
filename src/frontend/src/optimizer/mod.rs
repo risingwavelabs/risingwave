@@ -505,9 +505,15 @@ impl PlanRoot {
                 }
             };
 
-            let dummy_source_node =
-                LogicalSource::new(None, columns.clone(), row_id_index, false, true, context)
-                    .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
+            let dummy_source_node = LogicalSource::new(
+                None,
+                columns.clone(),
+                row_id_index,
+                false,
+                true,
+                context.clone(),
+            )
+            .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
 
             let mut dml_node: PlanRef =
                 StreamDml::new(dummy_source_node, append_only, column_descs).into();
@@ -586,7 +592,7 @@ impl PlanRoot {
             RequiredDist::ShardByKey(bitset)
         };
 
-        // let stream_plan = inline_session_timezone_in_exprs(context, stream_plan)?;
+        let stream_plan = inline_session_timezone_in_exprs(context, stream_plan)?;
 
         StreamMaterialize::create_for_table(
             stream_plan,

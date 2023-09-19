@@ -26,31 +26,40 @@ pub struct StreamRowIdGen {
     pub base: PlanBase<Stream>,
     input: PlanRef,
     row_id_index: usize,
+    custom_distribution: bool,
 }
 
 impl StreamRowIdGen {
     pub fn new(input: PlanRef, row_id_index: usize) -> Self {
-        let distribution = if input.append_only() {
+        if input.append_only() {
             // remove exchange for append only source
-            Distribution::HashShard(vec![row_id_index])
-        } else {
-            input.distribution().clone()
-        };
+            return Self::new_with_dist_helper(
+                input,
+                row_id_index,
+                Some(Distribution::HashShard(vec![row_id_index])),
+            );
+        }
 
-        Self::new_with_dist(input, row_id_index, distribution)
+        Self::new_with_dist_helper(input, row_id_index, None)
     }
 
-    pub fn new_with_dist(
+    pub fn new_with_dist(input: PlanRef, row_id_index: usize, distribution: Distribution) -> Self {
+        Self::new_with_dist_helper(input, row_id_index, Some(distribution))
+    }
+
+    fn new_with_dist_helper(
         input: PlanRef,
         row_id_index: usize,
-        distribution: Distribution,
+        distribution: Option<Distribution>,
     ) -> StreamRowIdGen {
+        let custom_distribution = distribution.is_some();
+        let dist = distribution.unwrap_or(input.distribution().clone());
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
-            distribution,
+            dist,
             input.append_only(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
@@ -59,6 +68,7 @@ impl StreamRowIdGen {
             base,
             input,
             row_id_index,
+            custom_distribution,
         }
     }
 }
@@ -76,6 +86,10 @@ impl PlanTreeNodeUnary for StreamRowIdGen {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
+        if self.custom_distribution {
+            return Self::new_with_dist(input, self.row_id_index, self.base.dist.clone());
+        }
+
         Self::new(input, self.row_id_index)
     }
 }
