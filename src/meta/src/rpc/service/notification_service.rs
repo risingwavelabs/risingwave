@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_pb::backup_service::MetaBackupManifestId;
-use risingwave_pb::catalog::Table;
+use risingwave_pb::catalog::{PbStreamJobStatus, Table};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::WriteLimits;
@@ -120,7 +120,12 @@ impl NotificationServiceImpl {
 
     async fn get_tables_and_creating_tables_snapshot(&self) -> (Vec<Table>, NotificationVersion) {
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        let mut tables = catalog_guard.database.list_tables();
+        let mut tables = catalog_guard
+            .database
+            .list_tables()
+            .into_iter()
+            .filter(|t| t.stream_job_status == PbStreamJobStatus::Created as i32)
+            .collect_vec();
         tables.extend(catalog_guard.database.list_creating_tables());
         let notification_version = self.env.notification_manager().current_version().await;
         (tables, notification_version)
