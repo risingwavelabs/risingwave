@@ -15,7 +15,7 @@
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
+use std::fs;
 use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
@@ -41,14 +41,25 @@ impl MinioService {
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &MinioConfig) -> Result<()> {
+        println!("这里{:?} {:?} {:?}", config.listen_address, config.port, config.console_port);
+        // let cert_file_content = fs::read_to_string("/Users/wangcongyi/singularity/risingwave/public.crt")?;
+        // let cert_file_content2= fs::read_to_string("/Users/wangcongyi/singularity/risingwave/public.crt")?;
+        // let ab = fs::read_to_string("/Users/wangcongyi/singularity/risingwave/private.key")?;
         cmd.arg("server")
             .arg("--address")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--console-address")
             .arg(format!("{}:{}", config.listen_address, config.console_port))
+            // .arg("--protocol")
+            // .arg("=https")
             .env("MINIO_ROOT_USER", &config.root_user)
             .env("MINIO_ROOT_PASSWORD", &config.root_password)
             .env("MINIO_PROMETHEUS_AUTH_TYPE", "public")
+            .env("MINIO_BROWSER", "on")
+            .env("MINIO_CERT_CER", "on")
+            .env("MINIO_CERT_CERTIFICATE", "/Users/wangcongyi/singularity/risingwave/public.crt")
+            .env("MINIO_CERT_PRIVATE_KEY", "/Users/wangcongyi/singularity/risingwave/private.key")
+            .env("MINIO_CERT_CERTIFICATE_CHAIN", "/Users/wangcongyi/singularity/risingwave/csr.csr")
             // Allow MinIO to be used on root disk, bypass restriction.
             // https://github.com/risingwavelabs/risingwave/pull/3012
             // https://docs.min.io/minio/baremetal/installation/deploy-minio-single-node-single-drive.html#id3
@@ -87,11 +98,25 @@ impl Task for MinioService {
 
         Self::apply_command_args(&mut cmd, &self.config)?;
 
+        println!("command = {:?}", cmd);
+
         let prefix_config = env::var("PREFIX_CONFIG")?;
 
         let data_path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
         fs_err::create_dir_all(&data_path)?;
 
+        // // 添加代码：将验证文件写入 minio/certs/CAs/ 目录
+        // let ca_path = Path::new(&prefix_config).join("minio").join("certs").join("CAs");
+        // let certs_path = Path::new(&prefix_config).join("minio").join("certs");
+        
+        // fs_err::create_dir_all(&certs_path)?;
+        // let cert_file_content = fs::read_to_string("/Users/wangcongyi/singularity/risingwave/public.crt")?;
+        // let cert_file_content2 = fs::read_to_string("/Users/wangcongyi/singularity/risingwave/public.crt")?;
+        // let ab = fs::read_to_string("/Users/wangcongyi/singularity/risingwave/private.key")?;
+        // fs_err::write(certs_path.join("public.crt"), cert_file_content)?;
+        // fs_err::write(certs_path.join("private.key"), ab)?;
+        // fs_err::write(ca_path.join("cert_chain_file.crt"), cert_file_content2)?;
+        // println!("prefix_config = {:?} {:?}", prefix_config, data_path);
         cmd.arg("--config-dir")
             .arg(Path::new(&prefix_config).join("minio"))
             .arg(&data_path);
