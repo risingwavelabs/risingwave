@@ -11,7 +11,7 @@ buildkite-agent artifact download simulation-it-test.tar.zst .
 echo "--- Extract artifacts"
 tar -xvf simulation-it-test.tar.zst
 mkdir target/sim
-mv target/ci-sim target/sim
+mv target/debug target/sim/ci-sim
 
 echo "--- Run integration tests in deterministic simulation mode"
 seq $TEST_NUM | parallel MADSIM_TEST_SEED={} NEXTEST_PROFILE=ci-sim \

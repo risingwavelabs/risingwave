@@ -47,6 +47,7 @@ serde_json = "1.0.107"
 sqllogictest = "0.15.3"
 tempfile = "3"
 tokio = { version = "0.2.23", package = "madsim-tokio" }
+tokio-stream = "0.1"
 tokio-postgres = "0.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
