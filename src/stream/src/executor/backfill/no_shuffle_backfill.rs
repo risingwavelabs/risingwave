@@ -131,14 +131,6 @@ where
         // +1 for vnode, +1 for backfill_finished, +1 for row_count.
         let state_len = pk_in_output_indices.len() + 3;
 
-        // Handle backwards compatibility of old schema:
-        // | vnode | pk ... | backfill_finished |
-        let row_count_is_persisted = if let Some(state_table) = self.state_table.as_ref() {
-            state_table.get_schema_len() == state_len
-        } else {
-            false
-        };
-
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
 
         let upstream_table_id = self.upstream_table.table_id().table_id;
@@ -153,7 +145,7 @@ where
         }
 
         let is_finished = if let Some(state_table) = self.state_table.as_ref() {
-            let is_finished = check_all_vnode_finished(state_table, row_count_is_persisted).await?;
+            let is_finished = check_all_vnode_finished(state_table, state_len).await?;
             if is_finished {
                 assert!(!first_barrier.is_newly_added(self.actor_id));
             }
@@ -228,8 +220,8 @@ where
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 =
-            if let Some(state_table) = self.state_table.as_ref() && row_count_is_persisted {
-                get_row_count_state(state_table).await?
+            if let Some(state_table) = self.state_table.as_ref() {
+                get_row_count_state(state_table, state_len).await?
             } else {
                 // Maintain backwards compatibility with no state_table.
                 0
