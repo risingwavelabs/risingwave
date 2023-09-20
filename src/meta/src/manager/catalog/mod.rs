@@ -735,14 +735,22 @@ impl CatalogManager {
             // TODO: commit_meta?
             // also add a status for table and sink catalog.
             // Seems like these will no longer be needed
-            // database_core.mark_creating(&key);
-            // database_core.mark_creating_streaming_job(table.id, key);
+            database_core.mark_creating(&key);
+            database_core.mark_creating_streaming_job(table.id, key);
             for &dependent_relation_id in &table.dependent_relations {
                 database_core.increase_ref_count(dependent_relation_id);
             }
             user_core.increase_ref(table.owner);
             Ok(())
         }
+    }
+
+    // FIXME
+    pub async fn check_key(&self, table: &Table) -> bool {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        database_core.in_progress_creation_tracker.contains(&key)
     }
 
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.

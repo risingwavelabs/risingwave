@@ -66,6 +66,7 @@ impl GlobalBarrierManager {
         // Need to rewrite as well.
         // List ALL stream jobs.
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
+        println!("stream_job_ids: {:?}", stream_job_ids);
         let to_drop_table_fragments = self
             .fragment_manager
             .list_dirty_table_fragments(|tf| {
