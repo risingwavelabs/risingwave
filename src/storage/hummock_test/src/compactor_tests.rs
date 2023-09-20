@@ -1354,7 +1354,7 @@ pub(crate) mod tests {
         let compact_ctx = prepare_compactor_and_filter(&storage, existing_table_id);
 
         let sstable_store = compact_ctx.sstable_store.clone();
-        let capacity = 512 * 1024;
+        let capacity = 256 * 1024;
         let mut options = SstableBuilderOptions {
             capacity,
             block_capacity: 2048,
@@ -1455,11 +1455,8 @@ pub(crate) mod tests {
             );
         }
         println!(
-            "fast sstables {}.file size={} {}.file size={}",
-            fast_ret[0].object_id,
-            fast_ret[0].file_size,
-            fast_ret[1].object_id,
-            fast_ret[1].file_size,
+            "fast sstables {}.file size={}",
+            fast_ret[0].object_id, fast_ret[0].file_size,
         );
         assert!(can_concat(&ret));
         assert!(can_concat(&fast_ret));

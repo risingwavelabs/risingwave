@@ -307,7 +307,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         full_key.encode_into(&mut self.raw_key);
         value.encode(&mut self.raw_value);
         let is_new_user_key = self.last_full_key.is_empty()
-            || user_key(&self.raw_key).eq(user_key(&self.last_full_key));
+            || !user_key(&self.raw_key).eq(user_key(&self.last_full_key));
         let table_id = full_key.user_key.table_id.table_id();
         let is_new_table = self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id;
         if is_new_table {
