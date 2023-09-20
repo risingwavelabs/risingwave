@@ -1541,9 +1541,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.4.3"
+version = "4.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84ed82781cea27b43c9b106a979fe450a13a31aab0500595fb3fc06616de08e6"
+checksum = "b1d7b8d5ec32af0fadc644bf1fd509a688c2103b185644bb1e29d164e0703136"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1551,9 +1551,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.4.2"
+version = "4.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bb9faaa7c2ef94b2743a21f5a29e6f0010dff4caa69ac8e9d6cf8b6fa74da08"
+checksum = "5179bb514e4d7c2051749d8fcefa2ed6d06a9f4e6d69faf3805f5d80b8cf8d56"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1780,6 +1780,15 @@ name = "const-str"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aca749d3d3f5b87a0d6100509879f9cf486ab510803a4a4e1001da1ff61c2bd6"
+
+[[package]]
+name = "convert_case"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec182b0ca2f35d8fc196cf3404988fd8b8c739a4d270ff118a398feb0cbec1ca"
+dependencies = [
+ "unicode-segmentation",
+]
 
 [[package]]
 name = "core-foundation"
@@ -2432,9 +2441,9 @@ dependencies = [
 
 [[package]]
 name = "dyn-clone"
-version = "1.0.13"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbfc4744c1b8f2a09adc0e55242f60b1af195d88596bd8700be74418c056c555"
+checksum = "23d2f3407d9a573d666de4b5bdf10569d73ca9478087346697dcbae6244bfbcd"
 
 [[package]]
 name = "easy-ext"
@@ -2506,6 +2515,26 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.33",
+]
+
+[[package]]
+name = "enum-display"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96d4df33d54dd1959d177a0e2c2f4e5a8637a3054aa56861ed7e173ad2043fe2"
+dependencies = [
+ "enum-display-macro",
+]
+
+[[package]]
+name = "enum-display-macro"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0ce3a36047ede676eb0d2721d065beed8410cf4f113f489604d2971331cb378"
+dependencies = [
+ "convert_case",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -3576,8 +3605,8 @@ dependencies = [
 
 [[package]]
 name = "icelake"
-version = "0.0.9"
-source = "git+https://github.com/icelake-io/icelake?rev=a6790d17094754959e351fac1e11147e37643e97#a6790d17094754959e351fac1e11147e37643e97"
+version = "0.0.10"
+source = "git+https://github.com/icelake-io/icelake?rev=85ca0e57bf059b2e84a8bca531f9a8f3bc2f8dfd#85ca0e57bf059b2e84a8bca531f9a8f3bc2f8dfd"
 dependencies = [
  "anyhow",
  "apache-avro 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3591,21 +3620,28 @@ dependencies = [
  "bitvec",
  "bytes",
  "chrono",
+ "csv",
+ "enum-display",
  "faster-hex",
  "futures",
+ "itertools 0.11.0",
  "log",
+ "murmur3",
  "once_cell",
  "opendal",
  "ordered-float 3.9.1",
  "parquet",
  "regex",
+ "reqwest",
  "rust_decimal",
  "serde",
  "serde_bytes",
  "serde_json",
  "serde_with 3.3.0",
  "tokio",
+ "toml 0.7.8",
  "url",
+ "urlencoding",
  "uuid",
 ]
 
@@ -4472,6 +4508,12 @@ checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "murmur3"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9252111cf132ba0929b6f8e030cac2a24b507f3a4d6db6fb2896f27b354c714b"
 
 [[package]]
 name = "mysql-common-derive"

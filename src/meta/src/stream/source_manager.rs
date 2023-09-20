@@ -29,7 +29,6 @@ use risingwave_connector::source::{
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::Source;
-use risingwave_pb::connector_service::PbTableSchema;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_rpc_client::ConnectorClient;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -77,30 +76,7 @@ struct ConnectorSourceWorker<P: SourceProperties> {
 
 fn extract_prop_from_source(source: &Source) -> MetaResult<ConnectorProperties> {
     let mut properties = ConnectorProperties::extract(source.properties.clone())?;
-    if properties.is_cdc_connector() {
-        let pk_indices = source
-            .pk_column_ids
-            .iter()
-            .map(|&id| {
-                source
-                    .columns
-                    .iter()
-                    .position(|col| col.column_desc.as_ref().unwrap().column_id == id)
-                    .unwrap() as u32
-            })
-            .collect_vec();
-
-        let table_schema = PbTableSchema {
-            columns: source
-                .columns
-                .iter()
-                .flat_map(|col| &col.column_desc)
-                .cloned()
-                .collect(),
-            pk_indices,
-        };
-        properties.init_cdc_properties(table_schema);
-    }
+    properties.init_from_pb_source(source);
     Ok(properties)
 }
 
@@ -935,6 +911,10 @@ mod tests {
 
         fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
             serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+        }
+
+        fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
+            Ok(())
         }
     }
 
