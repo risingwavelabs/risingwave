@@ -447,7 +447,7 @@ impl SinkImpl {
             SinkImpl::ClickHouse(_) => "clickhouse",
             SinkImpl::Iceberg(_) => "iceberg",
             SinkImpl::Nats(_) => "nats",
-            SinkImpl::RemoteIceberg(_) => "iceberg",
+            SinkImpl::RemoteIceberg(_) => "iceberg_java",
             SinkImpl::TestSink(_) => "test",
             SinkImpl::Doris(_) => "doris",
         }

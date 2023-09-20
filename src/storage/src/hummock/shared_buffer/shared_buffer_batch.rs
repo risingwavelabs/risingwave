@@ -32,10 +32,10 @@ use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
     HummockIteratorDirection,
 };
-use crate::hummock::store::memtable::ImmId;
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockEpoch, HummockResult, MonotonicDeleteEvent};
+use crate::mem_table::ImmId;
 use crate::storage_value::StorageValue;
 use crate::store::ReadOptions;
 
@@ -51,13 +51,13 @@ fn whether_update_largest_key<P: AsRef<[u8]>, Q: AsRef<[u8]>>(
 }
 
 /// The key is `table_key`, which does not contain table id or epoch.
-pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
+pub(crate) type SharedBufferItem = (TableKey<Bytes>, HummockValue<Bytes>);
 pub type SharedBufferBatchId = u64;
 
 /// A shared buffer may contain data from multiple epochs,
 /// there are multiple versions for a given key (`table_key`), we put those versions into a vector
 /// and sort them in descending order, aka newest to oldest.
-pub type SharedBufferVersionedEntry = (Bytes, Vec<(HummockEpoch, HummockValue<Bytes>)>);
+pub type SharedBufferVersionedEntry = (TableKey<Bytes>, Vec<(HummockEpoch, HummockValue<Bytes>)>);
 type PointRangePair = (PointRange<Vec<u8>>, PointRange<Vec<u8>>);
 
 struct SharedBufferDeleteRangeMeta {
@@ -142,11 +142,11 @@ impl SharedBufferBatchInner {
 
         if let Some(item) = payload.last() {
             if whether_update_largest_key(&largest_table_key, &item.0) {
-                largest_table_key = Bound::Included(item.0.clone());
+                largest_table_key = Bound::Included(item.0.clone().0);
             }
         }
         if let Some(item) = payload.first() {
-            if smallest_empty || item.0.lt(&smallest_table_key.as_ref()) {
+            if smallest_empty || item.0.as_ref().lt(smallest_table_key.as_ref()) {
                 smallest_table_key.clear();
                 smallest_table_key.extend_from_slice(item.0.as_ref());
             }
@@ -562,7 +562,7 @@ impl SharedBufferBatch {
     }
 
     pub fn build_shared_buffer_item_batches(
-        kv_pairs: Vec<(Bytes, StorageValue)>,
+        kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
     ) -> Vec<SharedBufferItem> {
         kv_pairs
             .into_iter()
@@ -675,7 +675,7 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
         }
     }
 
-    pub(crate) fn current_item(&self) -> (&Bytes, &(HummockEpoch, HummockValue<Bytes>)) {
+    pub(crate) fn current_item(&self) -> (&TableKey<Bytes>, &(HummockEpoch, HummockValue<Bytes>)) {
         assert!(self.is_valid(), "iterator is not valid");
         let (idx, version_idx) = match D::direction() {
             DirectionEnum::Forward => (self.current_idx, self.current_version_idx),

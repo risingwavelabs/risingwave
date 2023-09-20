@@ -146,8 +146,7 @@ impl Inner {
             projected_columns.push(evaluated_expr);
         }
         let (_, vis) = data_chunk.into_parts();
-        let vis = vis.into_visibility();
-        let new_chunk = StreamChunk::new(ops, projected_columns, vis);
+        let new_chunk = StreamChunk::with_visibility(ops, projected_columns, vis);
         Ok(Some(new_chunk))
     }
 

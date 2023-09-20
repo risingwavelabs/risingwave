@@ -1489,7 +1489,7 @@ impl GrpcMetaClient {
         force_refresh_receiver: Receiver<Sender<Result<()>>>,
         meta_config: MetaConfig,
     ) -> Result<()> {
-        let core_ref = self.core.clone();
+        let core_ref: Arc<RwLock<GrpcMetaClientCore>> = self.core.clone();
         let current_leader = init_leader_addr;
 
         let enable_period_tick = matches!(members, Either::Right(_));
