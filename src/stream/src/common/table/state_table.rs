@@ -562,8 +562,8 @@ where
         &self.value_indices
     }
 
-    pub fn is_dirty(&self) -> bool {
-        self.local_store.is_dirty()
+    fn is_dirty(&self) -> bool {
+        self.local_store.is_dirty() || self.state_clean_watermark.is_some()
     }
 
     pub fn vnode_bitmap(&self) -> &Bitmap {
