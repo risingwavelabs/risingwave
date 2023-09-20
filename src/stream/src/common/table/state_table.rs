@@ -908,9 +908,15 @@ where
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
         self.watermark_buffer_strategy.tick();
-        self.seal_current_epoch(new_epoch.curr)
-            .instrument(tracing::info_span!("state_table_commit"))
-            .await?;
+        if !self.is_dirty() {
+            // If the state table is not modified, go fast path.
+            self.local_store.seal_current_epoch(new_epoch.curr);
+            return Ok(());
+        } else {
+            self.seal_current_epoch(new_epoch.curr)
+                .instrument(tracing::info_span!("state_table_commit"))
+                .await?;
+        }
 
         // Refresh watermark cache if it is out of sync.
         if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
