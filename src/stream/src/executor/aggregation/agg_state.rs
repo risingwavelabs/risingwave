@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{StreamChunk, Vis};
+use risingwave_common::array::StreamChunk;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
@@ -98,7 +99,7 @@ impl AggState {
         chunk: &StreamChunk,
         call: &AggCall,
         func: &BoxedAggregateFunction,
-        visibility: Vis,
+        visibility: Bitmap,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => {
@@ -108,7 +109,7 @@ impl AggState {
             }
             Self::MaterializedInput(state) => {
                 // the input chunk for minput is unprojected
-                let chunk = chunk.with_visibility(visibility);
+                let chunk = chunk.clone_with_vis(visibility);
                 state.apply_chunk(&chunk)
             }
         }

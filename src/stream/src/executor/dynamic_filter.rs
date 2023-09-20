@@ -320,7 +320,8 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     let columns = chunk.into_parts().0.into_parts().0;
 
                     if new_visibility.count_ones() > 0 {
-                        let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
+                        let new_chunk =
+                            StreamChunk::with_visibility(new_ops, columns, new_visibility);
                         yield Message::Chunk(new_chunk)
                     }
                 }

@@ -170,10 +170,10 @@ pub(crate) fn mark_chunk_ref_by_vnode(
         new_visibility.append(v);
     }
     let (columns, _) = data.into_parts();
-    Ok(StreamChunk::new(
+    Ok(StreamChunk::with_visibility(
         ops,
         columns,
-        Some(new_visibility.finish()),
+        new_visibility.finish(),
     ))
 }
 
@@ -201,7 +201,7 @@ fn mark_chunk_inner(
         new_visibility.append(v);
     }
     let (columns, _) = data.into_parts();
-    StreamChunk::new(ops, columns, Some(new_visibility.finish()))
+    StreamChunk::with_visibility(ops, columns, new_visibility.finish())
 }
 
 fn mark_cdc_chunk_inner(
@@ -246,10 +246,10 @@ fn mark_cdc_chunk_inner(
     }
 
     let (columns, _) = data.into_parts();
-    Ok(StreamChunk::new(
+    Ok(StreamChunk::with_visibility(
         ops,
         columns,
-        Some(new_visibility.finish()),
+        new_visibility.finish(),
     ))
 }
 
@@ -257,7 +257,7 @@ fn mark_cdc_chunk_inner(
 pub(crate) fn mapping_chunk(chunk: StreamChunk, output_indices: &[usize]) -> StreamChunk {
     let (ops, columns, visibility) = chunk.into_inner();
     let mapped_columns = output_indices.iter().map(|&i| columns[i].clone()).collect();
-    StreamChunk::new(ops, mapped_columns, visibility.into_visibility())
+    StreamChunk::with_visibility(ops, mapped_columns, visibility)
 }
 
 fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {
