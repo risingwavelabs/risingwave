@@ -145,7 +145,7 @@ timeout_ms = 6000
 concurrency = 10
 
 [system]
-barrier_interval_ms = 1000
+barrier_interval_ms = 100
 checkpoint_frequency = 1
 sstable_size_mb = 256
 parallel_compact_size_mb = 512
