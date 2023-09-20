@@ -27,7 +27,7 @@ use super::expr_in::InExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
-use super::wrapper::CheckedExpression;
+use super::wrapper::Checked;
 use crate::expr::{
     BoxedExpression, Expression, InputRefExpression, LiteralExpression, TryFromExprNodeBoxed,
 };
@@ -75,7 +75,7 @@ fn build_from_prost_inner(prost: &ExprNode) -> Result<BoxedExpression> {
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let expr = build_from_prost_inner(prost)?;
 
-    let checked = CheckedExpression(expr);
+    let checked = Checked(expr);
 
     Ok(checked.boxed())
 }

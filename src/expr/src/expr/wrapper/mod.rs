@@ -14,4 +14,4 @@
 
 mod checked;
 
-pub use checked::CheckedExpression;
+pub use checked::Checked;

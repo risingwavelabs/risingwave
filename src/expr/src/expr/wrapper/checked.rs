@@ -22,11 +22,11 @@ use crate::expr::{Expression, ValueImpl};
 
 /// A wrapper of [`Expression`] that does extra checks after evaluation.
 #[derive(Debug)]
-pub struct CheckedExpression<E>(pub E);
+pub struct Checked<E>(pub E);
 
 // TODO: avoid the overhead of extra boxing.
 #[async_trait]
-impl<E: Expression> Expression for CheckedExpression<E> {
+impl<E: Expression> Expression for Checked<E> {
     fn return_type(&self) -> DataType {
         self.0.return_type()
     }
