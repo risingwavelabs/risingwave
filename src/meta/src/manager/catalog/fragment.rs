@@ -166,19 +166,21 @@ impl FragmentManager {
     pub async fn get_table_id_actor_mapping(
         &self,
         table_ids: &[TableId],
-    ) -> HashMap<ActorId, TableId> {
+    ) -> HashMap<TableId, Vec<ActorId>> {
         let map = &self.core.read().await.table_fragments;
-        let mut actor_mapping = HashMap::new();
+        let mut table_map = HashMap::new();
         for table_id in table_ids {
             if let Some(table_fragment) = map.get(table_id) {
+                let mut actors = vec![];
                 for fragment in table_fragment.fragments.values() {
                     for actor in &fragment.actors {
-                        actor_mapping.insert(actor.actor_id, *table_id);
+                        actors.push(actor.actor_id)
                     }
                 }
+                table_map.insert(*table_id, actors);
             }
         }
-        actor_mapping
+        table_map
     }
 
     /// Gets the counts for each upstream relation that each stream job

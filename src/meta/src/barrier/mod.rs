@@ -925,7 +925,7 @@ impl GlobalBarrierManager {
             .map(|t| TableId { table_id: t.id })
             .collect_vec();
 
-        let actor_map = self
+        let table_map = self
             .fragment_manager
             .get_table_id_actor_mapping(&creating_table_ids)
             .await;
@@ -943,8 +943,7 @@ impl GlobalBarrierManager {
         let mut tracker = self.tracker.lock().await;
         println!("creating_table_ids {:?}", creating_table_ids);
         *tracker = CreateMviewProgressTracker::recover(
-            creating_table_ids,
-            actor_map,
+            table_map,
             upstream_mv_counts,
             definitions,
             version_stats,

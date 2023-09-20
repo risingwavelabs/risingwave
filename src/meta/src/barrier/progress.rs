@@ -208,7 +208,6 @@ impl CreateMviewProgressTracker {
     /// For chain executors,
     /// it will need to report the progress.
     pub fn recover(
-        creating_table_ids: Vec<TableId>,
         // Add a status for the catalog proto.
         // CREATE a TABLE
         // 1. Set status to CREATING
@@ -219,7 +218,7 @@ impl CreateMviewProgressTracker {
         //    TableId first.
         // Then Find the actors from the fragment manager.
         // Then we have the mappings.
-        actor_map: HashMap<ActorId, TableId>,
+        table_map: HashMap<TableId, Vec<ActorId>>,
 
         // Get from table fragments, no need to store it as is.
         mut upstream_mv_counts: HashMap<TableId, HashMap<TableId, usize>>,
@@ -229,8 +228,20 @@ impl CreateMviewProgressTracker {
 
         version_stats: HummockVersionStats,
     ) -> Self {
+        let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        for creating_table_id in creating_table_ids {
+        for (creating_table_id, actors) in table_map.into_iter() {
+            let mut states = HashMap::new();
+            for actor in actors {
+                actor_map.insert(actor, creating_table_id);
+                states.insert(
+                    actor,
+                    ChainState::ConsumingUpstream(
+                        Epoch(0), // This should be updated?
+                        0,
+                    ),
+                );
+            }
             let upstream_mv_count = upstream_mv_counts.remove(&creating_table_id).unwrap();
             let upstream_total_key_count = upstream_mv_count
                 .iter()
@@ -246,8 +257,8 @@ impl CreateMviewProgressTracker {
             let progress = Progress {
                 // FIXME: I guess this has to be non-empty?
                 // Maybe set to 0.
-                states: Default::default(), // Fill only after first barrier pass.
-                done_count: 0,              // Fill only after first barrier pass
+                states,
+                done_count: 0, // Fill only after first barrier pass
                 upstream_mv_count: Default::default(),
                 upstream_total_key_count,
                 consumed_rows: 0, // Fill only after first barrier pass

@@ -789,6 +789,7 @@ impl CatalogManager {
         // in frontend, there is some function which gets all created catalog,
         // we only include the catalog with status::created in the snapshot.
 
+        println!("Finished and notifying frontend");
         let version = self
             .notify_frontend(
                 Operation::Add,
@@ -2314,6 +2315,7 @@ impl CatalogManager {
     }
 
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
+        println!("Notified frontend:\noperation: {:#?}\ninfo: {:#?}", operation, info);
         self.env
             .notification_manager()
             .notify_frontend(operation, info)
