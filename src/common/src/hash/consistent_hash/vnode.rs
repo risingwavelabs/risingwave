@@ -18,7 +18,7 @@ use parse_display::Display;
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::hash::Crc32HashCode;
 use crate::row::{Row, RowExt};
-use crate::types::{DataType, ScalarRefImpl};
+use crate::types::{DataType, ScalarRefImpl, Serial};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::row_id::extract_vnode_id_from_row_id;
 
@@ -119,9 +119,10 @@ impl VirtualNode {
         if let Ok(idx) = keys.iter().exactly_one()
             && let ArrayImpl::Serial(serial_array) = &**data_chunk.column_at(*idx)
         {
+            let fallback_row_id = Serial::from(rand::random::<i64>());
             return serial_array
                 .iter()
-                .map(|serial| extract_vnode_id_from_row_id(serial.unwrap_or_default().as_row_id()))
+                .map(|serial| extract_vnode_id_from_row_id(serial.unwrap_or(fallback_row_id).as_row_id()))
                 .collect();
         }
 
