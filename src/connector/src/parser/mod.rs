@@ -385,7 +385,7 @@ const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
 
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
-// #[try_stream(ok = StreamChunkWithState, error = RwError)]
+#[try_stream(ok = StreamChunkWithState, error = RwError)]
 async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream: BoxSourceStream) {
     let columns = parser.columns().to_vec();
 
@@ -463,7 +463,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                                         (
                                             SourceMeta::DebeziumCdc(cdc_meta),
                                             TABLE_NAME_COLUMN_NAME,
-                                        ) => Some(cdc_meta.full_table_name.as_str().into()),
+                                        ) => Some(Some(cdc_meta.full_table_name.as_str().into())),
                                         (
                                             SourceMeta::Kafka(kafka_meta),
                                             KAFKA_TIMESTAMP_COLUMN_NAME,

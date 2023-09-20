@@ -745,27 +745,28 @@ fn gen_create_table_plan_for_cdc_source(
     table_name: ObjectName,
     external_table_name: String,
     column_defs: Vec<ColumnDef>,
+    constraints: Vec<TableConstraint>,
     // mut columns: Vec<ColumnCatalog>, // columns defined in the create table from DDL
     // pk_column_ids: Vec<ColumnId>, // will used to derive pk column indices
     // definition: String,
-    version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
-                                    * TABLE` for `CREATE TABLE AS`. */
+    mut col_id_gen: ColumnIdGenerator,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let session = context.session_ctx().clone();
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
-    // cdc source cannot be append-only
-    let append_only = false;
 
+    // cdc table cannot be append-only
+    let append_only = false;
     let source_name = source_name.real_value();
     let source = session.get_source_by_name(schema_name, &source_name)?;
 
     let mut columns = bind_sql_columns(&column_defs)?;
+
     // Add `_rw_offset` hidden column for storing upstream cdc offset
+    let offset_column_idx = columns.len();
     columns.push(ColumnCatalog::offset_column());
-    // columns.push(ColumnCatalog::table_id_column());
 
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
@@ -796,7 +797,7 @@ fn gen_create_table_plan_for_cdc_source(
         table_id: source.id.into(), // FIXME: which id to use?
         pk: table_pk,
         columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
-        distribution_key: pk_column_indices.clone(),
+        distribution_key: vec![offset_column_idx], // use offset column as distribution key
         stream_key: pk_column_indices,
         append_only,
         retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
@@ -837,7 +838,7 @@ fn gen_create_table_plan_for_cdc_source(
         None,
         append_only,
         vec![], // no watermarks
-        version,
+        Some(col_id_gen.into_version()),
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -884,7 +885,7 @@ pub async fn handle_create_table(
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
         let mut col_id_gen = ColumnIdGenerator::new_initial();
 
-        let (plan, source, table) = match (source_schema, cdc_source) {
+        let (plan, source, table) = match (source_schema, cdc_source.as_ref()) {
             (Some(source_schema), None) => {
                 gen_create_table_plan_with_source(
                     context,
@@ -913,7 +914,8 @@ pub async fn handle_create_table(
                 table_name.clone(),
                 external_table.unwrap_or(table_name.real_value()),
                 column_defs,
-                None,
+                constraints,
+                col_id_gen,
             )?,
             (Some(_), Some(_)) => return Err(ErrorCode::NotSupported(
                 "Data format and encoding format doesn't apply to table created from a CDC source"

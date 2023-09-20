@@ -465,6 +465,7 @@ pub fn to_stream_prost_body(
                     _ => vec![],
                 },
                 output_indices: (0..base.schema().len() as u32).collect(),
+                downstream_table_name: None,
             }),
         }),
         Node::DynamicFilter(me) => {

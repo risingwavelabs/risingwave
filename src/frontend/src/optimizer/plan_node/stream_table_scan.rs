@@ -275,7 +275,17 @@ impl StreamTableScan {
                     })),
                     identity: "Upstream".into(),
                     fields: upstream_schema.clone(),
-                    stream_key: vec![], // not used
+                    stream_key: if cdc_upstream {
+                        // the `_rw_offset` column
+                        self.logical
+                            .table_desc
+                            .distribution_key
+                            .iter()
+                            .map(|&x| x as u32)
+                            .collect_vec()
+                    } else {
+                        vec![] // not used for other scenarios
+                    },
                     ..Default::default()
                 },
                 PbStreamNode {

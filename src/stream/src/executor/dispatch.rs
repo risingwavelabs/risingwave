@@ -26,6 +26,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::row::{Row, RowExt};
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
@@ -626,7 +627,7 @@ impl Dispatcher for HashDataDispatcher {
                 let should_emit = if let Some(row) = row && let Some(full_table_name) = self.downstream_table_name.as_ref() {
                     let table_name_datum = row.datum_at(self.keys[0]).unwrap();
                     tracing::info!("row: {:#?}, keys: {:?}, uptable: {}, datum: {:?}", row, self.keys, full_table_name, table_name_datum);
-                    table_name_datum == full_table_name
+                    table_name_datum == ScalarRefImpl::Utf8(full_table_name)
                 } else {
                     true
                 };

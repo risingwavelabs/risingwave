@@ -356,6 +356,7 @@ fn build_fragment(
                             r#type: DispatcherType::NoShuffle as i32,
                             dist_key_indices: vec![],
                             output_indices: (0..ref_fragment_node.fields.len() as u32).collect(),
+                            downstream_table_name: None,
                         };
 
                         let no_shuffle_exchange_operator_id = state.gen_operator_id() as u64;

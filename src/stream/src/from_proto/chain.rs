@@ -83,6 +83,9 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 RearrangedChainExecutor::new(snapshot, mview, progress, schema, params.pk_indices)
                     .boxed()
             }
+            ChainType::CdcBackfill => {
+                todo!("CdcBackfill")
+            }
             ChainType::Backfill => {
                 let table_desc: &StorageTableDesc = node.get_table_desc()?;
                 let table_id = TableId {

@@ -536,7 +536,7 @@ impl CompleteStreamFragmentGraph {
     }
 
     fn build_helper(
-        graph: StreamFragmentGraph,
+        mut graph: StreamFragmentGraph,
         upstream_ctx: Option<FragmentGraphUpstreamContext>,
         downstream_ctx: Option<FragmentGraphDownstreamContext>,
     ) -> MetaResult<Self> {
@@ -557,8 +557,7 @@ impl CompleteStreamFragmentGraph {
                         .as_ref()
                         .and_then(|map| map.get(&upstream_table_id))
                     {
-                        // extract the upstream full_table_name from the source node body
-                        // set the full_table_name into DispatchStrategy
+                        // extract the upstream full_table_name from the source fragment
                         let mut full_table_name = None;
                         visit_fragment(&mut fragment.inner, |node_body| {
                             if let NodeBody::Chain(chain_node) = node_body && let Some(table_desc) = chain_node.table_desc.as_ref() {
@@ -579,7 +578,7 @@ impl CompleteStreamFragmentGraph {
                                 .expect("table name column not found")
                         };
 
-                        StreamFragmentEdge {
+                        let edge = StreamFragmentEdge {
                             id: EdgeId::UpstreamExternal {
                                 upstream_table_id,
                                 downstream_fragment_id: id,
@@ -588,10 +587,21 @@ impl CompleteStreamFragmentGraph {
                             dispatch_strategy: DispatchStrategy {
                                 r#type: DispatcherType::Hash as _, /* there may have multiple downstream table jobs, so we use `Hash` here */
                                 dist_key_indices: vec![rw_table_name_index as _], /* index to `_rw_table_name` column */
-                                output_indices: output_columns.iter().map(|i| i as _).collect(), /* require all columns from the upstream source */
+                                output_indices: output_columns.iter().map(|i| *i as _).collect(), /* require all columns from the upstream source */
                                 downstream_table_name: full_table_name,
                             },
-                        }
+                        };
+
+                        extra_downstreams
+                            .entry(source_fragment_id)
+                            .or_insert_with(HashMap::new)
+                            .try_insert(id, edge.clone())
+                            .unwrap();
+                        extra_upstreams
+                            .entry(id)
+                            .or_insert_with(HashMap::new)
+                            .try_insert(source_fragment_id, edge)
+                            .unwrap();
                     } else {
                         let mview_fragment = upstream_mview_fragments
                             .get(&upstream_table_id)
@@ -634,9 +644,11 @@ impl CompleteStreamFragmentGraph {
                                 r#type: DispatcherType::NoShuffle as _,
                                 dist_key_indices: vec![], // not used for `NoShuffle`
                                 output_indices,
+                                downstream_table_name: None,
                             },
                         };
 
+                        // put the edge into the extra edges
                         extra_downstreams
                             .entry(mview_id)
                             .or_insert_with(HashMap::new)
