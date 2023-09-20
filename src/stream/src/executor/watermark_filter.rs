@@ -119,16 +119,17 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         yield Message::Barrier(first_barrier);
 
         // Initiate and yield the first watermark.
-        let mut current_watermark =
-            Self::get_global_max_watermark(&table, watermark_type.clone()).await?;
+        let mut current_watermark = Self::get_global_max_watermark(&table).await?;
 
-        let mut last_checkpoint_watermark = watermark_type.min_value();
+        let mut last_checkpoint_watermark = None;
 
-        yield Message::Watermark(Watermark::new(
-            event_time_col_idx,
-            watermark_type.clone(),
-            current_watermark.clone(),
-        ));
+        if let Some(watermark) = current_watermark.clone() {
+            yield Message::Watermark(Watermark::new(
+                event_time_col_idx,
+                watermark_type.clone(),
+                watermark.clone(),
+            ));
+        }
 
         // If the input is idle
         let mut idle_input = true;
@@ -152,11 +153,16 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         .await;
 
                     // Build the expression to calculate watermark filter.
-                    let watermark_filter_expr = Self::build_watermark_filter_expr(
-                        watermark_type.clone(),
-                        event_time_col_idx,
-                        current_watermark.clone(),
-                    )?;
+                    let watermark_filter_expr = current_watermark
+                        .clone()
+                        .map(|watermark| {
+                            Self::build_watermark_filter_expr(
+                                watermark_type.clone(),
+                                event_time_col_idx,
+                                watermark,
+                            )
+                        })
+                        .transpose()?;
 
                     // NULL watermark should not be considered.
                     let max_watermark = watermark_array
@@ -166,41 +172,53 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
                     if let Some(max_watermark) = max_watermark {
                         // Assign a new watermark.
-                        current_watermark = cmp::max_by(
-                            current_watermark,
+                        current_watermark = Some(current_watermark.map_or(
                             max_watermark.into_scalar_impl(),
-                            DefaultOrd::default_cmp,
-                        );
+                            |watermark| {
+                                cmp::max_by(
+                                    watermark,
+                                    max_watermark.into_scalar_impl(),
+                                    DefaultOrd::default_cmp,
+                                )
+                            },
+                        ));
                     }
 
-                    let pred_output = watermark_filter_expr
-                        .eval_infallible(chunk.data_chunk(), |err| {
-                            ctx.on_compute_error(err, &info.identity)
-                        })
-                        .await;
+                    if let Some(expr) = watermark_filter_expr {
+                        let pred_output = expr
+                            .eval_infallible(chunk.data_chunk(), |err| {
+                                ctx.on_compute_error(err, &info.identity)
+                            })
+                            .await;
 
-                    if let Some(output_chunk) = FilterExecutor::filter(chunk, pred_output)? {
-                        yield Message::Chunk(output_chunk);
-                    };
+                        if let Some(output_chunk) = FilterExecutor::filter(chunk, pred_output)? {
+                            yield Message::Chunk(output_chunk);
+                        };
+                    } else {
+                        // No watermark
+                        yield Message::Chunk(chunk);
+                    }
 
-                    idle_input = false;
-                    yield Message::Watermark(Watermark::new(
-                        event_time_col_idx,
-                        watermark_type.clone(),
-                        current_watermark.clone(),
-                    ));
+                    if let Some(watermark) = current_watermark.clone() {
+                        idle_input = false;
+                        yield Message::Watermark(Watermark::new(
+                            event_time_col_idx,
+                            watermark_type.clone(),
+                            watermark,
+                        ));
+                    }
                 }
                 Message::Watermark(watermark) => {
                     if watermark.col_idx == event_time_col_idx {
                         tracing::warn!("WatermarkFilterExecutor received a watermark on the event it is filtering.");
                         let watermark = watermark.val;
-                        if current_watermark.default_cmp(&watermark).is_lt() {
-                            current_watermark = watermark;
+                        if let Some(cur_watermark) = current_watermark.clone() && cur_watermark.default_cmp(&watermark).is_lt() {
+                            current_watermark = Some(watermark.clone());
                             idle_input = false;
                             yield Message::Watermark(Watermark::new(
                                 event_time_col_idx,
                                 watermark_type.clone(),
-                                current_watermark.clone(),
+                                watermark,
                             ));
                         }
                     } else {
@@ -215,9 +233,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
                         // Take the global max watermark when scaling happens.
                         if previous_vnode_bitmap != vnode_bitmap {
-                            current_watermark =
-                                Self::get_global_max_watermark(&table, watermark_type.clone())
-                                    .await?;
+                            current_watermark = Self::get_global_max_watermark(&table).await?;
                         }
                     }
 
@@ -226,12 +242,14 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     {
                         last_checkpoint_watermark = current_watermark.clone();
                         // Persist the watermark when checkpoint arrives.
-                        let vnodes = table.get_vnodes();
-                        for vnode in vnodes.iter_vnodes() {
-                            let pk = Some(ScalarImpl::Int16(vnode.to_scalar()));
-                            let row = [pk, Some(current_watermark.clone())];
-                            // FIXME(yuhao): use upsert.
-                            table.insert(row);
+                        if let Some(watermark) = current_watermark.clone() {
+                            let vnodes = table.get_vnodes();
+                            for vnode in vnodes.iter_vnodes() {
+                                let pk = Some(ScalarImpl::Int16(vnode.to_scalar()));
+                                let row = [pk, Some(watermark.clone())];
+                                // This is an upsert.
+                                table.insert(row);
+                            }
                         }
                         table.commit(barrier.epoch).await?;
                     } else {
@@ -242,18 +260,19 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         if idle_input {
                             // Align watermark
                             let global_max_watermark =
-                                Self::get_global_max_watermark(&table, watermark_type.clone())
-                                    .await?;
+                                Self::get_global_max_watermark(&table).await?;
                             current_watermark = cmp::max_by(
                                 current_watermark,
                                 global_max_watermark,
                                 DefaultOrd::default_cmp,
                             );
-                            yield Message::Watermark(Watermark::new(
-                                event_time_col_idx,
-                                watermark_type.clone(),
-                                current_watermark.clone(),
-                            ));
+                            if let Some(watermark) = current_watermark.clone() {
+                                yield Message::Watermark(Watermark::new(
+                                    event_time_col_idx,
+                                    watermark_type.clone(),
+                                    watermark,
+                                ));
+                            }
                         } else {
                             idle_input = true;
                         }
@@ -280,10 +299,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         )
     }
 
+    /// If the returned if `Ok(None)`, it means there is no global max watermark.
     async fn get_global_max_watermark(
         table: &StateTable<S>,
-        watermark_type: DataType,
-    ) -> StreamExecutorResult<ScalarImpl> {
+    ) -> StreamExecutorResult<Option<ScalarImpl>> {
         let watermark_iter_futures = (0..VirtualNode::COUNT).map(|vnode| async move {
             let pk = row::once(Some(ScalarImpl::Int16(vnode as _)));
             let watermark_row: Option<OwnedRow> = table.get_row(pk).await?;
@@ -307,8 +326,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         let watermark = watermarks
             .into_iter()
             .flatten()
-            .max_by(DefaultOrd::default_cmp)
-            .unwrap_or_else(|| watermark_type.min_value());
+            .max_by(DefaultOrd::default_cmp);
 
         Ok(watermark)
     }
@@ -430,13 +448,6 @@ mod tests {
                 Watermark::new(1, WATERMARK_TYPE.clone(), $scalar)
             };
         }
-
-        // Init watermark
-        let watermark = executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            watermark.into_watermark().unwrap(),
-            watermark!(WATERMARK_TYPE.min_value()),
-        );
 
         // push the 1st chunk
         tx.push_chunk(chunk1);
