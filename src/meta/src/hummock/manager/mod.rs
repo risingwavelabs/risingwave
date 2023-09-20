@@ -225,8 +225,8 @@ macro_rules! start_measure_real_process_timer {
 pub(crate) use start_measure_real_process_timer;
 
 use super::compaction::{
-    DynamicLevelSelector, LevelSelector, ManualCompactionSelector, SpaceReclaimCompactionSelector,
-    TtlCompactionSelector,
+    DynamicLevelSelector, EmergencySelector, LevelSelector, ManualCompactionSelector,
+    SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
@@ -838,7 +838,8 @@ impl HummockManager {
         }
 
         let can_trivial_move: bool =
-            matches!(selector.task_type(), compact_task::TaskType::Dynamic);
+            matches!(selector.task_type(), compact_task::TaskType::Dynamic)
+                || matches!(selector.task_type(), compact_task::TaskType::Emergency);
 
         let mut stats = LocalSelectorStatistic::default();
         let member_table_ids = &current_version
@@ -1351,7 +1352,8 @@ impl HummockManager {
         );
 
         if !deterministic_mode
-            && matches!(compact_task.task_type(), compact_task::TaskType::Dynamic)
+            && (matches!(compact_task.task_type(), compact_task::TaskType::Dynamic)
+                || matches!(compact_task.task_type(), compact_task::TaskType::Emergency))
         {
             // only try send Dynamic compaction
             self.try_send_compaction_request(
@@ -1739,20 +1741,14 @@ impl HummockManager {
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
     ) -> Result<HummockVersionDeltas> {
-        let ordered_version_deltas: BTreeMap<_, _> =
-            HummockVersionDelta::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .map(|version_delta| (version_delta.id, version_delta))
-                .collect();
-
-        let version_deltas = ordered_version_deltas
-            .into_iter()
-            .filter(|(id, delta)| {
-                *id >= start_id && delta.max_committed_epoch <= committed_epoch_limit
-            })
-            .map(|(_, v)| v)
+        let versioning = read_lock!(self, versioning).await;
+        let version_deltas = versioning
+            .hummock_version_deltas
+            .range(start_id..)
+            .map(|(_id, delta)| delta)
+            .filter(|delta| delta.max_committed_epoch <= committed_epoch_limit)
             .take(num_limit as _)
+            .cloned()
             .collect();
         Ok(HummockVersionDeltas { version_deltas })
     }
@@ -2621,7 +2617,30 @@ impl HummockManager {
                                 assert_ne!(0, pull_task_count);
                                 if let Some(compactor) = hummock_manager.compactor_manager.get_compactor(context_id) {
                                     if let Some((group, task_type)) = hummock_manager.auto_pick_compaction_group_and_type().await {
-                                        let selector: &mut Box<dyn LevelSelector> = compaction_selectors.get_mut(&task_type).unwrap();
+                                        let selector: &mut Box<dyn LevelSelector> = {
+                                            let versioning_guard = read_lock!(hummock_manager, versioning).await;
+                                            let versioning = versioning_guard.deref();
+
+                                            if versioning.write_limit.contains_key(&group) {
+                                                let enable_emergency_picker = match hummock_manager
+                                                    .compaction_group_manager
+                                                    .read()
+                                                    .await
+                                                    .try_get_compaction_group_config(group)
+                                                {
+                                                    Some(config) =>{ config.compaction_config.enable_emergency_picker },
+                                                    None => { unreachable!("compaction-group {} not exist", group) }
+                                                };
+
+                                                if enable_emergency_picker {
+                                                    compaction_selectors.get_mut(&TaskType::Emergency).unwrap()
+                                                } else {
+                                                    compaction_selectors.get_mut(&task_type).unwrap()
+                                                }
+                                            } else {
+                                                compaction_selectors.get_mut(&task_type).unwrap()
+                                            }
+                                        };
                                         for _ in 0..pull_task_count {
                                             let compact_task =
                                                 hummock_manager
@@ -2943,6 +2962,10 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn LevelSelector>> {
     compaction_selectors.insert(
         compact_task::TaskType::Tombstone,
         Box::<TombstoneCompactionSelector>::default(),
+    );
+    compaction_selectors.insert(
+        compact_task::TaskType::Emergency,
+        Box::<EmergencySelector>::default(),
     );
     compaction_selectors
 }
