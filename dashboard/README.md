@@ -28,7 +28,7 @@ TODO: Find a suitable testing framework
 
 ## Development
 
-Start the RisingWave database, remove drop tables from `tpch_snapshot.slt`
+Start the RisingWave database, and create tables by removing drop tables from `tpch_snapshot.slt`
 
 ```bash
 ./risedev d
@@ -41,7 +41,7 @@ Install Dependencies.
 npm i
 ```
 
-The website will be served at port 3000.
+The website will be served at port 3000. It requests data from the mock server at port 32333.
 
 ```bash
 npm run dev
@@ -50,10 +50,11 @@ npm run dev
 You should also run:
 
 ```bash
+./mock/fetch.sh # dump current data from RisingWave meta node to be used by mock server
 node mock-server.js
 ```
 
-To start a mock API server when developing. You can use `fetch.sh` to update the mock APIs.
+To start a mock API server when developing.
 
 ## Test with RisingWave meta node
 
@@ -61,8 +62,10 @@ To replace the built static files in RisingWave with your newest code,
 run the following scripts in the root directory.
 
 ```bash
-./risedev export-dashboard-v2
+./risedev export-dashboard
 ```
+
+The dashboard will be served by meta node at port 5691.
 
 ## Deployment
 
@@ -79,11 +82,4 @@ Check more details at [Static HTML Export](https://nextjs.org/docs/advanced-feat
 npm run build-static
 ```
 
-#### Next.js app
-
-The built files are generated at `./.next`.
-
-```bash
-npm run build
-npm run start
-```
+The built files are generated at `./out`.

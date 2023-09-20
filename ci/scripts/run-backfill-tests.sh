@@ -31,22 +31,11 @@ flush() {
 }
 
 run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
-run_sql_file "$PARENT_PATH"/sql/backfill/insert_seed.sql
 
 # Provide snapshot
-for i in $(seq 1 12)
-do
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert_recurse.sql
-  flush
-done
-
+run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql
+run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
 run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
-
-# Provide upstream updates
-for i in $(seq 1 5)
-do
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert_recurse.sql &
-done
 
 wait
 
