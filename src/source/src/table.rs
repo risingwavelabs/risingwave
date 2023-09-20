@@ -317,11 +317,8 @@ mod tests {
 
         macro_rules! write_chunk {
             ($i:expr) => {{
-                let chunk = StreamChunk::new(
-                    vec![Op::Insert],
-                    vec![I64Array::from_iter([$i]).into_ref()],
-                    None,
-                );
+                let chunk =
+                    StreamChunk::new(vec![Op::Insert], vec![I64Array::from_iter([$i]).into_ref()]);
                 write_handle.write_chunk(chunk).await.unwrap();
             }};
         }
@@ -362,11 +359,7 @@ mod tests {
 
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
 
-        let chunk = StreamChunk::new(
-            vec![Op::Insert],
-            vec![I64Array::from_iter([1]).into_ref()],
-            None,
-        );
+        let chunk = StreamChunk::new(vec![Op::Insert], vec![I64Array::from_iter([1]).into_ref()]);
         write_handle.write_chunk(chunk).await.unwrap();
 
         assert_matches!(reader.next().await.unwrap()?, txn_msg => {

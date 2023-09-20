@@ -900,14 +900,14 @@ def section_streaming_actors(outer_panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Actor Backpressure",
+                    "Actor Output Blocking Time Ratio (Backpressure)",
                     "We first record the total blocking duration(ns) of output buffer of each actor. It shows how "
                     "much time it takes an actor to process a message, i.e. a barrier, a watermark or rows of data, "
                     "on average. Then we divide this duration by 1 second and show it as a percentage.",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval]) / 1000000000",
-                            "{{actor_id}}",
+                            f"avg(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) / 1000000000",
+                            "fragment {{fragment_id}}->{{downstream_fragment_id}}",
                         ),
                     ],
                 ),
@@ -947,8 +947,8 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_actor_input_buffer_blocking_duration_ns')}[$__rate_interval]) / 1000000000",
-                            "{{actor_id}}->{{upstream_fragment_id}}",
+                            f"avg(rate({metric('stream_actor_input_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, upstream_fragment_id) / 1000000000",
+                            "fragment {{fragment_id}}<-{{upstream_fragment_id}}",
                         ),
                     ],
                 ),
@@ -1234,6 +1234,22 @@ def section_streaming_actors(outer_panels):
                                       "stream agg cached keys count | table {{table_id}} actor {{actor_id}}"),
                         panels.target(f"{metric('stream_agg_distinct_cached_keys')}",
                                       "stream agg distinct cached keys count |table {{table_id}} actor {{actor_id}}"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Aggregation Dirty Group Count",
+                    "Statistics for dirty (unflushed) groups in each hash aggregation executor's executor cache.",
+                    [
+                        panels.target(f"{metric('stream_agg_dirty_group_count')}",
+                                      "stream agg dirty group count | table {{table_id}} actor {{actor_id}}"),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Aggregation Dirty Group Heap Size",
+                    "Statistics for dirty (unflushed) groups in each hash aggregation executor's executor cache.",
+                    [
+                        panels.target(f"{metric('stream_agg_dirty_group_heap_size')}",
+                                      "stream agg dirty group heap size | table {{table_id}} actor {{actor_id}}"),
                     ],
                 ),
                 panels.timeseries_count(

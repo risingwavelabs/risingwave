@@ -16,7 +16,7 @@ use std::convert::TryFrom;
 use std::ops::BitAnd;
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk, Vis, VisRef};
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -38,7 +38,7 @@ impl Expression for CoalesceExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let init_vis = input.vis();
+        let init_vis = input.visibility();
         let mut input = input.clone();
         let len = input.capacity();
         let mut selection: Vec<Option<usize>> = vec![None; len];
@@ -46,18 +46,12 @@ impl Expression for CoalesceExpression {
         for (child_idx, child) in self.children.iter().enumerate() {
             let res = child.eval_checked(&input).await?;
             let res_bitmap = res.null_bitmap();
-            let orig_vis = input.vis();
-            let res_bitmap_ref: VisRef<'_> = res_bitmap.into();
-            orig_vis
-                .as_ref()
-                .bitand(res_bitmap_ref)
-                .iter_ones()
-                .for_each(|pos| {
-                    selection[pos] = Some(child_idx);
-                });
-            let res_vis: Vis = (!res_bitmap).into();
-            let new_vis = orig_vis & res_vis;
-            input.set_vis(new_vis);
+            let orig_vis = input.visibility();
+            for pos in orig_vis.bitand(res_bitmap).iter_ones() {
+                selection[pos] = Some(child_idx);
+            }
+            let new_vis = orig_vis & !res_bitmap;
+            input.set_visibility(new_vis);
             children_array.push(res);
         }
         let mut builder = self.return_type.create_array_builder(len);
