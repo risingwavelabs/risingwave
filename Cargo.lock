@@ -321,7 +321,7 @@ dependencies = [
  "bytes",
  "futures",
  "paste",
- "prost",
+ "prost 0.11.9",
  "tokio",
  "tonic",
 ]
@@ -1729,7 +1729,7 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2895653b4d9f1538a83970077cb01dfc77a4810524e51a110944688e916b18e"
 dependencies = [
- "prost",
+ "prost 0.11.9",
  "prost-types",
  "tonic",
  "tracing-core",
@@ -2646,7 +2646,7 @@ version = "0.11.1"
 source = "git+https://github.com/risingwavelabs/etcd-client.git?rev=d55550a#d55550a182f2119e39e64858771468e1b26f6777"
 dependencies = [
  "http",
- "prost",
+ "prost 0.11.9",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -3293,7 +3293,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5453af21ac0cc1f3b2cfb5b687c174e701c10ec2d5c286aff7ca8cbbf08d31b4"
 dependencies = [
- "prost",
+ "prost 0.11.9",
  "prost-types",
  "tonic",
 ]
@@ -5160,7 +5160,7 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry_api",
  "opentelemetry_sdk",
- "prost",
+ "prost 0.11.9",
  "thiserror",
  "tokio",
  "tonic",
@@ -5174,7 +5174,7 @@ checksum = "b1e3f814aa9f8c905d0ee4bde026afd3b2577a97c10e1699912e3e44f0c4cbeb"
 dependencies = [
  "opentelemetry_api",
  "opentelemetry_sdk",
- "prost",
+ "prost 0.11.9",
  "tonic",
 ]
 
@@ -5449,7 +5449,7 @@ checksum = "bdbb7b706f2afc610f3853550cdbbf6372fd324824a087806bd4480ea4996e24"
 dependencies = [
  "heck 0.4.1",
  "itertools 0.10.5",
- "prost",
+ "prost 0.11.9",
  "prost-types",
 ]
 
@@ -5962,7 +5962,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b82eaa1d779e9a4bc1c3217db8ffbeabaae1dca241bf70183242128d48681cd"
 dependencies = [
  "bytes",
- "prost-derive",
+ "prost-derive 0.11.9",
+]
+
+[[package]]
+name = "prost"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4fdd22f3b9c31b53c060df4a0613a1c7f062d4115a2b984dd15b1858f7e340d"
+dependencies = [
+ "bytes",
+ "prost-derive 0.12.1",
 ]
 
 [[package]]
@@ -5979,7 +5989,7 @@ dependencies = [
  "multimap",
  "petgraph",
  "prettyplease",
- "prost",
+ "prost 0.11.9",
  "prost-types",
  "regex",
  "syn 1.0.109",
@@ -6001,6 +6011,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost-derive"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
+dependencies = [
+ "anyhow",
+ "itertools 0.11.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.33",
+]
+
+[[package]]
 name = "prost-helpers"
 version = "0.1.0"
 dependencies = [
@@ -6017,7 +6040,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b823de344848e011658ac981009100818b322421676740546f8b52ed5249428"
 dependencies = [
  "once_cell",
- "prost",
+ "prost 0.11.9",
  "prost-types",
 ]
 
@@ -6027,7 +6050,7 @@ version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "213622a1460818959ac1181aaeb2dc9c7f63df720db7d788b3e24eacd1983e13"
 dependencies = [
- "prost",
+ "prost 0.11.9",
 ]
 
 [[package]]
@@ -6111,9 +6134,9 @@ dependencies = [
  "oauth2",
  "openidconnect",
  "pem 1.1.1",
- "prost",
+ "prost 0.11.9",
  "prost-build",
- "prost-derive",
+ "prost-derive 0.11.9",
  "rand",
  "regex",
  "serde",
@@ -6509,7 +6532,7 @@ dependencies = [
  "bytes",
  "itertools 0.11.0",
  "parking_lot 0.12.1",
- "prost",
+ "prost 0.12.1",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_object_store",
@@ -6717,7 +6740,7 @@ dependencies = [
  "pretty_assertions",
  "procfs 0.15.1",
  "prometheus",
- "prost",
+ "prost 0.12.1",
  "rand",
  "regex",
  "reqwest",
@@ -6926,7 +6949,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
- "prost",
+ "prost 0.12.1",
  "prost-build",
  "prost-reflect",
  "prost-types",
@@ -7190,7 +7213,7 @@ dependencies = [
  "madsim-tokio",
  "mockall",
  "parking_lot 0.12.1",
- "prost",
+ "prost 0.11.9",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
@@ -7202,7 +7225,7 @@ dependencies = [
 name = "risingwave_java_binding"
 version = "0.1.0"
 dependencies = [
- "prost",
+ "prost 0.12.1",
  "risingwave_common",
  "risingwave_expr",
  "risingwave_jni_core",
@@ -7220,7 +7243,7 @@ dependencies = [
  "itertools 0.11.0",
  "jni",
  "madsim-tokio",
- "prost",
+ "prost 0.12.1",
  "risingwave_common",
  "risingwave_expr",
  "risingwave_hummock_sdk",
@@ -7268,7 +7291,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "prometheus",
  "prometheus-http-query",
- "prost",
+ "prost 0.12.1",
  "rand",
  "regex",
  "reqwest",
@@ -7338,7 +7361,7 @@ dependencies = [
  "madsim-tonic-build",
  "pbjson",
  "pbjson-build",
- "prost",
+ "prost 0.12.1",
  "prost-helpers",
  "serde",
  "walkdir",
@@ -7614,7 +7637,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "procfs 0.15.1",
  "prometheus",
- "prost",
+ "prost 0.12.1",
  "rand",
  "risingwave_backup",
  "risingwave_common",
@@ -7677,7 +7700,7 @@ dependencies = [
  "parse-display",
  "pin-project",
  "prometheus",
- "prost",
+ "prost 0.12.1",
  "rand",
  "risingwave_common",
  "risingwave_connector",
@@ -9466,7 +9489,7 @@ dependencies = [
  "hyper-timeout",
  "percent-encoding",
  "pin-project",
- "prost",
+ "prost 0.11.9",
  "rustls-pemfile",
  "tokio",
  "tokio-rustls 0.24.1",
@@ -10327,7 +10350,7 @@ dependencies = [
  "postgres-types",
  "proc-macro2",
  "prometheus",
- "prost",
+ "prost 0.12.1",
  "rand",
  "rand_chacha",
  "rand_core",

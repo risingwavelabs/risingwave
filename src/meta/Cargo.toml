@@ -41,7 +41,7 @@ num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 prometheus = "0.13"
 prometheus-http-query = "0.6"
-prost = "0.11"
+prost = "0.12"
 rand = "0.8"
 regex = "1"
 reqwest = "0.11"
