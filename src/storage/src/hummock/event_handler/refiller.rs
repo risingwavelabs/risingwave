@@ -355,23 +355,16 @@ impl CacheRefillTask {
                         .data_refill_started_total
                         .inc_by(count as u64);
 
-                    match context
+                    if let Err(e) = context
                         .sstable_store
                         .fill_data_file_cache(sst_info.value(), idx_start..idx_end)
                         .await
                     {
-                        Ok(()) => {
-                            GLOBAL_CACHE_REFILL_METRICS
-                                .data_refill_success_duration
-                                .observe(now.elapsed().as_secs_f64());
-                            GLOBAL_CACHE_REFILL_METRICS
-                                .data_refill_success_total
-                                .inc_by(count as u64)
-                        }
-                        Err(e) => {
-                            tracing::warn!("data cache refill error: {:?}", e);
-                        }
+                        tracing::warn!("data cache refill error: {:?}", e);
                     }
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_success_duration
+                        .observe(now.elapsed().as_secs_f64());
                     drop(permit);
                 };
                 tasks.push(task);

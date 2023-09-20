@@ -37,6 +37,7 @@ use tokio::time::Instant;
 use zstd::zstd_safe::WriteBuf;
 
 use super::compactor::inheritance::SstableInheritance;
+use super::event_handler::refiller::GLOBAL_CACHE_REFILL_METRICS;
 use super::utils::MemoryTracker;
 use super::{
     Block, BlockCache, BlockMeta, BlockResponse, FileCache, RecentFilter, Sstable,
@@ -621,7 +622,9 @@ impl SstableStore {
                         block,
                     )
                     .await
-                    .map_err(HummockError::file_cache)
+                    .map_err(HummockError::file_cache)?;
+                GLOBAL_CACHE_REFILL_METRICS.data_refill_success_total.inc();
+                Ok::<_, HummockError>(())
             };
             tasks.push(task);
         }
