@@ -112,7 +112,7 @@ impl StatelessSimpleAggExecutor {
                             .try_collect()?;
                         let ops = vec![Op::Insert; 1];
 
-                        yield Message::Chunk(StreamChunk::new(ops, columns, None));
+                        yield Message::Chunk(StreamChunk::new(ops, columns));
                     }
 
                     yield m;

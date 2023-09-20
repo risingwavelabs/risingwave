@@ -18,32 +18,14 @@ use std::time::Duration;
 
 use etcd_client::{ConnectOptions, Error, GetOptions, LeaderKey, ResignOptions};
 use risingwave_common::bail;
-use serde::Serialize;
 use tokio::sync::watch::Receiver;
 use tokio::sync::{oneshot, watch};
 use tokio::time;
 use tokio_stream::StreamExt;
 
+use crate::rpc::election::{ElectionClient, ElectionMember, META_ELECTION_KEY};
 use crate::storage::WrappedEtcdClient;
 use crate::MetaResult;
-
-const META_ELECTION_KEY: &str = "__meta_election_";
-
-#[derive(Debug, Serialize)]
-pub struct ElectionMember {
-    pub id: String,
-    pub is_leader: bool,
-}
-
-#[async_trait::async_trait]
-pub trait ElectionClient: Send + Sync + 'static {
-    fn id(&self) -> MetaResult<String>;
-    async fn run_once(&self, ttl: i64, stop: Receiver<()>) -> MetaResult<()>;
-    fn subscribe(&self) -> Receiver<bool>;
-    async fn leader(&self) -> MetaResult<Option<ElectionMember>>;
-    async fn get_members(&self) -> MetaResult<Vec<ElectionMember>>;
-    async fn is_leader(&self) -> bool;
-}
 
 pub struct EtcdElectionClient {
     id: String,
@@ -367,7 +349,8 @@ mod tests {
     use tokio::sync::watch::Sender;
     use tokio::time;
 
-    use crate::rpc::election_client::{ElectionClient, EtcdElectionClient, META_ELECTION_KEY};
+    use crate::rpc::election::etcd::EtcdElectionClient;
+    use crate::rpc::election::{ElectionClient, META_ELECTION_KEY};
 
     type ElectionHandle = (Sender<()>, Arc<dyn ElectionClient>);
 
