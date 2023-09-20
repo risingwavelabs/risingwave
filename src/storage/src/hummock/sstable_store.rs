@@ -37,6 +37,7 @@ use tokio::time::Instant;
 use zstd::zstd_safe::WriteBuf;
 
 use super::compactor::inheritance::SstableInheritance;
+use super::event_handler::refiller::GLOBAL_CACHE_REFILL_METRICS;
 use super::utils::MemoryTracker;
 use super::{
     Block, BlockCache, BlockMeta, BlockResponse, FileCache, RecentFilter, Sstable,
@@ -603,6 +604,10 @@ impl SstableStore {
         {
             return Ok(false);
         }
+
+        GLOBAL_CACHE_REFILL_METRICS
+            .data_refill_started_total
+            .inc_by((idx_end - idx_start) as u64);
 
         let bytes_start = sst.calculate_block_info(idx_start).0.start;
         let bytes_end = sst.calculate_block_info(idx_end - 1).0.end;

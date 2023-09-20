@@ -335,10 +335,6 @@ impl CacheRefillTask {
 
                     let permit = context.concurrency.acquire().await.unwrap();
 
-                    GLOBAL_CACHE_REFILL_METRICS
-                        .data_refill_started_total
-                        .inc_by(count as u64);
-
                     match context
                         .sstable_store
                         .fill_data_file_cache(
@@ -348,9 +344,14 @@ impl CacheRefillTask {
                         )
                         .await
                     {
-                        Ok(true) => GLOBAL_CACHE_REFILL_METRICS
-                            .data_refill_success_duration
-                            .observe(now.elapsed().as_secs_f64()),
+                        Ok(true) => {
+                            GLOBAL_CACHE_REFILL_METRICS
+                                .data_refill_success_duration
+                                .observe(now.elapsed().as_secs_f64());
+                            GLOBAL_CACHE_REFILL_METRICS
+                                .data_refill_success_total
+                                .inc_by(count as u64)
+                        }
                         Ok(false) => GLOBAL_CACHE_REFILL_METRICS
                             .data_refill_filtered_total
                             .inc_by(count as u64),
