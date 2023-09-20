@@ -10788,7 +10788,6 @@ dependencies = [
  "sha2",
  "signature",
  "smallvec",
- "socket2 0.5.3",
  "sqlx",
  "sqlx-core",
  "sqlx-mysql",

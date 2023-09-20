@@ -108,7 +108,6 @@ sha1 = { version = "0.10" }
 sha2 = { version = "0.10" }
 signature = { version = "2", default-features = false, features = ["digest", "rand_core", "std"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
-socket2 = { version = "0.5", default-features = false, features = ["all"] }
 sqlx = { version = "0.7", features = ["bigdecimal", "chrono", "mysql", "postgres", "runtime-tokio-native-tls", "rust_decimal", "sqlite", "time", "uuid"] }
 sqlx-core = { version = "0.7", features = ["_rt-tokio", "_tls-native-tls", "any", "bigdecimal", "chrono", "json", "migrate", "offline", "rust_decimal", "time", "uuid"] }
 sqlx-mysql = { version = "0.7", default-features = false, features = ["any", "bigdecimal", "chrono", "json", "migrate", "offline", "rust_decimal", "time", "uuid"] }
@@ -208,6 +207,7 @@ time = { version = "0.3", features = ["local-offset", "macros", "serde-well-know
 time-macros = { version = "0.2", default-features = false, features = ["formatting", "parsing", "serde"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
 tokio = { version = "1", features = ["full", "stats", "tracing"] }
+tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88", features = ["with-chrono-0_4"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 toml_datetime = { version = "0.6", default-features = false, features = ["serde"] }
