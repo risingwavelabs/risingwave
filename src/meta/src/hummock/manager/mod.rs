@@ -847,6 +847,8 @@ impl HummockManager {
             .filter(|(table_id, _)| member_table_ids.contains(table_id))
             .collect();
 
+        const MAX_TRIVIAL_TASK_COUNT: usize = 64;
+
         loop {
             // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
             let task_id = self
@@ -895,6 +897,10 @@ impl HummockManager {
                 trivial_task_vec.push(compact_task);
             } else {
                 normal_task = Some(compact_task);
+                break;
+            }
+
+            if trivial_task_vec.len() >= MAX_TRIVIAL_TASK_COUNT {
                 break;
             }
         }
