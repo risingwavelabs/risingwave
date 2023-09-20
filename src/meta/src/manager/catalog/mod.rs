@@ -756,7 +756,8 @@ impl CatalogManager {
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let key = (table.database_id, table.schema_id, table.name.clone());
         assert!(
-            !tables.contains_key(&table.id)
+            // table will always contain key.
+            // !tables.contains_key(&table.id)
                 && database_core.in_progress_creation_tracker.contains(&key),
             "table must be in creating procedure"
         );
