@@ -24,6 +24,7 @@ env_scripts = [
 #!@duckscript
 
 # only duckscript can modify env variables in cargo-make
+# duckscript doc: https://github.com/sagiegurari/duckscript/blob/master/docs/sdk.md
 
 set_env ENABLE_TELEMETRY "false"
 
@@ -70,6 +71,12 @@ else
   set_env BUILD_HUMMOCK_TRACE_CMD ""
 end
 
+query_log_path = get_env RW_QUERY_LOG_PATH
+no_query_log_path = not ${query_log_path}
+
+if ${no_query_log_path}
+  set_env RW_QUERY_LOG_PATH "${PREFIX_LOG}"
+fi
 ''',
 ]
 
@@ -603,12 +610,10 @@ if [[ $ENABLE_COREDUMP == "true" ]]; then
   ulimit -c unlimited
 fi
 
-if [[ -z "$RW_QUERY_LOG_PATH" ]]; then
-  export RW_QUERY_LOG_PATH="${PREFIX_LOG}"
-fi
-
 if [[ -z "$RUST_LOG" ]]; then
   export RUST_LOG="pgwire_query_log=info"
+else
+  export RUST_LOG="pgwire_query_log=info,${RUST_LOG}"
 fi
 
 set -x
@@ -628,12 +633,10 @@ if [[ $ENABLE_COREDUMP == "true" ]]; then
   ulimit -c unlimited
 fi
 
-if [[ -z "$RW_QUERY_LOG_PATH" ]]; then
-  export RW_QUERY_LOG_PATH="${PREFIX_LOG}"
-fi
-
 if [[ -z "$RUST_LOG" ]]; then
   export RUST_LOG="pgwire_query_log=info"
+else
+  export RUST_LOG="pgwire_query_log=info,${RUST_LOG}"
 fi
 
 set -x
@@ -670,12 +673,10 @@ if [[ $ENABLE_COREDUMP == "true" ]]; then
   ulimit -c unlimited
 fi
 
-if [[ -z "$RW_QUERY_LOG_PATH" ]]; then
-  export RW_QUERY_LOG_PATH="${PREFIX_LOG}"
-fi
-
 if [[ -z "$RUST_LOG" ]]; then
   export RUST_LOG="pgwire_query_log=info"
+else
+  export RUST_LOG="pgwire_query_log=info,${RUST_LOG}"
 fi
 
 set -x
