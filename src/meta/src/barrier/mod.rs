@@ -973,7 +973,6 @@ impl GlobalBarrierManager {
         }
 
         if self.enable_recovery {
-            self.recover_mview_progress().await;
 
             let latest_snapshot = self.hummock_manager.latest_snapshot();
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
