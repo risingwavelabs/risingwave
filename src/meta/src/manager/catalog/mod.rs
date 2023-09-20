@@ -758,7 +758,7 @@ impl CatalogManager {
         assert!(
             // table will always contain key.
             // !tables.contains_key(&table.id) &&
-                database_core.in_progress_creation_tracker.contains(&key),
+            database_core.in_progress_creation_tracker.contains(&key),
             "table must be in creating procedure"
         );
         database_core.in_progress_creation_tracker.remove(&key);

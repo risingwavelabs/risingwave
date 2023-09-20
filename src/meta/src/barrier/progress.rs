@@ -259,68 +259,6 @@ impl CreateMviewProgressTracker {
         }
     }
 
-    // let progress_map = progress_per_actor
-    //     .into_iter()
-    //     .map(|(actor_id, state)| {
-    //         let epoch = actor_map.get(&actor_id).unwrap();
-    //         (epoch, (actor_id, state))
-    //     })
-    //     .sorted_by(|(epoch1, _), (epoch2, _)| epoch1.cmp(epoch2))
-    //     .group_by(|(epoch, _)| *epoch)
-    //     .into_iter()
-    //     .map(|(epoch, state_per_actor)| {
-    //         let mut states = HashMap::new();
-    //         let mut done_count = 0;
-    //         let creating_mv_id = *table_map.get(&epoch).unwrap();
-    //         // FIXME: Don't clone here.
-    //         let upstream_mv_count = upstream_mv_counts.get(&epoch).unwrap().clone();
-    //         let upstream_total_key_count = upstream_mv_count
-    //             .iter()
-    //             .map(|(upstream_mv, count)| {
-    //                 *count as u64
-    //                     * version_stats
-    //                         .table_stats
-    //                         .get(&upstream_mv.table_id)
-    //                         .map_or(0, |stat| stat.total_key_count as u64)
-    //             })
-    //             .sum();
-    //         let mut consumed_rows = 0;
-    //         let definition = definitions.get(&epoch).unwrap().clone();
-    // TODO: This should be recovered separately.
-    // for (_, (actor_id, status)) in state_per_actor {
-    //     match status {
-    //         ChainState::Init => {}
-    //         ChainState::ConsumingUpstream(epoch, actor_consumed_rows) => {
-    //             consumed_rows += actor_consumed_rows;
-    //             // FIXME: Should Done states be in the map?
-    //             // If no, then only insert here.
-    //             // states.insert(actor_id, ChainState::ConsumingUpstream(epoch, consumed_rows));
-    //         }
-    //         ChainState::Done => {
-    //             done_count += 1;
-    //         }
-    //     };
-    //     // FIXME: Should Done states be in the map?
-    //     states.insert(actor_id, status).unwrap();
-    // }
-    //     let progress = Progress {
-    //         states,
-    //         done_count,
-    //         creating_mv_id,
-    //         upstream_mv_count,
-    //         upstream_total_key_count,
-    //         consumed_rows,
-    //         definition,
-    //     };
-    //     let tracking_command = tracking_commands.remove(&epoch).unwrap();
-    //     (*epoch, (progress, tracking_command))
-    // })
-    // .collect();
-    // Self {
-    //     progress_map,
-    //     actor_map,
-    // }
-
     pub fn new() -> Self {
         Self {
             progress_map: Default::default(),
