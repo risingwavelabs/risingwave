@@ -97,14 +97,14 @@ where
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        Ok(match self.eval(input).await {
+        Ok(match self.inner.eval(input).await {
             Ok(array) => array,
             Err(_e) => self.eval_chunk_infallible_by_row(input).await,
         })
     }
 
     async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
-        Ok(match self.eval_v2(input).await {
+        Ok(match self.inner.eval_v2(input).await {
             Ok(value) => value,
             Err(_e) => self.eval_chunk_infallible_by_row(input).await.into(),
         })

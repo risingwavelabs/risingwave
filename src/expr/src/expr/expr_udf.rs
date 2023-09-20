@@ -25,7 +25,7 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 use risingwave_udf::ArrowFlightUdfClient;
 
-use super::{build_from_prost, BoxedExpression};
+use super::{build_from_prost, BoxedExpression, Build, InputRefExpression};
 use crate::expr::Expression;
 use crate::{bail, ExprError, Result};
 
@@ -115,10 +115,11 @@ impl UdfExpression {
 }
 
 #[cfg_or_panic(not(madsim))]
-impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
-    type Error = ExprError;
-
-    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+impl Build for UdfExpression {
+    fn build(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<Self> {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
 
@@ -140,7 +141,7 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
         let client = get_or_create_client(&udf.link)?;
 
         Ok(Self {
-            children: udf.children.iter().map(build_from_prost).try_collect()?,
+            children: udf.children.iter().map(build_child).try_collect()?,
             arg_types: udf.arg_types.iter().map(|t| t.into()).collect(),
             return_type,
             arg_schema,

@@ -24,7 +24,7 @@ use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::{ExprNode, FunctionCall};
 
 use super::build::get_children_and_return_type;
-use super::{build_from_prost, BoxedExpression, Expression};
+use super::{build_from_prost, BoxedExpression, Build, Expression};
 use crate::{ExprError, Result};
 
 #[derive(Debug)]
@@ -202,10 +202,11 @@ impl Expression for SomeAllExpression {
     }
 }
 
-impl<'a> TryFrom<&'a ExprNode> for SomeAllExpression {
-    type Error = ExprError;
-
-    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+impl Build for SomeAllExpression {
+    fn build(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<Self> {
         let outer_expr_type = prost.get_function_type().unwrap();
         let (outer_children, outer_return_type) = get_children_and_return_type(prost)?;
         ensure!(matches!(outer_return_type, DataType::Boolean));
@@ -220,8 +221,8 @@ impl<'a> TryFrom<&'a ExprNode> for SomeAllExpression {
             (inner_children, inner_return_type) = get_children_and_return_type(&inner_children[0])?;
         }
 
-        let left_expr = build_from_prost(&inner_children[0])?;
-        let right_expr = build_from_prost(&inner_children[1])?;
+        let left_expr = build_child(&inner_children[0])?;
+        let right_expr = build_child(&inner_children[1])?;
 
         let DataType::List(right_expr_return_type) = right_expr.return_type() else {
             bail!("Expect Array Type");
@@ -254,7 +255,7 @@ impl<'a> TryFrom<&'a ExprNode> for SomeAllExpression {
                     })),
                 }
             }
-            build_from_prost(&root_expr_node)?
+            build_child(&root_expr_node)?
         };
 
         Ok(SomeAllExpression::new(

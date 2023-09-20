@@ -21,9 +21,9 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
-use super::Expression;
+use super::{BoxedExpression, Build, Expression};
 use crate::expr::InputRefExpression;
-use crate::{bail, ensure, ExprError, Result};
+use crate::{bail, ensure, Result};
 
 #[derive(Debug)]
 pub struct VnodeExpression {
@@ -36,10 +36,11 @@ impl VnodeExpression {
     }
 }
 
-impl<'a> TryFrom<&'a ExprNode> for VnodeExpression {
-    type Error = ExprError;
-
-    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+impl Build for VnodeExpression {
+    fn build(
+        prost: &ExprNode,
+        _build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<Self> {
         ensure!(prost.get_function_type().unwrap() == Type::Vnode);
         ensure!(DataType::from(prost.get_return_type().unwrap()) == DataType::Int16);
 
@@ -50,7 +51,7 @@ impl<'a> TryFrom<&'a ExprNode> for VnodeExpression {
         let dist_key_input_refs = func_call_node
             .get_children()
             .iter()
-            .map(InputRefExpression::try_from)
+            .map(|e| InputRefExpression::build(e, |_| unreachable!()))
             .map(|res| res.map(|input| input.index()))
             .try_collect()?;
 
@@ -95,7 +96,7 @@ mod tests {
 
     use super::VnodeExpression;
     use crate::expr::test_utils::make_input_ref;
-    use crate::expr::Expression;
+    use crate::expr::{Build, Expression};
 
     pub fn make_vnode_function(children: Vec<ExprNode>) -> ExprNode {
         ExprNode {
@@ -113,7 +114,7 @@ mod tests {
         let input_node1 = make_input_ref(0, TypeName::Int32);
         let input_node2 = make_input_ref(0, TypeName::Int64);
         let input_node3 = make_input_ref(0, TypeName::Varchar);
-        let vnode_expr = VnodeExpression::try_from(&make_vnode_function(vec![
+        let vnode_expr = VnodeExpression::build_for_test(&make_vnode_function(vec![
             input_node1,
             input_node2,
             input_node3,
@@ -138,7 +139,7 @@ mod tests {
         let input_node1 = make_input_ref(0, TypeName::Int32);
         let input_node2 = make_input_ref(0, TypeName::Int64);
         let input_node3 = make_input_ref(0, TypeName::Varchar);
-        let vnode_expr = VnodeExpression::try_from(&make_vnode_function(vec![
+        let vnode_expr = VnodeExpression::build_for_test(&make_vnode_function(vec![
             input_node1,
             input_node2,
             input_node3,

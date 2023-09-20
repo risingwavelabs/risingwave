@@ -114,19 +114,6 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     }
 }
 
-/// Extension trait to convert the protobuf representation to a boxed [`Expression`], with a
-/// concrete expression type.
-#[easy_ext::ext(TryFromExprNodeBoxed)]
-impl<'a, T> T
-where
-    T: TryFrom<&'a PbExprNode, Error = ExprError> + Expression + 'static,
-{
-    /// Performs the conversion.
-    fn try_from_boxed(expr: &'a PbExprNode) -> Result<BoxedExpression> {
-        T::try_from(expr).map(|e| e.boxed())
-    }
-}
-
 impl dyn Expression {
     pub async fn eval_infallible(&self, input: &DataChunk) -> ArrayRef {
         self.eval(input).await.expect("evaluation failed")

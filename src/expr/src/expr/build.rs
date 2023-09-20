@@ -29,9 +29,7 @@ use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
 use super::wrapper::{Checked, EvalErrorReport, NonStrict};
-use crate::expr::{
-    BoxedExpression, Expression, InputRefExpression, LiteralExpression, TryFromExprNodeBoxed,
-};
+use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use crate::sig::func::FUNC_SIG_MAP;
 use crate::sig::FuncSigDebug;
 use crate::{bail, ExprError, Result};
@@ -47,6 +45,24 @@ pub fn build_non_strict_from_prost(
     error_report: impl EvalErrorReport + 'static,
 ) -> Result<BoxedExpression> {
     ExprBuilder::new_non_strict(Arc::new(error_report)).build(prost)
+}
+
+pub(crate) trait Build: Expression + Sized + 'static {
+    fn build(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<Self>;
+
+    fn build_boxed(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<BoxedExpression> {
+        Self::build(prost, build_child).map(Expression::boxed)
+    }
+
+    fn build_for_test(prost: &ExprNode) -> Result<Self> {
+        Self::build(prost, build_from_prost)
+    }
 }
 
 struct ExprBuilder<R> {
@@ -86,12 +102,14 @@ where
 
     /// Do build an expression from protobuf.
     fn build_inner(&self, prost: &ExprNode) -> Result<BoxedExpression> {
+        let build_child = |prost: &'_ ExprNode| self.build(prost);
+
         use PbType as E;
 
         let func_call = match prost.get_rex_node()? {
-            RexNode::InputRef(_) => return InputRefExpression::try_from_boxed(prost),
-            RexNode::Constant(_) => return LiteralExpression::try_from_boxed(prost),
-            RexNode::Udf(_) => return UdfExpression::try_from_boxed(prost),
+            RexNode::InputRef(_) => return InputRefExpression::build_boxed(prost, build_child),
+            RexNode::Constant(_) => return LiteralExpression::build_boxed(prost, build_child),
+            RexNode::Udf(_) => return UdfExpression::build_boxed(prost, build_child),
             RexNode::FuncCall(func_call) => func_call,
             RexNode::Now(_) => unreachable!("now should not be built at backend"),
         };
@@ -100,19 +118,19 @@ where
 
         match func_type {
             // Dedicated types
-            E::All | E::Some => SomeAllExpression::try_from_boxed(prost),
-            E::In => InExpression::try_from_boxed(prost),
-            E::Case => CaseExpression::try_from_boxed(prost),
-            E::Coalesce => CoalesceExpression::try_from_boxed(prost),
-            E::Field => FieldExpression::try_from_boxed(prost),
-            E::Vnode => VnodeExpression::try_from_boxed(prost),
+            E::All | E::Some => SomeAllExpression::build_boxed(prost, build_child),
+            E::In => InExpression::build_boxed(prost, build_child),
+            E::Case => CaseExpression::build_boxed(prost, build_child),
+            E::Coalesce => CoalesceExpression::build_boxed(prost, build_child),
+            E::Field => FieldExpression::build_boxed(prost, build_child),
+            E::Vnode => VnodeExpression::build_boxed(prost, build_child),
 
             _ => {
                 let ret_type = DataType::from(prost.get_return_type().unwrap());
                 let children = func_call
                     .get_children()
                     .iter()
-                    .map(|prost| self.build(prost))
+                    .map(build_child)
                     .try_collect()?;
 
                 build_func(func_type, ret_type, children)

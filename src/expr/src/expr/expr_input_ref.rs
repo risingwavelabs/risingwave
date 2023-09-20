@@ -20,6 +20,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 
+use super::{Build, BoxedExpression};
 use crate::expr::Expression;
 use crate::{ExprError, Result};
 
@@ -60,10 +61,11 @@ impl InputRefExpression {
     }
 }
 
-impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
-    type Error = ExprError;
-
-    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+impl Build for InputRefExpression {
+    fn build(
+        prost: &ExprNode,
+        _build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<Self> {
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let input_col_idx = prost.get_rex_node().unwrap().as_input_ref().unwrap();
 

@@ -22,6 +22,7 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
+use super::Build;
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
 use crate::{bail, ensure, ExprError, Result};
 
@@ -85,10 +86,11 @@ impl CoalesceExpression {
     }
 }
 
-impl<'a> TryFrom<&'a ExprNode> for CoalesceExpression {
-    type Error = ExprError;
-
-    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+impl Build for CoalesceExpression {
+    fn build(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<Self> {
         ensure!(prost.get_function_type().unwrap() == Type::Coalesce);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
@@ -100,7 +102,7 @@ impl<'a> TryFrom<&'a ExprNode> for CoalesceExpression {
             .children
             .to_vec()
             .iter()
-            .map(expr_build_from_prost)
+            .map(build_child)
             .collect::<Result<Vec<_>>>()?;
         Ok(CoalesceExpression::new(ret_type, children))
     }
@@ -120,7 +122,7 @@ mod tests {
 
     use crate::expr::expr_coalesce::CoalesceExpression;
     use crate::expr::test_utils::make_input_ref;
-    use crate::expr::Expression;
+    use crate::expr::{Build, Expression};
 
     pub fn make_coalesce_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
         ExprNode {
@@ -147,7 +149,7 @@ mod tests {
              . . .",
         );
 
-        let nullif_expr = CoalesceExpression::try_from(&make_coalesce_function(
+        let nullif_expr = CoalesceExpression::build_for_test(&make_coalesce_function(
             vec![input_node1, input_node2, input_node3],
             TypeName::Int32,
         ))
@@ -165,7 +167,7 @@ mod tests {
         let input_node2 = make_input_ref(1, TypeName::Int32);
         let input_node3 = make_input_ref(2, TypeName::Int32);
 
-        let nullif_expr = CoalesceExpression::try_from(&make_coalesce_function(
+        let nullif_expr = CoalesceExpression::build_for_test(&make_coalesce_function(
             vec![input_node1, input_node2, input_node3],
             TypeName::Int32,
         ))
