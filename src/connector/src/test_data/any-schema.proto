@@ -7,3 +7,11 @@ message TestAny {
   int32 id = 1;
   google.protobuf.Any name = 2;
 }
+
+message StringValue {
+  string value = 1;
+}
+
+message Int32Value {
+  int32 value = 1;
+}

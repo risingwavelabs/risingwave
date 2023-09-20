@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use prost_reflect::{
@@ -39,6 +40,7 @@ use crate::parser::{AccessBuilder, EncodingProperties};
 pub struct ProtobufAccessBuilder {
     confluent_wire_type: bool,
     message_descriptor: MessageDescriptor,
+    descriptor_pool: Arc<DescriptorPool>,
 }
 
 impl AccessBuilder for ProtobufAccessBuilder {
@@ -53,7 +55,10 @@ impl AccessBuilder for ProtobufAccessBuilder {
         let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
             .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
 
-        Ok(AccessImpl::Protobuf(ProtobufAccess::new(message)))
+        Ok(AccessImpl::Protobuf(ProtobufAccess::new(
+            message,
+            Arc::clone(&self.descriptor_pool),
+        )))
     }
 }
 
@@ -62,10 +67,13 @@ impl ProtobufAccessBuilder {
         let ProtobufParserConfig {
             confluent_wire_type,
             message_descriptor,
+            descriptor_pool,
         } = config;
+
         Ok(Self {
             confluent_wire_type,
             message_descriptor,
+            descriptor_pool,
         })
     }
 }
@@ -74,6 +82,8 @@ impl ProtobufAccessBuilder {
 pub struct ProtobufParserConfig {
     confluent_wire_type: bool,
     message_descriptor: MessageDescriptor,
+    /// Note that the pub(crate) here is merely for testing
+    pub(crate) descriptor_pool: Arc<DescriptorPool>,
 }
 
 impl ProtobufParserConfig {
@@ -135,15 +145,18 @@ impl ProtobufParserConfig {
                 location, e
             ))
         })?;
+
         let message_descriptor = pool.get_message_by_name(message_name).ok_or_else(|| {
             ProtocolError(format!(
-                "cannot find message {} in schema: {}.\n poll is {:?}",
+                "Cannot find message {} in schema: {}.\nDescriptor pool is {:?}",
                 message_name, location, pool
             ))
         })?;
+
         Ok(Self {
             message_descriptor,
             confluent_wire_type: protobuf_config.use_schema_registry,
+            descriptor_pool: Arc::new(pool),
         })
     }
 
@@ -224,7 +237,11 @@ fn detect_loop_and_push(trace: &mut Vec<String>, fd: &FieldDescriptor) -> Result
     Ok(())
 }
 
-pub fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value, type_expected: Option<&DataType>) -> Result<Datum> {
+pub fn from_protobuf_value(
+    field_desc: &FieldDescriptor,
+    value: &Value,
+    descriptor_pool: &Arc<DescriptorPool>,
+) -> Result<Datum> {
     let v = match value {
         Value::Bool(v) => ScalarImpl::Bool(*v),
         Value::I32(i) => ScalarImpl::Int32(*i),
@@ -250,12 +267,50 @@ pub fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value, type_exp
             ScalarImpl::Utf8(enum_symbol.name().into())
         }
         Value::Message(dyn_msg) => {
-            if let Some(DataType::Jsonb) = type_expected {
+            if dyn_msg.has_field_by_name("type_url") && dyn_msg.has_field_by_name("value") {
                 // The message is of type `Any`
-                // FIXME: Now we will just directly return the payload as Utf8
-                let _type_url = dyn_msg.get_field_by_name("type_url").expect("Expect type_url in dyn_msg");
-                let payload = dyn_msg.get_field_by_name("value").expect("Expect value (payload) in dyn_msg");
-                ScalarImpl::Utf8(payload.as_str().unwrap().into())
+                debug_assert!(
+                    dyn_msg.fields().count() == 2,
+                    "Expected only two fields for Any Type MessageDescriptor"
+                );
+
+                let type_url = dyn_msg
+                    .get_field_by_name("type_url")
+                    .expect("Expect type_url in dyn_msg");
+                let payload = dyn_msg
+                    .get_field_by_name("value")
+                    .expect("Expect value (payload) in dyn_msg")
+                    .as_ref()
+                    .clone();
+
+                let type_url =
+                    type_url.to_string().split('/').collect::<Vec<&str>>()[1].to_string();
+                let type_url = type_url[..type_url.len() - 1].to_string();
+                let payload_field_desc = dyn_msg.descriptor().get_field_by_name("value").unwrap();
+                let Some(ScalarImpl::Bytea(payload)) =
+                    from_protobuf_value(&payload_field_desc, &payload, descriptor_pool)?
+                else {
+                    panic!("Expected ScalarImpl::Bytea for payload");
+                };
+
+                // Get the corresponding schema from the descriptor pool
+                let msg_desc = descriptor_pool
+                    .get_message_by_name(&type_url)
+                    .ok_or_else(|| {
+                        ProtocolError(format!(
+                        "Cannot find message {} in from_protobuf_value.\nDescriptor pool is {:#?}",
+                        type_url, descriptor_pool
+                    ))
+                    })?;
+
+                // Decode the payload based on the `msg_desc`
+                let decoded_value = DynamicMessage::decode(msg_desc, payload.as_ref()).unwrap();
+
+                return from_protobuf_value(
+                    field_desc,
+                    &Value::Message(decoded_value),
+                    descriptor_pool,
+                );
             } else {
                 let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
                 // fields is a btree map in descriptor
@@ -273,7 +328,7 @@ pub fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value, type_exp
                     }
                     // use default value if dyn_msg doesn't has this field
                     let value = dyn_msg.get_field(&field_desc);
-                    rw_values.push(from_protobuf_value(&field_desc, &value, type_expected)?);
+                    rw_values.push(from_protobuf_value(&field_desc, &value, descriptor_pool)?);
                 }
                 ScalarImpl::Struct(StructValue::new(rw_values))
             }
@@ -281,7 +336,7 @@ pub fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value, type_exp
         Value::List(values) => {
             let rw_values = values
                 .iter()
-                .map(|value| from_protobuf_value(field_desc, value, type_expected))
+                .map(|value| from_protobuf_value(field_desc, value, descriptor_pool))
                 .collect::<Result<Vec<_>>>()?;
             ScalarImpl::List(ListValue::new(rw_values))
         }
@@ -322,13 +377,7 @@ fn protobuf_type_mapping(
                 .collect::<Result<Vec<_>>>()?;
             let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
 
-            // See if the message is of type `Any`
-            if field_names.len() == 2 && field_names.contains(&String::from("type_url")) && field_names.contains(&String::from("value")) {
-                // If so, `Jsonb` will be returned
-                DataType::Jsonb
-            } else{
-                DataType::new_struct(fields, field_names)
-            }
+            DataType::new_struct(fields, field_names)
         }
         Kind::Enum(_) => DataType::Varchar,
         Kind::Bytes => DataType::Bytea,
@@ -745,6 +794,13 @@ mod test {
         }
     }
 
+    // id: 12345
+    // name {
+    //    type_url: "type.googleapis.com/test.StringValue"
+    //    value: "\n\010John Doe"
+    // }
+    static ANY_GEN_PROTO_DATA: &[u8] = b"\x08\xb9\x60\x12\x32\x0a\x24\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x53\x74\x72\x69\x6e\x67\x56\x61\x6c\x75\x65\x12\x0a\x0a\x08\x4a\x6f\x68\x6e\x20\x44\x6f\x65";
+
     #[tokio::test]
     async fn test_any_schema() -> Result<()> {
         let location = schema_dir() + "/any-schema.pb";
@@ -756,42 +812,141 @@ mod test {
             use_schema_registry: false,
             ..Default::default()
         };
+
         let parser_config = SpecificParserConfig::new(
             SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
             &info,
             &HashMap::new(),
         )?;
+
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
-        let c = conf.map_to_columns().unwrap();
 
-        println!("Current column: {:?}", c);
+        println!("Current conf: {:#?}", conf);
+        println!("---------------------------");
 
-        // let value = DynamicMessage::decode(conf.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
+        let value =
+            DynamicMessage::decode(conf.message_descriptor.clone(), ANY_GEN_PROTO_DATA).unwrap();
 
-        // assert_eq!(
-        //     value.get_field_by_name("id").unwrap().into_owned(),
-        //     Value::I32(123)
-        // );
-        // assert_eq!(
-        //     value.get_field_by_name("address").unwrap().into_owned(),
-        //     Value::String("test address".to_string())
-        // );
-        // assert_eq!(
-        //     value.get_field_by_name("city").unwrap().into_owned(),
-        //     Value::String("test city".to_string())
-        // );
-        // assert_eq!(
-        //     value.get_field_by_name("zipcode").unwrap().into_owned(),
-        //     Value::I64(456)
-        // );
-        // assert_eq!(
-        //     value.get_field_by_name("rate").unwrap().into_owned(),
-        //     Value::F32(1.2345)
-        // );
-        // assert_eq!(
-        //     value.get_field_by_name("date").unwrap().into_owned(),
-        //     Value::String("2021-01-01".to_string())
-        // );
+        println!("Test ANY_GEN_PROTO_DATA, current value: {:#?}", value);
+        println!("---------------------------");
+
+        // This is of no use
+        let field = value.fields().next().unwrap().0;
+
+        if let Some(ret) =
+            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool).unwrap()
+        {
+            println!("Decoded Value for ANY_GEN_PROTO_DATA: {:#?}", ret);
+            println!("---------------------------");
+
+            let ScalarImpl::Struct(struct_value) = ret else {
+                panic!("Expected ScalarImpl::Struct");
+            };
+
+            let fields = struct_value.fields();
+
+            match fields[0].clone() {
+                Some(ScalarImpl::Int32(v)) => {
+                    println!("Successfully decode field[0]");
+                    assert_eq!(v, 12345);
+                }
+                _ => panic!("Expected ScalarImpl::Int32"),
+            }
+
+            match fields[1].clone() {
+                Some(ScalarImpl::Struct(sv)) => {
+                    let fields = sv.fields();
+                    debug_assert!(fields.len() == 1, "Expected only one field");
+                    match fields[0].clone() {
+                        Some(ScalarImpl::Utf8(v)) => {
+                            println!("Successfully decode field[0] for any type");
+                            assert_eq!(v.to_string(), "John Doe");
+                        }
+                        _ => panic!("Expected ScalarImpl::Int32"),
+                    }
+                }
+                _ => panic!("Expected ScalarImpl::Struct"),
+            }
+        }
+
+        Ok(())
+    }
+
+    // id: 12345
+    // name {
+    // type_url: "type.googleapis.com/test.Int32Value"
+    // value: "\010\322\376\006"
+    // }
+    // Unpacked Int32Value from Any: value: 114514
+    static ANY_GEN_PROTO_DATA_1: &[u8] = b"\x08\xb9\x60\x12\x2b\x0a\x23\x74\x79\x70\x65\x2e\x67\x6f\x6f\x67\x6c\x65\x61\x70\x69\x73\x2e\x63\x6f\x6d\x2f\x74\x65\x73\x74\x2e\x49\x6e\x74\x33\x32\x56\x61\x6c\x75\x65\x12\x04\x08\xd2\xfe\x06";
+
+    #[tokio::test]
+    async fn test_any_schema_1() -> Result<()> {
+        let location = schema_dir() + "/any-schema.pb";
+        println!("location: {}", location);
+        let message_name = "test.TestAny";
+        let info = StreamSourceInfo {
+            proto_message_name: message_name.to_string(),
+            row_schema_location: location.to_string(),
+            use_schema_registry: false,
+            ..Default::default()
+        };
+
+        let parser_config = SpecificParserConfig::new(
+            SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
+            &info,
+            &HashMap::new(),
+        )?;
+
+        let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
+
+        println!("Current conf: {:#?}", conf);
+        println!("---------------------------");
+
+        let value =
+            DynamicMessage::decode(conf.message_descriptor.clone(), ANY_GEN_PROTO_DATA_1).unwrap();
+
+        println!("Current Value: {:#?}", value);
+        println!("---------------------------");
+
+        // This is of no use
+        let field = value.fields().next().unwrap().0;
+
+        if let Some(ret) =
+            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool).unwrap()
+        {
+            println!("Decoded Value for ANY_GEN_PROTO_DATA: {:#?}", ret);
+            println!("---------------------------");
+
+            let ScalarImpl::Struct(struct_value) = ret else {
+                panic!("Expected ScalarImpl::Struct");
+            };
+
+            let fields = struct_value.fields();
+
+            match fields[0].clone() {
+                Some(ScalarImpl::Int32(v)) => {
+                    println!("Successfully decode field[0]");
+                    assert_eq!(v, 12345);
+                }
+                _ => panic!("Expected ScalarImpl::Int32"),
+            }
+
+            match fields[1].clone() {
+                Some(ScalarImpl::Struct(sv)) => {
+                    let fields = sv.fields();
+                    debug_assert!(fields.len() == 1, "Expected only one field");
+                    match fields[0].clone() {
+                        Some(ScalarImpl::Int32(v)) => {
+                            println!("Successfully decode field[0] for any type");
+                            assert_eq!(v, 114514);
+                        }
+                        _ => panic!("Expected ScalarImpl::Int32"),
+                    }
+                }
+                _ => panic!("Expected ScalarImpl::Struct"),
+            }
+        }
 
         Ok(())
     }
