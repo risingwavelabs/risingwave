@@ -307,7 +307,7 @@ impl SinkConfig {
             SinkConfig::ClickHouse(_) => "clickhouse",
             SinkConfig::Iceberg(_) => "iceberg",
             SinkConfig::Nats(_) => "nats",
-            SinkConfig::RemoteIceberg(_) => "iceberg",
+            SinkConfig::RemoteIceberg(_) => "iceberg_java",
             #[cfg(any(test, madsim))]
             SinkConfig::Test => "test",
         }

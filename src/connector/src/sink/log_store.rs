@@ -12,20 +12,90 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::future::Future;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::epoch::EpochPair;
 
 pub type LogStoreResult<T> = Result<T, anyhow::Error>;
+pub type ChunkId = usize;
+
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum TruncateOffset {
+    Chunk { epoch: u64, chunk_id: ChunkId },
+    Barrier { epoch: u64 },
+}
+
+impl PartialOrd for TruncateOffset {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let extract = |offset: &TruncateOffset| match offset {
+            TruncateOffset::Chunk { epoch, chunk_id } => (*epoch, *chunk_id),
+            TruncateOffset::Barrier { epoch } => (*epoch, usize::MAX),
+        };
+        let this = extract(self);
+        let other = extract(other);
+        this.partial_cmp(&other)
+    }
+}
+
+impl TruncateOffset {
+    pub fn next_chunk_id(&self) -> ChunkId {
+        match self {
+            TruncateOffset::Chunk { chunk_id, .. } => chunk_id + 1,
+            TruncateOffset::Barrier { .. } => 0,
+        }
+    }
+
+    pub fn epoch(&self) -> u64 {
+        match self {
+            TruncateOffset::Chunk { epoch, .. } | TruncateOffset::Barrier { epoch } => *epoch,
+        }
+    }
+
+    pub fn check_next_item_epoch(&self, epoch: u64) -> LogStoreResult<()> {
+        match self {
+            TruncateOffset::Chunk {
+                epoch: offset_epoch,
+                ..
+            } => {
+                if epoch != *offset_epoch {
+                    return Err(anyhow!(
+                        "new item epoch {} not match current chunk offset epoch {}",
+                        epoch,
+                        offset_epoch
+                    ));
+                }
+            }
+            TruncateOffset::Barrier {
+                epoch: offset_epoch,
+            } => {
+                if epoch <= *offset_epoch {
+                    return Err(anyhow!(
+                        "new item epoch {} not exceed barrier offset epoch {}",
+                        epoch,
+                        offset_epoch
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 pub enum LogStoreReadItem {
-    StreamChunk(StreamChunk),
-    Barrier { is_checkpoint: bool },
+    StreamChunk {
+        chunk: StreamChunk,
+        chunk_id: ChunkId,
+    },
+    Barrier {
+        is_checkpoint: bool,
+    },
     UpdateVnodeBitmap(Arc<Bitmap>),
 }
 
@@ -64,7 +134,10 @@ pub trait LogReader: Send + Sized + 'static {
 
     /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
     /// from the current offset.
-    fn truncate(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 }
 
 pub trait LogStoreFactory: 'static {
@@ -89,14 +162,20 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
         let (epoch, item) = self.inner.next_item().await?;
         let item = match item {
-            LogStoreReadItem::StreamChunk(chunk) => LogStoreReadItem::StreamChunk((self.f)(chunk)),
+            LogStoreReadItem::StreamChunk { chunk, chunk_id } => LogStoreReadItem::StreamChunk {
+                chunk: (self.f)(chunk),
+                chunk_id,
+            },
             other => other,
         };
         Ok((epoch, item))
     }
 
-    fn truncate(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
-        self.inner.truncate()
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.truncate(offset)
     }
 }
 
@@ -110,5 +189,60 @@ where
         f: F,
     ) -> TransformChunkLogReader<F, Self> {
         TransformChunkLogReader { f, inner: self }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::sink::log_store::TruncateOffset;
+
+    #[test]
+    fn test_truncate_offset_cmp() {
+        assert!(
+            TruncateOffset::Barrier { epoch: 232 }
+                < TruncateOffset::Chunk {
+                    epoch: 233,
+                    chunk_id: 1
+                }
+        );
+        assert_eq!(
+            TruncateOffset::Chunk {
+                epoch: 1,
+                chunk_id: 1
+            },
+            TruncateOffset::Chunk {
+                epoch: 1,
+                chunk_id: 1
+            }
+        );
+        assert!(
+            TruncateOffset::Chunk {
+                epoch: 1,
+                chunk_id: 1
+            } < TruncateOffset::Chunk {
+                epoch: 1,
+                chunk_id: 2
+            }
+        );
+        assert!(
+            TruncateOffset::Barrier { epoch: 1 }
+                > TruncateOffset::Chunk {
+                    epoch: 1,
+                    chunk_id: 2
+                }
+        );
+        assert!(
+            TruncateOffset::Chunk {
+                epoch: 1,
+                chunk_id: 2
+            } < TruncateOffset::Barrier { epoch: 1 }
+        );
+        assert!(
+            TruncateOffset::Chunk {
+                epoch: 2,
+                chunk_id: 2
+            } > TruncateOffset::Barrier { epoch: 1 }
+        );
+        assert!(TruncateOffset::Barrier { epoch: 2 } > TruncateOffset::Barrier { epoch: 1 });
     }
 }

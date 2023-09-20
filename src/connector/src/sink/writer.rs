@@ -21,7 +21,7 @@ use risingwave_common::buffer::Bitmap;
 
 use crate::sink::encoder::SerTo;
 use crate::sink::formatter::SinkFormatter;
-use crate::sink::log_store::{LogReader, LogStoreReadItem};
+use crate::sink::log_store::{LogReader, LogStoreReadItem, TruncateOffset};
 use crate::sink::{LogSinker, Result, SinkMetrics};
 
 #[async_trait]
@@ -223,27 +223,29 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                 }
             };
             match item {
-                LogStoreReadItem::StreamChunk(chunk) => {
+                LogStoreReadItem::StreamChunk { chunk, .. } => {
                     if let Err(e) = sink_writer.write_batch(chunk).await {
                         sink_writer.abort().await?;
                         return Err(e);
                     }
                 }
                 LogStoreReadItem::Barrier { is_checkpoint } => {
+                    let prev_epoch = match state {
+                        LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
+                        _ => unreachable!("epoch must have begun before handling barrier"),
+                    };
                     if is_checkpoint {
                         let start_time = Instant::now();
                         sink_writer.barrier(true).await?;
                         sink_metrics
                             .sink_commit_duration_metrics
                             .observe(start_time.elapsed().as_millis() as f64);
-                        log_reader.truncate().await?;
+                        log_reader
+                            .truncate(TruncateOffset::Barrier { epoch })
+                            .await?;
                     } else {
                         sink_writer.barrier(false).await?;
                     }
-                    let prev_epoch = match state {
-                        LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
-                        _ => unreachable!("epoch must have begun before handling barrier"),
-                    };
                     state = LogConsumerState::BarrierReceived { prev_epoch }
                 }
                 LogStoreReadItem::UpdateVnodeBitmap(vnode_bitmap) => {

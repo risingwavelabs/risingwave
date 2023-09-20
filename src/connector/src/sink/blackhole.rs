@@ -15,7 +15,7 @@
 use async_trait::async_trait;
 use risingwave_rpc_client::ConnectorClient;
 
-use crate::sink::log_store::{LogReader, LogStoreReadItem};
+use crate::sink::log_store::{LogReader, LogStoreReadItem, TruncateOffset};
 use crate::sink::{DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkWriterParam};
 
 pub const BLACKHOLE_SINK: &str = "blackhole";
@@ -41,16 +41,19 @@ impl LogSinker for BlackHoleSink {
     async fn consume_log_and_sink(self, mut log_reader: impl LogReader) -> Result<()> {
         log_reader.init().await?;
         loop {
-            if let (
-                _,
-                LogStoreReadItem::Barrier {
-                    is_checkpoint: true,
-                },
-            ) = log_reader.next_item().await?
-            {
-                // TODO: after we support truncate at not only checkpoint barrier, we can truncate
-                // at every item
-                log_reader.truncate().await?;
+            let (epoch, item) = log_reader.next_item().await?;
+            match item {
+                LogStoreReadItem::StreamChunk { chunk_id, .. } => {
+                    log_reader
+                        .truncate(TruncateOffset::Chunk { epoch, chunk_id })
+                        .await?;
+                }
+                LogStoreReadItem::Barrier { .. } => {
+                    log_reader
+                        .truncate(TruncateOffset::Barrier { epoch })
+                        .await?;
+                }
+                LogStoreReadItem::UpdateVnodeBitmap(_) => {}
             }
         }
     }
