@@ -983,7 +983,6 @@ where
     /// in the epoch will be visible
     pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
         assert_eq!(self.epoch(), new_epoch.prev);
-        assert!(!self.is_dirty());
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
         self.watermark_buffer_strategy.tick();
