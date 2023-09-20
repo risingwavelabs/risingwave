@@ -310,7 +310,7 @@ struct HashJoinChunkBuilder<const T: JoinTypePrimitive, const SIDE: SideTypePrim
 
 struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     ctx: &'a ActorContextRef,
-    identity: &'a str,
+    _identity: &'a str,
     side_l: &'a mut JoinSide<K, S>,
     side_r: &'a mut JoinSide<K, S>,
     actual_output_data_types: &'a [DataType],
@@ -745,7 +745,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     #[for_await]
                     for chunk in Self::eq_join_left(EqJoinArgs {
                         ctx: &self.ctx,
-                        identity: &self.identity,
+                        _identity: &self.identity,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
                         actual_output_data_types: &self.actual_output_data_types,
@@ -772,7 +772,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     #[for_await]
                     for chunk in Self::eq_join_right(EqJoinArgs {
                         ctx: &self.ctx,
-                        identity: &self.identity,
+                        _identity: &self.identity,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
                         actual_output_data_types: &self.actual_output_data_types,
@@ -990,7 +990,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     async fn eq_join_oneside<const SIDE: SideTypePrimitive>(args: EqJoinArgs<'_, K, S>) {
         let EqJoinArgs {
             ctx,
-            identity,
             side_l,
             side_r,
             actual_output_data_types,
@@ -1000,6 +999,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             append_only_optimize,
             chunk_size,
             cnt_rows_received,
+            ..
         } = args;
 
         let (side_update, side_match) = if SIDE == SideType::Left {
@@ -1080,12 +1080,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                     side_match.start_pos,
                                 );
 
-                                cond.eval_row_infallible(&new_row, |err| {
-                                    ctx.on_compute_error(err, identity)
-                                })
-                                .await
-                                .map(|s| *s.as_bool())
-                                .unwrap_or(false)
+                                cond.eval_row_infallible(&new_row)
+                                    .await
+                                    .map(|s| *s.as_bool())
+                                    .unwrap_or(false)
                             } else {
                                 true
                             };
@@ -1191,12 +1189,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                     side_match.start_pos,
                                 );
 
-                                cond.eval_row_infallible(&new_row, |err| {
-                                    ctx.on_compute_error(err, identity)
-                                })
-                                .await
-                                .map(|s| *s.as_bool())
-                                .unwrap_or(false)
+                                cond.eval_row_infallible(&new_row)
+                                    .await
+                                    .map(|s| *s.as_bool())
+                                    .unwrap_or(false)
                             } else {
                                 true
                             };

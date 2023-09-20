@@ -60,8 +60,8 @@ pub fn generate_agg_schema(
 }
 
 pub async fn agg_call_filter_res(
-    ctx: &ActorContextRef,
-    identity: &str,
+    _ctx: &ActorContextRef,
+    _identity: &str,
     agg_call: &AggCall,
     chunk: &DataChunk,
 ) -> StreamExecutorResult<Bitmap> {
@@ -77,11 +77,7 @@ pub async fn agg_call_filter_res(
     }
 
     if let Some(ref filter) = agg_call.filter {
-        if let Bool(filter_res) = filter
-            .eval_infallible(chunk, |err| ctx.on_compute_error(err, identity))
-            .await
-            .as_ref()
-        {
+        if let Bool(filter_res) = filter.eval_infallible(chunk).await.as_ref() {
             vis &= filter_res.to_bitmap();
         } else {
             bail!("Filter can only receive bool array");

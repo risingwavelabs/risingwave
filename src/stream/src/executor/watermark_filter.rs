@@ -102,7 +102,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             event_time_col_idx,
             watermark_expr,
             ctx,
-            info,
+            info: _,
             mut table,
         } = *self;
 
@@ -145,11 +145,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         continue;
                     }
 
-                    let watermark_array = watermark_expr
-                        .eval_infallible(chunk.data_chunk(), |err| {
-                            ctx.on_compute_error(err, &info.identity)
-                        })
-                        .await;
+                    let watermark_array = watermark_expr.eval_infallible(chunk.data_chunk()).await;
 
                     // Build the expression to calculate watermark filter.
                     let watermark_filter_expr = Self::build_watermark_filter_expr(
@@ -174,9 +170,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     }
 
                     let pred_output = watermark_filter_expr
-                        .eval_infallible(chunk.data_chunk(), |err| {
-                            ctx.on_compute_error(err, &info.identity)
-                        })
+                        .eval_infallible(chunk.data_chunk())
                         .await;
 
                     if let Some(output_chunk) = FilterExecutor::filter(chunk, pred_output)? {

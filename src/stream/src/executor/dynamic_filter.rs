@@ -101,10 +101,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         let mut last_res = false;
 
         let eval_results = if let Some(cond) = condition {
-            Some(
-                cond.eval_infallible(chunk, |err| self.ctx.on_compute_error(err, &self.identity))
-                    .await,
-            )
+            Some(cond.eval_infallible(chunk).await)
         } else {
             None
         };
