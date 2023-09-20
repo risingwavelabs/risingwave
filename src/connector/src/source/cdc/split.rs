@@ -132,6 +132,7 @@ pub struct DebeziumCdcSplit<T: CdcSourceTypeTrait> {
 
 impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
     fn id(&self) -> SplitId {
+        // TODO: may check T to get the specific cdc type
         assert!(self.mysql_split.is_some() || self.pg_split.is_some());
         if let Some(split) = &self.mysql_split {
             return format!("{}", split.inner.split_id).into();
@@ -148,6 +149,17 @@ impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
 
     fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
         serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    }
+
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        // TODO: may check T to get the specific cdc type
+        assert!(self.mysql_split.is_some() || self.pg_split.is_some());
+        if let Some(split) = &mut self.mysql_split {
+            split.update_with_offset(start_offset)?
+        } else if let Some(split) = &mut self.pg_split {
+            split.update_with_offset(start_offset)?
+        }
+        Ok(())
     }
 }
 
@@ -195,15 +207,5 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
             return &split.server_addr;
         }
         unreachable!("invalid debezium split")
-    }
-
-    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
-        assert!(self.mysql_split.is_some() || self.pg_split.is_some());
-        if let Some(split) = &mut self.mysql_split {
-            split.update_with_offset(start_offset)?
-        } else if let Some(split) = &mut self.pg_split {
-            split.update_with_offset(start_offset)?
-        }
-        Ok(())
     }
 }

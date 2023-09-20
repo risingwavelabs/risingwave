@@ -41,7 +41,6 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferVersionedEntry,
 };
 use crate::hummock::sstable::CompactionDeleteRangesBuilder;
-use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -49,6 +48,7 @@ use crate::hummock::{
     CompactionDeleteRanges, GetObjectId, HummockError, HummockResult, SstableBuilderOptions,
     SstableObjectIdManagerRef,
 };
+use crate::mem_table::ImmutableMemtable;
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
 const GC_WATERMARK_FOR_FLUSH: u64 = 0;

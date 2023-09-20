@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Op, Vis};
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::types::Interval;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
@@ -142,7 +142,7 @@ impl HopWindowExecutor {
                     let chunk = chunk.compact();
                     let (data_chunk, ops) = chunk.into_parts();
                     // SAFETY: Already compacted.
-                    assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
+                    assert!(data_chunk.is_compacted());
                     let len = data_chunk.cardinality();
 
                     // Collect each window's data into a chunk.

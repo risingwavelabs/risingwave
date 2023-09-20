@@ -22,6 +22,7 @@ pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 pub mod nats;
+pub mod pulsar;
 pub mod redis;
 pub mod remote;
 #[cfg(any(test, madsim))]
@@ -51,6 +52,7 @@ use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
 use self::encoder::SerTo;
 use self::formatter::SinkFormatter;
 use self::iceberg::{IcebergSink, ICEBERG_SINK, REMOTE_ICEBERG_SINK};
+use self::pulsar::{PulsarConfig, PulsarSink};
 use crate::sink::boxed::BoxSink;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::clickhouse::CLICKHOUSE_SINK;
@@ -58,6 +60,7 @@ use crate::sink::iceberg::{IcebergConfig, RemoteIcebergConfig, RemoteIcebergSink
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
 use crate::sink::nats::{NatsConfig, NatsSink, NATS_SINK};
+use crate::sink::pulsar::PULSAR_SINK;
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig, RemoteSink};
 #[cfg(any(test, madsim))]
@@ -321,6 +324,7 @@ pub enum SinkConfig {
     Kinesis(Box<KinesisSinkConfig>),
     Iceberg(IcebergConfig),
     RemoteIceberg(RemoteIcebergConfig),
+    Pulsar(PulsarConfig),
     BlackHole,
     ClickHouse(Box<ClickHouseConfig>),
     Nats(NatsConfig),
@@ -386,6 +390,7 @@ impl SinkConfig {
                 ClickHouseConfig::from_hashmap(properties)?,
             ))),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
+            PULSAR_SINK => Ok(SinkConfig::Pulsar(PulsarConfig::from_hashmap(properties)?)),
             REMOTE_ICEBERG_SINK => Ok(SinkConfig::RemoteIceberg(
                 RemoteIcebergConfig::from_hashmap(properties)?,
             )),
@@ -411,6 +416,7 @@ pub enum SinkImpl {
     Redis(RedisSink),
     Kafka(KafkaSink),
     Remote(RemoteSink),
+    Pulsar(PulsarSink),
     BlackHole(BlackHoleSink),
     Kinesis(KinesisSink),
     ClickHouse(ClickHouseSink),
@@ -426,12 +432,13 @@ impl SinkImpl {
             SinkImpl::Kafka(_) => "kafka",
             SinkImpl::Redis(_) => "redis",
             SinkImpl::Remote(_) => "remote",
+            SinkImpl::Pulsar(_) => "pulsar",
             SinkImpl::BlackHole(_) => "blackhole",
             SinkImpl::Kinesis(_) => "kinesis",
             SinkImpl::ClickHouse(_) => "clickhouse",
             SinkImpl::Iceberg(_) => "iceberg",
             SinkImpl::Nats(_) => "nats",
-            SinkImpl::RemoteIceberg(_) => "iceberg",
+            SinkImpl::RemoteIceberg(_) => "iceberg_java",
             SinkImpl::TestSink(_) => "test",
         }
     }
@@ -446,6 +453,7 @@ macro_rules! dispatch_sink {
             SinkImpl::Redis($sink) => $body,
             SinkImpl::Kafka($sink) => $body,
             SinkImpl::Remote($sink) => $body,
+            SinkImpl::Pulsar($sink) => $body,
             SinkImpl::BlackHole($sink) => $body,
             SinkImpl::Kinesis($sink) => $body,
             SinkImpl::ClickHouse($sink) => $body,
@@ -464,6 +472,7 @@ impl SinkImpl {
             SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(*cfg, param)),
             SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(*cfg, param)),
             SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(cfg, param)),
+            SinkConfig::Pulsar(cfg) => SinkImpl::Pulsar(PulsarSink::new(cfg, param)),
             SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),
             SinkConfig::ClickHouse(cfg) => SinkImpl::ClickHouse(ClickHouseSink::new(
                 *cfg,
@@ -508,6 +517,8 @@ pub enum SinkError {
     ClickHouse(String),
     #[error("Nats error: {0}")]
     Nats(anyhow::Error),
+    #[error("Pulsar error: {0}")]
+    Pulsar(anyhow::Error),
 }
 
 impl From<RpcError> for SinkError {
