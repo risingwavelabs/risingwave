@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::fmt::Debug;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use clickhouse::{Client, Row as ClickHouseRow};
@@ -87,7 +87,7 @@ impl ClickHouseSink {
     }
 
     /// Check that the column names and types of risingwave and clickhouse are identical
-    fn check_column_name_and_type(&self, clickhouse_columns_desc: Vec<SystemColumn>) -> Result<()> {
+    fn check_column_name_and_type(&self, clickhouse_columns_desc: &[SystemColumn]) -> Result<()> {
         let rw_fields_name = build_fields_name_type_from_schema(&self.schema)?;
         let clickhouse_columns_desc: HashMap<String, SystemColumn> = clickhouse_columns_desc
             .iter()
@@ -99,13 +99,44 @@ impl ClickHouseSink {
         }
 
         for i in rw_fields_name {
-            let value = clickhouse_columns_desc
-                .get(&i.0)
-                .ok_or(SinkError::ClickHouse(format!(
+            let value = clickhouse_columns_desc.get(&i.0).ok_or_else(|| {
+                SinkError::ClickHouse(format!(
                     "Column name don't find in clickhouse, risingwave is {:?} ",
                     i.0
-                )))?;
-            Self::check_and_correct_column_type(&i.1, value)?
+                ))
+            })?;
+
+            Self::check_and_correct_column_type(&i.1, value)?;
+        }
+        Ok(())
+    }
+
+    /// Check that the column names and types of risingwave and clickhouse are identical
+    fn check_pk_match(&self, clickhouse_columns_desc: &[SystemColumn]) -> Result<()> {
+        let mut clickhouse_pks: HashSet<String> = clickhouse_columns_desc
+            .iter()
+            .filter(|s| s.is_in_primary_key == 1)
+            .map(|s| s.name.clone())
+            .collect();
+
+        for (_, field) in self
+            .schema
+            .fields()
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| self.pk_indices.contains(index))
+        {
+            if !clickhouse_pks.remove(&field.name) {
+                return Err(SinkError::ClickHouse(
+                    "Clicklhouse and RisingWave pk is not match".to_string(),
+                ));
+            }
+        }
+
+        if !clickhouse_pks.is_empty() {
+            return Err(SinkError::ClickHouse(
+                "Clicklhouse and RisingWave pk is not match".to_string(),
+            ));
         }
         Ok(())
     }
@@ -203,7 +234,10 @@ impl Sink for ClickHouseSink {
                 self.config.common.database, self.config.common.table
             )));
         }
-        self.check_column_name_and_type(clickhouse_column)?;
+        self.check_column_name_and_type(&clickhouse_column)?;
+        if !self.is_append_only {
+            self.check_pk_match(&clickhouse_column)?;
+        }
         Ok(())
     }
 
@@ -445,6 +479,7 @@ impl SinkWriter for ClickHouseSinkWriter {
 struct SystemColumn {
     name: String,
     r#type: String,
+    is_in_primary_key: u8,
 }
 
 /// Serialize this structure to simulate the `struct` call clickhouse interface
