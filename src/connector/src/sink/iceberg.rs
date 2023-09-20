@@ -439,7 +439,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .collect::<Result<Vec<WriteResult>>>()?;
 
         let mut txn = Transaction::new(&mut self.table);
-        txn.append_file(
+        txn.append_data_file(
             write_results
                 .into_iter()
                 .flat_map(|s| s.data_files.into_iter()),
