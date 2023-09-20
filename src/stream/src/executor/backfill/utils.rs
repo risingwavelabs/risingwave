@@ -309,9 +309,11 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
 }
 
 pub(crate) fn get_backfill_finished(row: OwnedRow, state_len: usize) -> Option<bool> {
-    let datum = if row.len() < state_len {
+    let datum = if row.len() == state_len - 2 {
         // Handle backwards compatibility case where
-        // we did not have row count.
+        // we did not have row count (-1 for this).
+        // StateTable::get_row does not include vnode as well,
+        // so we -1 for it.
         row.last()
     } else {
         row.datum_at(row.len() - 2)
@@ -320,7 +322,11 @@ pub(crate) fn get_backfill_finished(row: OwnedRow, state_len: usize) -> Option<b
 }
 
 pub(crate) fn get_row_count(row: OwnedRow, state_len: usize) -> u64 {
-    if row.len() < state_len {
+    if row.len() == state_len - 2 {
+        // Handle backwards compatibility case where
+        // we did not have row count (-1 for this).
+        // StateTable::get_row does not include vnode as well,
+        // so we -1 for it.
         return 0;
     }
     match row.last() {
