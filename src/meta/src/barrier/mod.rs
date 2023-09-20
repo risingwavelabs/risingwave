@@ -918,6 +918,39 @@ impl GlobalBarrierManager {
         }
     }
 
+    async fn recover_mview_progress(&self) {
+        let creating_tables = self.catalog_manager.list_creating_tables().await;
+        let creating_table_ids = creating_tables
+            .iter()
+            .map(|t| TableId { table_id: t.id })
+            .collect_vec();
+
+        let actor_map = self
+            .fragment_manager
+            .get_table_id_actor_mapping(&creating_table_ids)
+            .await;
+        let upstream_mv_counts = self
+            .fragment_manager
+            .get_upstream_relation_counts(&creating_table_ids)
+            .await;
+        let definitions: HashMap<_, _> = creating_tables
+            .into_iter()
+            .map(|t| (TableId { table_id: t.id }, t.definition))
+            .collect();
+        let version_stats = self.hummock_manager.get_version_stats().await;
+        // If failed, enter recovery mode.
+        self.set_status(BarrierManagerStatus::Recovering).await;
+        let mut tracker = self.tracker.lock().await;
+        println!("creating_table_ids {:?}", creating_table_ids);
+        *tracker = CreateMviewProgressTracker::recover(
+            creating_table_ids,
+            actor_map,
+            upstream_mv_counts,
+            definitions,
+            version_stats,
+        );
+    }
+
     async fn failure_recovery(
         &self,
         err: MetaError,
@@ -940,35 +973,7 @@ impl GlobalBarrierManager {
         }
 
         if self.enable_recovery {
-            let creating_tables = self.catalog_manager.list_creating_tables().await;
-            let creating_table_ids = creating_tables
-                .iter()
-                .map(|t| TableId { table_id: t.id })
-                .collect_vec();
-
-            let actor_map = self
-                .fragment_manager
-                .get_table_id_actor_mapping(&creating_table_ids)
-                .await;
-            let upstream_mv_counts = self
-                .fragment_manager
-                .get_upstream_relation_counts(&creating_table_ids)
-                .await;
-            let definitions: HashMap<_, _> = creating_tables
-                .into_iter()
-                .map(|t| (TableId { table_id: t.id }, t.definition))
-                .collect();
-            let version_stats = self.hummock_manager.get_version_stats().await;
-            // If failed, enter recovery mode.
-            self.set_status(BarrierManagerStatus::Recovering).await;
-            let mut tracker = self.tracker.lock().await;
-            *tracker = CreateMviewProgressTracker::recover(
-                creating_table_ids,
-                actor_map,
-                upstream_mv_counts,
-                definitions,
-                version_stats,
-            );
+            self.recover_mview_progress().await;
 
             let latest_snapshot = self.hummock_manager.latest_snapshot();
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch

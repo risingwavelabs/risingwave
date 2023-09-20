@@ -462,8 +462,10 @@ impl DdlController {
 
         // At this point the key should be present in the creating tables.
         match stream_job {
-            StreamingJob::Table(_, ref t) => if !self.check_key(t).await {
-                println!("Key not present after building stream job for {t:#?}")
+            StreamingJob::Table(_, ref t) => {
+                if !self.check_key(t).await {
+                    println!("Key not present after building stream job for {t:#?}")
+                }
             }
             _ => {}
         }
@@ -710,8 +712,10 @@ impl DdlController {
             .await;
 
         match stream_job {
-            StreamingJob::Table(_, ref t) => if !self.check_key(t).await {
-                println!("Key not present within building stream job for {t:#?}")
+            StreamingJob::Table(_, ref t) => {
+                if !self.check_key(t).await {
+                    println!("Key not present within building stream job for {t:#?}")
+                }
             }
             _ => {}
         }
