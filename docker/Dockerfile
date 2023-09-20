@@ -35,25 +35,31 @@ RUN rustup self update \
   && rustup show \
   && rustup component add rustfmt
 
-RUN cargo install --git https://github.com/xxchan/cargo-chef cargo-chef --locked --rev 11f9fed
 
-FROM rust-base AS rust-planner
+# TODO: cargo-chef doesn't work well now, because we update Cargo.lock very often.
+# We may consider sccache instead.
 
-RUN mkdir -p /risingwave
-WORKDIR /risingwave
-COPY ./ /risingwave
+# RUN cargo install --git https://github.com/xxchan/cargo-chef cargo-chef --locked --rev 11f9fed
 
-RUN cargo chef prepare --recipe-path recipe.json
+# FROM rust-base AS rust-planner
+
+# RUN mkdir -p /risingwave
+# WORKDIR /risingwave
+# COPY ./ /risingwave
+
+# RUN cargo chef prepare --recipe-path recipe.json
+
+# FROM rust-base AS rust-builder
+
+# RUN mkdir -p /risingwave
+# WORKDIR /risingwave
+
+# COPY --from=rust-planner /risingwave/recipe.json recipe.json
+
+# # Build dependencies - this can be cached if the dependencies don't change
+# RUN cargo chef cook --release --recipe-path recipe.json
 
 FROM rust-base AS rust-builder
-
-RUN mkdir -p /risingwave
-WORKDIR /risingwave
-
-COPY --from=rust-planner /risingwave/recipe.json recipe.json
-
-# Build dependencies - this can be cached if the dependencies don't change
-RUN cargo chef cook --release --recipe-path recipe.json
 
 # Build application
 ARG GIT_SHA
