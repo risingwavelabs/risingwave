@@ -104,7 +104,6 @@ impl SourceStreamChunkBuilder {
                 .into_iter()
                 .map(|builder| builder.finish().into())
                 .collect(),
-            None,
         )
     }
 

@@ -18,6 +18,7 @@ mod arrow;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
+pub mod compact_chunk;
 mod data_chunk;
 pub mod data_chunk_iter;
 mod decimal_array;
@@ -35,7 +36,6 @@ pub mod stream_record;
 pub mod struct_array;
 mod utf8_array;
 mod value_reader;
-mod vis;
 
 use std::convert::From;
 use std::hash::{Hash, Hasher};
@@ -47,6 +47,7 @@ pub use chrono_array::{
     DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray,
     TimestampArrayBuilder, TimestamptzArray, TimestamptzArrayBuilder,
 };
+pub use compact_chunk::*;
 pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
@@ -61,7 +62,6 @@ use risingwave_pb::data::PbArray;
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
-pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
 pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};

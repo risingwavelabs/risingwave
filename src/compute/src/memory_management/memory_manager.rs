@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_batch::task::BatchManager;
-use risingwave_common::config::AutoDumpHeapProfileConfig;
+use risingwave_common::config::HeapProfilingConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
@@ -47,16 +47,13 @@ impl GlobalMemoryManager {
     pub fn new(
         metrics: Arc<StreamingMetrics>,
         total_memory_bytes: usize,
-        auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
+        heap_profiling_config: HeapProfilingConfig,
     ) -> Arc<Self> {
         let memory_control_policy =
-            build_memory_control_policy(total_memory_bytes, auto_dump_heap_profile_config.clone())
-                .unwrap();
+            build_memory_control_policy(total_memory_bytes, heap_profiling_config.clone());
         tracing::info!("memory control policy: {:?}", &memory_control_policy);
 
-        if auto_dump_heap_profile_config.enabled {
-            fs::create_dir_all(&auto_dump_heap_profile_config.dir).unwrap();
-        }
+        fs::create_dir_all(&heap_profiling_config.dir).unwrap();
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
             metrics,

@@ -22,11 +22,11 @@ await-tree = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
 crossbeam = "0.8.2"
 dashmap = { version = "5", default-features = false }
-dyn-clone = "1.0.13"
+dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-foyer = { git = "https://github.com/mrcroxx/foyer", rev = "2c6f080" }
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "41b1d39" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
@@ -79,7 +79,7 @@ nix = { version = "0.27", features = ["fs", "mman"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
-libc = "0.2.147"
+libc = "0.2.148"
 mach2 = "0.4"
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -87,7 +87,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_futures"] }
-moka = { version = "0.11", features = ["future"] }
+moka = { version = "0.12", features = ["future"] }
 risingwave_test_runner = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 

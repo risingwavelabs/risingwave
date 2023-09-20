@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk, Vis};
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::{bail, ensure};
@@ -64,25 +64,20 @@ impl Expression for CaseExpression {
         let when_len = self.when_clauses.len();
         let mut result_array = Vec::with_capacity(when_len + 1);
         for (when_idx, WhenClause { when, then }) in self.when_clauses.iter().enumerate() {
-            let calc_then_vis: Vis = when
-                .eval_checked(&input)
-                .await?
-                .as_bool()
-                .to_bitmap()
-                .into();
-            let input_vis = input.vis().clone();
-            input.set_vis(calc_then_vis.clone());
-            let then_res = then.eval_checked(&input).await?;
+            let calc_then_vis = when.eval(&input).await?.as_bool().to_bitmap();
+            let input_vis = input.visibility().clone();
+            input.set_visibility(calc_then_vis.clone());
+            let then_res = then.eval(&input).await?;
             calc_then_vis
                 .iter_ones()
                 .for_each(|pos| selection[pos] = Some(when_idx));
-            input.set_vis(&input_vis & (!&calc_then_vis));
+            input.set_visibility(&input_vis & (!calc_then_vis));
             result_array.push(then_res);
         }
         if let Some(ref else_expr) = self.else_clause {
-            let else_res = else_expr.eval_checked(&input).await?;
+            let else_res = else_expr.eval(&input).await?;
             input
-                .vis()
+                .visibility()
                 .iter_ones()
                 .for_each(|pos| selection[pos] = Some(when_len));
             result_array.push(else_res);

@@ -42,6 +42,7 @@
 #![feature(binary_heap_into_iter_sorted)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(result_option_inspect)]
+#![feature(map_entry_replace)]
 #![feature(negative_impls)]
 #![feature(async_fn_in_trait)]
 #![feature(bound_map)]
@@ -71,12 +72,12 @@ pub mod system_param;
 pub mod telemetry;
 pub mod transaction;
 
-pub mod format;
 pub mod metrics;
 pub mod test_utils;
 pub mod types;
 pub mod vnode_mapping;
 
+pub mod heap_profiling;
 pub mod range;
 
 pub mod test_prelude {

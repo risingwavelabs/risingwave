@@ -1,0 +1,46 @@
+query I
+select array_sum(array[1, 2, 3]);
+----
+6
+
+# Testing for int16 with positive numbers
+query I
+select array_sum(array[10, 20, 30]);
+----
+60
+
+# Testing for int16 with a mix of positive and negative numbers
+query I
+select array_sum(array[-10, 20, -30]);
+----
+-20
+
+# Testing for int16 with all zeros
+query I
+select array_sum(array[0, 0, 0]);
+----
+0
+
+# Testing for int32 with larger positive numbers
+query I
+select array_sum(array[1000, 2000, 3000]);
+----
+6000
+
+# Testing for int32 with a mix of larger positive and negative numbers
+query I
+select array_sum(array[-1000, 2000, -3000]);
+----
+-2000
+
+# Testing for int64 with much larger numbers
+query I
+select array_sum(array[1000000000, 2000000000, 3000000000]);
+----
+6000000000
+
+# Testing for int64 with a mix of much larger positive and negative numbers
+query I
+select array_sum(array[-1000000000, 2000000000, -3000000000]);
+----
+-2000000000

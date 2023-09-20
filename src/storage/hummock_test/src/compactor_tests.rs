@@ -30,7 +30,7 @@ pub(crate) mod tests {
     use risingwave_common_service::observer_manager::NotificationClient;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::key::{next_key, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::key::{next_key, TableKey, TABLE_PREFIX_LEN};
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
@@ -141,7 +141,10 @@ pub(crate) mod tests {
             new_val.extend_from_slice(&epoch.to_be_bytes());
             local
                 .ingest_batch(
-                    vec![(key.clone(), StorageValue::new_put(Bytes::from(new_val)))],
+                    vec![(
+                        TableKey(key.clone()),
+                        StorageValue::new_put(Bytes::from(new_val)),
+                    )],
                     vec![],
                     WriteOptions {
                         epoch,
@@ -253,7 +256,7 @@ pub(crate) mod tests {
             .pin_snapshot(worker_node2.id)
             .await
             .unwrap();
-        let key = key.freeze();
+        let key = TableKey(key.freeze());
         const SST_COUNT: u64 = 32;
         const TEST_WATERMARK: u64 = 8;
         prepare_test_put_data(
@@ -359,7 +362,7 @@ pub(crate) mod tests {
                 key.clone(),
                 ((TEST_WATERMARK - 1) * 1000) << 16,
                 ReadOptions {
-                    prefix_hint: Some(key.clone()),
+                    prefix_hint: Some(key.clone().0),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -407,7 +410,7 @@ pub(crate) mod tests {
         let mut key = BytesMut::default();
         key.put_u16(0);
         key.put_slice(b"same_key");
-        let key = key.freeze();
+        let key = TableKey(key.freeze());
         const SST_COUNT: u64 = 16;
 
         let mut val = b"0"[..].repeat(1 << 20);
@@ -422,67 +425,54 @@ pub(crate) mod tests {
         .await;
 
         // 2. get compact task
-        let mut compact_task = hummock_manager_ref
+
+        // 3. compact
+        while let Some(compact_task) = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
                 &mut default_level_selector(),
             )
             .await
             .unwrap()
-            .unwrap();
-        let compaction_filter_flag = CompactionFilterFlag::NONE;
-        compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        compact_task.current_epoch_time = 0;
+        {
+            // 3. compact
+            let (_tx, rx) = tokio::sync::oneshot::channel();
+            let (mut result_task, task_stats) = compact(
+                compact_ctx.clone(),
+                compact_task.clone(),
+                rx,
+                Box::new(sstable_object_id_manager.clone()),
+            )
+            .await;
 
-        // assert compact_task
-        assert_eq!(
-            compact_task
-                .input_ssts
-                .iter()
-                .map(|level| level.table_infos.len())
-                .sum::<usize>(),
-            SST_COUNT as usize / 2 + 1,
-        );
-        compact_task.target_level = 6;
-
-        // 3. compact
-        let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) = compact(
-            compact_ctx,
-            compact_task.clone(),
-            rx,
-            Box::new(sstable_object_id_manager.clone()),
-        )
-        .await;
-
-        hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
-            .await
-            .unwrap();
+            hummock_manager_ref
+                .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+                .await
+                .unwrap();
+        }
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
-        let output_table = version
+        let output_tables = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .levels
-            .last()
-            .unwrap()
-            .table_infos
-            .first()
-            .unwrap();
-        let table = storage
-            .sstable_store()
-            .sstable(output_table, &mut StoreLocalStatistic::default())
-            .await
-            .unwrap();
-        let target_table_size = storage.storage_opts().sstable_size_mb * (1 << 20);
-
-        assert!(
-            table.value().meta.estimated_size > target_table_size,
-            "table.meta.estimated_size {} <= target_table_size {}",
-            table.value().meta.estimated_size,
-            target_table_size
-        );
+            .iter()
+            .flat_map(|level| level.table_infos.clone())
+            .collect_vec();
+        for output_table in &output_tables {
+            let table = storage
+                .sstable_store()
+                .sstable(output_table, &mut StoreLocalStatistic::default())
+                .await
+                .unwrap();
+            let target_table_size = storage.storage_opts().sstable_size_mb * (1 << 20);
+            assert!(
+                table.value().meta.estimated_size > target_table_size,
+                "table.meta.estimated_size {} <= target_table_size {}",
+                table.value().meta.estimated_size,
+                target_table_size
+            );
+        }
 
         // 5. storage get back the correct kv after compaction
         storage.wait_version(version).await;
@@ -541,7 +531,9 @@ pub(crate) mod tests {
                 let mut key = idx.to_be_bytes().to_vec();
                 let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
                 key.extend_from_slice(&ramdom_key);
-                local.insert(Bytes::from(key), val.clone(), None).unwrap();
+                local
+                    .insert(TableKey(Bytes::from(key)), val.clone(), None)
+                    .unwrap();
             }
             local.flush(Vec::new()).await.unwrap();
             local.seal_current_epoch(epoch + 1);
@@ -722,7 +714,9 @@ pub(crate) mod tests {
             prefix.put_u16(1);
             prefix.put_slice(random_key.as_slice());
 
-            storage.insert(prefix.freeze(), val.clone(), None).unwrap();
+            storage
+                .insert(TableKey(prefix.freeze()), val.clone(), None)
+                .unwrap();
             storage.flush(Vec::new()).await.unwrap();
             storage.seal_current_epoch(next_epoch);
             other.seal_current_epoch(next_epoch);
@@ -906,7 +900,9 @@ pub(crate) mod tests {
             prefix.put_u16(1);
             prefix.put_slice(random_key.as_slice());
 
-            local.insert(prefix.freeze(), val.clone(), None).unwrap();
+            local
+                .insert(TableKey(prefix.freeze()), val.clone(), None)
+                .unwrap();
             local.flush(Vec::new()).await.unwrap();
             local.seal_current_epoch(next_epoch);
 
@@ -1097,7 +1093,7 @@ pub(crate) mod tests {
 
             let ramdom_key = [key_prefix.as_ref(), &rand::thread_rng().gen::<[u8; 32]>()].concat();
             local
-                .insert(Bytes::from(ramdom_key), val.clone(), None)
+                .insert(TableKey(Bytes::from(ramdom_key)), val.clone(), None)
                 .unwrap();
             local.flush(Vec::new()).await.unwrap();
             local.seal_current_epoch(next_epoch);
@@ -1196,8 +1192,8 @@ pub(crate) mod tests {
             key_prefix.to_vec(),
         ]
         .concat();
-        let start_bound_key = key_prefix;
-        let end_bound_key = Bytes::from(next_key(start_bound_key.as_ref()));
+        let start_bound_key = TableKey(key_prefix);
+        let end_bound_key = TableKey(Bytes::from(next_key(start_bound_key.as_ref())));
         let scan_result = storage
             .scan(
                 (

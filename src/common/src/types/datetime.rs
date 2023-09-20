@@ -324,7 +324,7 @@ impl Timestamp {
     }
 
     pub fn get_timestamp_nanos(&self) -> i64 {
-        self.0.timestamp_nanos()
+        self.0.timestamp_nanos_opt().unwrap()
     }
 
     pub fn with_micros(timestamp_micros: i64) -> Result<Self> {
