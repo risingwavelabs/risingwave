@@ -125,3 +125,45 @@ create table shipments (
  table.name = 'shipments',
  slot.name = 'shipments'
 );
+
+# format & encode provided and match with debezium json, this is okay
+statement ok
+explain create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+) format debezium encode json;
+
+# format & encode provided but mismatch with debezium json, this is not allowed
+statement error Row format for CDC connectors should be either omitted or set to `FORMAT DEBEZIUM ENCODE JSON`
+create table shipments (
+  shipment_id INTEGER,
+  order_id real,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ schema.name = 'public',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+) format canal encode csv;

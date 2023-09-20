@@ -26,7 +26,7 @@ use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::agg::{agg_kinds, AggKind};
-use risingwave_expr::function::window::{
+use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
@@ -1127,7 +1127,7 @@ impl Binder {
                 // TODO: really implement them.
                 // https://www.postgresql.org/docs/9.5/functions-info.html#FUNCTIONS-INFO-COMMENT-TABLE
                 // WARN: Hacked in [`Binder::bind_function`]!!!
-                ("col_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
+                ("col_description", raw_call(ExprType::ColDescription)),
                 ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("pg_is_in_recovery", raw_literal(ExprImpl::literal_bool(false))),

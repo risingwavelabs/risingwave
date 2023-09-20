@@ -5,6 +5,18 @@ ENV LANG en_US.utf8
 RUN apt-get update \
   && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk
 
+FROM base AS dashboard-builder
+
+RUN apt-get install -y curl gnupg protobuf-compiler && mkdir -p /etc/apt/keyrings \
+  && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+  && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_18.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+  && apt-get update && apt-get install -y nodejs
+
+COPY ./dashboard/ /risingwave/dashboard
+COPY ./proto  /risingwave/proto
+
+RUN cd /risingwave/dashboard && npm i && npm run build-static && rm -rf node_modules
+
 FROM base AS rust-base
 
 RUN apt-get -y install make cmake protobuf-compiler curl bash lld unzip
@@ -13,7 +25,6 @@ SHELL ["/bin/bash", "-c"]
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 ENV PATH /root/.cargo/bin/:$PATH
-ENV CARGO_INCREMENTAL=0
 
 COPY rust-toolchain rust-toolchain
 
@@ -42,12 +53,6 @@ COPY --from=rust-planner /risingwave/recipe.json recipe.json
 
 # Build dependencies - this can be cached if the dependencies don't change
 RUN cargo chef cook --release --recipe-path recipe.json
-
-
-# TODO: build dashboard, instead of downloading
-RUN curl -LO https://github.com/risingwavelabs/risingwave/archive/refs/heads/dashboard-artifact.zip
-RUN unzip dashboard-artifact.zip && mv risingwave-dashboard-artifact /risingwave/ui && rm dashboard-artifact.zip
-
 
 # Build application
 ARG GIT_SHA
@@ -109,7 +114,7 @@ RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 COPY --from=rust-builder /risingwave/bin/risingwave /risingwave/bin/risingwave
 COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
 COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
-COPY --from=rust-builder /risingwave/ui /risingwave/ui
+COPY --from=dashboard-builder /risingwave/dashboard/out /risingwave/ui
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 
 # Set default playground mode to docker-playground profile

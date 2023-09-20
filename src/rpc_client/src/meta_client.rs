@@ -332,10 +332,12 @@ impl MetaClient {
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
+        stream_job_execution_mode: StreamJobExecutionMode,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
+            stream_job_execution_mode: stream_job_execution_mode as i32,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -1487,7 +1489,7 @@ impl GrpcMetaClient {
         force_refresh_receiver: Receiver<Sender<Result<()>>>,
         meta_config: MetaConfig,
     ) -> Result<()> {
-        let core_ref = self.core.clone();
+        let core_ref: Arc<RwLock<GrpcMetaClientCore>> = self.core.clone();
         let current_leader = init_leader_addr;
 
         let enable_period_tick = matches!(members, Either::Right(_));

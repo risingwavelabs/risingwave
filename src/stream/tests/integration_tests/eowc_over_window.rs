@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_expr::agg::{AggArgs, AggKind};
-use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncCall, WindowFuncKind};
+use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncCall, WindowFuncKind};
 use risingwave_stream::executor::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
 
 use crate::prelude::*;
