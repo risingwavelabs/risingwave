@@ -1276,6 +1276,13 @@ impl HummockManager {
                 versioning.current_version = current_version;
 
                 if !deterministic_mode {
+                    // Compaction inheritance will not be persisted.
+                    versioning
+                        .hummock_version_deltas
+                        .last_entry()
+                        .unwrap()
+                        .get_mut()
+                        .inheritances = compact_task.inheritances.clone();
                     self.notify_last_version_delta(versioning);
                 }
             } else {
@@ -2804,10 +2811,6 @@ fn gen_version_delta<'a>(
         prev_id: old_version.id,
         max_committed_epoch: old_version.max_committed_epoch,
         trivial_move,
-        // NOTE: Whether to persist inheritance info is not decided yet.
-        //
-        // If not to persist, set inheritance info between val commit and memory commit.
-        inheritances: compact_task.inheritances.clone(),
         ..Default::default()
     };
     let group_deltas = &mut version_delta
