@@ -25,6 +25,7 @@ SHELL ["/bin/bash", "-c"]
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 ENV PATH /root/.cargo/bin/:$PATH
+ENV CARGO_INCREMENTAL=0
 
 COPY rust-toolchain rust-toolchain
 
