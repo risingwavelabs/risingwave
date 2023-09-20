@@ -538,10 +538,12 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Sink::PkColumnIds).json())
                     .col(ColumnDef::new(Sink::DistributionKey).json())
                     .col(ColumnDef::new(Sink::DownstreamPk).json())
-                    .col(ColumnDef::new(Sink::SinkType).string())
+                    .col(ColumnDef::new(Sink::SinkType).string().not_null())
                     .col(ColumnDef::new(Sink::Properties).json())
-                    .col(ColumnDef::new(Sink::Definition).string())
+                    .col(ColumnDef::new(Sink::Definition).string().not_null())
                     .col(ColumnDef::new(Sink::ConnectionId).integer())
+                    .col(ColumnDef::new(Sink::DbName).string().not_null())
+                    .col(ColumnDef::new(Sink::SinkFromName).string().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_sink_database_id")
@@ -744,7 +746,12 @@ impl MigrationTrait for Migration {
                 MigrationTable::create()
                     .table(ElectionMember::Table)
                     .col(ColumnDef::new(ElectionMember::Service).string().not_null())
-                    .col(ColumnDef::new(ElectionMember::Id).string().not_null())
+                    .col(
+                        ColumnDef::new(ElectionMember::Id)
+                            .string()
+                            .primary_key()
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(ElectionMember::LastHeartbeat)
                             .timestamp()
@@ -774,17 +781,6 @@ impl MigrationTrait for Migration {
                     .unique()
                     .col(Schema::DatabaseId)
                     .col(Schema::Name)
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_index(
-                MigrationIndex::create()
-                    .table(ElectionMember::Table)
-                    .name("election_member_pk")
-                    .unique()
-                    .col(ElectionMember::Service)
-                    .col(ElectionMember::Id)
                     .to_owned(),
             )
             .await?;
@@ -1058,6 +1054,8 @@ enum Sink {
     Properties,
     Definition,
     ConnectionId,
+    DbName,
+    SinkFromName,
 }
 
 #[derive(DeriveIden)]

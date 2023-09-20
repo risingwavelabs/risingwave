@@ -161,13 +161,13 @@ impl CatalogController {
 
         let base_query = SelectStatement::new()
             .column(object_dependency::Column::UsedBy)
-            .from(object_dependency::Entity)
+            .from(ObjectDependency)
             .and_where(object_dependency::Column::Oid.eq(obj_id))
             .to_owned();
 
         let cte_referencing = Query::select()
-            .column((object_dependency::Entity, object_dependency::Column::UsedBy))
-            .from(object_dependency::Entity)
+            .column((ObjectDependency, object_dependency::Column::UsedBy))
+            .from(ObjectDependency)
             .join(
                 JoinType::InnerJoin,
                 cte_alias.clone(),
@@ -258,42 +258,42 @@ impl CatalogController {
 
         let mut query_schema = Query::select()
             .column(schema::Column::SchemaId)
-            .from(schema::Entity)
+            .from(Schema)
             .and_where(schema::Column::DatabaseId.eq(database_id as i32))
             .to_owned();
         let query_table = Query::select()
             .column(table::Column::TableId)
-            .from(table::Entity)
+            .from(Table)
             .and_where(table::Column::DatabaseId.eq(database_id as i32))
             .to_owned();
         let query_source = Query::select()
             .column(source::Column::SourceId)
-            .from(source::Entity)
+            .from(Source)
             .and_where(source::Column::DatabaseId.eq(database_id as i32))
             .to_owned();
         let query_sink = Query::select()
             .column(sink::Column::SinkId)
-            .from(sink::Entity)
+            .from(Sink)
             .and_where(sink::Column::DatabaseId.eq(database_id as i32))
             .to_owned();
         let query_index = Query::select()
             .column(index::Column::IndexId)
-            .from(index::Entity)
+            .from(Index)
             .and_where(index::Column::DatabaseId.eq(database_id as i32))
             .to_owned();
         let query_view = Query::select()
             .column(view::Column::ViewId)
-            .from(view::Entity)
+            .from(View)
             .and_where(view::Column::DatabaseId.eq(database_id as i32))
             .to_owned();
         let query_function = Query::select()
             .column(function::Column::FunctionId)
-            .from(function::Entity)
+            .from(Function)
             .and_where(function::Column::DatabaseId.eq(database_id as i32))
             .to_owned();
         let query_connection = Query::select()
             .column(connection::Column::ConnectionId)
-            .from(connection::Entity)
+            .from(Connection)
             .and_where(connection::Column::DatabaseId.eq(database_id as i32))
             .to_owned();
         let query_all = query_schema

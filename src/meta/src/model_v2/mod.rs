@@ -6,6 +6,8 @@ pub mod actor;
 pub mod cluster;
 pub mod connection;
 pub mod database;
+pub mod election_leader;
+pub mod election_member;
 pub mod fragment;
 pub mod function;
 pub mod index;

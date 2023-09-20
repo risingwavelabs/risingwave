@@ -14,10 +14,12 @@ pub struct Model {
     pub pk_column_ids: Option<Json>,
     pub distribution_key: Option<Json>,
     pub downstream_pk: Option<Json>,
-    pub sink_type: Option<String>,
+    pub sink_type: String,
     pub properties: Option<Json>,
-    pub definition: Option<String>,
+    pub definition: String,
     pub connection_id: Option<i32>,
+    pub db_name: String,
+    pub sink_from_name: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

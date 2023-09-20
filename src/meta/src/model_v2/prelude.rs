@@ -4,6 +4,8 @@ pub use super::actor::Entity as Actor;
 pub use super::cluster::Entity as Cluster;
 pub use super::connection::Entity as Connection;
 pub use super::database::Entity as Database;
+pub use super::election_leader::Entity as ElectionLeader;
+pub use super::election_member::Entity as ElectionMember;
 pub use super::fragment::Entity as Fragment;
 pub use super::function::Entity as Function;
 pub use super::index::Entity as Index;
