@@ -695,6 +695,8 @@ message DispatchStrategy {
   DispatcherType type = 1;
   repeated uint32 dist_key_indices = 2;
   repeated uint32 output_indices = 3;
+  // The full table name of the downstream CDC table.
+  optional string downstream_table_name = 4;
 }
 
 // A dispatcher redistribute messages.

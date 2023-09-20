@@ -25,6 +25,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
+use risingwave_common::row::{Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
@@ -350,7 +351,7 @@ impl DispatcherImpl {
                     output_indices,
                     hash_mapping,
                     dispatcher.dispatcher_id,
-                    dispatcher.downstream_table_name,
+                    dispatcher.downstream_table_name.clone(),
                 ))
             }
             Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
@@ -612,7 +613,7 @@ impl Dispatcher for HashDataDispatcher {
         // Apply output indices after calculating the vnode.
         let chunk = chunk.project(&self.output_indices);
 
-        for ((vnode, &op), visible, row) in vnodes
+        for (((vnode, &op), visible), row) in vnodes
             .iter()
             .copied()
             .zip_eq_fast(chunk.ops())
@@ -621,9 +622,10 @@ impl Dispatcher for HashDataDispatcher {
         {
             // Build visibility map for every output chunk.
             for (output, vis_map) in self.outputs.iter().zip_eq_fast(vis_maps.iter_mut()) {
-                let should_emit = if let Some(full_table_name) = self.downstream_table_name {
-                    let last_column_idx = chunk.data_chunk().dimension() - 1;
-                    let table_name_datum = row.datum_at(last_column_idx).unwrap();
+                // TODO: dispatch based on downstream table name
+                let should_emit = if let Some(row) = row && let Some(full_table_name) = self.downstream_table_name.as_ref() {
+                    let table_name_datum = row.datum_at(self.keys[0]).unwrap();
+                    tracing::info!("row: {:#?}, keys: {:?}, uptable: {}, datum: {:?}", row, self.keys, full_table_name, table_name_datum);
                     table_name_datum == full_table_name
                 } else {
                     true

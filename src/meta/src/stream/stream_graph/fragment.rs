@@ -21,9 +21,12 @@ use anyhow::Context;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
+use risingwave_common::catalog::{
+    generate_internal_table_name_with_type, TableId, TABLE_NAME_COLUMN_NAME,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
+use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
@@ -548,25 +551,45 @@ impl CompleteStreamFragmentGraph {
         {
             // Build the extra edges between the upstream `Materialize` and the downstream `Chain`
             // of the new materialized view.
-            for (&id, fragment) in &graph.fragments {
+            for (&id, fragment) in &mut graph.fragments {
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
                     if let Some(source_fragment) = upstream_source_fragments
                         .as_ref()
                         .and_then(|map| map.get(&upstream_table_id))
                     {
+                        // extract the upstream full_table_name from the source node body
+                        // set the full_table_name into DispatchStrategy
+                        let mut full_table_name = None;
+                        visit_fragment(&mut fragment.inner, |node_body| {
+                            if let NodeBody::Chain(chain_node) = node_body && let Some(table_desc) = chain_node.table_desc.as_ref() {
+                                full_table_name = table_desc.table_name.clone();
+                            }
+                        });
+
                         let source_fragment_id = GlobalFragmentId::new(source_fragment.fragment_id);
 
-                        // TODO: shall we store a (table_id -> table desc) mapping in the source node body?
+                        // extract `_rw_table_name` column index
+                        let rw_table_name_index = {
+                            let node = source_fragment.actors[0].get_nodes().unwrap();
+
+                            // may remove the expect to extend other scenarios, currently only target the CDC scenario
+                            node.fields
+                                .iter()
+                                .position(|f| f.name.as_str() == TABLE_NAME_COLUMN_NAME)
+                                .expect("table name column not found")
+                        };
 
                         StreamFragmentEdge {
                             id: EdgeId::UpstreamExternal {
                                 upstream_table_id,
                                 downstream_fragment_id: id,
                             },
+                            // TODO: add the downstream table name into the DispatchStrategy
                             dispatch_strategy: DispatchStrategy {
                                 r#type: DispatcherType::Hash as _, /* there may have multiple downstream table jobs, so we use `Hash` here */
-                                dist_key_indices: vec![],          // not used for `NoShuffle`
-                                output_indices: vec![], /* require all columns from the upstream source */
+                                dist_key_indices: vec![rw_table_name_index as _], /* index to `_rw_table_name` column */
+                                output_indices: output_columns.iter().map(|i| i as _).collect(), /* require all columns from the upstream source */
+                                downstream_table_name: full_table_name,
                             },
                         }
                     } else {

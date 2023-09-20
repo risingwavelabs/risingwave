@@ -923,7 +923,6 @@ pub async fn handle_create_table(
             .into()),
         };
 
-        // TODO: gen stream graph for table
         let mut graph = build_graph(plan);
         graph.parallelism = if cdc_source.is_none() {
             session
@@ -936,7 +935,7 @@ pub async fn handle_create_table(
         (graph, source, table)
     };
 
-    tracing::trace!(
+    tracing::debug!(
         "name={}, graph=\n{}",
         table_name,
         serde_json::to_string_pretty(&graph).unwrap()

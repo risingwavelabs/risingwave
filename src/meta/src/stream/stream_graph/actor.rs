@@ -151,6 +151,7 @@ impl ActorBuilder {
                         upstream_fragment_id: upstreams.fragment_id.as_global_id(),
                         upstream_dispatcher_type: exchange.get_strategy()?.r#type,
                         fields: stream_node.get_fields().clone(),
+                        cdc_upstream: false,
                     })),
                     identity: "MergeExecutor".to_string(),
                     ..stream_node.clone()
@@ -180,6 +181,13 @@ impl ActorBuilder {
                 let upstream_actor_id = upstreams.actors.as_global_ids();
                 assert_eq!(upstream_actor_id.len(), 1);
 
+                let cdc_upstream =
+                    if let Some(NodeBody::Merge(merge_node)) = merge_node.node_body.as_ref() {
+                        merge_node.cdc_upstream
+                    } else {
+                        false
+                    };
+
                 let chain_input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
@@ -192,6 +200,7 @@ impl ActorBuilder {
                                 DispatcherType::NoShuffle as _
                             },
                             fields: merge_node.fields.clone(),
+                            cdc_upstream,
                         })),
                         ..merge_node.clone()
                     },
@@ -358,6 +367,7 @@ impl ActorGraphBuildStateInner {
             hash_mapping: Some(downstream_actor_mapping.to_protobuf()),
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
             downstream_actor_id: downstream_actors.as_global_ids(),
+            downstream_table_name: strategy.downstream_table_name.clone(),
         }
     }
 
@@ -377,6 +387,7 @@ impl ActorGraphBuildStateInner {
             hash_mapping: None,
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
             downstream_actor_id: downstream_actors.as_global_ids(),
+            downstream_table_name: None,
         }
     }
 
