@@ -44,7 +44,7 @@ use crate::estimate_size::EstimateSize;
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
 #[derive(Debug, Clone, Copy, Default, EstimateSize)]
-pub struct  Interval {
+pub struct Interval {
     months: i32,
     days: i32,
     usecs: i64,
