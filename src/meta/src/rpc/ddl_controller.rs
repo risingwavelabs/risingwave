@@ -417,6 +417,7 @@ impl DdlController {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
+        // NOTE(kwannoel): We commit `Table` to meta here.
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
