@@ -37,7 +37,6 @@ use tokio::time::Instant;
 use zstd::zstd_safe::WriteBuf;
 
 use super::compactor::inheritance::SstableInheritance;
-use super::event_handler::refiller::GLOBAL_CACHE_REFILL_METRICS;
 use super::utils::MemoryTracker;
 use super::{
     Block, BlockCache, BlockMeta, BlockResponse, FileCache, RecentFilter, Sstable,
@@ -551,7 +550,7 @@ impl SstableStore {
         &self.data_file_cache
     }
 
-    async fn should_refill(
+    pub async fn should_refill(
         &self,
         idx_range: Range<usize>,
         sstable_inheritance: &SstableInheritance,
@@ -583,8 +582,7 @@ impl SstableStore {
         &self,
         sst: &Sstable,
         indices: impl RangeBounds<usize>,
-        sstable_inheritance: &SstableInheritance,
-    ) -> HummockResult<bool> {
+    ) -> HummockResult<()> {
         let object_id = sst.id;
 
         let idx_start = match indices.start_bound() {
@@ -597,17 +595,6 @@ impl SstableStore {
             std::ops::Bound::Excluded(i) => *i,
             std::ops::Bound::Unbounded => sst.block_count(),
         };
-
-        if !self
-            .should_refill(idx_start..idx_end, sstable_inheritance)
-            .await
-        {
-            return Ok(false);
-        }
-
-        GLOBAL_CACHE_REFILL_METRICS
-            .data_refill_started_total
-            .inc_by((idx_end - idx_start) as u64);
 
         let bytes_start = sst.calculate_block_info(idx_start).0.start;
         let bytes_end = sst.calculate_block_info(idx_end - 1).0.end;
@@ -640,7 +627,7 @@ impl SstableStore {
         }
         try_join_all(tasks).await?;
 
-        Ok(true)
+        Ok(())
     }
 }
 

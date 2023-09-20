@@ -48,6 +48,7 @@ pub struct CacheRefillMetrics {
     pub data_refill_success_duration: Histogram,
     pub meta_refill_success_duration: Histogram,
 
+    pub data_refill_ignored_total: GenericCounter<AtomicU64>,
     pub data_refill_filtered_total: GenericCounter<AtomicU64>,
     pub data_refill_attempts_total: GenericCounter<AtomicU64>,
     pub data_refill_started_total: GenericCounter<AtomicU64>,
@@ -81,6 +82,9 @@ impl CacheRefillMetrics {
             .get_metric_with_label_values(&["meta", "success"])
             .unwrap();
 
+        let data_refill_ignored_total = refill_total
+            .get_metric_with_label_values(&["data", "ignored"])
+            .unwrap();
         let data_refill_filtered_total = refill_total
             .get_metric_with_label_values(&["data", "filtered"])
             .unwrap();
@@ -110,6 +114,7 @@ impl CacheRefillMetrics {
 
             data_refill_success_duration,
             meta_refill_success_duration,
+            data_refill_ignored_total,
             data_refill_filtered_total,
             data_refill_attempts_total,
             data_refill_started_total,
@@ -307,7 +312,7 @@ impl CacheRefillTask {
                 .map(|sst| sst.value().block_count() as u64)
                 .sum::<u64>();
             GLOBAL_CACHE_REFILL_METRICS
-                .data_refill_filtered_total
+                .data_refill_ignored_total
                 .inc_by(blocks);
             return;
         }
@@ -329,22 +334,33 @@ impl CacheRefillTask {
                 let count = idx_end - idx_start;
 
                 let task = async move {
+                    if !context
+                        .sstable_store
+                        .should_refill(idx_start..idx_end, sstable_inheritance)
+                        .await
+                    {
+                        GLOBAL_CACHE_REFILL_METRICS
+                            .data_refill_started_total
+                            .inc_by(count as u64);
+                        return;
+                    }
+
                     GLOBAL_CACHE_REFILL_METRICS
                         .data_refill_attempts_total
                         .inc_by(count as u64);
 
                     let permit = context.concurrency.acquire().await.unwrap();
 
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_started_total
+                        .inc_by((idx_end - idx_start) as u64);
+
                     match context
                         .sstable_store
-                        .fill_data_file_cache(
-                            sst_info.value(),
-                            idx_start..idx_end,
-                            sstable_inheritance,
-                        )
+                        .fill_data_file_cache(sst_info.value(), idx_start..idx_end)
                         .await
                     {
-                        Ok(true) => {
+                        Ok(()) => {
                             GLOBAL_CACHE_REFILL_METRICS
                                 .data_refill_success_duration
                                 .observe(now.elapsed().as_secs_f64());
@@ -352,9 +368,6 @@ impl CacheRefillTask {
                                 .data_refill_success_total
                                 .inc_by(count as u64)
                         }
-                        Ok(false) => GLOBAL_CACHE_REFILL_METRICS
-                            .data_refill_filtered_total
-                            .inc_by(count as u64),
                         Err(e) => {
                             tracing::warn!("data cache refill error: {:?}", e);
                         }
