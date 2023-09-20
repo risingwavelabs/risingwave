@@ -5,6 +5,18 @@ ENV LANG en_US.utf8
 RUN apt-get update \
   && apt-get -y install ca-certificates build-essential libsasl2-dev openjdk-11-jdk
 
+FROM base AS dashboard-builder
+
+RUN apt-get install -y curl gnupg protobuf-compiler && mkdir -p /etc/apt/keyrings \
+  && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+  && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_18.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+  && apt-get update && apt-get install -y nodejs
+
+COPY ./dashboard/ /risingwave/dashboard
+COPY ./proto  /risingwave/proto
+
+RUN cd /risingwave/dashboard && npm i && npm run build-static && rm -rf node_modules
+
 FROM base AS builder
 
 RUN apt-get update && apt-get -y install make cmake protobuf-compiler curl bash lld maven unzip
@@ -26,9 +38,6 @@ ENV IN_CONTAINER=1
 ARG GIT_SHA
 ENV GIT_SHA=$GIT_SHA
 
-RUN curl -LO https://github.com/risingwavelabs/risingwave/archive/refs/heads/dashboard-artifact.zip
-RUN unzip dashboard-artifact.zip && mv risingwave-dashboard-artifact /risingwave/ui && rm dashboard-artifact.zip
-
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
   && rustup set profile minimal \
@@ -37,7 +46,9 @@ RUN rustup self update \
 
 RUN cargo fetch && \
   cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
-  mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+  mkdir -p /risingwave/bin && \
+    mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+    mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \
   cp ./target/release/build/tikv-jemalloc-sys-*/out/build/bin/jeprof /risingwave/bin/ && \
   chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib && cargo clean
@@ -56,14 +67,17 @@ RUN apt-get -y install gdb \
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 
 COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
+COPY --from=builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
 COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
-COPY --from=builder /risingwave/ui /risingwave/ui
+COPY --from=dashboard-builder /risingwave/dashboard/out /risingwave/ui
 COPY --from=builder /risingwave/bin/jeprof /usr/local/bin/jeprof
 
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
 # Set default dashboard UI to local path instead of github proxy
 ENV RW_DASHBOARD_UI_PATH /risingwave/ui
+# Set default connector libs path
+ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "playground" ]

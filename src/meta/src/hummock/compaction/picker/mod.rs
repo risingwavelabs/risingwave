@@ -13,6 +13,8 @@
 // limitations under the License.
 
 mod base_level_compaction_picker;
+mod emergency_compaction_picker;
+mod intra_compaction_picker;
 mod manual_compaction_picker;
 mod min_overlap_compaction_picker;
 mod space_reclaim_compaction_picker;
@@ -21,7 +23,12 @@ mod tombstone_reclaim_compaction_picker;
 mod trivial_move_compaction_picker;
 mod ttl_reclaim_compaction_picker;
 
+mod compaction_task_validator;
+
 pub use base_level_compaction_picker::LevelCompactionPicker;
+pub use compaction_task_validator::{CompactionTaskValidator, ValidationRuleType};
+pub use emergency_compaction_picker::EmergencyCompactionPicker;
+pub use intra_compaction_picker::IntraCompactionPicker;
 pub use manual_compaction_picker::ManualCompactionPicker;
 pub use min_overlap_compaction_picker::MinOverlappingPicker;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -36,17 +43,24 @@ pub use ttl_reclaim_compaction_picker::{TtlPickerState, TtlReclaimCompactionPick
 
 use crate::hummock::level_handler::LevelHandler;
 
-#[derive(Default)]
+pub const MAX_COMPACT_LEVEL_COUNT: usize = 42;
+
+#[derive(Default, Debug)]
 pub struct LocalPickerStatistic {
     pub skip_by_write_amp_limit: u64,
     pub skip_by_count_limit: u64,
     pub skip_by_pending_files: u64,
     pub skip_by_overlapping: u64,
 }
+
+#[derive(Default, Debug)]
 pub struct CompactionInput {
     pub input_levels: Vec<InputLevel>,
     pub target_level: usize,
     pub target_sub_level_id: u64,
+    pub select_input_size: u64,
+    pub target_input_size: u64,
+    pub total_file_count: u64,
 }
 
 impl CompactionInput {

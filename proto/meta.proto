@@ -495,7 +495,7 @@ service MetaMemberService {
 
 // The schema for persisted system parameters.
 // Note on backward compatibility:
-// - Do not remove deprecated fields. Mark them as deprecated both after the field definition and in `system_params/mod.rs` instead.
+// - Do not remove deprecated fields. Mark them as deprecated instead.
 // - Do not rename existing fields, since each field is stored separately in the meta store with the field name as the key.
 // - To modify (rename, change the type or semantic of) a field, introduce a new field suffixed by the version.
 message SystemParams {
@@ -508,7 +508,8 @@ message SystemParams {
   optional string data_directory = 7;
   optional string backup_storage_url = 8;
   optional string backup_storage_directory = 9;
-  optional bool telemetry_enabled = 10;
+  // Deprecated. Use config file instead.
+  optional bool telemetry_enabled = 10 [deprecated = true];
   optional uint32 parallel_compact_size_mb = 11;
   optional uint32 max_concurrent_creating_streaming_jobs = 12;
   optional bool pause_on_next_bootstrap = 13;

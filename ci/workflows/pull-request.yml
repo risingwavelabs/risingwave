@@ -40,7 +40,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - GITHUB_TOKEN
-    timeout_in_minutes: 10
+    timeout_in_minutes: 12
     retry: *auto-retry
 
   - label: "build (deterministic simulation)"
@@ -95,6 +95,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test for opendal (parallel)"
+    if: build.pull_request.labels includes "ci/run-opendal-tests"
     command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-dev"
     depends_on:
       - "build"
@@ -109,6 +110,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (parallel, in-memory)"
+    if: build.pull_request.labels includes "ci/run-e2e-parallel-in-memory-tests"
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-dev"
     depends_on: "build"
     plugins:
@@ -145,11 +147,12 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 18
+    timeout_in_minutes: 20
     cancel_on_build_failing: true
     retry: *auto-retry
 
   - label: "connector node integration test Java {{matrix.java_version}}"
+    if: build.pull_request.labels includes "ci/run-java-connector-node-integration-tests"
     command: "ci/scripts/connector-node-integration-test.sh -p ci-dev -v {{matrix.java_version}}"
     depends_on:
       - "build"
@@ -169,6 +172,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -183,6 +187,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink v2 test"
+    if: build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests"
     command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -197,6 +202,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end clickhouse sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-clickhouse-sink-tests"
     command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -211,6 +217,7 @@ steps:
     retry: *auto-retry
 
   - label: "e2e java-binding test"
+    if: build.pull_request.labels includes "ci/run-java-binding-tests"
     command: "ci/scripts/java-binding-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -251,7 +258,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 16
+    timeout_in_minutes: 18
     retry: *auto-retry
 
   - label: "check"
@@ -452,4 +459,20 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    timeout_in_minutes: 10
+
+  - label: "e2e standalone binary test"
+    command: "ci/scripts/e2e-test.sh -p ci-dev -m standalone"
+    if: build.pull_request.labels includes "ci/run-e2e-standalone-tests"
+    depends_on:
+      - "build"
+      - "build-other"
+      - "docslt"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 25
+    retry: *auto-retry

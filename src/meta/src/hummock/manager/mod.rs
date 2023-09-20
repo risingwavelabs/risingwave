@@ -66,7 +66,8 @@ use tonic::Streaming;
 use tracing::warn;
 
 use crate::hummock::compaction::{
-    CompactStatus, LocalSelectorStatistic, ManualCompactionOption, TombstoneCompactionSelector,
+    CompactStatus, EmergencySelector, LocalSelectorStatistic, ManualCompactionOption,
+    TombstoneCompactionSelector,
 };
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
@@ -821,6 +822,7 @@ impl HummockManager {
                 return Ok(None);
             }
         };
+
         let (current_version, watermark) = {
             let versioning_guard = read_lock!(self, versioning).await;
             let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
@@ -829,7 +831,6 @@ impl HummockManager {
                 .values()
                 .map(|v| v.minimal_pinned_snapshot)
                 .fold(max_committed_epoch, std::cmp::min);
-
             (versioning_guard.current_version.clone(), watermark)
         };
         if current_version.levels.get(&compaction_group_id).is_none() {
@@ -837,7 +838,8 @@ impl HummockManager {
             return Ok(None);
         }
 
-        let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic);
+        let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic)
+            || matches!(selector.task_type(), compact_task::TaskType::Emergency);
 
         let mut stats = LocalSelectorStatistic::default();
         let member_table_ids = &current_version
@@ -1277,8 +1279,6 @@ impl HummockManager {
         let label = if is_trivial_reclaim {
             "trivial-space-reclaim"
         } else if is_trivial_move {
-            // TODO: only support can_trivial_move in DynamicLevelCompcation, will check
-            // task_type next PR
             "trivial-move"
         } else {
             self.compactor_manager
@@ -1312,7 +1312,8 @@ impl HummockManager {
         );
 
         if !deterministic_mode
-            && matches!(compact_task.task_type(), compact_task::TaskType::Dynamic)
+            && (matches!(compact_task.task_type(), compact_task::TaskType::Dynamic)
+                || matches!(compact_task.task_type(), compact_task::TaskType::Emergency))
         {
             // only try send Dynamic compaction
             self.try_send_compaction_request(
@@ -1693,26 +1694,21 @@ impl HummockManager {
 
     /// Get version deltas from meta store
     #[cfg_attr(coverage, no_coverage)]
+    #[named]
     pub async fn list_version_deltas(
         &self,
         start_id: u64,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
     ) -> Result<HummockVersionDeltas> {
-        let ordered_version_deltas: BTreeMap<_, _> =
-            HummockVersionDelta::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .map(|version_delta| (version_delta.id, version_delta))
-                .collect();
-
-        let version_deltas = ordered_version_deltas
-            .into_iter()
-            .filter(|(id, delta)| {
-                *id >= start_id && delta.max_committed_epoch <= committed_epoch_limit
-            })
-            .map(|(_, v)| v)
+        let versioning = read_lock!(self, versioning).await;
+        let version_deltas = versioning
+            .hummock_version_deltas
+            .range(start_id..)
+            .map(|(_id, delta)| delta)
+            .filter(|delta| delta.max_committed_epoch <= committed_epoch_limit)
             .take(num_limit as _)
+            .cloned()
             .collect();
         Ok(HummockVersionDeltas { version_deltas })
     }
@@ -1950,7 +1946,7 @@ impl HummockManager {
     }
 
     #[named]
-    pub async fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+    pub fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         use futures::{FutureExt, StreamExt};
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -2469,7 +2465,8 @@ impl HummockManager {
         }
     }
 
-    pub async fn compaction_event_loop(
+    #[named]
+    pub fn compaction_event_loop(
         hummock_manager: Arc<Self>,
         mut compactor_streams_change_rx: UnboundedReceiver<(
             u32,
@@ -2558,7 +2555,32 @@ impl HummockManager {
                                 assert_ne!(0, pull_task_count);
                                 if let Some(compactor) = hummock_manager.compactor_manager.get_compactor(context_id) {
                                     if let Some((group, task_type)) = hummock_manager.auto_pick_compaction_group_and_type().await {
-                                        let selector: &mut Box<dyn LevelSelector> = compaction_selectors.get_mut(&task_type).unwrap();
+                                        let selector: &mut Box<dyn LevelSelector> = {
+                                            let versioning_guard = read_lock!(hummock_manager, versioning).await;
+                                            let versioning = versioning_guard.deref();
+
+                                            if versioning.write_limit.contains_key(&group) {
+                                                let enable_emergency_picker = match hummock_manager
+                                                    .compaction_group_manager
+                                                    .read()
+                                                    .await
+                                                    .try_get_compaction_group_config(group)
+                                                {
+                                                    Some(config) =>{ config.compaction_config.enable_emergency_picker },
+                                                    None => { unreachable!("compaction-group {} not exist", group) }
+                                                };
+
+                                                if enable_emergency_picker {
+                                                    compaction_selectors.get_mut(&TaskType::Emergency).unwrap()
+                                                } else {
+                                                    compaction_selectors.get_mut(&task_type).unwrap()
+                                                }
+                                            } else {
+                                                compaction_selectors.get_mut(&task_type).unwrap()
+                                            }
+
+                                        };
+
                                         for _ in 0..pull_task_count {
                                             let compact_task =
                                                 hummock_manager
@@ -2772,34 +2794,47 @@ fn gen_version_delta<'a>(
         .or_default()
         .group_deltas;
     let mut gc_object_ids = vec![];
+    let mut removed_table_ids_map: BTreeMap<u32, Vec<u64>> = BTreeMap::default();
+
     for level in &compact_task.input_ssts {
+        let level_idx = level.level_idx;
+        let mut removed_table_ids = level
+            .table_infos
+            .iter()
+            .map(|sst| {
+                let object_id = sst.get_object_id();
+                let sst_id = sst.get_sst_id();
+                if !trivial_move
+                    && drop_sst(
+                        branched_ssts,
+                        compact_task.compaction_group_id,
+                        object_id,
+                        sst_id,
+                    )
+                {
+                    gc_object_ids.push(object_id);
+                }
+                sst_id
+            })
+            .collect_vec();
+
+        removed_table_ids_map
+            .entry(level_idx)
+            .or_default()
+            .append(&mut removed_table_ids);
+    }
+
+    for (level_idx, removed_table_ids) in removed_table_ids_map {
         let group_delta = GroupDelta {
             delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
-                level_idx: level.level_idx,
-                removed_table_ids: level
-                    .table_infos
-                    .iter()
-                    .map(|sst| {
-                        let object_id = sst.get_object_id();
-                        let sst_id = sst.get_sst_id();
-                        if !trivial_move
-                            && drop_sst(
-                                branched_ssts,
-                                compact_task.compaction_group_id,
-                                object_id,
-                                sst_id,
-                            )
-                        {
-                            gc_object_ids.push(object_id);
-                        }
-                        sst_id
-                    })
-                    .collect_vec(),
+                level_idx,
+                removed_table_ids,
                 ..Default::default()
             })),
         };
         group_deltas.push(group_delta);
     }
+
     let group_delta = GroupDelta {
         delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
             level_idx: compact_task.target_level,
@@ -2830,7 +2865,7 @@ async fn write_exclusive_cluster_id(
     const CLUSTER_ID_NAME: &str = "0";
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
-    match object_store.read(&cluster_id_full_path, None).await {
+    match object_store.read(&cluster_id_full_path, ..).await {
         Ok(cluster_id) => Err(ObjectError::internal(format!(
             "Data directory is already used by another cluster with id {:?}, path {}.",
             String::from_utf8(cluster_id.to_vec()).unwrap(),
@@ -2867,6 +2902,11 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn LevelSelector>> {
     compaction_selectors.insert(
         compact_task::TaskType::Tombstone,
         Box::<TombstoneCompactionSelector>::default(),
+    );
+
+    compaction_selectors.insert(
+        compact_task::TaskType::Emergency,
+        Box::<EmergencySelector>::default(),
     );
     compaction_selectors
 }

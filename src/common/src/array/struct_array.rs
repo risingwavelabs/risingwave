@@ -28,8 +28,7 @@ use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultPartialOrd, Scalar, StructType, ToDatumRef,
-    ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, StructType, ToDatumRef, ToText,
 };
 use crate::util::iter_util::ZipEqFast;
 use crate::util::memcmp_encoding;
@@ -268,7 +267,7 @@ impl From<DataChunk> for StructArray {
         Self::new(
             StructType::unnamed(chunk.columns().iter().map(|c| c.data_type()).collect()),
             chunk.columns().to_vec(),
-            chunk.vis().to_bitmap(),
+            chunk.visibility().clone(),
         )
     }
 }
@@ -280,13 +279,13 @@ pub struct StructValue {
 
 impl PartialOrd for StructValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for StructValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
+        self.as_scalar_ref().cmp(&other.as_scalar_ref())
     }
 }
 
@@ -374,14 +373,20 @@ impl PartialEq for StructRef<'_> {
     }
 }
 
+impl Eq for StructRef<'_> {}
+
 impl PartialOrd for StructRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for StructRef<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
         iter_fields_ref!(*self, lhs, {
             iter_fields_ref!(*other, rhs, {
-                if lhs.len() != rhs.len() {
-                    return None;
-                }
-                lhs.partial_cmp_by(rhs, |lv, rv| lv.default_partial_cmp(&rv))
+                assert_eq!(lhs.len(), rhs.len());
+                lhs.cmp_by(rhs, |lv, rv| lv.default_cmp(&rv))
             })
         })
     }
@@ -426,15 +431,6 @@ impl ToText for StructRef<'_> {
             DataType::Struct(_) => self.write(f),
             _ => unreachable!(),
         }
-    }
-}
-
-impl Eq for StructRef<'_> {}
-
-impl Ord for StructRef<'_> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // The order between two structs is deterministic.
-        self.partial_cmp(other).unwrap()
     }
 }
 
