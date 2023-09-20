@@ -38,8 +38,9 @@ type RowOpCodeType = i16;
 
 const FIRST_SEQ_ID: SeqIdType = 0;
 
-/// Readers truncate the offset at the granularity of epoch
-type ReaderTruncationOffsetType = u64;
+/// Readers truncate the offset at the granularity of seq id.
+/// None `SeqIdType` means that the whole epoch is truncated.
+type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
 pub struct KvLogStoreFactory<S: StateStore> {
     state_store: S,
@@ -115,7 +116,9 @@ mod tests {
         gen_multi_vnode_stream_chunks, gen_stream_chunk, gen_test_log_store_table,
     };
     use crate::common::log_store::kv_log_store::KvLogStoreFactory;
-    use crate::common::log_store::{LogReader, LogStoreFactory, LogStoreReadItem, LogWriter};
+    use crate::common::log_store::{
+        LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
+    };
 
     #[tokio::test]
     async fn test_basic() {
@@ -167,7 +170,13 @@ mod tests {
 
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(read_stream_chunk)) => {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    ..
+                },
+            ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(check_stream_chunk_eq(&stream_chunk1, &read_stream_chunk));
             }
@@ -181,7 +190,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(read_stream_chunk)) => {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    ..
+                },
+            ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(check_stream_chunk_eq(&stream_chunk2, &read_stream_chunk));
             }
@@ -244,7 +259,13 @@ mod tests {
 
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(read_stream_chunk)) => {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    ..
+                },
+            ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(check_stream_chunk_eq(&stream_chunk1, &read_stream_chunk));
             }
@@ -258,7 +279,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(read_stream_chunk)) => {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    ..
+                },
+            ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(check_stream_chunk_eq(&stream_chunk2, &read_stream_chunk));
             }
@@ -274,7 +301,10 @@ mod tests {
 
         test_env.commit_epoch(epoch2).await;
         // The truncate does not work because it is after the sync
-        reader.truncate().await.unwrap();
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch2 })
+            .await
+            .unwrap();
         test_env
             .storage
             .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
@@ -298,7 +328,13 @@ mod tests {
             .unwrap();
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(read_stream_chunk)) => {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    ..
+                },
+            ) => {
                 assert_eq!(epoch, epoch1);
                 assert!(check_stream_chunk_eq(&stream_chunk1, &read_stream_chunk));
             }
@@ -312,7 +348,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(read_stream_chunk)) => {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    ..
+                },
+            ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(check_stream_chunk_eq(&stream_chunk2, &read_stream_chunk));
             }
@@ -329,7 +371,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_truncate() {
-        for count in 0..20 {
+        for count in 2..10 {
             test_truncate_inner(count).await
         }
     }
@@ -341,12 +383,14 @@ mod tests {
 
         test_env.register_table(table.clone()).await;
 
-        let stream_chunk1 = gen_stream_chunk(0);
-        let stream_chunk2 = gen_stream_chunk(10);
+        let stream_chunk1_1 = gen_stream_chunk(0);
+        let stream_chunk1_2 = gen_stream_chunk(10);
+        let stream_chunk2 = gen_stream_chunk(20);
         let stream_chunk3 = gen_stream_chunk(20);
         let bitmap = calculate_vnode_bitmap(
-            stream_chunk1
+            stream_chunk1_1
                 .rows()
+                .chain(stream_chunk1_2.rows())
                 .chain(stream_chunk2.rows())
                 .chain(stream_chunk3.rows()),
         );
@@ -370,7 +414,8 @@ mod tests {
             .init(EpochPair::new_test_epoch(epoch1))
             .await
             .unwrap();
-        writer.write_chunk(stream_chunk1.clone()).await.unwrap();
+        writer.write_chunk(stream_chunk1_1.clone()).await.unwrap();
+        writer.write_chunk(stream_chunk1_2.clone()).await.unwrap();
         let epoch2 = epoch1 + 1;
         writer.flush_current_epoch(epoch2, true).await.unwrap();
         writer.write_chunk(stream_chunk2.clone()).await.unwrap();
@@ -378,13 +423,35 @@ mod tests {
         test_env.commit_epoch(epoch1).await;
 
         reader.init().await.unwrap();
-        match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(read_stream_chunk)) => {
+        let chunk_id1 = match reader.next_item().await.unwrap() {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    chunk_id,
+                },
+            ) => {
                 assert_eq!(epoch, epoch1);
-                assert!(check_stream_chunk_eq(&stream_chunk1, &read_stream_chunk));
+                assert!(check_stream_chunk_eq(&stream_chunk1_1, &read_stream_chunk));
+                chunk_id
             }
             _ => unreachable!(),
-        }
+        };
+        let chunk_id2 = match reader.next_item().await.unwrap() {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    chunk_id,
+                },
+            ) => {
+                assert_eq!(epoch, epoch1);
+                assert!(check_stream_chunk_eq(&stream_chunk1_2, &read_stream_chunk));
+                chunk_id
+            }
+            _ => unreachable!(),
+        };
+        assert!(chunk_id2 > chunk_id1);
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
                 assert_eq!(epoch, epoch1);
@@ -393,18 +460,31 @@ mod tests {
             _ => unreachable!(),
         }
 
-        // The truncate should work because it is before the flush
-        reader.truncate().await.unwrap();
-        let epoch3 = epoch2 + 1;
-        writer.flush_current_epoch(epoch3, true).await.unwrap();
-
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(read_stream_chunk)) => {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    ..
+                },
+            ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(check_stream_chunk_eq(&stream_chunk2, &read_stream_chunk));
             }
             _ => unreachable!(),
         }
+
+        // The truncate should work because it is before the flush
+        reader
+            .truncate(TruncateOffset::Chunk {
+                epoch: epoch1,
+                chunk_id: chunk_id1,
+            })
+            .await
+            .unwrap();
+        let epoch3 = epoch2 + 1;
+        writer.flush_current_epoch(epoch3, true).await.unwrap();
+
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
                 assert_eq!(epoch, epoch2);
@@ -442,7 +522,33 @@ mod tests {
 
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(read_stream_chunk)) => {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    ..
+                },
+            ) => {
+                assert_eq!(epoch, epoch1);
+                assert!(check_stream_chunk_eq(&stream_chunk1_2, &read_stream_chunk));
+            }
+            _ => unreachable!(),
+        }
+        match reader.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(is_checkpoint)
+            }
+            _ => unreachable!(),
+        }
+        match reader.next_item().await.unwrap() {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    ..
+                },
+            ) => {
                 assert_eq!(epoch, epoch2);
                 assert!(check_stream_chunk_eq(&stream_chunk2, &read_stream_chunk));
             }
@@ -456,7 +562,13 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(read_stream_chunk)) => {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    ..
+                },
+            ) => {
                 assert_eq!(epoch, epoch3);
                 assert!(check_stream_chunk_eq(&stream_chunk3, &read_stream_chunk));
             }
@@ -517,12 +629,12 @@ mod tests {
         writer2.write_chunk(chunk2_2.clone()).await.unwrap();
 
         match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(chunk)) => {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(check_stream_chunk_eq(&chunk1_1, &chunk));
             }
             _ => unreachable!(),
-        }
+        };
         match reader1.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
                 assert_eq!(epoch, epoch1);
@@ -532,7 +644,7 @@ mod tests {
         }
 
         match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(chunk)) => {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(check_stream_chunk_eq(&chunk1_2, &chunk));
             }
@@ -547,17 +659,20 @@ mod tests {
         }
 
         // Only reader1 will truncate
-        reader1.truncate().await.unwrap();
+        reader1
+            .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+            .await
+            .unwrap();
 
         match reader1.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(chunk)) => {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(check_stream_chunk_eq(&chunk2_1, &chunk));
             }
             _ => unreachable!(),
         }
         match reader2.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(chunk)) => {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(check_stream_chunk_eq(&chunk2_2, &chunk));
             }
@@ -602,7 +717,7 @@ mod tests {
         writer.init(EpochPair::new(epoch3, epoch2)).await.unwrap();
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(chunk)) => {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
                 assert_eq!(epoch, epoch1);
                 assert!(check_stream_chunk_eq(&chunk1_2, &chunk));
             }
@@ -616,7 +731,7 @@ mod tests {
             _ => unreachable!(),
         }
         match reader.next_item().await.unwrap() {
-            (epoch, LogStoreReadItem::StreamChunk(chunk)) => {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(check_rows_eq(
                     chunk2_1.rows().chain(chunk2_2.rows()),

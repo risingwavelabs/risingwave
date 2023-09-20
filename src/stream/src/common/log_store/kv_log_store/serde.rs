@@ -49,7 +49,7 @@ use risingwave_storage::table::{compute_vnode, Distribution};
 use crate::common::log_store::kv_log_store::{
     ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,
 };
-use crate::common::log_store::{LogStoreError, LogStoreReadItem, LogStoreResult};
+use crate::common::log_store::{LogStoreError, LogStoreResult};
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
 const DELETE_OP_CODE: RowOpCodeType = 2;
@@ -231,12 +231,12 @@ impl LogStoreRowSerde {
         &self,
         vnode: VirtualNode,
         epoch: u64,
-        seq_id: SeqIdType,
+        seq_id: Option<SeqIdType>,
     ) -> TableKey<Bytes> {
         serialize_pk_with_vnode(
             [
                 Some(ScalarImpl::Int64(Self::encode_epoch(epoch))),
-                Some(ScalarImpl::Int32(seq_id)),
+                seq_id.map(ScalarImpl::Int32),
             ],
             &self.pk_serde,
             vnode,
@@ -248,7 +248,8 @@ impl LogStoreRowSerde {
         vnode: VirtualNode,
         offset: ReaderTruncationOffsetType,
     ) -> Bytes {
-        let curr_offset = self.serialize_epoch(vnode, offset);
+        let (epoch, seq_id) = offset;
+        let curr_offset = self.serialize_log_store_pk(vnode, epoch, seq_id);
         let ret = Bytes::from(next_key(&curr_offset));
         assert!(!ret.is_empty());
         ret
@@ -368,6 +369,11 @@ enum StreamState {
     BarrierEmitted { prev_epoch: u64 },
 }
 
+pub(crate) enum KvLogStoreItem {
+    StreamChunk(StreamChunk),
+    Barrier { is_checkpoint: bool },
+}
+
 type BoxPeekableLogStoreItemStream<S> = Pin<Box<Peekable<LogStoreItemStream<S>>>>;
 
 struct LogStoreRowOpStream<S: StateStoreReadIterStream> {
@@ -419,7 +425,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
         }
     }
 
-    #[try_stream(ok = (u64, LogStoreReadItem), error = LogStoreError)]
+    #[try_stream(ok = (u64, KvLogStoreItem), error = LogStoreError)]
     async fn into_log_store_item_stream(mut self, chunk_size: usize) {
         let mut ops = Vec::with_capacity(chunk_size);
         let mut data_chunk_builder =
@@ -441,7 +447,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
                         let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
                         yield (
                             epoch,
-                            LogStoreReadItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
+                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
                         );
                     }
                 }
@@ -450,10 +456,10 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
                         let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
                         yield (
                             epoch,
-                            LogStoreReadItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
+                            KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
                         );
                     }
-                    yield (epoch, LogStoreReadItem::Barrier { is_checkpoint })
+                    yield (epoch, KvLogStoreItem::Barrier { is_checkpoint })
                 }
             }
         }
@@ -461,7 +467,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
 }
 
 pub(crate) type LogStoreItemMergeStream<S> =
-    impl Stream<Item = LogStoreResult<(u64, LogStoreReadItem)>>;
+    impl Stream<Item = LogStoreResult<(u64, KvLogStoreItem)>>;
 pub(crate) fn merge_log_store_item_stream<S: StateStoreReadIterStream>(
     streams: Vec<S>,
     serde: LogStoreRowSerde,
@@ -688,13 +694,13 @@ mod tests {
     use tokio::sync::oneshot::Sender;
 
     use crate::common::log_store::kv_log_store::serde::{
-        merge_log_store_item_stream, LogStoreRowOp, LogStoreRowOpStream, LogStoreRowSerde,
+        merge_log_store_item_stream, KvLogStoreItem, LogStoreRowOp, LogStoreRowOpStream,
+        LogStoreRowSerde,
     };
     use crate::common::log_store::kv_log_store::test_utils::{
         check_rows_eq, gen_test_data, gen_test_log_store_table, TEST_TABLE_ID,
     };
     use crate::common::log_store::kv_log_store::SeqIdType;
-    use crate::common::log_store::LogStoreReadItem;
 
     const EPOCH0: u64 = 233;
     const EPOCH1: u64 = EPOCH0 + 1;
@@ -723,8 +729,9 @@ mod tests {
         fn remove_vnode_prefix(key: &Bytes) -> Bytes {
             key.slice(VirtualNode::SIZE..)
         }
-        let delete_range_right1 =
-            remove_vnode_prefix(&serde.serialize_truncation_offset_watermark(DEFAULT_VNODE, epoch));
+        let delete_range_right1 = remove_vnode_prefix(
+            &serde.serialize_truncation_offset_watermark(DEFAULT_VNODE, (epoch, None)),
+        );
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
@@ -761,8 +768,9 @@ mod tests {
         seq_id = 1;
         epoch += 1;
 
-        let delete_range_right2 =
-            remove_vnode_prefix(&serde.serialize_truncation_offset_watermark(DEFAULT_VNODE, epoch));
+        let delete_range_right2 = remove_vnode_prefix(
+            &serde.serialize_truncation_offset_watermark(DEFAULT_VNODE, (epoch, None)),
+        );
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
@@ -1060,14 +1068,13 @@ mod tests {
 
         pin_mut!(stream);
 
-        let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
+        let (epoch, item): (_, KvLogStoreItem) = stream.try_next().await.unwrap().unwrap();
         assert_eq!(EPOCH0, epoch);
         match item {
-            LogStoreReadItem::StreamChunk(_) => unreachable!(),
-            LogStoreReadItem::Barrier { is_checkpoint } => {
+            KvLogStoreItem::StreamChunk(_) => unreachable!(),
+            KvLogStoreItem::Barrier { is_checkpoint } => {
                 assert!(is_checkpoint);
             }
-            _ => unreachable!(),
         }
 
         assert!(poll_fn(|cx| Poll::Ready(stream.poll_next_unpin(cx)))
@@ -1082,11 +1089,10 @@ mod tests {
                 let size = min(remain, CHUNK_SIZE);
                 let start_index = ops.len() - remain;
                 remain -= size;
-                let (epoch, item): (_, LogStoreReadItem) =
-                    stream.try_next().await.unwrap().unwrap();
+                let (epoch, item): (_, KvLogStoreItem) = stream.try_next().await.unwrap().unwrap();
                 assert_eq!(EPOCH1, epoch);
                 match item {
-                    LogStoreReadItem::StreamChunk(chunk) => {
+                    KvLogStoreItem::StreamChunk(chunk) => {
                         assert_eq!(chunk.cardinality(), size);
                         assert!(check_rows_eq(
                             chunk.rows(),
@@ -1098,14 +1104,13 @@ mod tests {
             }
         }
 
-        let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
+        let (epoch, item): (_, KvLogStoreItem) = stream.try_next().await.unwrap().unwrap();
         assert_eq!(EPOCH1, epoch);
         match item {
-            LogStoreReadItem::StreamChunk(_) => unreachable!(),
-            LogStoreReadItem::Barrier { is_checkpoint } => {
+            KvLogStoreItem::StreamChunk(_) => unreachable!(),
+            KvLogStoreItem::Barrier { is_checkpoint } => {
                 assert!(!is_checkpoint);
             }
-            _ => unreachable!(),
         }
 
         assert!(poll_fn(|cx| Poll::Ready(stream.poll_next_unpin(cx)))
@@ -1120,11 +1125,10 @@ mod tests {
                 let size = min(remain, CHUNK_SIZE);
                 let start_index = ops.len() - remain;
                 remain -= size;
-                let (epoch, item): (_, LogStoreReadItem) =
-                    stream.try_next().await.unwrap().unwrap();
+                let (epoch, item): (_, KvLogStoreItem) = stream.try_next().await.unwrap().unwrap();
                 assert_eq!(EPOCH2, epoch);
                 match item {
-                    LogStoreReadItem::StreamChunk(chunk) => {
+                    KvLogStoreItem::StreamChunk(chunk) => {
                         assert_eq!(chunk.cardinality(), size);
                         assert!(check_rows_eq(
                             chunk.rows(),
@@ -1136,14 +1140,13 @@ mod tests {
             }
         }
 
-        let (epoch, item): (_, LogStoreReadItem) = stream.try_next().await.unwrap().unwrap();
+        let (epoch, item): (_, KvLogStoreItem) = stream.try_next().await.unwrap().unwrap();
         assert_eq!(EPOCH2, epoch);
         match item {
-            LogStoreReadItem::StreamChunk(_) => unreachable!(),
-            LogStoreReadItem::Barrier { is_checkpoint } => {
+            KvLogStoreItem::StreamChunk(_) => unreachable!(),
+            KvLogStoreItem::Barrier { is_checkpoint } => {
                 assert!(is_checkpoint);
             }
-            _ => unreachable!(),
         }
 
         assert!(stream.next().await.is_none());

@@ -124,7 +124,10 @@ impl NotificationServiceImpl {
             .database
             .list_tables()
             .into_iter()
-            .filter(|t| t.stream_job_status == PbStreamJobStatus::Created as i32)
+            .filter(|t| {
+                t.stream_job_status == PbStreamJobStatus::Unspecified as i32
+                    || t.stream_job_status == PbStreamJobStatus::Created as i32
+            })
             .collect_vec();
         tables.extend(catalog_guard.database.list_creating_tables());
         let notification_version = self.env.notification_manager().current_version().await;

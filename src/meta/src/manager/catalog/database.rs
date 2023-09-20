@@ -149,18 +149,27 @@ impl DatabaseManager {
             self.schemas.values().cloned().collect_vec(),
             self.tables
                 .values()
-                .filter(|t| t.stream_job_status == PbStreamJobStatus::Created as i32)
+                .filter(|t| {
+                    t.stream_job_status == PbStreamJobStatus::Unspecified as i32
+                        || t.stream_job_status == PbStreamJobStatus::Created as i32
+                })
                 .cloned()
                 .collect_vec(),
             self.sources.values().cloned().collect_vec(),
             self.sinks
                 .values()
-                .filter(|s| s.stream_job_status == PbStreamJobStatus::Created as i32)
+                .filter(|t| {
+                    t.stream_job_status == PbStreamJobStatus::Unspecified as i32
+                        || t.stream_job_status == PbStreamJobStatus::Created as i32
+                })
                 .cloned()
                 .collect_vec(),
             self.indexes
                 .values()
-                .filter(|i| i.stream_job_status == PbStreamJobStatus::Created as i32)
+                .filter(|t| {
+                    t.stream_job_status == PbStreamJobStatus::Unspecified as i32
+                        || t.stream_job_status == PbStreamJobStatus::Created as i32
+                })
                 .cloned()
                 .collect_vec(),
             self.views.values().cloned().collect_vec(),
