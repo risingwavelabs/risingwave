@@ -26,19 +26,6 @@ pub struct PulsarSplit {
     pub(crate) start_offset: PulsarEnumeratorOffset,
 }
 
-impl PulsarSplit {
-    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
-        let start_offset = if start_offset.is_empty() {
-            PulsarEnumeratorOffset::Earliest
-        } else {
-            PulsarEnumeratorOffset::MessageId(start_offset)
-        };
-
-        self.start_offset = start_offset;
-        Ok(())
-    }
-}
-
 impl SplitMetaData for PulsarSplit {
     fn id(&self) -> SplitId {
         // TODO: should avoid constructing a string every time
@@ -51,5 +38,16 @@ impl SplitMetaData for PulsarSplit {
 
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
+    }
+
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        let start_offset = if start_offset.is_empty() {
+            PulsarEnumeratorOffset::Earliest
+        } else {
+            PulsarEnumeratorOffset::MessageId(start_offset)
+        };
+
+        self.start_offset = start_offset;
+        Ok(())
     }
 }
