@@ -35,7 +35,7 @@ use tokio::task::JoinHandle;
 
 use crate::hummock::compactor::inheritance::SstableInheritance;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::{HummockResult, SstableBlockIndex, SstableStoreRef, TableHolder};
+use crate::hummock::{HummockResult, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 pub static GLOBAL_CACHE_REFILL_METRICS: LazyLock<CacheRefillMetrics> =
@@ -51,6 +51,7 @@ pub struct CacheRefillMetrics {
     pub data_refill_filtered_total: GenericCounter<AtomicU64>,
     pub data_refill_attempts_total: GenericCounter<AtomicU64>,
     pub data_refill_started_total: GenericCounter<AtomicU64>,
+    pub data_refill_success_total: GenericCounter<AtomicU64>,
     pub meta_refill_attempts_total: GenericCounter<AtomicU64>,
 
     pub refill_queue_total: IntGauge,
@@ -89,6 +90,9 @@ impl CacheRefillMetrics {
         let data_refill_started_total = refill_total
             .get_metric_with_label_values(&["data", "started"])
             .unwrap();
+        let data_refill_success_total = refill_total
+            .get_metric_with_label_values(&["data", "success"])
+            .unwrap();
         let meta_refill_attempts_total = refill_total
             .get_metric_with_label_values(&["meta", "attempts"])
             .unwrap();
@@ -109,6 +113,7 @@ impl CacheRefillMetrics {
             data_refill_filtered_total,
             data_refill_attempts_total,
             data_refill_started_total,
+            data_refill_success_total,
             meta_refill_attempts_total,
             refill_queue_total,
         }
@@ -323,36 +328,6 @@ impl CacheRefillTask {
                 );
                 let count = idx_end - idx_start;
 
-                let mut refill = false;
-                'refill: for idx in idx_start..idx_end {
-                    let Some(block_inheritance) = sstable_inheritance.blocks.get(idx) else {
-                        continue;
-                    };
-                    for (sst_obj_id, info) in &block_inheritance.parents {
-                        for sst_blk_idx in info {
-                            if context
-                                .sstable_store
-                                .data_file_cache()
-                                .exists(&SstableBlockIndex {
-                                    sst_id: *sst_obj_id,
-                                    block_idx: *sst_blk_idx as u64,
-                                })
-                                .await
-                                .unwrap_or_default()
-                            {
-                                refill = true;
-                                break 'refill;
-                            }
-                        }
-                    }
-                }
-                if !refill {
-                    GLOBAL_CACHE_REFILL_METRICS
-                        .data_refill_filtered_total
-                        .inc_by(count as u64);
-                    continue;
-                }
-
                 let task = async move {
                     GLOBAL_CACHE_REFILL_METRICS
                         .data_refill_attempts_total
@@ -366,12 +341,19 @@ impl CacheRefillTask {
 
                     match context
                         .sstable_store
-                        .fill_data_file_cache(sst_info.value(), idx_start..idx_end)
+                        .fill_data_file_cache(
+                            sst_info.value(),
+                            idx_start..idx_end,
+                            sstable_inheritance,
+                        )
                         .await
                     {
-                        Ok(()) => GLOBAL_CACHE_REFILL_METRICS
+                        Ok(true) => GLOBAL_CACHE_REFILL_METRICS
                             .data_refill_success_duration
                             .observe(now.elapsed().as_secs_f64()),
+                        Ok(false) => GLOBAL_CACHE_REFILL_METRICS
+                            .data_refill_filtered_total
+                            .inc_by(count as u64),
                         Err(e) => {
                             tracing::warn!("data cache refill error: {:?}", e);
                         }

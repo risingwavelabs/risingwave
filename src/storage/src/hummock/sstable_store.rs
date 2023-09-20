@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::clone::Clone;
-use std::ops::RangeBounds;
+use std::ops::{Range, RangeBounds};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,6 +36,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use zstd::zstd_safe::WriteBuf;
 
+use super::compactor::inheritance::SstableInheritance;
 use super::utils::MemoryTracker;
 use super::{
     Block, BlockCache, BlockMeta, BlockResponse, FileCache, RecentFilter, Sstable,
@@ -549,11 +550,40 @@ impl SstableStore {
         &self.data_file_cache
     }
 
+    async fn should_refill(
+        &self,
+        idx_range: Range<usize>,
+        sstable_inheritance: &SstableInheritance,
+    ) -> bool {
+        for idx in idx_range {
+            let Some(block_inheritance) = sstable_inheritance.blocks.get(idx) else {
+                continue;
+            };
+            for (sst_obj_id, info) in &block_inheritance.parents {
+                for sst_blk_idx in info {
+                    if self
+                        .data_file_cache
+                        .exists(&SstableBlockIndex {
+                            sst_id: *sst_obj_id,
+                            block_idx: *sst_blk_idx as u64,
+                        })
+                        .await
+                        .unwrap_or_default()
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     pub async fn fill_data_file_cache(
         &self,
         sst: &Sstable,
         indices: impl RangeBounds<usize>,
-    ) -> HummockResult<()> {
+        sstable_inheritance: &SstableInheritance,
+    ) -> HummockResult<bool> {
         let object_id = sst.id;
 
         let idx_start = match indices.start_bound() {
@@ -566,6 +596,13 @@ impl SstableStore {
             std::ops::Bound::Excluded(i) => *i,
             std::ops::Bound::Unbounded => sst.block_count(),
         };
+
+        if !self
+            .should_refill(idx_start..idx_end, sstable_inheritance)
+            .await
+        {
+            return Ok(false);
+        }
 
         let bytes_start = sst.calculate_block_info(idx_start).0.start;
         let bytes_end = sst.calculate_block_info(idx_end - 1).0.end;
@@ -598,7 +635,7 @@ impl SstableStore {
         }
         try_join_all(tasks).await?;
 
-        Ok(())
+        Ok(true)
     }
 }
 
