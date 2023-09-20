@@ -15,7 +15,7 @@ The cluster contains a RisingWave cluster and its necessary dependencies, a data
 
 Login to mysql
 ```sh
-docker compose exec doris-fe mysql
+docker compose exec fe mysql -uroot -P9030 -h127.0.0.1
 ```
 
 Run the following queries to create database and table.
@@ -23,21 +23,23 @@ Run the following queries to create database and table.
 CREATE database demo;
 use demo;
 CREATE table demo_bhv_table(
-    user_id int primary key,
+    user_id int,
     target_id text,
-    event_timestamp timestamp,
-)UNIQUE KEY(`user_id`)
+    event_timestamp datetime
+) UNIQUE KEY(`user_id`)
 DISTRIBUTED BY HASH(`user_id`) BUCKETS 1
 PROPERTIES (
     "replication_allocation" = "tag.location.default: 1"
 );
+CREATE USER 'users'@'%' IDENTIFIED BY '123456';
+GRANT ALL ON *.* TO 'users'@'%';
 ```
 
 3. Execute the SQL queries in sequence:
 
 - create_source.sql
 - create_mv.sql
-- create_sink.sql(create_upsert_sink.sql)
+- create_sink.sql
 
 
 Run the following query
