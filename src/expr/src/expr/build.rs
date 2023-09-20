@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::iter::Peekable;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -27,7 +28,7 @@ use super::expr_in::InExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
-use super::wrapper::Checked;
+use super::wrapper::{Checked, EvalErrorReport, NonStrict};
 use crate::expr::{
     BoxedExpression, Expression, InputRefExpression, LiteralExpression, TryFromExprNodeBoxed,
 };
@@ -36,48 +37,88 @@ use crate::sig::FuncSigDebug;
 use crate::{bail, ExprError, Result};
 
 /// Build an expression from protobuf.
-fn build_from_prost_inner(prost: &ExprNode) -> Result<BoxedExpression> {
-    use PbType as E;
+pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
+    ExprBuilder::new().build(prost)
+}
 
-    let func_call = match prost.get_rex_node()? {
-        RexNode::InputRef(_) => return InputRefExpression::try_from_boxed(prost),
-        RexNode::Constant(_) => return LiteralExpression::try_from_boxed(prost),
-        RexNode::Udf(_) => return UdfExpression::try_from_boxed(prost),
-        RexNode::FuncCall(func_call) => func_call,
-        RexNode::Now(_) => unreachable!("now should not be built at backend"),
-    };
+/// Build an expression from protobuf in non-strict mode.
+pub fn build_non_strict_from_prost(
+    prost: &ExprNode,
+    error_report: impl EvalErrorReport + 'static,
+) -> Result<BoxedExpression> {
+    ExprBuilder::new_non_strict(Arc::new(error_report)).build(prost)
+}
 
-    let func_type = prost.function_type();
+struct ExprBuilder<R> {
+    error_report: Option<R>,
+}
 
-    match func_type {
-        // Dedicated types
-        E::All | E::Some => SomeAllExpression::try_from_boxed(prost),
-        E::In => InExpression::try_from_boxed(prost),
-        E::Case => CaseExpression::try_from_boxed(prost),
-        E::Coalesce => CoalesceExpression::try_from_boxed(prost),
-        E::Field => FieldExpression::try_from_boxed(prost),
-        E::Vnode => VnodeExpression::try_from_boxed(prost),
-
-        _ => {
-            let ret_type = DataType::from(prost.get_return_type().unwrap());
-            let children = func_call
-                .get_children()
-                .iter()
-                .map(build_from_prost)
-                .try_collect()?;
-
-            build_func(func_type, ret_type, children)
-        }
+impl ExprBuilder<!> {
+    fn new() -> Self {
+        Self { error_report: None }
     }
 }
 
-/// Build an expression from protobuf with wrappers.
-pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    let expr = build_from_prost_inner(prost)?;
+impl<R> ExprBuilder<R>
+where
+    R: EvalErrorReport + Clone + 'static,
+{
+    fn new_non_strict(error_report: R) -> Self {
+        Self {
+            error_report: Some(error_report),
+        }
+    }
 
-    let checked = Checked(expr);
+    /// Build an expression with `build_inner` and attach some wrappers.
+    fn build(&self, prost: &ExprNode) -> Result<BoxedExpression> {
+        let expr = self.build_inner(prost)?;
 
-    Ok(checked.boxed())
+        let checked = Checked(expr);
+
+        let may_non_strict = if let Some(error_report) = &self.error_report {
+            NonStrict::new(checked, error_report.clone()).boxed()
+        } else {
+            checked.boxed()
+        };
+
+        Ok(may_non_strict)
+    }
+
+    /// Do build an expression from protobuf.
+    fn build_inner(&self, prost: &ExprNode) -> Result<BoxedExpression> {
+        use PbType as E;
+
+        let func_call = match prost.get_rex_node()? {
+            RexNode::InputRef(_) => return InputRefExpression::try_from_boxed(prost),
+            RexNode::Constant(_) => return LiteralExpression::try_from_boxed(prost),
+            RexNode::Udf(_) => return UdfExpression::try_from_boxed(prost),
+            RexNode::FuncCall(func_call) => func_call,
+            RexNode::Now(_) => unreachable!("now should not be built at backend"),
+        };
+
+        let func_type = prost.function_type();
+
+        match func_type {
+            // Dedicated types
+            E::All | E::Some => SomeAllExpression::try_from_boxed(prost),
+            E::In => InExpression::try_from_boxed(prost),
+            E::Case => CaseExpression::try_from_boxed(prost),
+            E::Coalesce => CoalesceExpression::try_from_boxed(prost),
+            E::Field => FieldExpression::try_from_boxed(prost),
+            E::Vnode => VnodeExpression::try_from_boxed(prost),
+
+            _ => {
+                let ret_type = DataType::from(prost.get_return_type().unwrap());
+                let children = func_call
+                    .get_children()
+                    .iter()
+                    .map(|prost| self.build(prost))
+                    .try_collect()?;
+
+                build_func(func_type, ret_type, children)
+            }
+        }
+    }
 }
 
 /// Build an expression in `FuncCall` variant.

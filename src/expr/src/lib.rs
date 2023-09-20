@@ -23,6 +23,7 @@
 #![feature(generators)]
 #![feature(test)]
 #![feature(arc_unwrap_or_clone)]
+#![feature(never_type)]
 
 extern crate self as risingwave_expr;
 

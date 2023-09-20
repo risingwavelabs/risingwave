@@ -7015,6 +7015,7 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "auto_enums",
+ "auto_impl",
  "await-tree",
  "cfg-or-panic",
  "chrono",
@@ -7341,6 +7342,7 @@ dependencies = [
  "prost",
  "prost-helpers",
  "serde",
+ "strum 0.25.0",
  "walkdir",
  "workspace-hack",
 ]
