@@ -423,11 +423,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let actor_id_str = this.actor_ctx.id.to_string();
         let table_id_str = this.intermediate_state_table.table_id().to_string();
         this.metrics
-            .agg_dirty_group_count
+            .agg_dirty_groups_count
             .with_label_values(&[&table_id_str, &actor_id_str])
             .set(vars.dirty_groups.len() as i64);
         this.metrics
-            .agg_dirty_group_heap_size
+            .agg_dirty_groups_heap_size
             .with_label_values(&[&table_id_str, &actor_id_str])
             .set(vars.dirty_groups.estimated_heap_size() as i64);
 
