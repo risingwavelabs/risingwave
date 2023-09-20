@@ -66,6 +66,8 @@ ARG GIT_SHA
 ENV GIT_SHA=$GIT_SHA
 
 COPY ./ /risingwave
+WORKDIR /risingwave
+
 RUN cargo fetch && \
   cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
   mkdir -p /risingwave/bin && \
