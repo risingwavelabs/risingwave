@@ -2244,6 +2244,7 @@ impl CatalogManager {
     }
 
     // FIXME(kwannoel): Filter by `status`
+    // Doesn't list the internal tables.
     pub async fn list_creating_tables(&self) -> Vec<Table> {
         self.core.lock().await.database.list_creating_tables()
     }

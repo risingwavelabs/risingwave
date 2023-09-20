@@ -194,6 +194,8 @@ impl FragmentManager {
                 let dependent_ids = table_fragments.dependent_table_ids();
                 let r = upstream_relation_counts.insert(*table_id, dependent_ids);
                 assert!(r.is_none(), "Each table_id should be unique!")
+            } else {
+                upstream_relation_counts.insert(*table_id, HashMap::new());
             }
         }
         upstream_relation_counts

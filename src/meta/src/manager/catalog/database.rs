@@ -262,7 +262,10 @@ impl DatabaseManager {
         self.tables
             .values()
             .cloned()
-            .filter(|t| t.stream_job_status == PbStreamJobStatus::Creating as i32)
+            .filter(|t| {
+                t.stream_job_status == PbStreamJobStatus::Creating as i32
+                    && t.table_type == TableType::MaterializedView as i32
+            })
             .collect_vec()
         // self.in_progress_creating_tables
         //     .values()
