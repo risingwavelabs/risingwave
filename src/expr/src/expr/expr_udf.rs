@@ -25,9 +25,9 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 use risingwave_udf::ArrowFlightUdfClient;
 
-use super::{build_from_prost, BoxedExpression, Build, InputRefExpression};
+use super::{BoxedExpression, Build};
 use crate::expr::Expression;
-use crate::{bail, ExprError, Result};
+use crate::{bail, Result};
 
 #[derive(Debug)]
 pub struct UdfExpression {

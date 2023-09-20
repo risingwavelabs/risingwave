@@ -108,6 +108,7 @@ sqlx-core = { version = "0.7", features = ["_rt-tokio", "any", "chrono", "json",
 sqlx-mysql = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline"] }
 sqlx-postgres = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline"] }
 sqlx-sqlite = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline"] }
+strum = { version = "0.25", features = ["derive"] }
 subtle = { version = "2" }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }

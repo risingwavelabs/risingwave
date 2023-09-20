@@ -24,8 +24,8 @@ use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::{ExprNode, FunctionCall};
 
 use super::build::get_children_and_return_type;
-use super::{build_from_prost, BoxedExpression, Build, Expression};
-use crate::{ExprError, Result};
+use super::{BoxedExpression, Build, Expression};
+use crate::Result;
 
 #[derive(Debug)]
 pub struct SomeAllExpression {

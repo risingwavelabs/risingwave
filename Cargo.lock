@@ -10351,6 +10351,7 @@ dependencies = [
  "sqlx-mysql",
  "sqlx-postgres",
  "sqlx-sqlite",
+ "strum 0.25.0",
  "subtle",
  "syn 1.0.109",
  "syn 2.0.33",

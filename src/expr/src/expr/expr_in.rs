@@ -26,8 +26,8 @@ use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
 use super::Build;
-use crate::expr::{build_from_prost, BoxedExpression, Expression};
-use crate::{ExprError, Result};
+use crate::expr::{BoxedExpression, Expression};
+use crate::Result;
 
 #[derive(Debug)]
 pub struct InExpression {

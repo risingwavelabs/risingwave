@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::TryFrom;
-
 use anyhow::anyhow;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
@@ -23,8 +21,8 @@ use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
 use super::Build;
-use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
-use crate::{bail, ensure, ExprError, Result};
+use crate::expr::{BoxedExpression, Expression};
+use crate::{bail, ensure, Result};
 
 /// `FieldExpression` access a field from a struct.
 #[derive(Debug)]

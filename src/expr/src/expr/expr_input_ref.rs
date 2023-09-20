@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::TryFrom;
 use std::ops::Index;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
@@ -20,9 +19,9 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 
-use super::{Build, BoxedExpression};
+use super::{BoxedExpression, Build};
 use crate::expr::Expression;
-use crate::{ExprError, Result};
+use crate::Result;
 
 /// A reference to a column in input relation.
 #[derive(Debug, Clone)]

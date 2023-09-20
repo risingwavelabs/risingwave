@@ -55,7 +55,6 @@ use futures_util::TryFutureExt;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_pb::expr::PbExprNode;
 
 pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
