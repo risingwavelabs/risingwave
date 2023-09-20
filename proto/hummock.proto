@@ -133,6 +133,7 @@ message HummockVersionDelta {
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
   repeated uint64 gc_object_ids = 7;
+  map<uint64, SstableInheritance> inheritances = 8;
 }
 
 message HummockVersionDeltas {
@@ -243,6 +244,28 @@ message TableOption {
   uint32 retention_seconds = 1;
 }
 
+// `info`: parent sstable block indices (compressed)
+//
+// Compression:
+//   The highest bit refer to single index or a two-uint64 range:
+//     0 => single index
+//     1 => two-uint64 range (closed on left, open on right)
+//   e.g.
+//     info(bits) : [0..0010, 0..0011, 1..1000, 1..1010, 0..1111]
+//     indices    : [2, 3, range(8..10), 31]
+message ParentInfo {
+  repeated uint64 info = 1;
+}
+
+// { parent sst obj id => parent info }
+message BlockInheritance {
+  map<uint64, ParentInfo> parents = 1;
+}
+
+message SstableInheritance {
+  repeated BlockInheritance blocks = 1;
+}
+
 message CompactTask {
   enum TaskStatus {
     UNSPECIFIED = 0;
@@ -303,6 +326,7 @@ message CompactTask {
   bool split_by_state_table = 21;
   // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
   uint32 split_weight_by_vnode = 22;
+  map<uint64, SstableInheritance> inheritances = 23;
 }
 
 message LevelHandler {

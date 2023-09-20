@@ -19,6 +19,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 
 use super::super::{HummockResult, HummockValue};
 use super::Sstable;
@@ -338,6 +339,10 @@ impl HummockIterator for SstableIterator {
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats);
+    }
+
+    fn info(&self) -> Option<(HummockSstableObjectId, usize)> {
+        Some((*self.sst.key(), self.cur_idx))
     }
 }
 

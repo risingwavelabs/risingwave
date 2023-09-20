@@ -17,6 +17,7 @@ mod compaction_filter;
 pub mod compaction_utils;
 pub mod compactor_runner;
 mod context;
+pub mod inheritance;
 mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;

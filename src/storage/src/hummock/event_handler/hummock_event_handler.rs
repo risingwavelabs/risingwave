@@ -30,6 +30,7 @@ use tracing::{error, info, trace, warn};
 
 use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
+use crate::hummock::compactor::inheritance::SstableInheritance;
 use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::CacheRefillerEvent;
@@ -407,13 +408,22 @@ impl HummockEventHandler {
             .unwrap_or_else(|| self.pinned_version.load().clone());
 
         let mut sst_delta_infos = vec![];
+        let mut inheritances = BTreeMap::new();
+
         let newly_pinned_version = match version_payload {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = pinned_version.version();
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
+
                     if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
-                        sst_delta_infos = version_to_apply.build_sst_delta_infos(version_delta);
+                        sst_delta_infos
+                            .append(&mut version_to_apply.build_sst_delta_infos(version_delta));
+                        inheritances.extend(version_delta.inheritances.iter().map(
+                            |(sst_obj_id, proto)| {
+                                (*sst_obj_id, SstableInheritance::from_proto(proto))
+                            },
+                        ));
                     }
                     version_to_apply.apply_version_delta(version_delta);
                 }
@@ -427,8 +437,12 @@ impl HummockEventHandler {
 
         let new_pinned_version = pinned_version.new_pin_version(newly_pinned_version);
 
-        self.refiller
-            .start_cache_refill(sst_delta_infos, pinned_version, new_pinned_version);
+        self.refiller.start_cache_refill(
+            inheritances,
+            sst_delta_infos,
+            pinned_version,
+            new_pinned_version,
+        );
     }
 
     fn apply_version_update(

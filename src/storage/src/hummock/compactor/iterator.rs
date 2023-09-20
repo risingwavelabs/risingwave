@@ -24,7 +24,7 @@ use fail::fail_point;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::KeyComparator;
+use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::compactor::task_progress::TaskProgress;
@@ -238,6 +238,10 @@ impl SstableStreamIterator {
     pub fn is_valid(&self) -> bool {
         // True iff block_iter exists and is valid.
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
+    }
+
+    fn info(&self) -> Option<(HummockSstableObjectId, usize)> {
+        Some((self.sstable_info.object_id, self.seek_block_idx))
     }
 
     fn sst_debug_info(&self) -> String {
@@ -496,6 +500,10 @@ impl HummockIterator for ConcatSstableIterator {
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats)
+    }
+
+    fn info(&self) -> Option<(HummockSstableObjectId, usize)> {
+        self.sstable_iter.as_ref().expect("no table iter").info()
     }
 }
 

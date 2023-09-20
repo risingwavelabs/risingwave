@@ -181,6 +181,7 @@ impl HummockStorage {
                     .copied()
                     .collect(),
                 concurrency: options.cache_refill_concurrency,
+                group: options.cache_refill_group,
             },
         );
 

@@ -28,6 +28,7 @@ use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
+use super::inheritance::SstableInheritance;
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::{
     MultiCompactionFilter, StateCleanUpCompactionFilter, TtlCompactionFilter,
@@ -94,10 +95,12 @@ pub struct CompactionStatistics {
     // to calculate delete ratio
     pub iter_total_key_counts: u64,
     pub iter_drop_key_counts: u64,
+
+    pub inheritances: Vec<SstableInheritance>,
 }
 
 impl CompactionStatistics {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn delete_ratio(&self) -> Option<u64> {
         if self.iter_total_key_counts == 0 {
             return None;

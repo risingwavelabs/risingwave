@@ -578,6 +578,9 @@ pub struct CacheRefillConfig {
     #[serde(default = "default::cache_refill::concurrency")]
     pub concurrency: usize,
 
+    #[serde(default = "default::cache_refill::group")]
+    pub group: usize,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -1120,7 +1123,11 @@ pub mod default {
         }
 
         pub fn concurrency() -> usize {
-            10
+            100
+        }
+
+        pub fn group() -> usize {
+            64
         }
     }
 

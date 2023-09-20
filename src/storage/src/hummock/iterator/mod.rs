@@ -35,6 +35,7 @@ mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 
@@ -126,6 +127,9 @@ pub trait HummockIterator: Send + 'static {
 
     /// take local statistic info from iterator to report metrics.
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic);
+
+    /// Get current sst object id and block index.
+    fn info(&self) -> Option<(HummockSstableObjectId, usize)>;
 }
 
 /// This is a placeholder trait used in `HummockIteratorUnion`
@@ -165,6 +169,10 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
     }
 
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+
+    fn info(&self) -> Option<(HummockSstableObjectId, usize)> {
+        unreachable!()
+    }
 }
 
 /// The `HummockIteratorUnion` acts like a wrapper over multiple types of `HummockIterator`, so that
@@ -274,6 +282,15 @@ impl<
             Fourth(iter) => iter.collect_local_statistic(stats),
         }
     }
+
+    fn info(&self) -> Option<(HummockSstableObjectId, usize)> {
+        match self {
+            First(iter) => iter.info(),
+            Second(iter) => iter.info(),
+            Third(iter) => iter.info(),
+            Fourth(iter) => iter.info(),
+        }
+    }
 }
 
 impl<I: HummockIterator> HummockIterator for Box<I> {
@@ -309,6 +326,10 @@ impl<I: HummockIterator> HummockIterator for Box<I> {
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         (*self).deref().collect_local_statistic(stats);
+    }
+
+    fn info(&self) -> Option<(HummockSstableObjectId, usize)> {
+        (*self).deref().info()
     }
 }
 

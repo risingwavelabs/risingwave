@@ -150,6 +150,7 @@ pub struct MetaMetrics {
 
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
+    pub compaction_inheritance_info: HistogramVec,
 
     /// ********************************** Object Store ************************************
     // Object store related metrics (for backup/restore and version checkpoint)
@@ -613,6 +614,15 @@ impl MetaMetrics {
         let compaction_event_loop_iteration_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let compaction_inheritance_info = register_histogram_vec_with_registry!(
+            "compactor_compaction_inheritance_info",
+            "compactor compaction inheritance info",
+            &["group", "level"],
+            vec![0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0, 20.0, 30.0, 50.0, 100.0],
+            registry,
+        )
+        .unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -676,6 +686,7 @@ impl MetaMetrics {
             branched_sst_count,
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
+            compaction_inheritance_info,
         }
     }
 

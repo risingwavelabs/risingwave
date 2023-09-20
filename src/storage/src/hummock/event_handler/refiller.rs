@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::ops::DerefMut;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
@@ -29,9 +29,11 @@ use prometheus::{
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
+use crate::hummock::compactor::inheritance::SstableInheritance;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::{HummockResult, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
@@ -46,9 +48,11 @@ pub struct CacheRefillMetrics {
     pub data_refill_success_duration: Histogram,
     pub meta_refill_success_duration: Histogram,
 
+    pub data_refill_ignored_total: GenericCounter<AtomicU64>,
     pub data_refill_filtered_total: GenericCounter<AtomicU64>,
     pub data_refill_attempts_total: GenericCounter<AtomicU64>,
     pub data_refill_started_total: GenericCounter<AtomicU64>,
+    pub data_refill_success_total: GenericCounter<AtomicU64>,
     pub meta_refill_attempts_total: GenericCounter<AtomicU64>,
 
     pub refill_queue_total: IntGauge,
@@ -78,6 +82,9 @@ impl CacheRefillMetrics {
             .get_metric_with_label_values(&["meta", "success"])
             .unwrap();
 
+        let data_refill_ignored_total = refill_total
+            .get_metric_with_label_values(&["data", "ignored"])
+            .unwrap();
         let data_refill_filtered_total = refill_total
             .get_metric_with_label_values(&["data", "filtered"])
             .unwrap();
@@ -86,6 +93,9 @@ impl CacheRefillMetrics {
             .unwrap();
         let data_refill_started_total = refill_total
             .get_metric_with_label_values(&["data", "started"])
+            .unwrap();
+        let data_refill_success_total = refill_total
+            .get_metric_with_label_values(&["data", "success"])
             .unwrap();
         let meta_refill_attempts_total = refill_total
             .get_metric_with_label_values(&["meta", "attempts"])
@@ -104,9 +114,11 @@ impl CacheRefillMetrics {
 
             data_refill_success_duration,
             meta_refill_success_duration,
+            data_refill_ignored_total,
             data_refill_filtered_total,
             data_refill_attempts_total,
             data_refill_started_total,
+            data_refill_success_total,
             meta_refill_attempts_total,
             refill_queue_total,
         }
@@ -118,6 +130,7 @@ pub struct CacheRefillConfig {
     pub timeout: Duration,
     pub data_refill_levels: HashSet<u32>,
     pub concurrency: usize,
+    pub group: usize,
 }
 
 struct Item {
@@ -149,11 +162,13 @@ impl CacheRefiller {
 
     pub fn start_cache_refill(
         &mut self,
+        inheritances: BTreeMap<HummockSstableObjectId, SstableInheritance>,
         deltas: Vec<SstDeltaInfo>,
         pinned_version: Arc<PinnedVersion>,
         new_pinned_version: PinnedVersion,
     ) {
         let task = CacheRefillTask {
+            inheritances,
             deltas,
             context: self.context.clone(),
         };
@@ -209,27 +224,30 @@ struct CacheRefillContext {
 }
 
 pub struct CacheRefillTask {
+    inheritances: BTreeMap<HummockSstableObjectId, SstableInheritance>,
     deltas: Vec<SstDeltaInfo>,
     context: CacheRefillContext,
 }
 
 impl CacheRefillTask {
     async fn run(self) {
+        let inheritances = &self.inheritances;
+        let context = &self.context;
         let tasks = self
             .deltas
             .iter()
-            .map(|delta| {
-                let context = self.context.clone();
-                async move {
-                    let holders = match Self::meta_cache_refill(&context, delta).await {
-                        Ok(holders) => holders,
-                        Err(e) => {
-                            tracing::warn!("meta cache refill error: {:?}", e);
-                            return;
-                        }
-                    };
-                    Self::data_cache_refill(&context, delta, holders).await;
+            .map(|delta| async move {
+                let holders = match Self::meta_cache_refill(context, delta).await {
+                    Ok(holders) => holders,
+                    Err(e) => {
+                        tracing::warn!("meta cache refill error: {:?}", e);
+                        return;
+                    }
+                };
+                if inheritances.is_empty() {
+                    return;
                 }
+                Self::data_cache_refill(context, inheritances, delta, holders).await;
             })
             .collect_vec();
         let future = join_all(tasks);
@@ -263,6 +281,7 @@ impl CacheRefillTask {
 
     async fn data_cache_refill(
         context: &CacheRefillContext,
+        inheritances: &BTreeMap<HummockSstableObjectId, SstableInheritance>,
         delta: &SstDeltaInfo,
         holders: Vec<TableHolder>,
     ) {
@@ -288,34 +307,75 @@ impl CacheRefillTask {
                 .iter()
                 .any(|id| filter.contains(id))
         {
-            GLOBAL_CACHE_REFILL_METRICS.data_refill_filtered_total.inc();
+            let blocks = holders
+                .iter()
+                .map(|sst| sst.value().block_count() as u64)
+                .sum::<u64>();
+            GLOBAL_CACHE_REFILL_METRICS
+                .data_refill_ignored_total
+                .inc_by(blocks);
             return;
         }
 
         let mut tasks = vec![];
         for sst_info in &holders {
-            let task = async move {
-                GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
-
-                let permit = context.concurrency.acquire().await.unwrap();
-
-                GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
-
-                match context
-                    .sstable_store
-                    .fill_data_file_cache(sst_info.value())
-                    .await
-                {
-                    Ok(()) => GLOBAL_CACHE_REFILL_METRICS
-                        .data_refill_success_duration
-                        .observe(now.elapsed().as_secs_f64()),
-                    Err(e) => {
-                        tracing::warn!("data cache refill error: {:?}", e);
-                    }
-                }
-                drop(permit);
+            let Some(sstable_inheritance) = inheritances.get(sst_info.key()) else {
+                GLOBAL_CACHE_REFILL_METRICS
+                    .data_refill_filtered_total
+                    .inc_by(sst_info.value().block_count() as u64);
+                continue;
             };
-            tasks.push(task);
+
+            for idx_start in (0..sst_info.value().block_count()).step_by(context.config.group) {
+                let idx_end = std::cmp::min(
+                    idx_start + context.config.group,
+                    sst_info.value().block_count(),
+                );
+                let count = idx_end - idx_start;
+
+                let task = async move {
+                    if !context
+                        .sstable_store
+                        .should_refill(idx_start..idx_end, sstable_inheritance)
+                        .await
+                    {
+                        GLOBAL_CACHE_REFILL_METRICS
+                            .data_refill_filtered_total
+                            .inc_by(count as u64);
+                        return;
+                    }
+
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_attempts_total
+                        .inc_by(count as u64);
+
+                    let permit = context.concurrency.acquire().await.unwrap();
+
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_started_total
+                        .inc_by(count as u64);
+
+                    match context
+                        .sstable_store
+                        .fill_data_file_cache(sst_info.value(), idx_start..idx_end)
+                        .await
+                    {
+                        Ok(()) => {
+                            GLOBAL_CACHE_REFILL_METRICS
+                                .data_refill_success_duration
+                                .observe(now.elapsed().as_secs_f64());
+                            GLOBAL_CACHE_REFILL_METRICS
+                                .data_refill_success_total
+                                .inc_by(count as u64)
+                        }
+                        Err(e) => {
+                            tracing::warn!("data cache refill error: {:?}", e);
+                        }
+                    }
+                    drop(permit);
+                };
+                tasks.push(task);
+            }
         }
 
         join_all(tasks).await;

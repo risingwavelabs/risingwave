@@ -1223,6 +1223,24 @@ impl HummockManager {
                 false
             };
             if is_success {
+                // Record comapction inheritance metrics.
+                let group = compact_task.compaction_group_id.to_string();
+                let level = compact_task.target_level.to_string();
+                compact_task
+                    .inheritances
+                    .values()
+                    .for_each(|sstable_inheritance| {
+                        sstable_inheritance
+                            .blocks
+                            .iter()
+                            .for_each(|block_inheritance| {
+                                self.metrics
+                                    .compaction_inheritance_info
+                                    .with_label_values(&[&group, &level])
+                                    .observe(block_inheritance.parents.len() as f64)
+                            })
+                    });
+
                 let mut hummock_version_deltas =
                     BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
                 let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
@@ -1258,6 +1276,13 @@ impl HummockManager {
                 versioning.current_version = current_version;
 
                 if !deterministic_mode {
+                    // Compaction inheritance will not be persisted.
+                    versioning
+                        .hummock_version_deltas
+                        .last_entry()
+                        .unwrap()
+                        .get_mut()
+                        .inheritances = compact_task.inheritances.clone();
                     self.notify_last_version_delta(versioning);
                 }
             } else {

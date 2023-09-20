@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::clone::Clone;
+use std::ops::{Range, RangeBounds};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,6 +36,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use zstd::zstd_safe::WriteBuf;
 
+use super::compactor::inheritance::SstableInheritance;
 use super::utils::MemoryTracker;
 use super::{
     Block, BlockCache, BlockMeta, BlockResponse, FileCache, RecentFilter, Sstable,
@@ -548,40 +550,81 @@ impl SstableStore {
         &self.data_file_cache
     }
 
-    pub async fn fill_data_file_cache(&self, sst: &Sstable) -> HummockResult<()> {
+    pub async fn should_refill(
+        &self,
+        idx_range: Range<usize>,
+        sstable_inheritance: &SstableInheritance,
+    ) -> bool {
+        for idx in idx_range {
+            let Some(block_inheritance) = sstable_inheritance.blocks.get(idx) else {
+                continue;
+            };
+            for (sst_obj_id, info) in &block_inheritance.parents {
+                for sst_blk_idx in info {
+                    if self
+                        .data_file_cache
+                        .exists(&SstableBlockIndex {
+                            sst_id: *sst_obj_id,
+                            block_idx: *sst_blk_idx as u64,
+                        })
+                        .await
+                        .unwrap_or_default()
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    pub async fn fill_data_file_cache(
+        &self,
+        sst: &Sstable,
+        indices: impl RangeBounds<usize>,
+    ) -> HummockResult<()> {
         let object_id = sst.id;
 
-        if let Some(filter) = self.data_file_cache_refill_filter.as_ref() {
-            filter.insert(object_id);
-        }
+        let idx_start = match indices.start_bound() {
+            std::ops::Bound::Included(i) => *i,
+            std::ops::Bound::Excluded(i) => *i + 1,
+            std::ops::Bound::Unbounded => 0,
+        };
+        let idx_end = match indices.end_bound() {
+            std::ops::Bound::Included(i) => *i + 1,
+            std::ops::Bound::Excluded(i) => *i,
+            std::ops::Bound::Unbounded => sst.block_count(),
+        };
+
+        let bytes_start = sst.calculate_block_info(idx_start).0.start;
+        let bytes_end = sst.calculate_block_info(idx_end - 1).0.end;
 
         let data = self
             .store
-            .read(&self.get_sst_data_path(object_id), ..)
+            .read(&self.get_sst_data_path(object_id), bytes_start..bytes_end)
             .await?;
 
         let mut tasks = vec![];
-        for block_index in 0..sst.block_count() {
-            let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
-            let bytes = data.slice(range);
+        for idx in idx_start..idx_end {
+            let (range, uncompressed_capacity) = sst.calculate_block_info(idx);
+            let bytes = data.slice(range.start - bytes_start..range.end - bytes_start);
             let block = Block::decode(bytes, uncompressed_capacity)?;
             let block = Box::new(block);
-
-            let key = SstableBlockIndex {
-                sst_id: object_id,
-                block_idx: block_index as u64,
-            };
-
             let cache = self.data_file_cache.clone();
             let task = async move {
                 cache
-                    .insert_force(key, block)
+                    .insert_force(
+                        SstableBlockIndex {
+                            sst_id: object_id,
+                            block_idx: idx as u64,
+                        },
+                        block,
+                    )
                     .await
                     .map_err(HummockError::file_cache)
             };
             tasks.push(task);
         }
-
         try_join_all(tasks).await?;
 
         Ok(())
