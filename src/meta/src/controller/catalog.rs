@@ -31,8 +31,9 @@ use sea_orm::{
 };
 use tokio::sync::RwLock;
 
-use crate::controller::{ObjectModel, ObjectType};
+use crate::controller::ObjectModel;
 use crate::manager::{DatabaseId, MetaSrvEnv, NotificationVersion, UserId};
+use crate::model_v2::object::ObjectType;
 use crate::model_v2::prelude::*;
 use crate::model_v2::{
     connection, database, function, index, object, object_dependency, schema, sink, source, table,
@@ -94,7 +95,7 @@ impl CatalogController {
         owner_id: UserId,
     ) -> MetaResult<object::Model> {
         let mut active_db = object::ActiveModel::new();
-        active_db.obj_type = ActiveValue::Set(obj_type.to_string());
+        active_db.obj_type = ActiveValue::Set(obj_type);
         active_db.owner_id = ActiveValue::Set(owner_id as _);
         Ok(active_db.insert(txn).await?)
     }

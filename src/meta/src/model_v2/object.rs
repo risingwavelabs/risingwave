@@ -14,12 +14,35 @@
 
 use sea_orm::entity::prelude::*;
 
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(None)")]
+pub enum ObjectType {
+    #[sea_orm(string_value = "DATABASE")]
+    Database,
+    #[sea_orm(string_value = "SCHEMA")]
+    Schema,
+    #[sea_orm(string_value = "TABLE")]
+    Table,
+    #[sea_orm(string_value = "SOURCE")]
+    Source,
+    #[sea_orm(string_value = "SINK")]
+    Sink,
+    #[sea_orm(string_value = "VIEW")]
+    View,
+    #[sea_orm(string_value = "INDEX")]
+    Index,
+    #[sea_orm(string_value = "FUNCTION")]
+    Function,
+    #[sea_orm(string_value = "CONNECTION")]
+    Connection,
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "object")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub oid: i32,
-    pub obj_type: String,
+    pub obj_type: ObjectType,
     pub owner_id: i32,
     pub initialized_at: DateTime,
     pub created_at: DateTime,

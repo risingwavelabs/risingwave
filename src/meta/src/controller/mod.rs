@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use parse_display::Display;
 use risingwave_pb::catalog::{PbDatabase, PbSchema};
 use sea_orm::{ActiveValue, DatabaseConnection, ModelTrait};
 
@@ -48,21 +47,6 @@ impl SqlMetaStore {
         Migrator::up(&conn, None).await.unwrap();
         Self { conn }
     }
-}
-
-#[derive(Clone, Display, Debug)]
-#[display(style = "UPPERCASE")]
-#[allow(dead_code)]
-enum ObjectType {
-    Database,
-    Schema,
-    Table,
-    Source,
-    Sink,
-    View,
-    Index,
-    Function,
-    Connection,
 }
 
 pub struct ObjectModel<M: ModelTrait>(M, object::Model);
