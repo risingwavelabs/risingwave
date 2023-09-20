@@ -837,9 +837,8 @@ impl HummockManager {
             return Ok(None);
         }
 
-        let can_trivial_move: bool =
-            matches!(selector.task_type(), compact_task::TaskType::Dynamic)
-                || matches!(selector.task_type(), compact_task::TaskType::Emergency);
+        let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic)
+            || matches!(selector.task_type(), compact_task::TaskType::Emergency);
 
         let mut stats = LocalSelectorStatistic::default();
         let member_table_ids = &current_version
@@ -898,7 +897,6 @@ impl HummockManager {
                 start_time.elapsed()
             );
         } else if is_trivial_move && can_trivial_move {
-            // compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
@@ -1735,6 +1733,7 @@ impl HummockManager {
 
     /// Get version deltas from meta store
     #[cfg_attr(coverage, no_coverage)]
+    #[named]
     pub async fn list_version_deltas(
         &self,
         start_id: u64,
@@ -2528,6 +2527,7 @@ impl HummockManager {
         }
     }
 
+    #[named]
     pub fn compaction_event_loop(
         hummock_manager: Arc<Self>,
         mut compactor_streams_change_rx: UnboundedReceiver<(
