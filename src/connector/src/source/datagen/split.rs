@@ -39,6 +39,11 @@ impl SplitMetaData for DatagenSplit {
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
     }
+
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        self.start_offset = Some(start_offset.as_str().parse::<u64>().unwrap());
+        Ok(())
+    }
 }
 
 impl DatagenSplit {
@@ -48,10 +53,5 @@ impl DatagenSplit {
             split_num,
             start_offset,
         }
-    }
-
-    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
-        self.start_offset = Some(start_offset.as_str().parse::<u64>().unwrap());
-        Ok(())
     }
 }
