@@ -131,6 +131,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
 
+    /// The maximum heap size of dirty groups. If exceeds, the executor should flush dirty groups.
+    max_dirty_groups_heap_size: usize,
+
     /// Should emit on window close according to watermark?
     emit_on_window_close: bool,
 
@@ -251,6 +254,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
+                max_dirty_groups_heap_size: MAX_DIRTY_GROUPS_HEAP_SIZE,
                 emit_on_window_close: args.extra.emit_on_window_close,
                 metrics: args.metrics,
             },
@@ -647,7 +651,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut this, &mut vars, chunk).await?;
 
-                    if vars.dirty_groups.estimated_heap_size() >= MAX_DIRTY_GROUPS_HEAP_SIZE {
+                    if this.max_dirty_groups_heap_size > 0
+                        && vars.dirty_groups.estimated_heap_size()
+                            >= this.max_dirty_groups_heap_size
+                    {
                         // flush dirty groups if heap size is too large, to better prevent from OOM
                         #[for_await]
                         for chunk in Self::flush_data(&mut this, &mut vars) {
