@@ -214,6 +214,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn take_snapshot_and_clear_cache(
         &mut self,
         epoch: EpochPair,
+        is_checkpoint: bool,
     ) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
         let incompleted = core
@@ -250,7 +251,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
             core.split_state_store.set_all_complete(completed).await?
         }
         // commit anyway, even if no message saved
-        core.split_state_store.state_store.commit(epoch).await?;
+        core.split_state_store
+            .state_store
+            .commit(epoch, is_checkpoint)
+            .await?;
 
         core.state_cache.clear();
         Ok(())
@@ -386,7 +390,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                 _ => {}
                             }
                         }
-                        self.take_snapshot_and_clear_cache(epoch).await?;
+                        self.take_snapshot_and_clear_cache(epoch, barrier.is_checkpoint())
+                            .await?;
 
                         self.metrics
                             .source_row_per_barrier

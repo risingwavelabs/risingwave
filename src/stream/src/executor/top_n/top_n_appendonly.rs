@@ -145,8 +145,12 @@ where
         generate_output(res_rows, res_ops, self.schema())
     }
 
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.flush(epoch).await
+    async fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+        is_checkpoint: bool,
+    ) -> StreamExecutorResult<()> {
+        self.managed_state.flush(epoch, is_checkpoint).await
     }
 
     fn info(&self) -> &ExecutorInfo {

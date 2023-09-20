@@ -407,6 +407,7 @@ where
                 // Persist state on barrier
                 Self::persist_state(
                     barrier.epoch,
+                    barrier.is_checkpoint(),
                     &mut self.state_table,
                     false,
                     &current_pos,
@@ -450,6 +451,7 @@ where
 
                     Self::persist_state(
                         barrier.epoch,
+                        barrier.is_checkpoint(),
                         &mut self.state_table,
                         true,
                         &current_pos,
@@ -525,6 +527,7 @@ where
 
     async fn persist_state(
         epoch: EpochPair,
+        is_checkpoint: bool,
         table: &mut Option<StateTable<S>>,
         is_finished: bool,
         current_pos: &Option<OwnedRow>,
@@ -535,6 +538,7 @@ where
         let Some(table) = table else { return Ok(()) };
         utils::persist_state(
             epoch,
+            is_checkpoint,
             table,
             is_finished,
             current_pos,

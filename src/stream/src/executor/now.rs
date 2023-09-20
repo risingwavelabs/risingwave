@@ -95,7 +95,9 @@ impl<S: StateStore> NowExecutor<S> {
                 // Assert that no data is updated.
                 state_table.commit_no_data_expected(barrier.epoch);
             } else {
-                state_table.commit(barrier.epoch).await?;
+                state_table
+                    .commit(barrier.epoch, barrier.is_checkpoint())
+                    .await?;
             }
 
             // Extract timestamp from the current epoch.

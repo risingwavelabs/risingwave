@@ -447,7 +447,7 @@ mod tests {
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
         }
 
         // --- chunk 2 ---
@@ -497,7 +497,7 @@ mod tests {
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
         }
 
         drop(deduplicater);
@@ -573,7 +573,7 @@ mod tests {
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
         }
     }
 
@@ -653,7 +653,7 @@ mod tests {
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
         }
 
         let chunk = StreamChunk::from_pretty(
@@ -707,7 +707,7 @@ mod tests {
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
         }
     }
 }

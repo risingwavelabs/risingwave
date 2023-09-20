@@ -30,7 +30,6 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
-use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_storage::StateStore;
 use tokio::time::Instant;
 
@@ -796,11 +795,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 }
                 AlignedMessage::Barrier(barrier) => {
                     let barrier_start_time = Instant::now();
-                    if barrier.kind == BarrierKind::Barrier {
-                        self.try_flush_data(barrier.epoch).await?;
-                    } else {
-                        self.flush_data(barrier.epoch).await?;
-                    }
+                    self.flush_data(barrier.epoch, barrier.is_checkpoint())
+                        .await?;
 
                     // Update the vnode bitmap for state tables of both sides if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
@@ -844,19 +840,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
     }
 
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    async fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+        is_checkpoint: bool,
+    ) -> StreamExecutorResult<()> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
-        self.side_l.ht.flush(epoch).await?;
-        self.side_r.ht.flush(epoch).await?;
-        Ok(())
-    }
-
-    async fn try_flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        // All changes to the state has been buffered in the mem-table of the state table. Just
-        // `commit` them here.
-        self.side_l.ht.try_flush(epoch).await?;
-        self.side_r.ht.try_flush(epoch).await?;
+        self.side_l.ht.flush(epoch, is_checkpoint).await?;
+        self.side_r.ht.flush(epoch, is_checkpoint).await?;
         Ok(())
     }
 

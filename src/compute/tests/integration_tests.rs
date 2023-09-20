@@ -469,7 +469,7 @@ async fn test_row_seq_scan() -> Result<()> {
     ]));
 
     epoch.inc();
-    state.commit(epoch).await.unwrap();
+    state.commit(epoch, true).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table,

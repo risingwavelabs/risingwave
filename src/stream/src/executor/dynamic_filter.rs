@@ -429,7 +429,9 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                             if let Some(row) = &current_epoch_row {
                                 self.right_table.insert(row);
                             }
-                            self.right_table.commit(barrier.epoch).await?;
+                            self.right_table
+                                .commit(barrier.epoch, barrier.is_checkpoint())
+                                .await?;
                         } else {
                             self.right_table.commit_no_data_expected(barrier.epoch);
                         }
@@ -439,7 +441,9 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         self.right_table.commit_no_data_expected(barrier.epoch);
                     }
 
-                    self.left_table.commit(barrier.epoch).await?;
+                    self.left_table
+                        .commit(barrier.epoch, barrier.is_checkpoint())
+                        .await?;
 
                     prev_epoch_value = Some(curr);
 

@@ -142,7 +142,9 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                 Message::Barrier(barrier) => {
                     if commit_data {
                         // Only commit when we have new data in this epoch.
-                        self.state_table.commit(barrier.epoch).await?;
+                        self.state_table
+                            .commit(barrier.epoch, barrier.is_checkpoint())
+                            .await?;
                         commit_data = false;
                     } else {
                         self.state_table.commit_no_data_expected(barrier.epoch);

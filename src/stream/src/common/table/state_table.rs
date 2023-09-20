@@ -902,67 +902,75 @@ where
         }
     }
 
-    pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        assert!(self.epoch() >= new_epoch.prev);
-        if self.epoch() >= new_epoch.curr {
-            panic!("Fail to commit, the epoch gap runs out");
-        }
-        trace!(
-            table_id = %self.table_id,
-            epoch = ?self.epoch(),
-            "commit state table"
-        );
+    pub async fn commit(
+        &mut self,
+        new_epoch: EpochPair,
+        is_checkpoint: bool,
+    ) -> StreamExecutorResult<()> {
+        assert_eq!(self.epoch(), new_epoch.prev);
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
-        self.watermark_buffer_strategy.tick();
-        self.seal_current_epoch(new_epoch.curr)
-            .instrument(tracing::info_span!("state_table_commit"))
-            .await?;
+        match is_checkpoint {
+            false => {
+                self.local_store.try_flush().await?;
+                self.local_store.seal_current_epoch(new_epoch.curr);
+            }
+            true => {
+                self.watermark_buffer_strategy.tick();
+                self.seal_current_epoch(new_epoch.curr)
+                    .instrument(tracing::info_span!("state_table_commit"))
+                    .await?;
 
-        // Refresh watermark cache if it is out of sync.
-        if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
-            if let Some(ref watermark) = self.prev_cleaned_watermark {
-                let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
-                    (Included(once(Some(watermark.clone()))), Unbounded);
-                // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
-                // because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
-                // and a mutable ref (via `self.watermark_cache.insert`) at the same time.
-                // TODO(kwannoel): We can optimize it with:
-                // 1. Either use `RefCell`.
-                // 2. Or pass in a direct reference to LocalStateStore,
-                //    instead of referencing it indirectly from `self`.
-                //    Similar to how we do for pk_indices.
-                let mut pks = Vec::with_capacity(self.watermark_cache.capacity());
-                {
-                    let mut streams = vec![];
-                    for vnode in self.vnodes().iter_vnodes() {
-                        let stream = self
-                            .iter_row_with_pk_range(&range, vnode, PrefetchOptions::default())
-                            .await?;
-                        streams.push(Box::pin(stream));
-                    }
-                    let merged_stream = merge_sort(streams);
-                    pin_mut!(merged_stream);
+                // Refresh watermark cache if it is out of sync.
+                if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {
+                    if let Some(ref watermark) = self.prev_cleaned_watermark {
+                        let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
+                            (Included(once(Some(watermark.clone()))), Unbounded);
+                        // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
+                        // because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
+                        // and a mutable ref (via `self.watermark_cache.insert`) at the same time.
+                        // TODO(kwannoel): We can optimize it with:
+                        // 1. Either use `RefCell`.
+                        // 2. Or pass in a direct reference to LocalStateStore,
+                        //    instead of referencing it indirectly from `self`.
+                        //    Similar to how we do for pk_indices.
+                        let mut pks = Vec::with_capacity(self.watermark_cache.capacity());
+                        {
+                            let mut streams = vec![];
+                            for vnode in self.vnodes().iter_vnodes() {
+                                let stream = self
+                                    .iter_row_with_pk_range(
+                                        &range,
+                                        vnode,
+                                        PrefetchOptions::default(),
+                                    )
+                                    .await?;
+                                streams.push(Box::pin(stream));
+                            }
+                            let merged_stream = merge_sort(streams);
+                            pin_mut!(merged_stream);
 
-                    #[for_await]
-                    for entry in merged_stream.take(self.watermark_cache.capacity()) {
-                        let keyed_row = entry?;
-                        let pk = self.pk_serde.deserialize(keyed_row.key())?;
-                        if !pk.is_null_at(0) {
-                            pks.push(pk);
+                            #[for_await]
+                            for entry in merged_stream.take(self.watermark_cache.capacity()) {
+                                let keyed_row = entry?;
+                                let pk = self.pk_serde.deserialize(keyed_row.key())?;
+                                if !pk.is_null_at(0) {
+                                    pks.push(pk);
+                                }
+                            }
+                        }
+
+                        let mut filler = self.watermark_cache.begin_syncing();
+                        for pk in pks {
+                            filler.insert_unchecked(DefaultOrdered(pk), ());
+                        }
+                        filler.finish();
+
+                        let n_cache_entries = self.watermark_cache.len();
+                        if n_cache_entries < self.watermark_cache.capacity() {
+                            self.watermark_cache.set_table_row_count(n_cache_entries);
                         }
                     }
-                }
-
-                let mut filler = self.watermark_cache.begin_syncing();
-                for pk in pks {
-                    filler.insert_unchecked(DefaultOrdered(pk), ());
-                }
-                filler.finish();
-
-                let n_cache_entries = self.watermark_cache.len();
-                if n_cache_entries < self.watermark_cache.capacity() {
-                    self.watermark_cache.set_table_row_count(n_cache_entries);
                 }
             }
         }

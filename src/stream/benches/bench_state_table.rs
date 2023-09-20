@@ -119,7 +119,7 @@ async fn run_bench_state_table_inserts<const USE_WATERMARK_CACHE: bool>(
         state_table.insert(row);
     }
     epoch.inc();
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit(epoch, true).await.unwrap();
 }
 
 fn bench_state_table_inserts(c: &mut Criterion) {
@@ -179,7 +179,7 @@ async fn run_bench_state_table_chunks<const USE_WATERMARK_CACHE: bool>(
         state_table.write_chunk(chunk);
     }
     epoch.inc();
-    state_table.commit(epoch).await.unwrap();
+    state_table.commit(epoch, true).await.unwrap();
 }
 
 fn bench_state_table_write_chunk(c: &mut Criterion) {

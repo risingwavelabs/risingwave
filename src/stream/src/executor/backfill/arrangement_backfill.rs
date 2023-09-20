@@ -395,7 +395,9 @@ where
                 if upstream_chunk_buffer_is_empty {
                     upstream_table.commit_no_data_expected(barrier.epoch)
                 } else {
-                    upstream_table.commit(barrier.epoch).await?;
+                    upstream_table
+                        .commit(barrier.epoch, barrier.is_checkpoint())
+                        .await?;
                 }
 
                 self.metrics
@@ -426,6 +428,7 @@ where
                 // Persist state on barrier
                 persist_state_per_vnode(
                     barrier.epoch,
+                    barrier.is_checkpoint(),
                     &mut self.state_table,
                     false,
                     &backfill_state,
@@ -466,6 +469,7 @@ where
 
                     persist_state_per_vnode(
                         barrier.epoch,
+                        barrier.is_checkpoint(),
                         &mut self.state_table,
                         false,
                         &backfill_state,

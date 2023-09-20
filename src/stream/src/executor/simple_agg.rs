@@ -210,6 +210,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         this: &mut ExecutorInner<S>,
         vars: &mut ExecutionVars<S>,
         epoch: EpochPair,
+        is_checkpoint: bool,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = if vars.state_changed || vars.agg_group.is_uninitialized() {
             // Flush distinct dedup state.
@@ -223,7 +224,8 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
             // Commit all state tables.
             futures::future::try_join_all(
-                this.all_state_tables_mut().map(|table| table.commit(epoch)),
+                this.all_state_tables_mut()
+                    .map(|table| table.commit(epoch, is_checkpoint)),
             )
             .await?;
 
@@ -297,8 +299,13 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                     Self::apply_chunk(&mut this, &mut vars, chunk).await?;
                 }
                 Message::Barrier(barrier) => {
-                    if let Some(chunk) =
-                        Self::flush_data(&mut this, &mut vars, barrier.epoch).await?
+                    if let Some(chunk) = Self::flush_data(
+                        &mut this,
+                        &mut vars,
+                        barrier.epoch,
+                        barrier.is_checkpoint(),
+                    )
+                    .await?
                     {
                         yield Message::Chunk(chunk);
                     }

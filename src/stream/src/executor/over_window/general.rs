@@ -630,7 +630,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     }
                 }
                 Message::Barrier(barrier) => {
-                    this.state_table.commit(barrier.epoch).await?;
+                    this.state_table
+                        .commit(barrier.epoch, barrier.is_checkpoint())
+                        .await?;
                     vars.cached_partitions.evict();
 
                     {

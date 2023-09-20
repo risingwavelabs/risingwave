@@ -40,7 +40,11 @@ pub trait TopNExecutorBase: Send + 'static {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk>;
 
     /// Flush the buffered chunk to the storage backend.
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
+    async fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+        is_checkpoint: bool,
+    ) -> StreamExecutorResult<()>;
 
     fn info(&self) -> &ExecutorInfo;
 
@@ -134,7 +138,9 @@ where
                 }
                 Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
                 Message::Barrier(barrier) => {
-                    self.inner.flush_data(barrier.epoch).await?;
+                    self.inner
+                        .flush_data(barrier.epoch, barrier.is_checkpoint())
+                        .await?;
 
                     // Update the vnode bitmap, only used by Group Top-N.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {

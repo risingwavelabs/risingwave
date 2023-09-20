@@ -242,8 +242,12 @@ impl<S: StateStore> ManagedTopNState<S> {
         Ok(())
     }
 
-    pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.state_table.commit(epoch).await?;
+    pub async fn flush(
+        &mut self,
+        epoch: EpochPair,
+        is_checkpoint: bool,
+    ) -> StreamExecutorResult<()> {
+        self.state_table.commit(epoch, is_checkpoint).await?;
         Ok(())
     }
 }

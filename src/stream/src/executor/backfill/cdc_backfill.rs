@@ -340,6 +340,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     Self::persist_state(
                                         &mut self.source_state_handler,
                                         barrier.epoch,
+                                        barrier.is_checkpoint(),
                                     )
                                     .await?;
 
@@ -467,7 +468,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
                 // persist the backfill state if any
                 if let Message::Barrier(barrier) = &msg {
-                    Self::persist_state(&mut self.source_state_handler, barrier.epoch).await?;
+                    Self::persist_state(
+                        &mut self.source_state_handler,
+                        barrier.epoch,
+                        barrier.is_checkpoint(),
+                    )
+                    .await?;
                 }
                 yield msg;
             }
@@ -539,8 +545,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     async fn persist_state(
         source_state_handler: &mut SourceStateTableHandler<S>,
         new_epoch: EpochPair,
+        is_checkpoint: bool,
     ) -> StreamExecutorResult<()> {
-        source_state_handler.state_store.commit(new_epoch).await
+        source_state_handler
+            .state_store
+            .commit(new_epoch, is_checkpoint)
+            .await
     }
 }
 

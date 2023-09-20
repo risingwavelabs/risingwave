@@ -344,6 +344,10 @@ impl Barrier {
         matches!(self.mutation.as_deref(), Some(Mutation::Resume))
     }
 
+    pub fn is_checkpoint(&self) -> bool {
+        matches!(self.kind, BarrierKind::Checkpoint)
+    }
+
     /// Returns the [`MergeUpdate`] if this barrier is to update the merge executors for the actor
     /// with `actor_id`.
     pub fn as_update_merge(

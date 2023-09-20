@@ -457,16 +457,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(entry_state)
     }
 
-    pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    pub async fn flush(
+        &mut self,
+        epoch: EpochPair,
+        is_checkpoint: bool,
+    ) -> StreamExecutorResult<()> {
         self.metrics.flush();
-        self.state.table.commit(epoch).await?;
-        self.degree_state.table.commit(epoch).await?;
-        Ok(())
-    }
-
-    pub async fn try_flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.state.table.try_flush(epoch.curr).await?;
-        self.degree_state.table.try_flush(epoch.curr).await?;
+        self.state.table.commit(epoch, is_checkpoint).await?;
+        self.degree_state.table.commit(epoch, is_checkpoint).await?;
         Ok(())
     }
 

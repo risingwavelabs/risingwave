@@ -109,7 +109,7 @@ async fn test_storage_table_value_indices() {
     ]));
 
     epoch.inc();
-    state.commit(epoch).await.unwrap();
+    state.commit(epoch, true).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let get_row1_res = table
@@ -222,7 +222,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
     ]));
 
     epoch.inc();
-    state.commit(epoch).await.unwrap();
+    state.commit(epoch, true).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let get_row1_res = table
@@ -329,7 +329,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         Some(222_i32.into()),
     ]));
     epoch.inc();
-    state.commit(epoch).await.unwrap();
+    state.commit(epoch, true).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let get_row1_res = table
@@ -444,7 +444,7 @@ async fn test_batch_scan_with_value_indices() {
     ]));
 
     epoch.inc();
-    state.commit(epoch).await.unwrap();
+    state.commit(epoch, true).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
     let iter = table

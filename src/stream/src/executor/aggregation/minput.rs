@@ -345,7 +345,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(3i32.into()));
@@ -363,7 +363,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(2i32.into()));
@@ -438,7 +438,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(8i32.into()));
@@ -456,7 +456,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(9i32.into()));
@@ -569,8 +569,8 @@ mod tests {
             state_2.apply_chunk(&chunk_2)?;
 
             epoch.inc();
-            table_1.commit(epoch).await.unwrap();
-            table_2.commit(epoch).await.unwrap();
+            table_1.commit(epoch, true).await.unwrap();
+            table_2.commit(epoch, true).await.unwrap();
 
             let out1 = state_1
                 .get_output(&table_1, group_key.as_ref(), &agg1)
@@ -638,7 +638,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(5i32.into()));
@@ -656,7 +656,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(8i32.into()));
@@ -746,7 +746,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(min_value.into()));
@@ -773,7 +773,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(min_value.into()));
@@ -830,7 +830,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(4i32.into()));
@@ -850,7 +850,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(12i32.into()));
@@ -872,7 +872,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some(12i32.into()));
@@ -938,7 +938,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some("c,a".into()));
@@ -955,7 +955,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             assert_eq!(res, Some("d_c,a+e".into()));
@@ -1016,7 +1016,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             match res {
@@ -1043,7 +1043,7 @@ mod tests {
             state.apply_chunk(&chunk)?;
 
             epoch.inc();
-            table.commit(epoch).await.unwrap();
+            table.commit(epoch, true).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref(), &agg).await?;
             match res {

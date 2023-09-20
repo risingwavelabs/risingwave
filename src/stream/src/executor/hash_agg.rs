@@ -446,6 +446,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         this: &'a mut ExecutorInner<K, S>,
         vars: &'a mut ExecutionVars<K, S>,
         epoch: EpochPair,
+        is_checkpoint: bool,
     ) {
         // Update metrics.
         let actor_id_str = this.actor_ctx.id.to_string();
@@ -579,7 +580,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             // Commit all state tables.
             futures::future::try_join_all(
                 this.all_state_tables_mut()
-                    .map(|table| async { table.commit(epoch).await }),
+                    .map(|table| async { table.commit(epoch, is_checkpoint).await }),
             )
             .await?;
         }
@@ -673,7 +674,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 }
                 Message::Barrier(barrier) => {
                     #[for_await]
-                    for chunk in Self::flush_data(&mut this, &mut vars, barrier.epoch) {
+                    for chunk in Self::flush_data(
+                        &mut this,
+                        &mut vars,
+                        barrier.epoch,
+                        barrier.is_checkpoint(),
+                    ) {
                         yield Message::Chunk(chunk?);
                     }
 
