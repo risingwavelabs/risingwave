@@ -137,24 +137,24 @@ impl IcebergConfig {
 
         if let Some(region) = &self.region {
             iceberg_configs.insert(
-                "iceberg.catalog.table.io.region".to_string(),
+                "iceberg.table.io.region".to_string(),
                 region.clone().to_string(),
             );
         }
 
         if let Some(endpoint) = &self.endpoint {
             iceberg_configs.insert(
-                "iceberg.catalog.table.io.endpoint".to_string(),
+                "iceberg.table.io.endpoint".to_string(),
                 endpoint.clone().to_string(),
             );
         }
 
         iceberg_configs.insert(
-            "iceberg.catalog.table.io.access_key_id".to_string(),
+            "iceberg.table.io.access_key_id".to_string(),
             self.access_key.clone().to_string(),
         );
         iceberg_configs.insert(
-            "iceberg.catalog.table.io.secret_access_key".to_string(),
+            "iceberg.table.io.secret_access_key".to_string(),
             self.secret_key.clone().to_string(),
         );
 
