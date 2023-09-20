@@ -150,7 +150,7 @@ impl<K: HashKey> LookupJoinBase<K> {
 
                 for (build_row_id, (build_key, visible)) in build_keys
                     .into_iter()
-                    .zip_eq_fast(build_chunk.vis().iter())
+                    .zip_eq_fast(build_chunk.visibility().iter())
                     .enumerate()
                 {
                     if !visible {

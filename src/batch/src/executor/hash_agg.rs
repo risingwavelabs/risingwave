@@ -226,8 +226,10 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let chunk = StreamChunk::from(chunk?);
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             let mut memory_usage_diff = 0;
-            for (row_id, (key, visible)) in
-                keys.into_iter().zip_eq_fast(chunk.vis().iter()).enumerate()
+            for (row_id, (key, visible)) in keys
+                .into_iter()
+                .zip_eq_fast(chunk.visibility().iter())
+                .enumerate()
             {
                 if !visible {
                     continue;

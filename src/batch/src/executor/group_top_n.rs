@@ -203,7 +203,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
                 encode_chunk(&chunk, &self.column_orders)?
                     .into_iter()
                     .zip_eq_fast(keys.into_iter())
-                    .zip_eq_fast(chunk.vis().iter())
+                    .zip_eq_fast(chunk.visibility().iter())
                     .enumerate()
             {
                 if !visible {

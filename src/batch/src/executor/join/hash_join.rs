@@ -254,7 +254,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
             for (build_row_id, (build_key, visible)) in build_keys
                 .into_iter()
-                .zip_eq_fast(build_chunk.vis().iter())
+                .zip_eq_fast(build_chunk.visibility().iter())
                 .enumerate()
             {
                 self.shutdown_rx.check()?;
@@ -357,7 +357,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
-                .zip_eq_fast(probe_chunk.vis().iter())
+                .zip_eq_fast(probe_chunk.visibility().iter())
                 .enumerate()
             {
                 if !visible {
@@ -420,7 +420,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
-                .zip_eq_fast(probe_chunk.vis().iter())
+                .zip_eq_fast(probe_chunk.visibility().iter())
                 .enumerate()
             {
                 if !visible {
@@ -489,7 +489,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
-                .zip_eq_fast(probe_chunk.vis().iter())
+                .zip_eq_fast(probe_chunk.visibility().iter())
                 .enumerate()
             {
                 if !visible {
@@ -567,7 +567,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
-                .zip_eq_fast(probe_chunk.vis().iter())
+                .zip_eq_fast(probe_chunk.visibility().iter())
                 .enumerate()
             {
                 if !visible {
@@ -631,7 +631,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
-                .zip_eq_fast(probe_chunk.vis().iter())
+                .zip_eq_fast(probe_chunk.visibility().iter())
                 .enumerate()
             {
                 if !visible {
@@ -706,7 +706,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
-                .zip_eq_fast(probe_chunk.vis().iter())
+                .zip_eq_fast(probe_chunk.visibility().iter())
                 .enumerate()
             {
                 if !visible {
@@ -788,7 +788,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
-                .zip_eq_fast(probe_chunk.vis().iter())
+                .zip_eq_fast(probe_chunk.visibility().iter())
                 .enumerate()
             {
                 if !visible {
@@ -853,7 +853,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
-                .zip_eq_fast(probe_chunk.vis().iter())
+                .zip_eq_fast(probe_chunk.visibility().iter())
                 .enumerate()
             {
                 if !visible {
@@ -923,7 +923,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_key, visible) in probe_keys.iter().zip_eq_fast(probe_chunk.vis().iter()) {
+            for (probe_key, visible) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+            {
                 if !visible {
                     continue;
                 }
@@ -976,7 +979,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
-                .zip_eq_fast(probe_chunk.vis().iter())
+                .zip_eq_fast(probe_chunk.visibility().iter())
                 .enumerate()
             {
                 if !visible {
@@ -1049,7 +1052,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
-                .zip_eq_fast(probe_chunk.vis().iter())
+                .zip_eq_fast(probe_chunk.visibility().iter())
                 .enumerate()
             {
                 if !visible {
@@ -1131,7 +1134,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, (probe_key, visible)) in probe_keys
                 .iter()
-                .zip_eq_fast(probe_chunk.vis().iter())
+                .zip_eq_fast(probe_chunk.visibility().iter())
                 .enumerate()
             {
                 if !visible {
