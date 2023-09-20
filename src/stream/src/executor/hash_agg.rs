@@ -63,8 +63,7 @@ impl<S: StateStore> EstimateSize for BoxedAggGroup<S> {
 
 type AggGroupCache<K, S> = ManagedLruCache<K, Option<BoxedAggGroup<S>>, PrecomputedBuildHasher>;
 
-// const MAX_DIRTY_GROUP_HEAP_SIZE: usize = 64 << 20; // 64MB
-// const MAX_DIRTY_GROUP_HEAP_SIZE: usize = 100 << 10; // 100KB
+const MAX_DIRTY_GROUPS_HEAP_SIZE: usize = 64 << 20; // 64MB
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -432,41 +431,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn flush_data<'a>(
-        this: &'a mut ExecutorInner<K, S>,
-        vars: &'a mut ExecutionVars<K, S>,
-        epoch: EpochPair,
-    ) {
-        // Update metrics.
-        let actor_id_str = this.actor_ctx.id.to_string();
-        let table_id_str = this.intermediate_state_table.table_id().to_string();
-        this.metrics
-            .agg_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .inc_by(vars.stats.lookup_miss_count);
-        vars.stats.lookup_miss_count = 0;
-        this.metrics
-            .agg_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .inc_by(vars.stats.total_lookup_count);
-        vars.stats.total_lookup_count = 0;
-        this.metrics
-            .agg_cached_keys
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .set(vars.agg_group_cache.len() as i64);
-        this.metrics
-            .agg_chunk_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .inc_by(vars.stats.chunk_lookup_miss_count);
-        vars.stats.chunk_lookup_miss_count = 0;
-        this.metrics
-            .agg_chunk_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .inc_by(vars.stats.chunk_total_lookup_count);
-        vars.stats.chunk_total_lookup_count = 0;
-
+    async fn flush_data<'a>(this: &'a mut ExecutorInner<K, S>, vars: &'a mut ExecutionVars<K, S>) {
         let window_watermark = vars.window_watermark.take();
-        let n_dirty_group = vars.dirty_groups.len();
 
         // flush changed states into intermediate state table
         for agg_group in vars.dirty_groups.values() {
@@ -547,37 +513,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             vars.agg_group_cache.put(key, Some(agg_group));
         }
 
-        this.metrics
-            .agg_dirty_group_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .set(0);
-        this.metrics
-            .agg_dirty_group_heap_size
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .set(0);
-
         // Yield the remaining rows in chunk builder.
         if let Some(chunk) = vars.chunk_builder.take() {
             yield chunk;
         }
 
-        if n_dirty_group == 0 && window_watermark.is_none() {
-            // Nothing is expected to be changed.
-            this.all_state_tables_mut().for_each(|table| {
-                table.commit_no_data_expected(epoch);
-            });
-        } else {
-            if let Some(watermark) = window_watermark {
-                // Update watermark of state tables, for state cleaning.
-                this.all_state_tables_mut()
-                    .for_each(|table| table.update_watermark(watermark.clone(), false));
-            }
-            // Commit all state tables.
-            futures::future::try_join_all(
-                this.all_state_tables_mut()
-                    .map(|table| async { table.commit(epoch).await }),
-            )
-            .await?;
+        if let Some(watermark) = window_watermark {
+            // Update watermark of state tables, for state cleaning.
+            this.all_state_tables_mut()
+                .for_each(|table| table.update_watermark(watermark.clone(), false));
         }
 
         // Flush distinct dedup state.
@@ -586,6 +530,43 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Evict cache to target capacity.
         vars.agg_group_cache.evict();
+    }
+
+    fn update_metrics(this: &ExecutorInner<K, S>, vars: &mut ExecutionVars<K, S>) {
+        let actor_id_str = this.actor_ctx.id.to_string();
+        let table_id_str = this.intermediate_state_table.table_id().to_string();
+        this.metrics
+            .agg_lookup_miss_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .inc_by(std::mem::take(&mut vars.stats.lookup_miss_count));
+        this.metrics
+            .agg_total_lookup_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .inc_by(std::mem::take(&mut vars.stats.total_lookup_count));
+        this.metrics
+            .agg_cached_keys
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .set(vars.agg_group_cache.len() as i64);
+        this.metrics
+            .agg_chunk_lookup_miss_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .inc_by(std::mem::take(&mut vars.stats.chunk_lookup_miss_count));
+        this.metrics
+            .agg_chunk_total_lookup_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .inc_by(std::mem::take(&mut vars.stats.chunk_total_lookup_count));
+    }
+
+    async fn commit_state_tables(
+        this: &mut ExecutorInner<K, S>,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(
+            this.all_state_tables_mut()
+                .map(|table| async { table.commit(epoch).await }),
+        )
+        .await?;
+        Ok(())
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -665,12 +646,23 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 }
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut this, &mut vars, chunk).await?;
+
+                    if vars.dirty_groups.estimated_heap_size() >= MAX_DIRTY_GROUPS_HEAP_SIZE {
+                        // flush dirty groups if heap size is too large, to better prevent from OOM
+                        #[for_await]
+                        for chunk in Self::flush_data(&mut this, &mut vars) {
+                            yield Message::Chunk(chunk?);
+                        }
+                    }
                 }
                 Message::Barrier(barrier) => {
+                    Self::update_metrics(&this, &mut vars);
+
                     #[for_await]
-                    for chunk in Self::flush_data(&mut this, &mut vars, barrier.epoch) {
+                    for chunk in Self::flush_data(&mut this, &mut vars) {
                         yield Message::Chunk(chunk?);
                     }
+                    Self::commit_state_tables(&mut this, barrier.epoch).await?;
 
                     if this.emit_on_window_close {
                         // ignore watermarks on other columns
