@@ -29,6 +29,7 @@ pub enum ValueImpl {
 impl ValueImpl {
     /// Number of scalars in this value.
     #[inline]
+    #[expect(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.iter().len()
     }
@@ -57,6 +58,7 @@ pub enum ValueRef<'a, A: Array> {
 impl<'a, A: Array> ValueRef<'a, A> {
     /// Number of scalars in this value.
     #[inline]
+    #[expect(clippy::len_without_is_empty)]
     pub fn len(self) -> usize {
         self.iter().len()
     }
