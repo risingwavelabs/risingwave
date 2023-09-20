@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
-use crate::hummock::compactor::inheritance::{Parent, SstableInheritance};
+use crate::hummock::compactor::inheritance::SstableInheritance;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::{HummockResult, SstableBlockIndex, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
@@ -328,23 +328,21 @@ impl CacheRefillTask {
                     let Some(block_inheritance) = sstable_inheritance.blocks.get(idx) else {
                         continue;
                     };
-                    for Parent {
-                        sst_obj_id,
-                        sst_blk_idx,
-                    } in &block_inheritance.parents
-                    {
-                        if context
-                            .sstable_store
-                            .data_file_cache()
-                            .exists(&SstableBlockIndex {
-                                sst_id: *sst_obj_id,
-                                block_idx: *sst_blk_idx as u64,
-                            })
-                            .await
-                            .unwrap_or_default()
-                        {
-                            refill = true;
-                            break 'refill;
+                    for (sst_obj_id, info) in &block_inheritance.parents {
+                        for sst_blk_idx in info {
+                            if context
+                                .sstable_store
+                                .data_file_cache()
+                                .exists(&SstableBlockIndex {
+                                    sst_id: *sst_obj_id,
+                                    block_idx: *sst_blk_idx as u64,
+                                })
+                                .await
+                                .unwrap_or_default()
+                            {
+                                refill = true;
+                                break 'refill;
+                            }
                         }
                     }
                 }

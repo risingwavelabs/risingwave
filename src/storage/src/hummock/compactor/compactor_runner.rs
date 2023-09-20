@@ -31,7 +31,7 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 use tokio::sync::oneshot::Receiver;
 
-use super::inheritance::{BlockInheritance, Parent, SstableInheritance};
+use super::inheritance::{BlockInheritance, SstableInheritance};
 use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
@@ -849,10 +849,13 @@ fn record_compaction_inheritance(
         blocks.push(BlockInheritance::default());
     }
 
-    blocks.last_mut().unwrap().parents.insert(Parent {
-        sst_obj_id: *sst_obj_id,
-        sst_blk_idx: *sst_blk_idx,
-    });
+    blocks
+        .last_mut()
+        .unwrap()
+        .parents
+        .entry(*sst_obj_id)
+        .or_default()
+        .insert(*sst_blk_idx);
 }
 
 #[cfg(test)]

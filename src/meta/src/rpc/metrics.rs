@@ -617,7 +617,7 @@ impl MetaMetrics {
         let compaction_inheritance_info = register_histogram_vec_with_registry!(
             "compactor_compaction_inheritance_info",
             "compactor compaction inheritance info",
-            &["group", "level", "sublevel"],
+            &["group", "level"],
             vec![0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0, 20.0, 30.0, 50.0, 100.0],
             registry,
         )

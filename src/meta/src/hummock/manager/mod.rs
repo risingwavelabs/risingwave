@@ -1224,7 +1224,6 @@ impl HummockManager {
                 // Record comapction inheritance metrics.
                 let group = compact_task.compaction_group_id.to_string();
                 let level = compact_task.target_level.to_string();
-                let sublevel = compact_task.target_sub_level_id.to_string();
                 compact_task
                     .inheritances
                     .values()
@@ -1235,7 +1234,7 @@ impl HummockManager {
                             .for_each(|block_inheritance| {
                                 self.metrics
                                     .compaction_inheritance_info
-                                    .with_label_values(&[&group, &level, &sublevel])
+                                    .with_label_values(&[&group, &level])
                                     .observe(block_inheritance.parents.len() as f64)
                             })
                     });

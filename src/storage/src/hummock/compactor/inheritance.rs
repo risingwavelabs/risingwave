@@ -12,51 +12,93 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::hummock::{
-    BlockInheritance as PbBlockInheritance, Parent as PbParent,
+    BlockInheritance as PbBlockInheritance, ParentInfo as PbParentInfo,
     SstableInheritance as PbSstableInheritance,
 };
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Parent {
-    pub sst_obj_id: HummockSstableObjectId,
-    pub sst_blk_idx: usize,
-}
+const PARENT_INFO_MASK: u64 = 1 << 63;
 
-impl Parent {
-    pub fn from_proto(proto: &PbParent) -> Self {
-        Self {
-            sst_obj_id: proto.sst_obj_id,
-            sst_blk_idx: proto.sst_blk_idx as usize,
+/// FYI: See format doc in `hummock.proto`.
+pub struct ParentInfo;
+
+impl ParentInfo {
+    pub fn from_proto(proto: &PbParentInfo) -> BTreeSet<usize> {
+        let mut res = BTreeSet::new();
+        let mut iter = proto.info.iter();
+
+        while let Some(u) = iter.next() {
+            // single
+            if u & PARENT_INFO_MASK == 0 {
+                res.insert(*u as usize);
+                continue;
+            }
+            // range
+            let v = iter.next().unwrap();
+            for i in (*u ^ PARENT_INFO_MASK)..(*v ^ PARENT_INFO_MASK) {
+                res.insert(i as usize);
+            }
         }
+
+        res
     }
 
-    pub fn to_proto(&self) -> PbParent {
-        PbParent {
-            sst_obj_id: self.sst_obj_id,
-            sst_blk_idx: self.sst_blk_idx as u64,
+    pub fn to_proto(info: &BTreeSet<usize>) -> PbParentInfo {
+        let mut proto = PbParentInfo::default();
+
+        let handle = |info: &mut Vec<u64>, range: &[usize]| match range.len() {
+            0 => {}
+            1 => info.push(range[0] as u64),
+            2 => {
+                info.push(range[0] as u64 | PARENT_INFO_MASK);
+                info.push(range[1] as u64 | PARENT_INFO_MASK);
+            }
+            _ => unreachable!(),
+        };
+
+        let info = info.iter().copied().collect_vec();
+
+        let mut range = vec![];
+        for i in 0..info.len() {
+            if i > 0 && info[i - 1] + 1 != info[i] {
+                handle(&mut proto.info, &range);
+                range.clear();
+            }
+            range.push(info[i]);
         }
+        handle(&mut proto.info, &range);
+
+        proto
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct BlockInheritance {
-    pub parents: BTreeSet<Parent>,
+    pub parents: BTreeMap<HummockSstableObjectId, BTreeSet<usize>>,
 }
 
 impl BlockInheritance {
     pub fn from_proto(proto: &PbBlockInheritance) -> Self {
         Self {
-            parents: proto.parents.iter().map(Parent::from_proto).collect(),
+            parents: proto
+                .parents
+                .iter()
+                .map(|(sst_obj_id, proto)| (*sst_obj_id, ParentInfo::from_proto(proto)))
+                .collect(),
         }
     }
 
     pub fn to_proto(&self) -> PbBlockInheritance {
         PbBlockInheritance {
-            parents: self.parents.iter().map(Parent::to_proto).collect(),
+            parents: self
+                .parents
+                .iter()
+                .map(|(sst_obj_id, info)| (*sst_obj_id, ParentInfo::to_proto(info)))
+                .collect(),
         }
     }
 }
