@@ -244,6 +244,8 @@ impl CreateMviewProgressTracker {
                 .sum();
             let definition = definitions.remove(&creating_table_id).unwrap();
             let progress = Progress {
+                // FIXME: I guess this has to be non-empty?
+                // Maybe set to 0.
                 states: Default::default(), // Fill only after first barrier pass.
                 done_count: 0,              // Fill only after first barrier pass
                 upstream_mv_count: Default::default(),
