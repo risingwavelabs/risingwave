@@ -53,11 +53,10 @@ impl ParentInfo {
         let handle = |info: &mut Vec<u64>, range: &[usize]| match range.len() {
             0 => {}
             1 => info.push(range[0] as u64),
-            2 => {
-                info.push(range[0] as u64 | PARENT_INFO_MASK);
-                info.push(range[1] as u64 | PARENT_INFO_MASK);
+            _ => {
+                info.push(*range.first().unwrap() as u64 | PARENT_INFO_MASK);
+                info.push((*range.last().unwrap() + 1) as u64 | PARENT_INFO_MASK);
             }
-            _ => unreachable!(),
         };
 
         let info = info.iter().copied().collect_vec();
@@ -76,7 +75,7 @@ impl ParentInfo {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BlockInheritance {
     pub parents: BTreeMap<HummockSstableObjectId, BTreeSet<usize>>,
 }
@@ -103,7 +102,7 @@ impl BlockInheritance {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SstableInheritance {
     pub blocks: Vec<BlockInheritance>,
 }
@@ -123,5 +122,36 @@ impl SstableInheritance {
         PbSstableInheritance {
             blocks: self.blocks.iter().map(BlockInheritance::to_proto).collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_enc_dec() {
+        let mut si = SstableInheritance::default();
+        si.blocks.push(BlockInheritance {
+            parents: {
+                let mut map = BTreeMap::default();
+                map.insert(1, [1, 2, 3, 4, 6, 7, 9, 100, 1000].into_iter().collect());
+                map.insert(2, [1, 2, 4, 5, 6, 10, 15, 20, 21, 22].into_iter().collect());
+                map
+            },
+        });
+        si.blocks.push(BlockInheritance {
+            parents: {
+                let mut map = BTreeMap::default();
+                map.insert(3, [1, 2, 4, 6, 70].into_iter().collect());
+                map.insert(4, [1, 2, 6, 10, 15, 20, 21, 22].into_iter().collect());
+                map
+            },
+        });
+
+        let proto = si.to_proto();
+        let siv = SstableInheritance::from_proto(&proto);
+
+        assert_eq!(si, siv);
     }
 }
