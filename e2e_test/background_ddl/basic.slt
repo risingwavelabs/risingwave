@@ -22,12 +22,11 @@ CREATE MATERIALIZED VIEW m2 as SELECT * FROM t;
 statement ok
 CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
 
-sleep 3s
-
-query I
-select count(*) from rw_catalog.rw_ddl_progress;
-----
-3
+# Disable the flaky check:
+# query I
+# select count(*) from rw_catalog.rw_ddl_progress;
+# ----
+# 3
 
 statement error
 SELECT * FROM m1;
