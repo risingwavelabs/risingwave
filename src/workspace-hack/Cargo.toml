@@ -54,8 +54,7 @@ hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 heck = { version = "0.4", features = ["unicode"] }
 hyper = { version = "0.14", features = ["full"] }
-indexmap-dff4ba8e3ae991db = { package = "indexmap", version = "1", default-features = false, features = ["std"] }
-indexmap-f595c2ba2a3f28df = { package = "indexmap", version = "2", features = ["serde"] }
+indexmap = { version = "1", default-features = false, features = ["serde", "std"] }
 itertools = { version = "0.10" }
 jni = { version = "0.21", features = ["invocation"] }
 lazy_static = { version = "1", default-features = false, features = ["spin_no_std"] }
@@ -155,7 +154,6 @@ futures-task = { version = "0.3" }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
 heck = { version = "0.4", features = ["unicode"] }
-indexmap-f595c2ba2a3f28df = { package = "indexmap", version = "2", features = ["serde"] }
 itertools = { version = "0.10" }
 lazy_static = { version = "1", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2", features = ["extra_traits"] }

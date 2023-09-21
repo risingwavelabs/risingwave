@@ -2,7 +2,19 @@
 
 In this demo, we want to showcase how RisingWave is able to sink data to Doris.
 
-1. Launch the cluster:
+1. Modify max_map_count
+
+```sh
+# linux
+sysctl -w vm.max_map_count=2000000
+# Macos
+docker run -it --privileged --pid=host --name=change_count debian nsenter -t 1 -m -u -n -i sh
+```
+
+If, after running these commands, Docker still encounters Doris startup errors, please refer to: https://doris.apache.org/docs/dev/install/construct-docker/run-docker-cluster
+
+
+2. Launch the cluster:
 
 ```sh
 docker-compose up -d
@@ -10,8 +22,7 @@ docker-compose up -d
 
 The cluster contains a RisingWave cluster and its necessary dependencies, a datagen that generates the data, a Doris fe and be for sink.
 
-
-2. Create the Doris table via mysql:
+3. Create the Doris table via mysql:
 
 Login to mysql
 ```sh
@@ -35,12 +46,20 @@ CREATE USER 'users'@'%' IDENTIFIED BY '123456';
 GRANT ALL ON *.* TO 'users'@'%';
 ```
 
-3. Execute the SQL queries in sequence:
+4. Execute the SQL queries in sequence:
 
-- create_source.sql
-- create_mv.sql
-- create_sink.sql
+- append-only sql:
+    - append-only/create_source.sql
+    - append-only/create_mv.sql
+    - append-only/create_sink.sql
 
+- upsert sql:
+    - upsert/create_table.sql
+    - upsert/create_mv.sql
+    - upsert/create_sink.sql
+    - upsert/insert_update_delete.sql
+
+We only support `upsert` with doris' `UNIQUE KEY`
 
 Run the following query
 ```sql

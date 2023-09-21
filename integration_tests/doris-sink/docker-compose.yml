@@ -82,25 +82,6 @@ services:
     networks:
       mynetwork:
         ipv4_address: 172.21.0.11
-  message_queue:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: message_queue
-    networks:
-      mynetwork:
-        ipv4_address: 172.21.0.12
-  datagen:
-    build: ../datagen
-    depends_on: [message_queue]
-    command:
-      - /bin/sh
-      - -c
-      - /datagen --mode clickstream --qps 2 kafka --brokers message_queue:29092
-    restart: always
-    container_name: datagen
-    networks:
-      mynetwork:
-        ipv4_address: 172.21.0.13
 volumes:
   compute-node-0:
     external: false

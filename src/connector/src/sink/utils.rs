@@ -39,7 +39,7 @@ pub fn doris_rows_to_json(
     let encoder = JsonEncoder::new_with_doris(
         schema,
         None,
-        TimestampHandlingMode::Milli,
+        TimestampHandlingMode::String,
         decimal_map.clone(),
     );
     let map = encoder.encode(row)?;
