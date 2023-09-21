@@ -413,25 +413,10 @@ mod tests {
             "benching {} agg, chunk_size={}, vis_rate={}",
             agg_desc, chunk_size, vis_rate
         );
-        let bitmap = if vis_rate < 1.0 {
-            Some(rand_bitmap::gen_rand_bitmap(
-                chunk_size,
-                (chunk_size as f64 * vis_rate) as usize,
-                666,
-            ))
-        } else {
-            None
-        };
-        let (ops, data) = rand_stream_chunk::gen_legal_stream_chunk(
-            bitmap.as_ref(),
-            chunk_size,
-            append_only,
-            666,
-        );
-        let vis = match bitmap {
-            Some(bitmap) => Vis::Bitmap(bitmap),
-            None => Vis::Compact(chunk_size),
-        };
+        let vis =
+            rand_bitmap::gen_rand_bitmap(chunk_size, (chunk_size as f64 * vis_rate) as usize, 666);
+        let (ops, data) =
+            rand_stream_chunk::gen_legal_stream_chunk(&vis, chunk_size, append_only, 666);
         let chunk = StreamChunk::from_parts(ops, DataChunk::new(vec![Arc::new(data)], vis));
         let pretty = format!("({agg_desc}:int8 $0:int8)");
         let agg = crate::agg::build_append_only(&AggCall::from_pretty(pretty)).unwrap();

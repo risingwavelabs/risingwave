@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -eo pipefail
-[ -n "${BACKUP_TEST_BACKUP_RESTORE}" ]
 [ -n "${BACKUP_TEST_MCLI}" ]
 [ -n "${BACKUP_TEST_MCLI_CONFIG}" ]
 [ -n "${BACKUP_TEST_RW_ALL_IN_ONE}" ]
@@ -70,7 +69,10 @@ function restore() {
   stop_cluster
   clean_etcd_data
   start_etcd_minio
-  ${BACKUP_TEST_BACKUP_RESTORE} \
+  ${BACKUP_TEST_RW_ALL_IN_ONE} \
+  risectl \
+  meta \
+  restore-meta \
   --meta-store-type etcd \
   --meta-snapshot-id "${job_id}" \
   --etcd-endpoints 127.0.0.1:2388 \

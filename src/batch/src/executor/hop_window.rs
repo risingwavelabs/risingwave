@@ -16,7 +16,7 @@ use std::num::NonZeroUsize;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Interval};
@@ -173,7 +173,7 @@ impl HopWindowExecutor {
         #[for_await]
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;
-            assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
+            assert!(data_chunk.is_compacted());
             let len = data_chunk.cardinality();
             for i in 0..units {
                 let window_start_col = if output_indices.contains(&window_start_col_index) {
