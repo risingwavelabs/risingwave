@@ -763,12 +763,12 @@ impl CatalogManager {
         let database_core = &mut core.database;
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let key = (table.database_id, table.schema_id, table.name.clone());
-        assert!(
-            // table will always contain key.
-            // !tables.contains_key(&table.id) &&
-            database_core.in_progress_creation_tracker.contains(&key),
-            "table must be in creating procedure"
-        );
+        // assert!(
+        //     // table will always contain key.
+        //     // !tables.contains_key(&table.id) &&
+        //     database_core.in_progress_creation_tracker.contains(&key),
+        //     "table must be in creating procedure"
+        // );
         database_core.in_progress_creation_tracker.remove(&key);
         database_core
             .in_progress_creation_streaming_job

@@ -455,7 +455,23 @@ impl CreateMviewProgressTracker {
                     }
                     match o.remove().1 {
                         StreamJobOrigin::TrackingCommand(t) => Some(t),
-                        _ => None,
+                        StreamJobOrigin::RecoveredStreamJob(Notifier {
+                            finished: Some(sender),
+                            ..
+                        }) => {
+                            if let Err(e) = sender.send(()) {
+                                tracing::error!(
+                                    "Failed to noify BarrierManager for recovered stream job, error: {e:#?}"
+                                );
+                            }
+                            None
+                        }
+                        _ => {
+                            tracing::error!(
+                                "Finished stream job must either have a tracking command or a corresponding channel."
+                            );
+                            None
+                        }
                     }
                 } else {
                     None
