@@ -247,6 +247,7 @@ message TableFunction {
     REGEXP_MATCHES = 3;
     RANGE = 4;
     GENERATE_SUBSCRIPTS = 5;
+    // buf:lint:ignore ENUM_VALUE_UPPER_SNAKE_CASE
     _PG_EXPANDARRAY = 6;
     // Jsonb functions
     JSONB_ARRAY_ELEMENTS = 10;
