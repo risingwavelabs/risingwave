@@ -21,7 +21,6 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use risingwave_rpc_client::ConnectorClient;
 use serde::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
@@ -167,7 +166,7 @@ impl Sink for DorisSink {
         .await?)
     }
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
                 "Primary key not defined for upsert doris sink (please define in `primary_key` field)")));
