@@ -112,7 +112,7 @@ subtle = { version = "2" }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
 tokio = { version = "1", features = ["full", "stats", "tracing"] }
-tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6", features = ["with-chrono-0_4"] }
+tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88", features = ["with-chrono-0_4"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 toml_datetime = { version = "0.6", default-features = false, features = ["serde"] }
@@ -126,6 +126,7 @@ unicode-bidi = { version = "0.3" }
 unicode-normalization = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
+whoami = { version = "1" }
 
 [build-dependencies]
 ahash = { version = "0.8" }
@@ -206,5 +207,6 @@ tracing-core = { version = "0.1" }
 unicode-bidi = { version = "0.3" }
 unicode-normalization = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
+whoami = { version = "1" }
 
 ### END HAKARI SECTION
