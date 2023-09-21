@@ -100,7 +100,7 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let len = self.chunk.capacity();
-        let vis = self.chunk.vis();
+        let vis = self.chunk.visibility();
         if self.idx == len {
             None
         } else {
