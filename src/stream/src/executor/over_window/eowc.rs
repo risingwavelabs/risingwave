@@ -352,11 +352,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         let columns: Vec<ArrayRef> = builders.into_iter().map(|b| b.finish().into()).collect();
         let chunk_size = columns[0].len();
         Ok(if chunk_size > 0 {
-            Some(StreamChunk::new(
-                vec![Op::Insert; chunk_size],
-                columns,
-                None,
-            ))
+            Some(StreamChunk::new(vec![Op::Insert; chunk_size], columns))
         } else {
             None
         })

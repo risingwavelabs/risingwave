@@ -62,7 +62,7 @@ impl AggregateFunction for Filter {
             .as_bool()
             .to_bitmap();
         let mut input1 = input.clone();
-        input1.set_vis(input.vis() & &bitmap);
+        input1.set_visibility(input.visibility() & &bitmap);
         self.inner.update_range(state, &input1, range).await
     }
 

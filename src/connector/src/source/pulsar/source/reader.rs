@@ -97,7 +97,7 @@ impl SplitReader for PulsarSplitReader {
     ) -> Result<Self> {
         ensure!(splits.len() == 1, "only support single split");
         let split = splits.into_iter().next().unwrap();
-        let pulsar = props.build_pulsar_client().await?;
+        let pulsar = props.common.build_client().await?;
         let topic = split.topic.to_string();
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);

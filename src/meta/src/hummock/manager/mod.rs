@@ -1694,26 +1694,21 @@ impl HummockManager {
 
     /// Get version deltas from meta store
     #[cfg_attr(coverage, no_coverage)]
+    #[named]
     pub async fn list_version_deltas(
         &self,
         start_id: u64,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
     ) -> Result<HummockVersionDeltas> {
-        let ordered_version_deltas: BTreeMap<_, _> =
-            HummockVersionDelta::list(self.env.meta_store())
-                .await?
-                .into_iter()
-                .map(|version_delta| (version_delta.id, version_delta))
-                .collect();
-
-        let version_deltas = ordered_version_deltas
-            .into_iter()
-            .filter(|(id, delta)| {
-                *id >= start_id && delta.max_committed_epoch <= committed_epoch_limit
-            })
-            .map(|(_, v)| v)
+        let versioning = read_lock!(self, versioning).await;
+        let version_deltas = versioning
+            .hummock_version_deltas
+            .range(start_id..)
+            .map(|(_id, delta)| delta)
+            .filter(|delta| delta.max_committed_epoch <= committed_epoch_limit)
             .take(num_limit as _)
+            .cloned()
             .collect();
         Ok(HummockVersionDeltas { version_deltas })
     }

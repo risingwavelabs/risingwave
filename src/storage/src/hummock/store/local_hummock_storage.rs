@@ -20,7 +20,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::mpsc;
 use tracing::{warn, Instrument};
@@ -48,6 +48,8 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::StateStoreIter;
 
+/// `LocalHummockStorage` is a handle for a state table shard to access data from and write data to
+/// the hummock state backend. It is created via `HummockStorage::new_local`.
 pub struct LocalHummockStorage {
     mem_table: MemTable,
 
@@ -141,24 +143,22 @@ impl LocalHummockStorage {
 
     pub async fn may_exist_inner(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<bool> {
         if self.mem_table.iter(key_range.clone()).next().is_some() {
             return Ok(true);
         }
 
-        let table_key_range = map_table_key_range(key_range);
-
         let read_snapshot = read_filter_for_local(
             HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
             read_options.table_id,
-            &table_key_range,
+            &key_range,
             self.read_version.clone(),
         )?;
 
         self.hummock_version_reader
-            .may_exist(table_key_range, read_options, read_snapshot)
+            .may_exist(key_range, read_options, read_snapshot)
             .await
     }
 }
@@ -168,22 +168,22 @@ impl StateStoreRead for LocalHummockStorage {
 
     fn get(
         &self,
-        key: Bytes,
+        key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<Bytes>>> + '_ {
         assert!(epoch <= self.epoch());
-        self.get_inner(TableKey(key), epoch, read_options)
+        self.get_inner(key, epoch, read_options)
     }
 
     fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
         assert!(epoch <= self.epoch());
-        self.iter_inner(map_table_key_range(key_range), epoch, read_options)
+        self.iter_inner(key_range, epoch, read_options)
             .instrument(tracing::trace_span!("hummock_iter"))
     }
 }
@@ -193,18 +193,19 @@ impl LocalStateStore for LocalHummockStorage {
 
     fn may_exist(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
         self.may_exist_inner(key_range, read_options)
     }
 
-    async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
+    async fn get(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+    ) -> StorageResult<Option<Bytes>> {
         match self.mem_table.buffer.get(&key) {
-            None => {
-                self.get_inner(TableKey(key), self.epoch(), read_options)
-                    .await
-            }
+            None => self.get_inner(key, self.epoch(), read_options).await,
             Some(op) => match op {
                 KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
                 KeyOp::Delete(_) => Ok(None),
@@ -215,19 +216,13 @@ impl LocalStateStore for LocalHummockStorage {
     #[allow(clippy::manual_async_fn)]
     fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
         async move {
             let stream = self
-                .iter_inner(
-                    map_table_key_range(key_range.clone()),
-                    self.epoch(),
-                    read_options,
-                )
+                .iter_inner(key_range.clone(), self.epoch(), read_options)
                 .await?;
-            let (l, r) = key_range;
-            let key_range = (l.map(Bytes::from), r.map(Bytes::from));
             Ok(merge_stream(
                 self.mem_table.iter(key_range),
                 stream,
@@ -237,7 +232,12 @@ impl LocalStateStore for LocalHummockStorage {
         }
     }
 
-    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
+    fn insert(
+        &mut self,
+        key: TableKey<Bytes>,
+        new_val: Bytes,
+        old_val: Option<Bytes>,
+    ) -> StorageResult<()> {
         match old_val {
             None => self.mem_table.insert(key, new_val)?,
             Some(old_val) => self.mem_table.update(key, old_val, new_val)?,
@@ -245,7 +245,7 @@ impl LocalStateStore for LocalHummockStorage {
         Ok(())
     }
 
-    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+    fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
         self.mem_table.delete(key, old_val)?;
         Ok(())
     }
@@ -360,7 +360,7 @@ impl LocalStateStore for LocalHummockStorage {
 impl LocalHummockStorage {
     async fn flush_inner(
         &mut self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
+        kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
