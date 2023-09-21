@@ -122,7 +122,8 @@ impl dyn Expression {
         self.eval(input).await.expect("evaluation failed")
     }
 
-    /// Evaluate the expression in row-based execution and assert it succeeds. Returns a nullable scalar.
+    /// Evaluate the expression in row-based execution and assert it succeeds. Returns a nullable
+    /// scalar.
     ///
     /// Use with expressions built in non-strict mode.
     pub async fn eval_row_infallible(&self, input: &OwnedRow) -> Datum {
