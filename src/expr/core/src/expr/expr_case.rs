@@ -153,106 +153,69 @@ impl<'a> TryFrom<&'a ExprNode> for CaseExpression {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::row::Row;
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::Scalar;
+    use risingwave_common::types::ToOwnedDatum;
+    use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;
     use crate::expr::build_from_pretty;
 
-    async fn test_eval_row(expr: CaseExpression, row_inputs: Vec<i32>, expected: Vec<Option<f32>>) {
-        for (i, row_input) in row_inputs.iter().enumerate() {
-            let row = OwnedRow::new(vec![Some(row_input.to_scalar_value())]);
-            let datum = expr.eval_row(&row).await.unwrap();
-            let expected = expected[i].map(|f| f.into());
-            assert_eq!(datum, expected)
+    #[tokio::test]
+    async fn test_eval_searched_case() {
+        // when x then 1 else 2
+        let when_clauses = vec![WhenClause {
+            when: build_from_pretty("$0:boolean"),
+            then: build_from_pretty("1:int4"),
+        }];
+        let els = build_from_pretty("2:int4");
+        let case = CaseExpression::new(DataType::Int32, when_clauses, Some(els));
+        let (input, expected) = DataChunk::from_pretty(
+            "B f
+             f 1
+             t 2
+             f 1
+             f 1
+             t 2",
+        )
+        .split_column_at(1);
+
+        // test eval
+        let output = case.eval(&input).await.unwrap();
+        assert_eq!(&output, expected.column_at(0));
+
+        // test eval_row
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
+            let result = case.eval_row(&row.to_owned_row()).await.unwrap();
+            assert_eq!(result, expected.datum_at(0).to_owned_datum());
         }
     }
 
     #[tokio::test]
-    async fn test_eval_searched_case() {
-        let ret_type = DataType::Float32;
-        // when x <= 2 then 3.1 else 4.1
-        let when_clauses = vec![WhenClause {
-            when: build_from_pretty("(less_than_or_equal:boolean (cast:float4 $0:int4) 2:float4)"),
-            then: build_from_pretty("3.1:float4"),
-        }];
-        let els = build_from_pretty("4.1:float4");
-        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
-        let input = DataChunk::from_pretty(
-            "i
-             1
-             2
-             3
-             4
-             5",
-        );
-        let output = searched_case_expr.eval(&input).await.unwrap();
-        assert_eq!(output.datum_at(0), Some(3.1f32.into()));
-        assert_eq!(output.datum_at(1), Some(3.1f32.into()));
-        assert_eq!(output.datum_at(2), Some(4.1f32.into()));
-        assert_eq!(output.datum_at(3), Some(4.1f32.into()));
-        assert_eq!(output.datum_at(4), Some(4.1f32.into()));
-    }
-
-    #[tokio::test]
     async fn test_eval_without_else() {
-        let ret_type = DataType::Float32;
-        // when x <= 3 then 3.1
+        // when x then 1
         let when_clauses = vec![WhenClause {
-            when: build_from_pretty("(less_than_or_equal:boolean (cast:float4 $0:int4) 3:float4)"),
-            then: build_from_pretty("3.1:float4"),
+            when: build_from_pretty("$0:boolean"),
+            then: build_from_pretty("1:int4"),
         }];
-        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
-        let input = DataChunk::from_pretty(
-            "i
-             3
-             4
-             3
-             4",
-        );
-        let output = searched_case_expr.eval(&input).await.unwrap();
-        assert_eq!(output.datum_at(0), Some(3.1f32.into()));
-        assert_eq!(output.datum_at(1), None);
-        assert_eq!(output.datum_at(2), Some(3.1f32.into()));
-        assert_eq!(output.datum_at(3), None);
-    }
+        let case = CaseExpression::new(DataType::Int32, when_clauses, None);
+        let (input, expected) = DataChunk::from_pretty(
+            "B f
+             t 1
+             f .
+             t 1
+             f .",
+        )
+        .split_column_at(1);
 
-    #[tokio::test]
-    async fn test_eval_row_searched_case() {
-        let ret_type = DataType::Float32;
-        // when x <= 2 then 3.1 else 4.1
-        let when_clauses = vec![WhenClause {
-            when: build_from_pretty("(less_than_or_equal:boolean (cast:float4 $0:int4) 2:float4)"),
-            then: build_from_pretty("3.1:float4"),
-        }];
-        let els = build_from_pretty("4.1:float4");
-        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
+        // test eval
+        let output = case.eval(&input).await.unwrap();
+        assert_eq!(&output, expected.column_at(0));
 
-        let row_inputs = vec![1, 2, 3, 4, 5];
-        let expected = vec![
-            Some(3.1f32),
-            Some(3.1f32),
-            Some(4.1f32),
-            Some(4.1f32),
-            Some(4.1f32),
-        ];
-
-        test_eval_row(searched_case_expr, row_inputs, expected).await;
-    }
-
-    #[tokio::test]
-    async fn test_eval_row_without_else() {
-        let ret_type = DataType::Float32;
-        // when x <= 3 then 3.1
-        let when_clauses = vec![WhenClause {
-            when: build_from_pretty("(less_than_or_equal:boolean (cast:float4 $0:int4) 3:float4)"),
-            then: build_from_pretty("3.1:float4"),
-        }];
-        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
-
-        let row_inputs = vec![2, 3, 4, 5];
-        let expected = vec![Some(3.1f32), Some(3.1f32), None, None];
-
-        test_eval_row(searched_case_expr, row_inputs, expected).await;
+        // test eval_row
+        for (row, expected) in input.rows().zip_eq_debug(expected.rows()) {
+            let result = case.eval_row(&row.to_owned_row()).await.unwrap();
+            assert_eq!(result, expected.datum_at(0).to_owned_datum());
+        }
     }
 }

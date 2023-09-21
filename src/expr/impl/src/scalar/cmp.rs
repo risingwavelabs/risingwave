@@ -531,7 +531,10 @@ mod tests {
             Type::Add | Type::Subtract | Type::Multiply | Type::Divide => "int4",
             _ => "boolean",
         };
-        let expr = build_from_pretty(format!("({kind:?}:{ty} $0:int4 $1:int4)"));
+        let expr = build_from_pretty(format!(
+            "({name}:{ty} $0:int4 $1:int4)",
+            name = kind.as_str_name()
+        ));
         let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -578,7 +581,10 @@ mod tests {
         let col1 = DateArray::from_iter(&lhs).into_ref();
         let col2 = IntervalArray::from_iter(&rhs).into_ref();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let expr = build_from_pretty(format!("({kind:?}:timestamp $0:date $1:interval)"));
+        let expr = build_from_pretty(format!(
+            "({name}:timestamp $0:date $1:interval)",
+            name = kind.as_str_name()
+        ));
         let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -634,7 +640,10 @@ mod tests {
             Type::Add | Type::Subtract | Type::Multiply | Type::Divide => "decimal",
             _ => "boolean",
         };
-        let expr = build_from_pretty(format!("({kind:?}:{ty} $0:decimal $1:decimal)"));
+        let expr = build_from_pretty(format!(
+            "({name}:{ty} $0:decimal $1:decimal)",
+            name = kind.as_str_name()
+        ));
         let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {

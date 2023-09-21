@@ -1,5 +1,6 @@
 [package]
 name = "risingwave_expr"
+description = "Core expression traits and function registry."
 version = { workspace = true }
 edition = { workspace = true }
 homepage = { workspace = true }

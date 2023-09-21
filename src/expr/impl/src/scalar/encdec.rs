@@ -14,7 +14,6 @@
 
 use std::fmt::Write;
 
-use hex;
 use risingwave_common::cast::{parse_bytes_hex, parse_bytes_traditional};
 use risingwave_expr::{function, ExprError, Result};
 

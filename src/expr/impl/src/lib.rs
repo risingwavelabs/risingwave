@@ -12,6 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Function implementations.
+//!
+//! To enable functions in this crate, add the following line to your code:
+//!
+//! ```
+//! risingwave_expr_impl::enable!();
+//! ```
+
 #![allow(non_snake_case)] // for `ctor` generated code
 #![feature(let_chains)]
 #![feature(assert_matches)]
@@ -27,3 +35,12 @@
 mod aggregate;
 mod scalar;
 mod table_function;
+
+/// Enable functions in this crate.
+#[macro_export]
+macro_rules! enable {
+    () => {
+        #[allow(unused_extern_crates)]
+        extern crate risingwave_expr_impl;
+    };
+}

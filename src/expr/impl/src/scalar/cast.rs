@@ -118,6 +118,7 @@ where
 #[function("cast(timestamp) -> date")]
 #[function("cast(timestamp) -> time")]
 #[function("cast(interval) -> time")]
+#[function("cast(varchar) -> varchar")]
 #[function("cast(int256) -> float8")]
 pub fn cast<T1, T2>(elem: T1) -> T2
 where

@@ -1,5 +1,6 @@
 [package]
 name = "risingwave_expr_impl"
+description = "RisingWave function implementations."
 version = { workspace = true }
 edition = { workspace = true }
 homepage = { workspace = true }
@@ -32,8 +33,8 @@ md5 = "0.7"
 num-traits = "0.2"
 regex = "1"
 risingwave_common = { workspace = true }
-risingwave_pb = { workspace = true }
 risingwave_expr = { workspace = true }
+risingwave_pb = { workspace = true }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 self_cell = "1.0.1"
 serde = { version = "1", features = ["derive"] }
