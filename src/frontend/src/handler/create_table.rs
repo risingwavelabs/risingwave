@@ -677,7 +677,6 @@ fn gen_table_plan_inner(
         optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
             TableId::placeholder().table_id,
         )),
-        privatelink_endpoint: None,
         version: INITIAL_SOURCE_VERSION_ID,
     });
 

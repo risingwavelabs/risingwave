@@ -87,9 +87,6 @@ message Source {
   optional uint64 initialized_at_epoch = 15;
   optional uint64 created_at_epoch = 16;
 
-  // Privatelink endpoint provisioned by the cloud platform or provided by the user.
-  optional string privatelink_endpoint = 17;
-
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
 }

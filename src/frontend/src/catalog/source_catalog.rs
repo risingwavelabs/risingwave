@@ -43,7 +43,6 @@ pub struct SourceCatalog {
     pub connection_id: Option<ConnectionId>,
     pub created_at_epoch: Option<Epoch>,
     pub initialized_at_epoch: Option<Epoch>,
-    pub privatelink_endpoint: Option<String>,
     pub version: SourceVersionId,
 }
 
@@ -73,7 +72,6 @@ impl SourceCatalog {
             optional_associated_table_id: self
                 .associated_table_id
                 .map(|id| OptionalAssociatedTableId::AssociatedTableId(id.table_id)),
-            privatelink_endpoint: self.privatelink_endpoint.clone(),
             version: self.version,
         }
     }
@@ -129,7 +127,6 @@ impl From<&PbSource> for SourceCatalog {
             connection_id,
             created_at_epoch: prost.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: prost.initialized_at_epoch.map(Epoch::from),
-            privatelink_endpoint: prost.privatelink_endpoint.clone(),
             version,
         }
     }

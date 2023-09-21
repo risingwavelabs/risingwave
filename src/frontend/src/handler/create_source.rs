@@ -35,7 +35,6 @@ use risingwave_connector::source::cdc::{
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::filesystem::S3_CONNECTOR;
-use risingwave_connector::source::kafka::PRIVATELINK_ENDPOINT_KEY;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::{
     SourceEncode, SourceFormat, SourceStruct, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
@@ -1127,7 +1126,6 @@ pub async fn handle_create_source(
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
     let mut with_options = WithOptions::new(with_properties);
-    let privatelink_endpoint = with_options.get(PRIVATELINK_ENDPOINT_KEY).cloned();
     // resolve privatelink connection for Kafka source
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
@@ -1150,7 +1148,6 @@ pub async fn handle_create_source(
         initialized_at_epoch: None,
         created_at_epoch: None,
         optional_associated_table_id: None,
-        privatelink_endpoint,
         version: INITIAL_SOURCE_VERSION_ID,
     };
 
