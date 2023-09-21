@@ -161,7 +161,7 @@ pub trait Sink {
     type Writer: SinkWriter<CommitMetadata = ()>;
     type Coordinator: SinkCommitCoordinator;
 
-    async fn validate(&self, client: Option<ConnectorClient>) -> Result<()>;
+    async fn validate(&self) -> Result<()>;
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
     async fn new_coordinator(
         &self,
@@ -351,7 +351,7 @@ impl Sink for BlackHoleSink {
         Ok(Self)
     }
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         Ok(())
     }
 }
@@ -540,6 +540,8 @@ pub enum SinkError {
     Doris(String),
     #[error("Pulsar error: {0}")]
     Pulsar(anyhow::Error),
+    #[error("Internal error: {0}")]
+    Internal(anyhow::Error),
 }
 
 impl From<RpcError> for SinkError {
