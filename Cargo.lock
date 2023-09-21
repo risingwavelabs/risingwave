@@ -6521,18 +6521,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "risingwave_backup_cmd"
-version = "1.3.0-alpha"
-dependencies = [
- "clap",
- "madsim-tokio",
- "prometheus",
- "risingwave_backup",
- "risingwave_meta",
- "risingwave_rt",
-]
-
-[[package]]
 name = "risingwave_batch"
 version = "1.3.0-alpha"
 dependencies = [
