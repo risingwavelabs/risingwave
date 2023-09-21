@@ -56,21 +56,6 @@ pub struct ClickHouseSink {
     is_append_only: bool,
 }
 
-impl TryFrom<SinkParam> for ClickHouseSink {
-    type Error = SinkError;
-
-    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let schema = param.schema();
-        let config = ClickHouseConfig::from_hashmap(param.properties)?;
-        ClickHouseSink::new(
-            config,
-            schema,
-            param.downstream_pk,
-            param.sink_type.is_append_only(),
-        )
-    }
-}
-
 impl ClickHouseConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
         let config =
@@ -88,21 +73,22 @@ impl ClickHouseConfig {
     }
 }
 
-impl ClickHouseSink {
-    pub fn new(
-        config: ClickHouseConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        is_append_only: bool,
-    ) -> Result<Self> {
+impl TryFrom<SinkParam> for ClickHouseSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = ClickHouseConfig::from_hashmap(param.properties)?;
         Ok(Self {
             config,
             schema,
-            pk_indices,
-            is_append_only,
+            pk_indices: param.downstream_pk,
+            is_append_only: param.sink_type.is_append_only(),
         })
     }
+}
 
+impl ClickHouseSink {
     /// Check that the column names and types of risingwave and clickhouse are identical
     fn check_column_name_and_type(&self, clickhouse_column: Vec<SystemColumn>) -> Result<()> {
         let ck_fields_name = build_fields_name_type_from_schema(&self.schema)?;

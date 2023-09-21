@@ -269,21 +269,16 @@ impl TryFrom<SinkParam> for KafkaSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let config = KafkaConfig::from_hashmap(param.properties.clone())?;
-        Ok(KafkaSink::new(config, param))
-    }
-}
-
-impl KafkaSink {
-    pub fn new(config: KafkaConfig, param: SinkParam) -> Self {
-        Self {
+        let schema = param.schema();
+        let config = KafkaConfig::from_hashmap(param.properties)?;
+        Ok(Self {
             config,
-            schema: param.schema(),
+            schema,
             pk_indices: param.downstream_pk,
             is_append_only: param.sink_type.is_append_only(),
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,
-        }
+        })
     }
 }
 
