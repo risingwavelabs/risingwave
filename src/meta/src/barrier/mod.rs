@@ -958,6 +958,7 @@ impl GlobalBarrierManager {
             .fragment_manager
             .get_upstream_relation_counts(&creating_table_ids)
             .await;
+        println!("upstream_mv_counts: {:#?}", &upstream_mv_counts);
         let definitions: HashMap<_, _> = creating_tables
             .into_iter()
             .map(|t| (TableId { table_id: t.id }, t.definition))

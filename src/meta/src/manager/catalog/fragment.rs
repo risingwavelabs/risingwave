@@ -194,6 +194,7 @@ impl FragmentManager {
         for table_id in table_ids {
             if let Some(table_fragments) = map.get(table_id) {
                 let dependent_ids = table_fragments.dependent_table_ids();
+                println!("dependent ids: {:#?}", &dependent_ids);
                 let r = upstream_relation_counts.insert(*table_id, dependent_ids);
                 assert!(r.is_none(), "Each table_id should be unique!")
             } else {

@@ -266,7 +266,7 @@ impl CreateMviewProgressTracker {
                 // Maybe set to 0.
                 states,
                 done_count: 0, // Fill only after first barrier pass
-                upstream_mv_count: Default::default(),
+                upstream_mv_count,
                 upstream_total_key_count,
                 consumed_rows: 0, // Fill only after first barrier pass
                 definition,
@@ -421,6 +421,7 @@ impl CreateMviewProgressTracker {
             );
             return None;
         };
+        println!("stream_job table_id: {:#?}", table_id);
 
         let new_state = if progress.done {
             ChainState::Done(progress.consumed_rows)
@@ -428,14 +429,24 @@ impl CreateMviewProgressTracker {
             ChainState::ConsumingUpstream(progress.consumed_epoch.into(), progress.consumed_rows)
         };
 
-        match self.progress_map.entry(epoch) {
+        match self.progress_map.entry(table_id) {
             Entry::Occupied(mut o) => {
                 let progress = &mut o.get_mut().0;
 
+                println!("upstream mv count: {:#?}", &progress.upstream_mv_count);
                 let upstream_total_key_count: u64 = progress
                     .upstream_mv_count
                     .iter()
                     .map(|(upstream_mv, count)| {
+                        assert_ne!(*count, 0);
+                        println!("Upstream mv count: {}", count);
+                        println!(
+                            "table count: {:#?}",
+                            version_stats
+                                .table_stats
+                                .get(&upstream_mv.table_id)
+                                .map(|stat| stat.total_key_count as u64)
+                        );
                         *count as u64
                             * version_stats
                                 .table_stats
@@ -447,7 +458,7 @@ impl CreateMviewProgressTracker {
                 progress.update(actor, new_state, upstream_total_key_count);
 
                 if progress.is_done() {
-                    tracing::debug!("all actors done for creating mview with epoch {}!", epoch);
+                    tracing::debug!("all actors done for creating mview with table_id {}!", table_id);
 
                     // Clean-up the mapping from actors to DDL epoch.
                     for actor in o.get().0.actors() {
