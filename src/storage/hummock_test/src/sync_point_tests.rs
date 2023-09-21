@@ -21,6 +21,7 @@ use bytes::Bytes;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::CompactionFilterFlag;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
@@ -40,7 +41,7 @@ use risingwave_storage::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_storage::hummock::compactor::compactor_runner::compact;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::{CachePolicy, GetObjectId, SstableObjectIdManager};
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions, StateStoreRead};
 use risingwave_storage::StateStore;
 use serial_test::serial;
 
@@ -48,6 +49,7 @@ use super::compactor_tests::tests::{get_hummock_storage, prepare_compactor_and_f
 use crate::compactor_tests::tests::flush_and_commit;
 use crate::get_notification_client_for_test;
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
+use crate::test_utils::gen_key_from_bytes;
 
 #[tokio::test]
 #[cfg(feature = "sync_point")]
@@ -311,25 +313,37 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let val1 = Bytes::from(b"1"[..].repeat(1 << 10)); // 1024 Byte value
 
     local.init_for_test(100).await.unwrap();
-    let mut start_key = b"\0\0aaa".to_vec();
+    let mut start_key = b"aaa".to_vec();
     for _ in 0..10 {
         local
             .insert(
-                Bytes::copy_from_slice(start_key.as_slice()),
+                gen_key_from_bytes(VirtualNode::ZERO, start_key.as_slice()),
                 val0.clone(),
                 None,
             )
             .unwrap();
-        start_key = next_key(&start_key);
+        start_key = next_key(start_key.as_slice());
     }
     local
-        .insert(Bytes::from(b"\0\0ggg".as_slice()), val0.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"ggg"),
+            val0.clone(),
+            None,
+        )
         .unwrap();
     local
-        .insert(Bytes::from(b"\0\0hhh".as_slice()), val0.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"hhh"),
+            val0.clone(),
+            None,
+        )
         .unwrap();
     local
-        .insert(Bytes::from(b"\0\0kkk".as_slice()), val0.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"kkk"),
+            val0.clone(),
+            None,
+        )
         .unwrap();
     local.flush(Vec::new()).await.unwrap();
     local.seal_current_epoch(101);
@@ -343,10 +357,18 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     .await;
 
     local
-        .insert(Bytes::from(b"\0\0aaa".as_slice()), val1.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"aaa"),
+            val1.clone(),
+            None,
+        )
         .unwrap();
     local
-        .insert(Bytes::from(b"\0\0bbb".as_slice()), val1.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"bbb"),
+            val1.clone(),
+            None,
+        )
         .unwrap();
     local
         .flush(vec![(
@@ -366,10 +388,18 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     .await;
 
     local
-        .insert(Bytes::from(b"\0\0hhh".as_slice()), val1.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"hhh"),
+            val1.clone(),
+            None,
+        )
         .unwrap();
     local
-        .insert(Bytes::from(b"\0\0iii".as_slice()), val1.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"iii"),
+            val1.clone(),
+            None,
+        )
         .unwrap();
     local
         .flush(vec![(
@@ -390,10 +420,18 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     .await;
 
     local
-        .insert(Bytes::from(b"\0\0lll".as_slice()), val1.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"lll"),
+            val1.clone(),
+            None,
+        )
         .unwrap();
     local
-        .insert(Bytes::from(b"\0\0mmm".as_slice()), val1.clone(), None)
+        .insert(
+            gen_key_from_bytes(VirtualNode::ZERO, b"mmm"),
+            val1.clone(),
+            None,
+        )
         .unwrap();
     local.flush(Vec::new()).await.unwrap();
     local.seal_current_epoch(u64::MAX);
@@ -431,22 +469,38 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         ..Default::default()
     };
     let get_result = storage
-        .get(Bytes::from("\0\0hhh"), 120, read_options.clone())
+        .get(
+            gen_key_from_bytes(VirtualNode::ZERO, b"hhh"),
+            120,
+            read_options.clone(),
+        )
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val1);
     let get_result = storage
-        .get(Bytes::from("\0\0ggg"), 120, read_options.clone())
+        .get(
+            gen_key_from_bytes(VirtualNode::ZERO, b"ggg"),
+            120,
+            read_options.clone(),
+        )
         .await
         .unwrap();
     assert!(get_result.is_none());
     let get_result = storage
-        .get(Bytes::from("\0\0aaa"), 120, read_options.clone())
+        .get(
+            gen_key_from_bytes(VirtualNode::ZERO, b"aaa"),
+            120,
+            read_options.clone(),
+        )
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val1);
     let get_result = storage
-        .get(Bytes::from("\0\0aab"), 120, read_options.clone())
+        .get(
+            gen_key_from_bytes(VirtualNode::ZERO, b"aab"),
+            120,
+            read_options.clone(),
+        )
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val0);
@@ -459,7 +513,11 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         }
     });
     let get_result = storage
-        .get(Bytes::from("\0\0kkk"), 120, read_options.clone())
+        .get(
+            gen_key_from_bytes(VirtualNode::ZERO, b"kkk"),
+            120,
+            read_options.clone(),
+        )
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val0);

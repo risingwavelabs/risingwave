@@ -563,6 +563,8 @@ pub struct StorageConfig {
     pub compact_iter_recreate_timeout_ms: u64,
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
+    #[serde(default = "default::storage::enable_fast_compaction")]
+    pub enable_fast_compaction: bool,
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -1031,6 +1033,10 @@ pub mod default {
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
+
+        pub fn enable_fast_compaction() -> bool {
+            true
+        }
     }
 
     pub mod streaming {
@@ -1202,11 +1208,12 @@ pub mod default {
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
-        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 1000;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
+        const DEFAULT_EMERGENCY_PICKER: bool = true;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1251,6 +1258,10 @@ pub mod default {
         }
         pub fn tombstone_reclaim_ratio() -> u32 {
             DEFAULT_TOMBSTONE_RATIO_PERCENT
+        }
+
+        pub fn enable_emergency_picker() -> bool {
+            DEFAULT_EMERGENCY_PICKER
         }
     }
 
@@ -1377,6 +1388,8 @@ pub struct CompactionConfig {
     pub level0_max_compact_file_number: u64,
     #[serde(default = "default::compaction_config::tombstone_reclaim_ratio")]
     pub tombstone_reclaim_ratio: u32,
+    #[serde(default = "default::compaction_config::enable_emergency_picker")]
+    pub enable_emergency_picker: bool,
 }
 
 #[cfg(test)]

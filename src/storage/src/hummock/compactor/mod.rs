@@ -27,6 +27,7 @@ use tonic::Request;
 
 pub mod compactor_runner;
 mod context;
+pub mod fast_compactor_runner;
 mod iterator;
 mod shared_buffer_compact;
 pub(super) mod task_progress;
@@ -44,7 +45,6 @@ pub use compaction_filter::{
     TtlCompactionFilter,
 };
 pub use context::CompactorContext;
-use futures::future::try_join_all;
 use futures::{pin_mut, StreamExt};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
@@ -84,6 +84,7 @@ use crate::hummock::{
     HummockError, SharedComapctorObjectIdManager, SstableWriterFactory,
     StreamingSstableWriterFactory,
 };
+use crate::monitor::CompactorMetrics;
 
 /// Implementation of Hummock compaction.
 pub struct Compactor {
@@ -204,46 +205,14 @@ impl Compactor {
 
         compact_timer.observe_duration();
 
-        let mut ssts = Vec::with_capacity(split_table_outputs.len());
-        let mut upload_join_handles = vec![];
+        let ssts = Self::report_progress(
+            self.context.compactor_metrics.clone(),
+            task_progress,
+            split_table_outputs,
+            self.context.is_share_buffer_compact,
+        )
+        .await?;
 
-        for SplitTableOutput {
-            sst_info,
-            upload_join_handle,
-        } in split_table_outputs
-        {
-            let sst_size = sst_info.file_size();
-            ssts.push(sst_info);
-
-            let tracker_cloned = task_progress.clone();
-            let compactor_metrics_cloned = self.context.compactor_metrics.clone();
-            let is_share_buffer_compact = self.context.is_share_buffer_compact;
-            upload_join_handles.push(async move {
-                upload_join_handle
-                    .verbose_instrument_await("upload")
-                    .await
-                    .map_err(HummockError::sstable_upload_error)??;
-                if let Some(tracker) = tracker_cloned {
-                    tracker.inc_ssts_uploaded();
-                    tracker
-                        .num_pending_write_io
-                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                }
-                if is_share_buffer_compact {
-                    compactor_metrics_cloned
-                        .shared_buffer_to_sstable_size
-                        .observe(sst_size as _);
-                } else {
-                    compactor_metrics_cloned.compaction_upload_sst_counts.inc();
-                }
-                Ok::<_, HummockError>(())
-            });
-        }
-
-        // Check if there are any failed uploads. Report all of those SSTs.
-        try_join_all(upload_join_handles)
-            .verbose_instrument_await("join")
-            .await?;
         self.context
             .compactor_metrics
             .get_table_id_total_time_duration
@@ -263,6 +232,45 @@ impl Compactor {
             );
         }
         Ok((ssts, table_stats_map))
+    }
+
+    pub async fn report_progress(
+        metrics: Arc<CompactorMetrics>,
+        task_progress: Option<Arc<TaskProgress>>,
+        split_table_outputs: Vec<SplitTableOutput>,
+        is_share_buffer_compact: bool,
+    ) -> HummockResult<Vec<LocalSstableInfo>> {
+        let mut ssts = Vec::with_capacity(split_table_outputs.len());
+        let mut rets = vec![];
+
+        for SplitTableOutput {
+            sst_info,
+            upload_join_handle,
+        } in split_table_outputs
+        {
+            let sst_size = sst_info.file_size();
+            ssts.push(sst_info);
+            let ret = upload_join_handle
+                .verbose_instrument_await("upload")
+                .await
+                .map_err(HummockError::sstable_upload_error);
+            rets.push(ret);
+            if let Some(tracker) = &task_progress {
+                tracker.inc_ssts_uploaded();
+                tracker
+                    .num_pending_write_io
+                    .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            if is_share_buffer_compact {
+                metrics.shared_buffer_to_sstable_size.observe(sst_size as _);
+            } else {
+                metrics.compaction_upload_sst_counts.inc();
+            }
+        }
+        for ret in rets {
+            ret??;
+        }
+        Ok(ssts)
     }
 
     async fn compact_key_range_impl<F: SstableWriterFactory, B: FilterBuilder>(
@@ -610,7 +618,6 @@ pub fn start_compactor(
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, no_coverage)]
-#[allow(clippy::too_many_arguments)]
 pub fn start_shared_compactor(
     grpc_proxy_client: GrpcCompactorProxyClient,
     mut receiver: mpsc::UnboundedReceiver<Request<DispatchCompactionTaskRequest>>,

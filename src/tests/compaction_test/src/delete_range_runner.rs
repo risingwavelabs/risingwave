@@ -29,6 +29,7 @@ use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{extract_storage_memory_config, load_config, NoOverride, RwConfig};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -420,7 +421,7 @@ impl NormalState {
     async fn get_impl(&self, key: &[u8], ignore_range_tombstone: bool) -> Option<Bytes> {
         self.storage
             .get(
-                Bytes::copy_from_slice(key),
+                TableKey(Bytes::copy_from_slice(key)),
                 ReadOptions {
                     prefix_hint: None,
                     ignore_range_tombstone,
@@ -445,8 +446,8 @@ impl NormalState {
             .storage
             .iter(
                 (
-                    Bound::Included(Bytes::copy_from_slice(left)),
-                    Bound::Excluded(Bytes::copy_from_slice(right)),
+                    Bound::Included(TableKey(Bytes::copy_from_slice(left))),
+                    Bound::Excluded(TableKey(Bytes::copy_from_slice(right))),
                 ),
                 ReadOptions {
                     prefix_hint: None,
@@ -477,8 +478,8 @@ impl CheckState for NormalState {
             self.storage
                 .iter(
                     (
-                        Bound::Included(Bytes::copy_from_slice(left)),
-                        Bound::Excluded(Bytes::copy_from_slice(right)),
+                        Bound::Included(Bytes::copy_from_slice(left)).map(TableKey),
+                        Bound::Excluded(Bytes::copy_from_slice(right)).map(TableKey),
                     ),
                     ReadOptions {
                         prefix_hint: None,
@@ -496,7 +497,7 @@ impl CheckState for NormalState {
         let mut delete_item = Vec::new();
         while let Some(item) = iter.next().await {
             let (full_key, value) = item.unwrap();
-            delete_item.push((full_key.user_key.table_key.0, value));
+            delete_item.push((full_key.user_key.table_key, value));
         }
         drop(iter);
         for (key, value) in delete_item {
@@ -506,7 +507,11 @@ impl CheckState for NormalState {
 
     fn insert(&mut self, key: &[u8], val: &[u8]) {
         self.storage
-            .insert(Bytes::from(key.to_vec()), Bytes::copy_from_slice(val), None)
+            .insert(
+                TableKey(Bytes::from(key.to_vec())),
+                Bytes::copy_from_slice(val),
+                None,
+            )
             .unwrap();
     }
 

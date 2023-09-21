@@ -31,8 +31,7 @@ use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 use sync_point::sync_point;
 use tracing::Instrument;
 
-use super::memtable::{ImmId, ImmutableMemtable};
-use super::state_store::StagingDataIterator;
+use super::StagingDataIterator;
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
     ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
@@ -41,7 +40,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::store::state_store::HummockStorageIterator;
+use crate::hummock::store::HummockStorageIterator;
 use crate::hummock::utils::{
     check_subset_preserve_order, filter_single_sst, prune_nonoverlapping_ssts,
     prune_overlapping_ssts, range_overlap, search_sst_idx,
@@ -50,6 +49,7 @@ use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, Sstable,
     SstableDeleteRangeIterator, SstableIterator,
 };
+use crate::mem_table::{ImmId, ImmutableMemtable};
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
 };
@@ -112,7 +112,6 @@ impl StagingSstableInfo {
 
 #[derive(Clone)]
 pub enum StagingData {
-    // ImmMem(Arc<Memtable>),
     ImmMem(ImmutableMemtable),
     MergedImmMem(ImmutableMemtable),
     Sst(StagingSstableInfo),

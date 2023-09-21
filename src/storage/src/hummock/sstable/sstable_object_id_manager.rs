@@ -201,7 +201,7 @@ impl GetObjectId for Arc<SstableObjectIdManager> {
 
 struct SharedComapctorObjectIdManagerCore {
     output_object_ids: VecDeque<u64>,
-    client: GrpcCompactorProxyClient,
+    client: Option<GrpcCompactorProxyClient>,
     sstable_id_remote_fetch_number: u32,
 }
 impl SharedComapctorObjectIdManagerCore {
@@ -212,8 +212,16 @@ impl SharedComapctorObjectIdManagerCore {
     ) -> Self {
         Self {
             output_object_ids,
-            client,
+            client: Some(client),
             sstable_id_remote_fetch_number,
+        }
+    }
+
+    pub fn for_test(output_object_ids: VecDeque<u64>) -> Self {
+        Self {
+            output_object_ids,
+            client: None,
+            sstable_id_remote_fetch_number: 0,
         }
     }
 }
@@ -239,6 +247,14 @@ impl SharedComapctorObjectIdManager {
             )),
         }
     }
+
+    pub fn for_test(output_object_ids: VecDeque<u64>) -> Self {
+        Self {
+            core: Arc::new(tokio::sync::Mutex::new(
+                SharedComapctorObjectIdManagerCore::for_test(output_object_ids),
+            )),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -254,7 +270,13 @@ impl GetObjectId for SharedComapctorObjectIdManager {
             let request = GetNewSstIdsRequest {
                 number: core.sstable_id_remote_fetch_number,
             };
-            match core.client.get_new_sst_ids(request).await {
+            match core
+                .client
+                .as_mut()
+                .expect("GrpcCompactorProxyClient is None")
+                .get_new_sst_ids(request)
+                .await
+            {
                 Ok(response) => {
                     let resp = response.into_inner();
                     let start_id = resp.start_id;

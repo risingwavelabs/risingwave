@@ -30,4 +30,12 @@ pub trait FilterBuilder: Send {
     fn switch_block(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) {}
     /// approximate memory when finish filter
     fn approximate_building_memory(&self) -> usize;
+
+    /// Add raw data which build by keys directly. Please make sure that you have finished the last
+    /// block by calling `switch_block`
+    fn add_raw_data(&mut self, _raw: Vec<u8>) {}
+
+    fn support_blocked_raw_data(&self) -> bool {
+        false
+    }
 }

@@ -510,9 +510,9 @@ struct UserFunctionAttr {
     async_: bool,
     /// Whether contains argument `&Context`.
     context: bool,
-    /// The last argument type is `&mut dyn Write`.
+    /// Whether contains argument `&mut impl Write`.
     write: bool,
-    /// The last argument type is `retract: bool`.
+    /// Whether the last argument type is `retract: bool`.
     retract: bool,
     /// The argument type are `Option`s.
     arg_option: bool,
