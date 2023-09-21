@@ -113,11 +113,18 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     }
 }
 
+// TODO: make this an extension, or implement it on a `NonStrict` newtype.
 impl dyn Expression {
+    /// Evaluate the expression in vectorized execution and assert it succeeds. Returns an array.
+    ///
+    /// Use with expressions built in non-strict mode.
     pub async fn eval_infallible(&self, input: &DataChunk) -> ArrayRef {
         self.eval(input).await.expect("evaluation failed")
     }
 
+    /// Evaluate the expression in row-based execution and assert it succeeds. Returns a nullable scalar.
+    ///
+    /// Use with expressions built in non-strict mode.
     pub async fn eval_row_infallible(&self, input: &OwnedRow) -> Datum {
         self.eval_row(input).await.expect("evaluation failed")
     }
@@ -153,16 +160,6 @@ impl Expression for BoxedExpression {
         self
     }
 }
-
-/// Controls the behavior when a compute error happens.
-///
-/// - If set to `false`, `NULL` will be inserted.
-/// - TODO: If set to `true`, The MV will be suspended and removed from further checkpoints. It can
-///   still be used to serve outdated data without corruption.
-///
-/// See also <https://github.com/risingwavelabs/risingwave/issues/4625>.
-#[allow(dead_code)]
-const STRICT_MODE: bool = false;
 
 /// An optional context that can be used in a function.
 ///

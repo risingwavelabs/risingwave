@@ -68,7 +68,7 @@ impl AggCall {
             })
             .collect();
         let filter = match agg_call.filter {
-            Some(ref pb_filter) => Some(build_from_prost(pb_filter)?.into()),
+            Some(ref pb_filter) => Some(build_from_prost(pb_filter)?.into()), /* TODO: non-strict filter in streaming */
             None => None,
         };
         let direct_args = agg_call
