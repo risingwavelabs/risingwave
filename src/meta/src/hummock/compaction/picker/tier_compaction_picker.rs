@@ -14,6 +14,8 @@
 
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::can_concat;
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
@@ -68,7 +70,7 @@ impl TierCompactionPicker {
                 continue;
             }
 
-            let input_level = InputLevel {
+            let mut input_level = InputLevel {
                 level_idx: 0,
                 level_type: level.level_type,
                 table_infos: level.table_infos.clone(),

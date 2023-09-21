@@ -191,83 +191,6 @@ impl Compactor {
 
         compact_timer.observe_duration();
 
-        let mut ssts = Vec::with_capacity(split_table_outputs.len());
-        let mut upload_join_handles = vec![];
-
-        for SplitTableOutput {
-            sst_info,
-            writer_output,
-            bloom_filter_size,
-            avg_key_size,
-            avg_value_size,
-            epoch_count,
-        } in split_table_outputs
-        {
-            if bloom_filter_size != 0 {
-                self.context
-                    .compactor_metrics
-                    .sstable_bloom_filter_size
-                    .observe(bloom_filter_size as _);
-            }
-
-            if sst_info.file_size() != 0 {
-                self.context
-                    .compactor_metrics
-                    .sstable_file_size
-                    .observe(sst_info.file_size() as _);
-            }
-
-            if avg_key_size != 0 {
-                self.context
-                    .compactor_metrics
-                    .sstable_avg_key_size
-                    .observe(avg_key_size as _);
-            }
-
-            if avg_value_size != 0 {
-                self.context
-                    .compactor_metrics
-                    .sstable_avg_value_size
-                    .observe(avg_value_size as _);
-            }
-
-            if epoch_count != 0 {
-                self.context
-                    .compactor_metrics
-                    .sstable_distinct_epoch_count
-                    .observe(epoch_count as _);
-            }
-            let sst_size = sst_info.file_size();
-            ssts.push(sst_info);
-
-            let tracker_cloned = task_progress.clone();
-            let context_cloned = self.context.clone();
-            upload_join_handles.push(async move {
-                writer_output
-                    .verbose_instrument_await("upload")
-                    .await
-                    .map_err(HummockError::sstable_upload_error)??;
-                if let Some(tracker) = tracker_cloned {
-                    tracker.inc_ssts_uploaded();
-                    tracker
-                        .num_pending_write_io
-                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                }
-                if context_cloned.is_share_buffer_compact {
-                    context_cloned
-                        .compactor_metrics
-                        .shared_buffer_to_sstable_size
-                        .observe(sst_size as _);
-                } else {
-                    context_cloned
-                        .compactor_metrics
-                        .compaction_upload_sst_counts
-                        .inc();
-                }
-                Ok::<_, HummockError>(())
-            });
-        }
-
         let ssts = Self::report_progress(
             self.context.compactor_metrics.clone(),
             task_progress,
@@ -305,15 +228,41 @@ impl Compactor {
     ) -> HummockResult<Vec<LocalSstableInfo>> {
         let mut ssts = Vec::with_capacity(split_table_outputs.len());
         let mut rets = vec![];
-
         for SplitTableOutput {
             sst_info,
-            upload_join_handle,
+            writer_output,
+            bloom_filter_size,
+            avg_key_size,
+            avg_value_size,
+            epoch_count,
         } in split_table_outputs
         {
+            if bloom_filter_size != 0 {
+                metrics
+                    .sstable_bloom_filter_size
+                    .observe(bloom_filter_size as _);
+            }
+
+            if sst_info.file_size() != 0 {
+                metrics.sstable_file_size.observe(sst_info.file_size() as _);
+            }
+
+            if avg_key_size != 0 {
+                metrics.sstable_avg_key_size.observe(avg_key_size as _);
+            }
+
+            if avg_value_size != 0 {
+                metrics.sstable_avg_value_size.observe(avg_value_size as _);
+            }
+
+            if epoch_count != 0 {
+                metrics
+                    .sstable_distinct_epoch_count
+                    .observe(epoch_count as _);
+            }
             let sst_size = sst_info.file_size();
             ssts.push(sst_info);
-            let ret = upload_join_handle
+            let ret = writer_output
                 .verbose_instrument_await("upload")
                 .await
                 .map_err(HummockError::sstable_upload_error);

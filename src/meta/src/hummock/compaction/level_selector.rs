@@ -738,6 +738,7 @@ impl LevelSelector for EmergencySelector {
             compaction_input.add_pending_task(task_id, level_handlers);
 
             return Some(create_compaction_task(
+                task_id,
                 group.compaction_config.as_ref(),
                 compaction_input,
                 ctx.base_level,

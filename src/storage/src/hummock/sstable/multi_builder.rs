@@ -29,8 +29,8 @@ use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BatchUploadWriter, BlockMeta,  CachePolicy, HummockResult, MemoryLimiter, SplitTableOutput, SstableBuilder,
-    SstableBuilderOptions, SstableWriter, SstableWriterOptions, Xor16FilterBuilder,
+    BatchUploadWriter, BlockMeta, CachePolicy, HummockResult, MemoryLimiter, SplitTableOutput,
+    SstableBuilder, SstableBuilderOptions, SstableWriter, SstableWriterOptions, Xor16FilterBuilder,
 };
 
 pub type UploadJoinHandle = JoinHandle<HummockResult<()>>;

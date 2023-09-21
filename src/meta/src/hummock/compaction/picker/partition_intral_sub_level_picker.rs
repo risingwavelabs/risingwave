@@ -24,26 +24,11 @@ use risingwave_pb::hummock::{
     CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel, SstableInfo,
 };
 
-use crate::hummock::compaction::create_overlap_strategy;
 use crate::hummock::compaction::picker::{
-    CompactionInput, CompactionPicker, LocalPickerStatistic, TrivialMovePicker,
+    CompactionInput, CompactionPicker, LocalPickerStatistic, PartitionLevelInfo, TrivialMovePicker,
 };
+use crate::hummock::compaction::{create_overlap_strategy, LevelPartition};
 use crate::hummock::level_handler::LevelHandler;
-
-#[derive(Default, Clone, Debug)]
-pub struct PartitionLevelInfo {
-    pub level_id: u32,
-    pub sub_level_id: u64,
-    pub left_idx: usize,
-    pub right_idx: usize,
-    pub total_file_size: u64,
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct LevelPartition {
-    pub sub_levels: Vec<PartitionLevelInfo>,
-    pub total_file_size: u64,
-}
 
 pub struct PartitionIntraSubLevelPicker {
     config: Arc<CompactionConfig>,

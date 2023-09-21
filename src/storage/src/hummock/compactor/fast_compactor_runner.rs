@@ -324,9 +324,7 @@ impl CompactorRunner {
         };
         let sst_builder = CapacitySplitTableBuilder::new(
             builder_factory,
-            context.compactor_metrics.clone(),
             Some(task_progress.clone()),
-            task_config.is_target_l0_or_lbase,
             task_config.split_by_table,
             task_config.split_weight_by_vnode,
         );
