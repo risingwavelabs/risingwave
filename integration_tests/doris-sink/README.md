@@ -5,10 +5,7 @@ In this demo, we want to showcase how RisingWave is able to sink data to Doris.
 1. Modify max_map_count
 
 ```sh
-# linux
 sysctl -w vm.max_map_count=2000000
-# Macos
-docker run -it --privileged --pid=host --name=change_count debian nsenter -t 1 -m -u -n -i sh
 ```
 
 If, after running these commands, Docker still encounters Doris startup errors, please refer to: https://doris.apache.org/docs/dev/install/construct-docker/run-docker-cluster

@@ -264,7 +264,10 @@ fn datum_to_json_object(
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::types::{DataType, Interval, ScalarImpl, Time, Timestamp};
+    use risingwave_common::types::{
+        DataType, Date, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue, Time,
+        Timestamp,
+    };
 
     use super::*;
     #[test]
@@ -275,6 +278,7 @@ mod tests {
             sub_fields: Default::default(),
             type_name: Default::default(),
         };
+
         let boolean_value = datum_to_json_object(
             &Field {
                 data_type: DataType::Boolean,
@@ -377,7 +381,7 @@ mod tests {
         let interval_value = datum_to_json_object(
             &Field {
                 data_type: DataType::Interval,
-                ..mock_field
+                ..mock_field.clone()
             },
             Some(
                 ScalarImpl::Interval(Interval::from_month_day_usec(13, 2, 1000000))
@@ -388,5 +392,54 @@ mod tests {
         )
         .unwrap();
         assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));
+
+        let mut map = HashMap::default();
+        map.insert("aaa".to_string(), (10_u8, 5_u8));
+        let decimal = datum_to_json_object(
+            &Field {
+                data_type: DataType::Decimal,
+                name: "aaa".to_string(),
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Decimal(Decimal::try_from(1.1111111).unwrap()).as_scalar_ref_impl()),
+            TimestampHandlingMode::String,
+            &CustomJsonType::Doris(map),
+        )
+        .unwrap();
+        assert_eq!(decimal, json!("1.11111"));
+
+        let date_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Date,
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Date(Date::from_ymd_uncheck(2010, 10, 10)).as_scalar_ref_impl()),
+            TimestampHandlingMode::String,
+            &CustomJsonType::Doris(HashMap::default()),
+        )
+        .unwrap();
+        assert_eq!(date_value, json!("2010-10-10"));
+
+        let value = StructValue::new(vec![
+            Some(3_i32.to_scalar_value()),
+            Some(2_i32.to_scalar_value()),
+            Some(1_i32.to_scalar_value()),
+        ]);
+
+        let interval_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Struct(StructType::new(vec![
+                    ("v3", DataType::Int32),
+                    ("v2", DataType::Int32),
+                    ("v1", DataType::Int32),
+                ])),
+                ..mock_field.clone()
+            },
+            Some(ScalarRefImpl::Struct(StructRef::ValueRef { val: &value })),
+            TimestampHandlingMode::String,
+            &CustomJsonType::Doris(HashMap::default()),
+        )
+        .unwrap();
+        assert_eq!(interval_value, json!("{\"v3\":3,\"v2\":2,\"v1\":1}"));
     }
 }
