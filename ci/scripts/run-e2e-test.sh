@@ -168,12 +168,7 @@ fi
 
 if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     echo "--- e2e, ci-meta-backup-test"
-    download-and-decompress-artifact backup-restore-"$profile" target/debug/
-    mv target/debug/backup-restore-"$profile" target/debug/backup-restore
-    chmod +x ./target/debug/backup-restore
-
     test_root="src/storage/backup/integration_tests"
-    BACKUP_TEST_BACKUP_RESTORE="target/debug/backup-restore" \
     BACKUP_TEST_MCLI=".risingwave/bin/mcli" \
     BACKUP_TEST_MCLI_CONFIG=".risingwave/config/mcli" \
     BACKUP_TEST_RW_ALL_IN_ONE="target/debug/risingwave" \
