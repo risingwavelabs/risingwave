@@ -79,7 +79,6 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         } else {
             Ok(MergeExecutor::new(
                 schema,
-                cdc_upstream,
                 params.pk_indices,
                 actor_context,
                 params.fragment_id,

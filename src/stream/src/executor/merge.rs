@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::LazyCell;
 use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -21,16 +20,7 @@ use anyhow::anyhow;
 use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
-use risingwave_common::row::{Row, RowExt};
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::parser::{
-    DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties,
-    SourceStreamChunkBuilder, SpecificParserConfig,
-};
-use risingwave_connector::sink::encoder::{JsonEncoder, RowEncoder, SerTo, TimestampHandlingMode};
-use risingwave_connector::source::{SourceColumnDesc, SourceContext};
+use risingwave_common::catalog::Schema;
 use tokio::time::Instant;
 
 use super::error::StreamExecutorError;
@@ -59,8 +49,6 @@ pub struct MergeExecutor {
     /// Logical Operator Info
     info: ExecutorInfo,
 
-    cdc_upstream: bool,
-
     /// Shared context of the stream manager.
     context: Arc<SharedContext>,
 
@@ -72,7 +60,6 @@ impl MergeExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         schema: Schema,
-        cdc_upstream: bool,
         pk_indices: PkIndices,
         ctx: ActorContextRef,
         fragment_id: FragmentId,
@@ -93,7 +80,6 @@ impl MergeExecutor {
                 pk_indices,
                 identity: format!("MergeExecutor {:X}", executor_id),
             },
-            cdc_upstream,
             context,
             metrics,
         }
@@ -106,7 +92,6 @@ impl MergeExecutor {
 
         Self::new(
             schema,
-            false,
             vec![],
             ActorContext::create(114),
             514,
@@ -123,21 +108,6 @@ impl MergeExecutor {
         )
     }
 
-    fn get_rw_columns(schema: &Schema) -> Vec<SourceColumnDesc> {
-        schema
-            .fields
-            .iter()
-            .map(|field| {
-                let column_desc = ColumnDesc::named(
-                    field.name.clone(),
-                    ColumnId::placeholder(),
-                    field.data_type.clone(),
-                );
-                SourceColumnDesc::from(&column_desc)
-            })
-            .collect_vec()
-    }
-
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
         // Futures of all active upstreams.
@@ -145,27 +115,6 @@ impl MergeExecutor {
         let actor_id = self.actor_context.id;
         let actor_id_str = actor_id.to_string();
         let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
-
-        let mut parser = if self.cdc_upstream {
-            let props = SpecificParserConfig {
-                key_encoding_config: None,
-                encoding_config: EncodingProperties::Json(JsonProperties {
-                    use_schema_registry: false,
-                }),
-                protocol_config: ProtocolProperties::Debezium,
-            };
-            Some(
-                DebeziumParser::new(
-                    props,
-                    Self::get_rw_columns(&self.info.schema),
-                    Arc::new(SourceContext::default()),
-                )
-                .await
-                .map_err(|err| StreamExecutorError::connector_error(err))?,
-            )
-        } else {
-            None
-        };
 
         // Channels that're blocked by the barrier to align.
         let mut start_time = Instant::now();
@@ -186,68 +135,6 @@ impl MergeExecutor {
                         .actor_in_record_cnt
                         .with_label_values(&[&actor_id_str])
                         .inc_by(chunk.cardinality() as _);
-
-                    if self.cdc_upstream && let Some(parser) = parser.as_mut() {
-                        let props = SpecificParserConfig {
-                            key_encoding_config: None,
-                            encoding_config: EncodingProperties::Json(JsonProperties {
-                                use_schema_registry: false,
-                            }),
-                            protocol_config: ProtocolProperties::Debezium,
-                        };
-
-                        // here we transform the input chunk in [jsonb, varchar] schema to chunk with downstream table schema
-                        // `info.schema` of MergeNode contains the schema of the table job with `_rw_offset` in the end
-                        //  see `gen_create_table_plan_for_cdc_source` for details
-                        let column_descs = Self::get_rw_columns(&self.info.schema);
-                        let mut builder =
-                            SourceStreamChunkBuilder::with_capacity(column_descs, chunk.capacity());
-                        let encoder =
-                            JsonEncoder::new(&self.info.schema, None, TimestampHandlingMode::Milli);
-
-                        // The schema of input chunk [jsonb, _rw_offset]
-                        // We should use the debezium parser to parse the first column,
-                        // then chain the parsed row with _rw_offset row to a new rows.
-                        let data_columns = chunk.data_chunk().project(vec![0].as_slice());
-                        let offset_columns = chunk.data_chunk().project(vec![1].as_slice());
-                        for row in data_columns.rows() {
-                            let json_record = encoder.encode(row)?;
-                            let payload: Vec<u8> = json_record.ser_to()?;
-                            // TODO: preserve the transaction semantics
-                            parser
-                                .parse_inner(None, Some(payload), builder.row_writer())
-                                .await
-                                .unwrap();
-                        }
-
-                        let parsed_chunk = builder.finish();
-                        let (data_chunk, ops) = parsed_chunk.into_parts();
-
-                        // concat the rows in the parsed chunk with the _rw_offset column, we should also retain the Op column
-                        let mut new_rows = Vec::with_capacity(chunk.capacity());
-                        for (data_row, offset_row) in data_chunk
-                            .rows_with_holes()
-                            .zip_eq_fast(offset_columns.rows_with_holes())
-                        {
-                            let combined = data_row.chain(offset_row);
-                            new_rows.push(combined);
-                        }
-
-                        let data_types = self
-                            .info
-                            .schema
-                            .fields
-                            .iter()
-                            .map(|field| field.data_type.clone())
-                            .collect_vec();
-                        let mut transformed_chunk = StreamChunk::from_parts(
-                            ops,
-                            DataChunk::from_rows(new_rows.as_slice(), data_types.as_slice()),
-                        );
-
-                        // TODO: is it safe to swap the chunk?
-                        std::mem::swap(chunk, &mut transformed_chunk);
-                    }
                 }
                 Message::Barrier(barrier) => {
                     tracing::trace!(

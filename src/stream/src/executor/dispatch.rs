@@ -939,6 +939,7 @@ mod tests {
             vec![0, 1, 2],
             hash_mapping,
             0,
+            None,
         );
 
         let chunk = StreamChunk::from_pretty(
@@ -1174,6 +1175,7 @@ mod tests {
             (0..dimension).collect(),
             hash_mapping.clone(),
             0,
+            None,
         );
 
         let mut ops = Vec::new();

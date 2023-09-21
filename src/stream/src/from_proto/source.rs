@@ -184,6 +184,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             pk_indices,
                             params.executor_stats,
                             source_state_handler,
+                            false,
                             source_ctrl_opts.chunk_size
                         );
                         cdc_backfill.boxed()
