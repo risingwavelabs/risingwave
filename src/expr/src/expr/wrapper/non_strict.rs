@@ -24,7 +24,7 @@ use crate::ExprError;
 
 /// Report an error during evaluation.
 #[auto_impl(Arc)]
-pub trait EvalErrorReport: Send + Sync {
+pub trait EvalErrorReport: Clone + Send + Sync {
     /// Perform the error reporting.
     ///
     /// Called when an error occurs during row-level evaluation of a non-strict expression,

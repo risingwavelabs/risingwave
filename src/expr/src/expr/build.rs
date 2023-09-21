@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::iter::Peekable;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -44,7 +43,7 @@ pub fn build_non_strict_from_prost(
     prost: &ExprNode,
     error_report: impl EvalErrorReport + 'static,
 ) -> Result<BoxedExpression> {
-    ExprBuilder::new_non_strict(Arc::new(error_report)).build(prost)
+    ExprBuilder::new_non_strict(error_report).build(prost)
 }
 
 /// Build an expression from protobuf with possibly some wrappers attached to each node.
@@ -65,7 +64,7 @@ impl ExprBuilder<!> {
 
 impl<R> ExprBuilder<R>
 where
-    R: EvalErrorReport + Clone + 'static,
+    R: EvalErrorReport + 'static,
 {
     /// Create a new builder in non-strict mode with the given error reporting.
     fn new_non_strict(error_report: R) -> Self {
@@ -74,10 +73,8 @@ where
         }
     }
 
-    /// Build an expression with `build_inner` and attach some wrappers.
-    fn build(&self, prost: &ExprNode) -> Result<BoxedExpression> {
-        let expr = self.build_inner(prost)?;
-
+    /// Attach wrappers to an expression.
+    fn wrap(&self, expr: impl Expression + 'static) -> BoxedExpression {
         let checked = Checked(expr);
 
         let may_non_strict = if let Some(error_report) = &self.error_report {
@@ -86,7 +83,13 @@ where
             checked.boxed()
         };
 
-        Ok(may_non_strict)
+        may_non_strict
+    }
+
+    /// Build an expression with `build_inner` and attach some wrappers.
+    fn build(&self, prost: &ExprNode) -> Result<BoxedExpression> {
+        let expr = self.build_inner(prost)?;
+        Ok(self.wrap(expr))
     }
 
     /// Build an expression from protobuf.
@@ -210,7 +213,27 @@ pub fn build_func(
                 }
             ))
         })?;
+
     (desc.build)(ret_type, children)
+}
+
+/// Build an expression in `FuncCall` variant in non-strict mode.
+///
+/// Note: This is a workaround, and only the uppermost children nodes and the root node are wrapped
+/// in non-strict mode. Prefer [`build_non_strict_from_prost`] if possible.
+pub fn build_func_non_strict(
+    func: PbType,
+    ret_type: DataType,
+    children: Vec<BoxedExpression>,
+    error_report: impl EvalErrorReport + 'static,
+) -> Result<BoxedExpression> {
+    let builder = ExprBuilder::new_non_strict(error_report);
+
+    let children = children.into_iter().map(|e| builder.wrap(e)).collect();
+    let expr = build_func(func, ret_type, children)?;
+    let wrapped = builder.wrap(expr);
+
+    Ok(wrapped)
 }
 
 pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNode], DataType)> {
