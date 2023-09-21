@@ -249,6 +249,8 @@ impl DdlService for DdlServiceImpl {
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
+
+        println!("req {:#?}", req);
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
 
@@ -259,6 +261,7 @@ impl DdlService for DdlServiceImpl {
 
         let mut stream_job = StreamingJob::Sink(sink);
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+
         stream_job.set_id(id);
 
         let version = self
