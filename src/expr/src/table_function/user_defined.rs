@@ -55,7 +55,7 @@ impl UserDefinedTableFunction {
         // evaluate children expressions
         let mut columns = Vec::with_capacity(self.children.len());
         for c in &self.children {
-            let val = c.eval_checked(input).await?;
+            let val = c.eval(input).await?;
             columns.push(val);
         }
         let direct_input = DataChunk::new(columns, input.visibility().clone());

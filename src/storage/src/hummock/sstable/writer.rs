@@ -25,6 +25,8 @@ pub trait SstableWriter: Send {
     /// Write an SST block to the writer.
     async fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()>;
 
+    async fn write_block_bytes(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()>;
+
     /// Finish writing the SST.
     async fn finish(self, meta: SstableMeta) -> HummockResult<Self::Output>;
 
@@ -57,6 +59,11 @@ impl SstableWriter for InMemWriter {
 
     async fn write_block(&mut self, block: &[u8], _meta: &BlockMeta) -> HummockResult<()> {
         self.buf.extend_from_slice(block);
+        Ok(())
+    }
+
+    async fn write_block_bytes(&mut self, block: Bytes, _meta: &BlockMeta) -> HummockResult<()> {
+        self.buf.extend_from_slice(&block);
         Ok(())
     }
 
@@ -94,7 +101,7 @@ mod tests {
                 smallest_key: Vec::new(),
                 len: 1000,
                 offset: i * 1000,
-                uncompressed_size: 0, // dummy value
+                ..Default::default()
             });
             blocks.push(data.slice((i * 1000) as usize..((i + 1) * 1000) as usize));
         }

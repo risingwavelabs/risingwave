@@ -8,6 +8,12 @@ import "common.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
+enum BloomFilterType {
+  BLOOM_FILTER_UNSPECIFIED = 0;
+  SSTABLE = 1;
+  BLOCKED = 2;
+}
+
 message SstableInfo {
   uint64 object_id = 1;
   uint64 sst_id = 2;
@@ -21,6 +27,7 @@ message SstableInfo {
   uint64 max_epoch = 10;
   uint64 uncompressed_file_size = 11;
   uint64 range_tombstone_count = 12;
+  BloomFilterType bloom_filter_kind = 13;
 }
 
 enum LevelType {
