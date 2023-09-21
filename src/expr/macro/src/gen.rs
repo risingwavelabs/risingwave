@@ -80,7 +80,7 @@ impl FunctionAttr {
         };
         let deprecated = self.deprecated;
         Ok(quote! {
-            #[risingwave_expr::ctor]
+            #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { risingwave_expr::sig::func::_register(#descriptor_type {
@@ -502,7 +502,7 @@ impl FunctionAttr {
             self.generate_agg_build_fn(user_fn)?
         };
         Ok(quote! {
-            #[risingwave_expr::ctor]
+            #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { risingwave_expr::sig::agg::_register(#descriptor_type {
@@ -783,7 +783,7 @@ impl FunctionAttr {
             quote! { |_| Ok(#ty) }
         };
         Ok(quote! {
-            #[risingwave_expr::ctor]
+            #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { risingwave_expr::sig::table_function::_register(#descriptor_type {
@@ -902,7 +902,9 @@ impl FunctionAttr {
                 use risingwave_common::types::*;
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::util::iter_util::ZipEqFast;
-                use itertools::multizip;
+                use risingwave_expr::expr::BoxedExpression;
+                use risingwave_expr::{Result, ExprError};
+                use risingwave_expr::codegen::*;
 
                 risingwave_expr::ensure!(children.len() == #num_args);
                 let mut iter = children.into_iter();
