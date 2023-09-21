@@ -431,6 +431,14 @@ impl DataType {
         }
         d
     }
+
+    /// Compares the datatype with another, ignoring nested field names and metadata.
+    pub fn equals_datatype(&self, other: &DataType) -> bool {
+        match (self, other) {
+            (Self::Struct(s1), Self::Struct(s2)) => s1.equals_datatype(s2),
+            _ => self == other,
+        }
+    }
 }
 
 impl From<DataType> for PbDataType {
