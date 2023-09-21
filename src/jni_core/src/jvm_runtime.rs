@@ -275,6 +275,20 @@ fn register_native_method_for_jvm(jvm: &JavaVM) {
                 fn_ptr: crate::Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToChannel
                     as *mut c_void,
             },
+            NativeMethod {
+                name: JNIString::from("recvSinkWriterRequestFromChannel"),
+                sig: JNIString::from("(J)[B"),
+                fn_ptr:
+                    crate::Java_com_risingwave_java_binding_Binding_recvSinkWriterRequestFromChannel
+                        as *mut c_void,
+            },
+            NativeMethod {
+                name: JNIString::from("sendSinkWriterResponseToChannel"),
+                sig: JNIString::from("(J[B)Z"),
+                fn_ptr:
+                    crate::Java_com_risingwave_java_binding_Binding_sendSinkWriterResponseToChannel
+                        as *mut c_void,
+            },
         ],
     )
     .inspect_err(|e| tracing::error!("jvm register native methods error: {:?}", e))
