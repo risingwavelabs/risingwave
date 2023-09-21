@@ -6,9 +6,9 @@
     cargo run -- generate MIGRATION_NAME
     cargo run -- up
     ```
-  - Define tables, indexes, foreign keys in the file. The new generated file will include a sample migration script, 
-  you can replace it with your own migration scripts, like defining or changing tables, indexes, foreign keys and other 
-  dml operation to do data correctness etc. Check [writing-migration](https://www.sea-ql.org/SeaORM/docs/migration/writing-migration/) 
+  - Define tables, indexes, foreign keys in the file. The new generated file will include a sample migration script,
+  you can replace it with your own migration scripts, like defining or changing tables, indexes, foreign keys and other
+  dml operation to do data correctness etc. Check [writing-migration](https://www.sea-ql.org/SeaORM/docs/migration/writing-migration/)
   for more details.
   ```rust
     #[async_trait::async_trait]
@@ -30,13 +30,13 @@
     sea-orm-cli generate entity -u postgres://postgres:@localhost:5432/postgres -s public -o {target_dir}
     cp {target_dir}/xxx.rs src/meta/src/model_v2/
     ```
-- Defines enum and array types in the model files, since they're basically only supported in PG, and we need to 
+- Defines enum and array types in the model files, since they're basically only supported in PG, and we need to
   define them in the model files manually. For example:
   ```rust
   // We define integer array typed fields as json and derive it using the follow one.
   #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Eq, Serialize, Deserialize, Default)]
   pub struct I32Array(pub Vec<i32>);
-  
+
   // We define enum typed fields as string and derive it using the follow one.
   #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
   #[sea_orm(rs_type = "String", db_type = "String(None)")]
