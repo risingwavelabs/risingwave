@@ -40,7 +40,7 @@ impl Expression for FieldExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let array = self.input.eval_checked(input).await?;
+        let array = self.input.eval(input).await?;
         if let ArrayImpl::Struct(struct_array) = array.as_ref() {
             Ok(struct_array.field_at(self.index).clone())
         } else {
