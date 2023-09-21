@@ -256,6 +256,7 @@ mod tests {
     use crate::manager::MetaSrvEnv;
 
     #[tokio::test]
+    #[cfg(not(madsim))]
     async fn test_system_params() {
         let env = MetaSrvEnv::for_test().await;
         let meta_store = env.sql_meta_store().unwrap();

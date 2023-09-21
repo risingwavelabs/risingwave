@@ -365,6 +365,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[cfg(not(madsim))]
     async fn test_create_database() {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).unwrap();
         let db = PbDatabase {

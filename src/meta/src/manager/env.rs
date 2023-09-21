@@ -357,7 +357,11 @@ impl MetaSrvEnv {
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store = MemStore::default().into_ref();
-        let sql_meta_store = SqlMetaStore::for_test().await;
+        #[cfg(madsim)]
+        let meta_store_sql: Option<SqlMetaStore> = None;
+        #[cfg(not(madsim))]
+        let meta_store_sql = Some(SqlMetaStore::for_test().await);
+
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -373,20 +377,24 @@ impl MetaSrvEnv {
             .await
             .unwrap(),
         );
-        let system_params_controller = Some(Arc::new(
-            SystemParamsController::new(
-                sql_meta_store.clone(),
-                notification_manager.clone(),
-                risingwave_common::system_param::system_params_for_test(),
-            )
-            .await
-            .unwrap(),
-        ));
+        let system_params_controller = if let Some(store) = &meta_store_sql {
+            Some(Arc::new(
+                SystemParamsController::new(
+                    store.clone(),
+                    notification_manager.clone(),
+                    risingwave_common::system_param::system_params_for_test(),
+                )
+                .await
+                .unwrap(),
+            ))
+        } else {
+            None
+        };
 
         Self {
             id_gen_manager,
             meta_store,
-            meta_store_sql: Some(sql_meta_store),
+            meta_store_sql,
             notification_manager,
             stream_client_pool,
             idle_manager,
