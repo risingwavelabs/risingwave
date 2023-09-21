@@ -265,6 +265,15 @@ pub struct KafkaSink {
     sink_from_name: String,
 }
 
+impl TryFrom<SinkParam> for KafkaSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let config = KafkaConfig::from_hashmap(param.properties.clone())?;
+        Ok(KafkaSink::new(config, param))
+    }
+}
+
 impl KafkaSink {
     pub fn new(config: KafkaConfig, param: SinkParam) -> Self {
         Self {
@@ -278,10 +287,11 @@ impl KafkaSink {
     }
 }
 
-#[async_trait::async_trait]
 impl Sink for KafkaSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = SinkWriterV1Adapter<KafkaSinkWriter>;
+
+    const SINK_NAME: &'static str = KAFKA_SINK;
 
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
         Ok(SinkWriterV1Adapter::new(

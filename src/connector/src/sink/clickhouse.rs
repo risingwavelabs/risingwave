@@ -32,7 +32,8 @@ use serde_with::serde_as;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::common::ClickHouseCommon;
 use crate::sink::{
-    Result, Sink, SinkError, SinkWriter, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Result, Sink, SinkError, SinkParam, SinkWriter, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT,
 };
 
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
@@ -53,6 +54,21 @@ pub struct ClickHouseSink {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+}
+
+impl TryFrom<SinkParam> for ClickHouseSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = ClickHouseConfig::from_hashmap(param.properties)?;
+        ClickHouseSink::new(
+            config,
+            schema,
+            param.downstream_pk,
+            param.sink_type.is_append_only(),
+        )
+    }
 }
 
 impl ClickHouseConfig {
@@ -174,10 +190,11 @@ impl ClickHouseSink {
         Ok(())
     }
 }
-#[async_trait::async_trait]
 impl Sink for ClickHouseSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = ClickHouseSinkWriter;
+
+    const SINK_NAME: &'static str = CLICKHOUSE_SINK;
 
     async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
         // For upsert clickhouse sink, the primary key must be defined.

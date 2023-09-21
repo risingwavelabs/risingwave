@@ -29,5 +29,5 @@ pub async fn validate_sink(
 
     let sink = build_sink(param)?;
 
-    dispatch_sink!(sink, sink, { Ok(sink.validate(connector_client).await?) })
+    dispatch_sink!(sink, sink, Ok(sink.validate(connector_client).await?))
 }

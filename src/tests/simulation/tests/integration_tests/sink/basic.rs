@@ -65,35 +65,6 @@ impl Drop for TestWriter {
     }
 }
 
-struct TestSink {
-    row_counter: Arc<AtomicUsize>,
-    parallelism_counter: Arc<AtomicUsize>,
-}
-
-#[async_trait]
-impl Sink for TestSink {
-    type Coordinator = BoxCoordinator;
-    type Writer = BoxWriter<()>;
-
-    async fn validate(
-        &self,
-        _client: Option<risingwave_rpc_client::ConnectorClient>,
-    ) -> risingwave_connector::sink::Result<()> {
-        Ok(())
-    }
-
-    async fn new_writer(
-        &self,
-        _writer_param: SinkWriterParam,
-    ) -> risingwave_connector::sink::Result<Self::Writer> {
-        self.parallelism_counter.fetch_add(1, Relaxed);
-        Ok(Box::new(TestWriter {
-            parallelism_counter: self.parallelism_counter.clone(),
-            row_counter: self.row_counter.clone(),
-        }))
-    }
-}
-
 #[tokio::test]
 async fn test_sink_basic() -> Result<()> {
     let config_path = {
@@ -121,11 +92,12 @@ async fn test_sink_basic() -> Result<()> {
     let _sink_guard = registry_build_sink({
         let row_counter = row_counter.clone();
         let parallelism_counter = parallelism_counter.clone();
-        move |_param| {
-            Ok(Box::new(TestSink {
+        move |_, _| {
+            parallelism_counter.fetch_add(1, Relaxed);
+            Box::new(TestWriter {
                 row_counter: row_counter.clone(),
                 parallelism_counter: parallelism_counter.clone(),
-            }))
+            })
         }
     });
 
@@ -193,11 +165,12 @@ async fn test_sink_decouple_basic() -> Result<()> {
     let _sink_guard = registry_build_sink({
         let row_counter = row_counter.clone();
         let parallelism_counter = parallelism_counter.clone();
-        move |_param| {
-            Ok(Box::new(TestSink {
+        move |_, _| {
+            parallelism_counter.fetch_add(1, Relaxed);
+            Box::new(TestWriter {
                 row_counter: row_counter.clone(),
                 parallelism_counter: parallelism_counter.clone(),
-            }))
+            })
         }
     });
 
