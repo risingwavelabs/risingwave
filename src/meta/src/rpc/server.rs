@@ -146,11 +146,6 @@ pub async fn rpc_serve(
                 .connect_timeout(Duration::from_secs(10))
                 .idle_timeout(Duration::from_secs(30));
             let conn = sea_orm::Database::connect(options).await?;
-            // Try to upgrade if any new model changes are added.
-            Migrator::up(&conn, None)
-                .await
-                .expect("Failed to upgrade models in meta store");
-
             Some(SqlMetaStore::new(conn))
         }
         None => None,
@@ -383,6 +378,13 @@ pub async fn start_service_as_election_leader(
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
+    if let Some(sql_store) = &meta_store_sql {
+        // Try to upgrade if any new model changes are added.
+        Migrator::up(&sql_store.conn, None)
+            .await
+            .expect("Failed to upgrade models in meta store");
+    }
+
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
     let env = MetaSrvEnv::new(
         opts.clone(),
