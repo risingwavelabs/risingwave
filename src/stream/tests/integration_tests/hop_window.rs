@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::cast::str_to_timestamp;
 use risingwave_common::types::test_utils::IntervalTestExt;
-use risingwave_common::types::Interval;
+use risingwave_common::types::{Interval, Timestamp};
 use risingwave_expr::expr::test_utils::make_hop_window_expression;
 use risingwave_stream::executor::{ExecutorInfo, HopWindowExecutor};
 
@@ -70,28 +69,28 @@ fn push_watermarks(tx: &mut MessageSender) {
     tx.push_watermark(
         TIME_COL_IDX,
         DataType::Timestamp,
-        str_to_timestamp("2023-07-06 18:27:03").unwrap().into(),
+        "2023-07-06 18:27:03".parse::<Timestamp>().unwrap().into(),
     );
     tx.push_watermark(
         TIME_COL_IDX,
         DataType::Timestamp,
-        str_to_timestamp("2023-07-06 18:29:59").unwrap().into(),
+        "2023-07-06 18:29:59".parse::<Timestamp>().unwrap().into(),
     );
     tx.push_watermark(
         TIME_COL_IDX,
         DataType::Timestamp,
-        str_to_timestamp("2023-07-06 18:30:00").unwrap().into(),
+        "2023-07-06 18:30:00".parse::<Timestamp>().unwrap().into(),
     );
     tx.push_watermark(0, DataType::Int64, 100.into());
     tx.push_watermark(
         TIME_COL_IDX,
         DataType::Timestamp,
-        str_to_timestamp("2023-07-06 18:43:40").unwrap().into(),
+        "2023-07-06 18:43:40".parse::<Timestamp>().unwrap().into(),
     );
     tx.push_watermark(
         TIME_COL_IDX,
         DataType::Timestamp,
-        str_to_timestamp("2023-07-06 18:50:00").unwrap().into(),
+        "2023-07-06 18:50:00".parse::<Timestamp>().unwrap().into(),
     );
 }
 

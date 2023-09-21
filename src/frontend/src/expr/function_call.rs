@@ -15,9 +15,8 @@
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::scalar::cast::literal_parsing;
 use thiserror::Error;
 
 use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
@@ -129,10 +128,7 @@ impl FunctionCall {
             let datum = literal
                 .get_data()
                 .as_ref()
-                .map(|scalar| {
-                    let s = scalar.as_utf8();
-                    literal_parsing(&target, s)
-                })
+                .map(|scalar| ScalarImpl::from_literal(scalar.as_utf8(), &target))
                 .transpose();
             if let Ok(datum) = datum {
                 *child = Literal::new(datum, target).into();

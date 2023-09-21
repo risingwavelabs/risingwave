@@ -18,52 +18,21 @@ use std::str::FromStr;
 use futures_util::FutureExt;
 use itertools::Itertools;
 use risingwave_common::array::{ListRef, ListValue, StructRef, StructValue};
-use risingwave_common::cast::{
-    parse_naive_date, parse_naive_datetime, parse_naive_time, str_to_bytea as str_to_bytea_common,
-};
+use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{
-    DataType, Date, Decimal, Int256, Interval, IntoOrdered, JsonbRef, ScalarImpl, Time, Timestamp,
-    Timestamptz, ToText, F32, F64,
-};
+use risingwave_common::types::{DataType, Int256, IntoOrdered, JsonbRef, ToText, F64};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{build_func, Context, Expression, InputRefExpression};
 use risingwave_expr::{function, ExprError, Result};
 use risingwave_pb::expr::expr_node::PbType;
 
-/// String literals for bool type.
-///
-/// See [`https://www.postgresql.org/docs/9.5/datatype-boolean.html`]
-const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes", "ye", "y"];
-const FALSE_BOOL_LITERALS: [&str; 10] = [
-    "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
-];
-
-#[function("cast(varchar) -> date")]
-pub fn str_to_date(elem: &str) -> Result<Date> {
-    Ok(Date::new(
-        parse_naive_date(elem).map_err(|err| ExprError::Parse(err.into()))?,
-    ))
-}
-
-#[function("cast(varchar) -> time")]
-pub fn str_to_time(elem: &str) -> Result<Time> {
-    Ok(Time::new(
-        parse_naive_time(elem).map_err(|err| ExprError::Parse(err.into()))?,
-    ))
-}
-
-#[function("cast(varchar) -> timestamp")]
-pub fn str_to_timestamp(elem: &str) -> Result<Timestamp> {
-    Ok(Timestamp::new(
-        parse_naive_datetime(elem).map_err(|err| ExprError::Parse(err.into()))?,
-    ))
-}
-
 #[function("cast(varchar) -> *int")]
 #[function("cast(varchar) -> decimal")]
 #[function("cast(varchar) -> *float")]
 #[function("cast(varchar) -> int256")]
+#[function("cast(varchar) -> date")]
+#[function("cast(varchar) -> time")]
+#[function("cast(varchar) -> timestamp")]
 #[function("cast(varchar) -> interval")]
 #[function("cast(varchar) -> jsonb")]
 pub fn str_parse<T>(elem: &str) -> Result<T>
@@ -103,27 +72,6 @@ pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
         .into_ordered()
         .try_into()
         .map_err(|_| ExprError::NumericOutOfRange)
-}
-
-/// In `PostgreSQL`, casting from timestamp to date discards the time part.
-#[function("cast(timestamp) -> date")]
-pub fn timestamp_to_date(elem: Timestamp) -> Date {
-    Date(elem.0.date())
-}
-
-/// In `PostgreSQL`, casting from timestamp to time discards the date part.
-#[function("cast(timestamp) -> time")]
-pub fn timestamp_to_time(elem: Timestamp) -> Time {
-    Time(elem.0.time())
-}
-
-/// In `PostgreSQL`, casting from interval to time discards the days part.
-#[function("cast(interval) -> time")]
-pub fn interval_to_time(elem: Interval) -> Time {
-    let usecs = elem.usecs_of_day();
-    let secs = (usecs / 1_000_000) as u32;
-    let nano = (usecs % 1_000_000 * 1000) as u32;
-    Time::from_num_seconds_from_midnight_uncheck(secs, nano)
 }
 
 #[function("cast(int4) -> int2")]
@@ -167,7 +115,9 @@ where
 #[function("cast(float4) -> float8")]
 #[function("cast(date) -> timestamp")]
 #[function("cast(time) -> interval")]
-#[function("cast(varchar) -> varchar")]
+#[function("cast(timestamp) -> date")]
+#[function("cast(timestamp) -> time")]
+#[function("cast(interval) -> time")]
 #[function("cast(int256) -> float8")]
 pub fn cast<T1, T2>(elem: T1) -> T2
 where
@@ -178,20 +128,7 @@ where
 
 #[function("cast(varchar) -> boolean")]
 pub fn str_to_bool(input: &str) -> Result<bool> {
-    let trimmed_input = input.trim();
-    if TRUE_BOOL_LITERALS
-        .iter()
-        .any(|s| s.eq_ignore_ascii_case(trimmed_input))
-    {
-        Ok(true)
-    } else if FALSE_BOOL_LITERALS
-        .iter()
-        .any(|s| trimmed_input.eq_ignore_ascii_case(s))
-    {
-        Ok(false)
-    } else {
-        Err(ExprError::Parse("Invalid bool".into()))
-    }
+    cast::str_to_bool(input).map_err(|err| ExprError::Parse(err.into()))
 }
 
 #[function("cast(int4) -> boolean")]
@@ -232,41 +169,7 @@ pub fn bool_out(input: bool, writer: &mut impl Write) {
 
 #[function("cast(varchar) -> bytea")]
 pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
-    str_to_bytea_common(elem).map_err(|err| ExprError::Parse(err.into()))
-}
-
-/// A lite version of casting from string to target type. Used by frontend to handle types that have
-/// to be created by casting.
-///
-/// For example, the user can input `1` or `true` directly, but they have to use
-/// `'2022-01-01'::date`.
-fn literal_parsing(t: &DataType, s: &str) -> std::result::Result<ScalarImpl, Option<ExprError>> {
-    let scalar = match t {
-        DataType::Boolean => str_to_bool(s)?.into(),
-        DataType::Int16 => str_parse::<i16>(s)?.into(),
-        DataType::Int32 => str_parse::<i32>(s)?.into(),
-        DataType::Int64 => str_parse::<i64>(s)?.into(),
-        DataType::Int256 => str_parse::<Int256>(s)?.into(),
-        DataType::Serial => return Err(None),
-        DataType::Decimal => str_parse::<Decimal>(s)?.into(),
-        DataType::Float32 => str_parse::<F32>(s)?.into(),
-        DataType::Float64 => str_parse::<F64>(s)?.into(),
-        DataType::Varchar => s.into(),
-        DataType::Date => str_to_date(s)?.into(),
-        DataType::Timestamp => str_to_timestamp(s)?.into(),
-        // We only handle the case with timezone here, and leave the implicit session timezone case
-        // for later phase.
-        DataType::Timestamptz => str_parse::<Timestamptz>(s)?.into(),
-        DataType::Time => str_to_time(s)?.into(),
-        DataType::Interval => str_parse::<Interval>(s)?.into(),
-        // Not processing list or struct literal right now. Leave it for later phase (normal backend
-        // evaluation).
-        DataType::List { .. } => return Err(None),
-        DataType::Struct(_) => return Err(None),
-        DataType::Jsonb => return Err(None),
-        DataType::Bytea => str_to_bytea(s)?.into(),
-    };
-    Ok(scalar)
+    cast::str_to_bytea(elem).map_err(|err| ExprError::Parse(err.into()))
 }
 
 // TODO(nanderstabel): optimize for multidimensional List. Depth can be given as a parameter to this
@@ -383,9 +286,9 @@ mod tests {
     use chrono::NaiveDateTime;
     use itertools::Itertools;
     use risingwave_common::array::*;
-    use risingwave_common::types::{Date, Scalar, StructType};
-    use risingwave_pb::expr::expr_node::PbType;
+    use risingwave_common::types::*;
     use risingwave_expr::expr::build_from_pretty;
+    use risingwave_pb::expr::expr_node::PbType;
 
     use super::*;
 
@@ -430,26 +333,6 @@ mod tests {
         test!(general_to_text(Decimal::try_from(1.222).unwrap()), "1.222");
 
         test!(general_to_text(Decimal::NaN), "NaN");
-    }
-
-    #[test]
-    fn temporal_cast() {
-        assert_eq!(
-            timestamp_to_date(str_to_timestamp("1999-01-08 04:02").unwrap()),
-            str_to_date("1999-01-08").unwrap(),
-        );
-        assert_eq!(
-            timestamp_to_time(str_to_timestamp("1999-01-08 04:02").unwrap()),
-            str_to_time("04:02").unwrap(),
-        );
-        assert_eq!(
-            interval_to_time(Interval::from_month_day_usec(1, 2, 61000003)),
-            str_to_time("00:01:01.000003").unwrap(),
-        );
-        assert_eq!(
-            interval_to_time(Interval::from_month_day_usec(0, 0, -61000003)),
-            str_to_time("23:58:58.999997").unwrap(),
-        );
     }
 
     #[test]
@@ -605,17 +488,6 @@ mod tests {
                 Some(0i32.to_scalar_value()),
             ])
         );
-    }
-
-    #[test]
-    fn test_str_to_timestamp() {
-        let str1 = "0001-11-15 07:35:40.999999";
-        let timestamp1 = str_to_timestamp(str1).unwrap();
-        assert_eq!(timestamp1.0.timestamp_micros(), -62108094259000001);
-
-        let str2 = "1969-12-31 23:59:59.999999";
-        let timestamp2 = str_to_timestamp(str2).unwrap();
-        assert_eq!(timestamp2.0.timestamp_micros(), -1);
     }
 
     #[test]

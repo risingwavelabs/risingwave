@@ -15,7 +15,6 @@
 use std::fmt::Write;
 
 use num_traits::CheckedNeg;
-use risingwave_common::cast::str_to_timestamp;
 use risingwave_common::types::{CheckedAdd, Interval, IntoOrdered, Timestamp, Timestamptz, F64};
 use risingwave_expr::{function, ExprError, Result};
 
@@ -87,7 +86,8 @@ pub fn timestamptz_to_string(
 pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<Timestamptz> {
     elem.parse().or_else(|_| {
         timestamp_at_time_zone(
-            str_to_timestamp(elem).map_err(|err| ExprError::Parse(err.into()))?,
+            elem.parse::<Timestamp>()
+                .map_err(|err| ExprError::Parse(err.to_string().into()))?,
             time_zone,
         )
     })
@@ -189,7 +189,6 @@ mod tests {
     use risingwave_common::util::iter_util::ZipEqFast;
 
     use super::*;
-    use crate::scalar::cast::str_to_timestamp;
 
     #[test]
     fn test_time_zone_conversion() {
@@ -219,7 +218,7 @@ mod tests {
                 .skip(1)
                 .zip_eq_fast(zones)
                 .for_each(|(local, zone)| {
-                    let local = str_to_timestamp(local).unwrap();
+                    let local = local.parse().unwrap();
 
                     let actual = timestamptz_at_time_zone(usecs, zone).unwrap();
                     assert_eq!(local, actual);
@@ -238,9 +237,7 @@ mod tests {
             ("2022-03-27 02:00:00", "europe/zurich"),
             ("2022-03-27 02:59:00", "europe/zurich"),
         ] {
-            let local = str_to_timestamp(local).unwrap();
-
-            let actual = timestamp_at_time_zone(local, zone);
+            let actual = timestamp_at_time_zone(local.parse().unwrap(), zone);
             assert!(actual.is_err());
         }
     }
@@ -260,7 +257,7 @@ mod tests {
         ];
         for (instant, local, zone, preferred) in test_cases {
             let usecs = str_to_timestamptz(instant, "UTC").unwrap();
-            let local = str_to_timestamp(local).unwrap();
+            let local = local.parse().unwrap();
 
             let actual = timestamptz_at_time_zone(usecs, zone).unwrap();
             assert_eq!(local, actual);
