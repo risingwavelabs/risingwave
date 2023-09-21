@@ -857,7 +857,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsg
             Err(e) => {
                 tracing::info!("send error.  {:?}", e);
                 Ok(JNI_FALSE)
-            },
+            }
         }
     })
 }
@@ -906,7 +906,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterRe
             Err(e) => {
                 tracing::info!("send error.  {:?}", e);
                 Ok(JNI_FALSE)
-            },
+            }
         }
     })
 }
