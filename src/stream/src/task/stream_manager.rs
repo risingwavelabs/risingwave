@@ -108,8 +108,8 @@ pub struct LocalStreamManager {
 /// Report expression evaluation errors to the actor context.
 #[derive(Clone)]
 pub struct ActorEvalErrorReport {
-    actor_context: ActorContextRef,
-    identity: Arc<str>,
+    pub actor_context: ActorContextRef,
+    pub identity: Arc<str>,
 }
 
 impl risingwave_expr::expr::EvalErrorReport for ActorEvalErrorReport {

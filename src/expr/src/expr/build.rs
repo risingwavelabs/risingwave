@@ -74,6 +74,7 @@ where
     }
 
     /// Attach wrappers to an expression.
+    #[expect(clippy::let_and_return)]
     fn wrap(&self, expr: impl Expression + 'static) -> BoxedExpression {
         let checked = Checked(expr);
 

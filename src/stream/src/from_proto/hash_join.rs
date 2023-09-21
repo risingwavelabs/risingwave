@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{
-    build_func, build_non_strict_from_prost, BoxedExpression, InputRefExpression,
+    build_func_non_strict, build_non_strict_from_prost, BoxedExpression, InputRefExpression,
 };
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
@@ -101,7 +101,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                     let data_type = source_l.schema().fields
                         [min(key_required_larger, key_required_smaller)]
                     .data_type();
-                    Some(build_func(
+                    Some(build_func_non_strict(
                         delta_expression.delta_type(),
                         data_type.clone(),
                         vec![
@@ -111,6 +111,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                                 params.eval_error_report.clone(),
                             )?,
                         ],
+                        params.eval_error_report.clone(),
                     )?)
                 } else {
                     None

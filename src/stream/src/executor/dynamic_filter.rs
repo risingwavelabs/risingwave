@@ -25,7 +25,9 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{once, OwnedRow as RowData, Row};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::{build_func, BoxedExpression, InputRefExpression, LiteralExpression};
+use risingwave_expr::expr::{
+    build_func_non_strict, BoxedExpression, InputRefExpression, LiteralExpression,
+};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
     GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
@@ -42,6 +44,7 @@ use super::{
 use crate::common::table::state_table::{StateTable, WatermarkCacheParameterizedStateTable};
 use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
+use crate::task::ActorEvalErrorReport;
 
 pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool> {
     ctx: ActorContextRef,
@@ -255,17 +258,24 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         let r_data_type = input_r.schema().data_types()[0].clone();
         // The types are aligned by frontend.
         assert_eq!(l_data_type, r_data_type);
-        let dynamic_cond = move |literal: Datum| {
-            literal.map(|scalar| {
-                build_func(
-                    self.comparator,
-                    DataType::Boolean,
-                    vec![
-                        Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
-                        Box::new(LiteralExpression::new(r_data_type.clone(), Some(scalar))),
-                    ],
-                )
-            })
+        let dynamic_cond = {
+            let eval_error_report = ActorEvalErrorReport {
+                actor_context: self.ctx.clone(),
+                identity: self.identity.as_str().into(),
+            };
+            move |literal: Datum| {
+                literal.map(|scalar| {
+                    build_func_non_strict(
+                        self.comparator,
+                        DataType::Boolean,
+                        vec![
+                            Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
+                            Box::new(LiteralExpression::new(r_data_type.clone(), Some(scalar))),
+                        ],
+                        eval_error_report.clone(),
+                    )
+                })
+            }
         };
 
         let aligned_stream = barrier_align(
