@@ -180,6 +180,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 String granted = res.getString(1).toUpperCase();
                 // all privileges granted, check passed
                 if (granted.contains("ALL")) {
+                    hashSet.clear();
                     break;
                 }
 
