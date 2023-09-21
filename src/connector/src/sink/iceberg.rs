@@ -252,7 +252,7 @@ impl Sink for IcebergSink {
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
             table,
         };
-        Ok(CoordinatedSinkWriter::new(
+        CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
                 .expect("should have meta client")
@@ -266,7 +266,7 @@ impl Sink for IcebergSink {
             })?,
             inner,
         )
-        .await?)
+        .await
     }
 
     async fn new_coordinator(

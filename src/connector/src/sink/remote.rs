@@ -97,7 +97,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     const SINK_NAME: &'static str = R::SINK_NAME;
 
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
-        Ok(RemoteSinkWriter::new(self.param.clone(), writer_param.connector_params).await?)
+        RemoteSinkWriter::new(self.param.clone(), writer_param.connector_params).await
     }
 
     async fn validate(&self, client: Option<ConnectorClient>) -> Result<()> {
@@ -168,7 +168,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
     }
 
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
-        Ok(CoordinatedSinkWriter::new(
+        CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
                 .expect("should have meta client")
@@ -183,19 +183,19 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
             CoordinatedRemoteSinkWriter::new(self.0.param.clone(), writer_param.connector_params)
                 .await?,
         )
-        .await?)
+        .await
     }
 
     async fn new_coordinator(
         &self,
         connector_client: Option<ConnectorClient>,
     ) -> Result<Self::Coordinator> {
-        Ok(RemoteCoordinator::new(
+        RemoteCoordinator::new(
             connector_client
                 .ok_or_else(|| Remote(anyhow_error!("no connector client specified")))?,
             self.0.param.clone(),
         )
-        .await?)
+        .await
     }
 }
 

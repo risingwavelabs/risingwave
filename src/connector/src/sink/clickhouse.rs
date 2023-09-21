@@ -224,13 +224,13 @@ impl Sink for ClickHouseSink {
     }
 
     async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
-        Ok(ClickHouseSinkWriter::new(
+        ClickHouseSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
         )
-        .await?)
+        .await
     }
 }
 pub struct ClickHouseSinkWriter {

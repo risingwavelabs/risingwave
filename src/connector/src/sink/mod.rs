@@ -213,6 +213,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
 
     async fn validate(&self, client: Option<ConnectorClient>) -> Result<()>;
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
+    #[expect(clippy::unused_async)]
     async fn new_coordinator(
         &self,
         _connector_client: Option<ConnectorClient>,

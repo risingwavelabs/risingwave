@@ -109,7 +109,7 @@ impl Sink for NatsSink {
     }
 
     async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
-        Ok(NatsSinkWriter::new(self.config.clone(), self.schema.clone()).await?)
+        NatsSinkWriter::new(self.config.clone(), self.schema.clone()).await
     }
 }
 
