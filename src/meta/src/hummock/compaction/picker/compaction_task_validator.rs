@@ -89,17 +89,23 @@ struct TierCompactionTaskValidationRule {
 
 impl CompactionTaskValidationRule for TierCompactionTaskValidationRule {
     fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
+        // Limit sstable file count to avoid using too much memory.
+        let overlapping_max_compact_file_numer = std::cmp::min(
+            self.config.level0_max_compact_file_number,
+            MAX_COMPACT_LEVEL_COUNT as u64,
+        );
+
+        if input.total_file_count >= overlapping_max_compact_file_numer
+            || input.input_levels.len() >= MAX_COMPACT_LEVEL_COUNT
+        {
+            return true;
+        }
+
         // so the design here wants to merge multiple overlapping-levels in one compaction
         let max_compaction_bytes = std::cmp::min(
             self.config.max_compaction_bytes,
             self.config.sub_level_max_compaction_bytes
                 * self.config.level0_overlapping_sub_level_compact_level_count as u64,
-        );
-
-        // Limit sstable file count to avoid using too much memory.
-        let overlapping_max_compact_file_numer = std::cmp::min(
-            self.config.level0_max_compact_file_number,
-            MAX_COMPACT_LEVEL_COUNT as u64,
         );
 
         let waiting_enough_files = {
@@ -129,7 +135,9 @@ struct IntraCompactionTaskValidationRule {
 
 impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
     fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
-        if input.total_file_count >= self.config.level0_max_compact_file_number {
+        if input.total_file_count >= self.config.level0_max_compact_file_number
+            || input.input_levels.len() >= MAX_COMPACT_LEVEL_COUNT
+        {
             return true;
         }
 
@@ -175,6 +183,12 @@ struct BaseCompactionTaskValidationRule {
 
 impl CompactionTaskValidationRule for BaseCompactionTaskValidationRule {
     fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
+        if input.total_file_count >= self.config.level0_max_compact_file_number
+            || input.input_levels.len() >= MAX_COMPACT_LEVEL_COUNT
+        {
+            return true;
+        }
+
         // The size of target level may be too large, we shall skip this compact task and wait
         //  the data in base level compact to lower level.
         if input.target_input_size > self.config.max_compaction_bytes {
