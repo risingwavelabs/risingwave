@@ -36,6 +36,8 @@ pub type MessageStatus = Status;
 pub type Notification = Result<SubscribeResponse, Status>;
 pub type NotificationManagerRef = Arc<NotificationManager>;
 pub type NotificationVersion = u64;
+/// NOTE(kwannoel): This is just ignored, used in background DDL
+pub const IGNORED_NOTIFICATION_VERSION: u64 = 0;
 
 #[derive(Clone, Debug)]
 pub enum LocalNotification {

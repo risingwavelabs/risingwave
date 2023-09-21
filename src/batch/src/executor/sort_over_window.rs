@@ -19,8 +19,9 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::function::window::WindowFuncCall;
-use risingwave_expr::window_function::{create_window_state, StateKey, WindowStates};
+use risingwave_expr::window_function::{
+    create_window_state, StateKey, WindowFuncCall, WindowStates,
+};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};

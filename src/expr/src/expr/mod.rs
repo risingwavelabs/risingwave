@@ -32,36 +32,22 @@
 //! [`eval`]: Expression::eval
 
 // These modules define concrete expression structures.
-mod expr_array_concat;
-mod expr_array_to_string;
 mod expr_array_transform;
 mod expr_binary_nonnull;
 mod expr_binary_nullable;
 mod expr_case;
 mod expr_coalesce;
-mod expr_concat_ws;
 mod expr_field;
 mod expr_in;
 mod expr_input_ref;
-mod expr_is_null;
-mod expr_jsonb_access;
 mod expr_literal;
-mod expr_nested_construct;
-mod expr_proctime;
-pub mod expr_regexp;
-pub mod expr_regexp_count;
 mod expr_some_all;
-mod expr_timestamp_to_char_const_tmpl;
-mod expr_timestamptz_to_char_const_tmpl;
-mod expr_to_date_const_tmpl;
-mod expr_to_timestamp_const_tmpl;
 pub(crate) mod expr_udf;
 mod expr_unary;
 mod expr_vnode;
+pub(crate) mod wrapper;
 
 mod build;
-pub(crate) mod template;
-pub(crate) mod template_fast;
 pub mod test_utils;
 mod value;
 
@@ -89,16 +75,6 @@ pub use super::{ExprError, Result};
 pub trait Expression: std::fmt::Debug + Sync + Send {
     /// Get the return data type.
     fn return_type(&self) -> DataType;
-
-    /// Eval the result with extra checks.
-    async fn eval_checked(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let res = self.eval(input).await?;
-
-        // TODO: Decide to use assert or debug_assert by benchmarks.
-        assert_eq!(res.len(), input.capacity());
-
-        Ok(res)
-    }
 
     /// Evaluate the expression in vectorized execution. Returns an array.
     ///
@@ -190,6 +166,34 @@ impl dyn Expression {
 /// An owned dynamically typed [`Expression`].
 pub type BoxedExpression = Box<dyn Expression>;
 
+// TODO: avoid the overhead of extra boxing.
+#[async_trait::async_trait]
+impl Expression for BoxedExpression {
+    fn return_type(&self) -> DataType {
+        (**self).return_type()
+    }
+
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        (**self).eval(input).await
+    }
+
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        (**self).eval_v2(input).await
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        (**self).eval_row(input).await
+    }
+
+    fn eval_const(&self) -> Result<Datum> {
+        (**self).eval_const()
+    }
+
+    fn boxed(self) -> BoxedExpression {
+        self
+    }
+}
+
 /// Controls the behavior when a compute error happens.
 ///
 /// - If set to `false`, `NULL` will be inserted.
@@ -199,3 +203,20 @@ pub type BoxedExpression = Box<dyn Expression>;
 /// See also <https://github.com/risingwavelabs/risingwave/issues/4625>.
 #[allow(dead_code)]
 const STRICT_MODE: bool = false;
+
+/// An optional context that can be used in a function.
+///
+/// # Example
+/// ```ignore
+/// #[function("foo(int32) -> int64")]
+/// fn foo(a: i32, ctx: &Context) -> i64 {
+///    assert_eq!(ctx.arg_types[0], DataType::Int32);
+///    assert_eq!(ctx.return_type, DataType::Int64);
+///    // ...
+/// }
+/// ```
+#[derive(Debug)]
+pub struct Context {
+    pub arg_types: Vec<DataType>,
+    pub return_type: DataType,
+}

@@ -28,7 +28,6 @@ members = [
   "src/sqlparser/test_runner",
   "src/storage",
   "src/storage/backup",
-  "src/storage/backup/cmd",
   "src/storage/compactor",
   "src/storage/hummock_sdk",
   "src/storage/hummock_test",
@@ -52,7 +51,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "1.1.0-alpha"
+version = "1.3.0-alpha"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -95,7 +94,7 @@ aws-types = "0.55"
 etcd-client = { package = "madsim-etcd-client", version = "0.3" }
 futures-async-stream = "0.2"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim.git", rev = "bb8f063", features = [
+rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim.git", rev = "fedb1e3", features = [
   "cmake-build",
 ] }
 hashbrown = { version = "0.14.0", features = [
@@ -106,12 +105,16 @@ hashbrown = { version = "0.14.0", features = [
 criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.3.1" }
 tonic-build = { package = "madsim-tonic-build", version = "0.3.1" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "a6790d17094754959e351fac1e11147e37643e97" }
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "166a36b1a40a64086db09a0e0f2ed6791cec548b" }
 arrow-array = "46"
 arrow-schema = "46"
 arrow-buffer = "46"
 arrow-flight = "46"
 arrow-select = "46"
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
+  "profiling",
+  "stats",
+], rev = "64a2d9" }
 
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
@@ -173,8 +176,9 @@ redundant_explicit_links = "allow"
 lto = 'off'
 
 [profile.release]
-debug = 1
-lto = 'thin'
+debug = "full"
+split-debuginfo = "packed"
+lto = "thin"
 
 # The profile used for CI in main branch.
 # This profile inherits from the release profile, but turns on some checks and assertions for us to
@@ -183,6 +187,7 @@ lto = 'thin'
 inherits = "release"
 incremental = false
 debug = "line-tables-only"
+split-debuginfo = "off"
 debug-assertions = true
 overflow-checks = true
 
@@ -217,6 +222,6 @@ quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "8daf97e" }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
-tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6" }
+tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "d55550a" }

@@ -224,6 +224,35 @@ select (extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d9
 ----
 192.168.0.14 192.168.0.1 861 8374
 
+# steaming
+# to ensure UDF & UDTF respect visibility
+
+statement ok
+create table t (x int);
+
+statement ok
+create materialized view mv as select gcd(x, x), series(x) from t where x <> 2;
+
+statement ok
+insert into t values (1), (2), (3);
+
+statement ok
+flush;
+
+query II
+select * from mv;
+----
+1 0
+3 0
+3 1
+3 2
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;
+
 # error handling
 
 statement error

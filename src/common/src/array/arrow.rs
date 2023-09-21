@@ -26,11 +26,14 @@ use crate::types::{Int256, StructType};
 use crate::util::iter_util::ZipEqDebug;
 
 // Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
-
 impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
     type Error = ArrayError;
 
     fn try_from(chunk: &DataChunk) -> Result<Self, Self::Error> {
+        if !chunk.is_compacted() {
+            let c = chunk.clone();
+            return Self::try_from(&c.compact());
+        }
         let columns: Vec<_> = chunk
             .columns()
             .iter()
@@ -47,8 +50,9 @@ impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
             .collect();
 
         let schema = Arc::new(Schema::new(fields));
-
-        arrow_array::RecordBatch::try_new(schema, columns)
+        let opts =
+            arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
+        arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
             .map_err(|err| ArrayError::ToArrow(err.to_string()))
     }
 }

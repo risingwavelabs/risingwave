@@ -101,5 +101,44 @@ drop schema search_path_test1;
 statement ok
 drop schema search_path_test2;
 
+# Schema for functions https://github.com/risingwavelabs/risingwave/issues/12422
+
+query TI
+select * from information_schema._pg_expandarray(Array['a','b','c'])
+----
+a 1
+b 2
+c 3
+
+# FIXME: This should not be available since information_schema is not in the search path
+query TI
+select * from _pg_expandarray(Array['a','b','c'])
+----
+a 1
+b 2
+c 3
+
+
+statement ok
+set search_path to information_schema;
+
+query TI
+select * from _pg_expandarray(Array['a','b','c'])
+----
+a 1
+b 2
+c 3
+
+# built-in functions (pg_catalog) are always available
+query I
+select abs(1)
+----
+1
+
+query I
+select pg_catalog.abs(1)
+----
+1
+
 statement ok
 set search_path to "$user", public;

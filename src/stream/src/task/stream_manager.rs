@@ -33,6 +33,7 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_storage::monitor::HummockTraceFutureExt;
@@ -219,7 +220,7 @@ impl LocalStreamManager {
     }
 
     /// Broadcast a barrier to all senders. Save a receiver in barrier manager
-    pub fn send_barrier(
+    pub async fn send_barrier(
         &self,
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
@@ -229,6 +230,11 @@ impl LocalStreamManager {
             .streaming_metrics
             .barrier_inflight_latency
             .start_timer();
+        if barrier.kind == BarrierKind::Initial {
+            let core = self.core.lock().await;
+            core.get_watermark_epoch()
+                .store(barrier.epoch.curr, std::sync::atomic::Ordering::SeqCst);
+        }
         let mut barrier_manager = self.context.lock_barrier_manager();
         barrier_manager.send_barrier(
             barrier,
@@ -446,6 +452,7 @@ impl LocalStreamManagerCore {
         input: BoxedExecutor,
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
+        fragment_id: FragmentId,
     ) -> StreamResult<DispatchExecutor> {
         let dispatcher_impls = dispatchers
             .iter()
@@ -456,6 +463,7 @@ impl LocalStreamManagerCore {
             input,
             dispatcher_impls,
             actor_id,
+            fragment_id,
             self.context.clone(),
             self.streaming_metrics.clone(),
         ))
@@ -638,7 +646,8 @@ impl LocalStreamManagerCore {
                 .may_trace_hummock()
                 .await?;
 
-            let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
+            let dispatcher =
+                self.create_dispatcher(executor, &actor.dispatcher, actor_id, actor.fragment_id)?;
             let actor = Actor::new(
                 dispatcher,
                 subtasks,

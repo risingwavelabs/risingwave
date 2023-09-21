@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::Hash;
 use std::iter::{FusedIterator, TrustedLen};
 use std::ops::Range;
 
@@ -59,7 +60,7 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
             Some(idx) if idx < self.idx.end => {
                 self.idx.start = idx + 1;
                 Some(RowRef {
-                    chunk: self.chunk,
+                    columns: self.chunk.columns(),
                     idx,
                 })
             }
@@ -99,7 +100,7 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let len = self.chunk.capacity();
-        let vis = self.chunk.vis();
+        let vis = self.chunk.visibility();
         if self.idx == len {
             None
         } else {
@@ -107,7 +108,7 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
                 None
             } else {
                 Some(RowRef {
-                    chunk: self.chunk,
+                    columns: self.chunk.columns(),
                     idx: self.idx,
                 })
             });
@@ -127,7 +128,7 @@ unsafe impl TrustedLen for DataChunkRefIterWithHoles<'_> {}
 
 #[derive(Clone, Copy)]
 pub struct RowRef<'a> {
-    chunk: &'a DataChunk,
+    columns: &'a [ArrayRef],
 
     idx: usize,
 }
@@ -140,8 +141,18 @@ impl<'a> std::fmt::Debug for RowRef<'a> {
 
 impl<'a> RowRef<'a> {
     pub fn new(chunk: &'a DataChunk, idx: usize) -> Self {
-        debug_assert!(idx < chunk.capacity());
-        Self { chunk, idx }
+        assert!(idx < chunk.capacity());
+        Self {
+            columns: chunk.columns(),
+            idx,
+        }
+    }
+
+    pub fn with_columns(columns: &'a [ArrayRef], idx: usize) -> Self {
+        if !columns.is_empty() {
+            assert!(idx < columns[0].len());
+        }
+        Self { columns, idx }
     }
 
     /// Get the index of this row in the data chunk.
@@ -158,30 +169,35 @@ impl PartialEq for RowRef<'_> {
 }
 impl Eq for RowRef<'_> {}
 
+impl Hash for RowRef<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let len = self.columns.len();
+        for i in 0..len {
+            self.datum_at(i).hash(state);
+        }
+    }
+}
+
 impl Row for RowRef<'_> {
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        debug_assert!(self.idx < self.chunk.capacity());
         // for `RowRef`, the index is always in bound.
-        unsafe { self.chunk.columns()[index].value_at_unchecked(self.idx) }
+        unsafe { self.columns[index].value_at_unchecked(self.idx) }
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        debug_assert!(self.idx < self.chunk.capacity());
         // for `RowRef`, the index is always in bound.
-        self.chunk
-            .columns()
+        self.columns
             .get_unchecked(index)
             .value_at_unchecked(self.idx)
     }
 
     fn len(&self) -> usize {
-        self.chunk.columns().len()
+        self.columns.len()
     }
 
     fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
-        debug_assert!(self.idx < self.chunk.capacity());
         RowRefIter {
-            columns: self.chunk.columns().iter(),
+            columns: self.columns.iter(),
             row_idx: self.idx,
         }
     }
@@ -212,3 +228,44 @@ impl<'a> Iterator for RowRefIter<'a> {
 
 impl ExactSizeIterator for RowRefIter<'_> {}
 unsafe impl TrustedLen for RowRefIter<'_> {}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use crate::array::StreamChunk;
+    use crate::test_prelude::StreamChunkTestExt;
+
+    #[test]
+    fn test_row_ref_hash() {
+        let mut set = HashSet::new();
+        let chunk1 = StreamChunk::from_pretty(
+            " I I I
+            + 2 5 1
+            + 4 9 2
+            - 2 5 1",
+        );
+        for (_, row) in chunk1.rows() {
+            set.insert(row);
+        }
+        assert_eq!(set.len(), 2);
+
+        let chunk2 = StreamChunk::from_pretty(
+            " I I I
+            - 4 9 2",
+        );
+        for (_, row) in chunk2.rows() {
+            set.insert(row);
+        }
+        assert_eq!(set.len(), 2);
+
+        let chunk3 = StreamChunk::from_pretty(
+            " I I I
+            + 1 2 3",
+        );
+        for (_, row) in chunk3.rows() {
+            set.insert(row);
+        }
+        assert_eq!(set.len(), 3);
+    }
+}

@@ -78,6 +78,10 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave
   gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
 
+  echo "--- Release upload risingwave debug info"
+  tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.dwp.tar.gz risingwave.dwp
+  gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.dwp.tar.gz
+
   echo "--- Release upload risectl asset"
   tar -czvf risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risectl
   gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
