@@ -141,6 +141,11 @@ impl Progress {
     }
 }
 
+pub enum StreamJobOrigin {
+    TrackingCommand(TrackingCommand),
+    RecoveredStreamJob(Notifier),
+}
+
 /// The command tracking by the [`CreateMviewProgressTracker`].
 pub(super) struct TrackingCommand {
     /// The context of the command.
@@ -175,7 +180,7 @@ pub(super) struct CreateMviewProgressTracker {
     // Additionally if are to allow concurrent mview creation in the
     // future, CreateMViewEpoch will not be a good candidate for this.
     /// Progress of the create-mview DDL indicated by the epoch.
-    progress_map: HashMap<TableId, (Progress, Option<TrackingCommand>)>,
+    progress_map: HashMap<TableId, (Progress, StreamJobOrigin)>,
 
     /// Find the epoch of the create-mview DDL by the actor containing the chain node.
     actor_map: HashMap<ActorId, TableId>,
@@ -227,6 +232,8 @@ impl CreateMviewProgressTracker {
         mut definitions: HashMap<TableId, String>,
 
         version_stats: HummockVersionStats,
+
+        mut finished_notifiers: HashMap<TableId, Notifier>,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
@@ -264,7 +271,10 @@ impl CreateMviewProgressTracker {
                 consumed_rows: 0, // Fill only after first barrier pass
                 definition,
             };
-            progress_map.insert(creating_table_id, (progress, None));
+            let origin = StreamJobOrigin::RecoveredStreamJob(
+                finished_notifiers.remove(&creating_table_id).unwrap(),
+            );
+            progress_map.insert(creating_table_id, (progress, origin));
         }
         Self {
             progress_map,
@@ -305,7 +315,10 @@ impl CreateMviewProgressTracker {
         // If the target command found in progress map, return and remove it. Note that the command
         // should have finished if not found.
         if let Some(Some(epoch)) = epochs.first() {
-            self.progress_map.remove(epoch).unwrap().1
+            match self.progress_map.remove(epoch).unwrap().1 {
+                StreamJobOrigin::TrackingCommand(t) => Some(t),
+                _ => None,
+            }
         } else {
             None
         }
@@ -378,9 +391,10 @@ impl CreateMviewProgressTracker {
             upstream_total_key_count,
             definition,
         );
-        let old = self
-            .progress_map
-            .insert(creating_mv_id, (progress, Some(command)));
+        let old = self.progress_map.insert(
+            creating_mv_id,
+            (progress, StreamJobOrigin::TrackingCommand(command)),
+        );
         assert!(old.is_none());
         None
     }
@@ -439,7 +453,10 @@ impl CreateMviewProgressTracker {
                     for actor in o.get().0.actors() {
                         self.actor_map.remove(&actor);
                     }
-                    o.remove().1
+                    match o.remove().1 {
+                        StreamJobOrigin::TrackingCommand(t) => Some(t),
+                        _ => None,
+                    }
                 } else {
                     None
                 }

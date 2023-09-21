@@ -2315,7 +2315,10 @@ impl CatalogManager {
     }
 
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
-        println!("Notified frontend:\noperation: {:#?}\ninfo: {:#?}", operation, info);
+        println!(
+            "Notified frontend:\noperation: {:#?}\ninfo: {:#?}",
+            operation, info
+        );
         self.env
             .notification_manager()
             .notify_frontend(operation, info)

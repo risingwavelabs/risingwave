@@ -19,6 +19,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -40,7 +41,7 @@ use risingwave_pb::stream_service::{
 use risingwave_rpc_client::StreamClientPoolRef;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{Receiver, Sender};
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tracing::Instrument;
 use uuid::Uuid;
@@ -55,8 +56,8 @@ use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
-    WorkerId,
+    CatalogManager, CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification,
+    MetaSrvEnv, WorkerId,
 };
 use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
@@ -918,12 +919,36 @@ impl GlobalBarrierManager {
         }
     }
 
-    async fn recover_mview_progress(&self) {
+    async fn recover_mview_progress(&self) -> MetaResult<()> {
         let creating_tables = self.catalog_manager.list_creating_tables().await;
         let creating_table_ids = creating_tables
             .iter()
             .map(|t| TableId { table_id: t.id })
             .collect_vec();
+
+        let mut senders = HashMap::new();
+        let mut receivers = Vec::new();
+        for table_id in creating_table_ids.iter().copied() {
+            let (finished_tx, finished_rx) = oneshot::channel();
+            senders.insert(
+                table_id,
+                Notifier {
+                    finished: Some(finished_tx),
+                    ..Default::default()
+                },
+            );
+
+            let fragments = self
+                .fragment_manager
+                .select_table_fragments_by_table_id(&table_id)
+                .await?;
+            let internal_table_ids = fragments.internal_table_ids();
+            let internal_tables = self.catalog_manager.get_tables(&internal_table_ids).await;
+            let table = self.catalog_manager.get_tables(&[table_id.table_id]).await;
+            assert_eq!(table.len(), 1, "should only have 1 materialized table");
+            let table = table.into_iter().next().unwrap();
+            receivers.push((table, internal_tables, finished_rx));
+        }
 
         let table_map = self
             .fragment_manager
@@ -947,7 +972,29 @@ impl GlobalBarrierManager {
             upstream_mv_counts,
             definitions,
             version_stats,
+            senders,
         );
+        for (table, internal_tables, finished) in receivers {
+            let catalog_manager = self.catalog_manager.clone();
+            tokio::spawn(async move {
+                let res: MetaResult<()> = try {
+                    finished
+                        .await
+                        .map_err(|e| anyhow!("failed to finish command: {}", e))?;
+
+                    // Once notified that job is finished we need to notify frontend.
+                    // and mark catalog as created and commit to meta.
+                    // both of these are done by catalog manager.
+                    catalog_manager
+                        .finish_create_table_procedure(internal_tables, table)
+                        .await?;
+                };
+                // FIXME: Should copy the functionality from DDLController,
+                // and call cancel_stream_job here if any part of this failed.
+                res.unwrap();
+            });
+        }
+        Ok(())
     }
 
     async fn failure_recovery(

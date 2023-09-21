@@ -118,7 +118,6 @@ impl GlobalBarrierManager {
         prev_epoch: TracedEpoch,
         paused_reason: Option<PausedReason>,
     ) -> BarrierManagerState {
-        self.recover_mview_progress().await;
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering")
@@ -211,7 +210,7 @@ impl GlobalBarrierManager {
                                 warn!(err = ?err, "post_collect failed");
                                 Err(err)
                             } else {
-                                Ok((new_epoch, response))
+                                Ok((new_epoch.clone(), response))
                             }
                         }
                         Err(err) => {
@@ -219,7 +218,8 @@ impl GlobalBarrierManager {
                             Err(err)
                         }
                     };
-                    let (new_epoch, _) = res?;
+
+                    self.recover_mview_progress().await?;
 
                     BarrierManagerState::new(new_epoch, command_ctx.next_paused_reason())
                 };
