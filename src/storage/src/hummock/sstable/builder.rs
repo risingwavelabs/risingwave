@@ -270,7 +270,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.block_metas.push(meta);
         self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
-        self.writer.send_block(buf, block_meta).await?;
+        self.writer.write_block_bytes(buf, block_meta).await?;
         Ok(true)
     }
 

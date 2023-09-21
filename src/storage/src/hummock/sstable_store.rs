@@ -713,7 +713,7 @@ impl SstableWriter for BatchUploadWriter {
         Ok(())
     }
 
-    async fn send_block(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()> {
+    async fn write_block_bytes(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()> {
         self.buf.extend_from_slice(&block);
         if let CachePolicy::Fill(_) = self.policy {
             self.block_info
@@ -817,7 +817,7 @@ impl SstableWriter for StreamingUploadWriter {
             .map_err(HummockError::object_io_error)
     }
 
-    async fn send_block(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()> {
+    async fn write_block_bytes(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()> {
         self.data_len += block.len();
         if let CachePolicy::Fill(_) = self.policy {
             let block = Block::decode(block.clone(), meta.uncompressed_size as usize)?;

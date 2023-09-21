@@ -490,7 +490,6 @@ impl CompactorRunner {
             self.task_id,
             skip_raw_block_size * 100 / total_read_bytes,
         );
-        println!("optimize {}%", skip_raw_block_size * 100 / total_read_bytes);
 
         let outputs = self.executor.builder.finish().await?;
         let ssts = Compactor::report_progress(
