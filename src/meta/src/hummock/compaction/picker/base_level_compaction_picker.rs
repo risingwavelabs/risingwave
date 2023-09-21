@@ -137,8 +137,8 @@ impl LevelCompactionPicker {
             min_compaction_bytes,
             // divide by 2 because we need to select files of base level and it need use the other
             // half quota.
-            std::cmp::min(
-                self.config.max_bytes_for_level_base,
+            std::cmp::max(
+                (self.config.max_bytes_for_level_base as f64 * 1.2) as u64,
                 self.config.max_compaction_bytes / 2,
             ),
             1,
@@ -573,6 +573,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(100010)
+                .max_bytes_for_level_base(512)
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
