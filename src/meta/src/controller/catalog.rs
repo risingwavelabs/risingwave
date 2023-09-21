@@ -54,7 +54,7 @@ pub struct ReleaseContext {
 }
 
 impl CatalogController {
-    pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
+    pub fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let meta_store = env
             .sql_meta_store()
             .expect("sql meta store is not initialized");
@@ -85,7 +85,7 @@ impl CatalogController {
 }
 
 impl CatalogController {
-    pub async fn snapshot(&self) -> MetaResult<()> {
+    pub fn snapshot(&self) -> MetaResult<()> {
         todo!("snapshot")
     }
 
@@ -366,9 +366,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_database() {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)
-            .await
-            .unwrap();
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).unwrap();
         let db = PbDatabase {
             name: "test".to_string(),
             owner: DEFAULT_SUPER_USER_ID,
