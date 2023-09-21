@@ -220,19 +220,16 @@ pub fn build_func(
 
 /// Build an expression in `FuncCall` variant in non-strict mode.
 ///
-/// Note: This is a workaround, and only the uppermost children nodes and the root node are wrapped
-/// in non-strict mode. Prefer [`build_non_strict_from_prost`] if possible.
+/// Note: This is a workaround, and only the root node are wrappedin non-strict mode.
+/// Prefer [`build_non_strict_from_prost`] if possible.
 pub fn build_func_non_strict(
     func: PbType,
     ret_type: DataType,
     children: Vec<BoxedExpression>,
     error_report: impl EvalErrorReport + 'static,
 ) -> Result<BoxedExpression> {
-    let builder = ExprBuilder::new_non_strict(error_report);
-
-    let children = children.into_iter().map(|e| builder.wrap(e)).collect();
     let expr = build_func(func, ret_type, children)?;
-    let wrapped = builder.wrap(expr);
+    let wrapped = ExprBuilder::new_non_strict(error_report).wrap(expr);
 
     Ok(wrapped)
 }
