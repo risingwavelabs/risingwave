@@ -24,7 +24,6 @@ use pulsar::producer::{Message, SendFuture};
 use pulsar::{Producer, ProducerOptions, Pulsar, TokioExecutor};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_rpc_client::ConnectorClient;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
@@ -171,7 +170,7 @@ impl Sink for PulsarSink {
         .await
     }
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         // For upsert Pulsar sink, the primary key must be defined.
         if !self.is_append_only && self.downstream_pk.is_empty() {
             return Err(SinkError::Config(anyhow!(
