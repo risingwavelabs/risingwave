@@ -45,7 +45,6 @@ mod int256;
 mod jsonb_access;
 mod jsonb_info;
 mod length;
-mod like;
 mod lower;
 mod md5;
 mod overlay;
