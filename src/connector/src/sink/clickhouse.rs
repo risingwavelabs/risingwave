@@ -300,6 +300,10 @@ impl ClickHouseSinkWriter {
         )?;
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
+                tracing::warn!(
+                    "append only click house sink receive an {:?} which will be ignored.",
+                    op
+                );
                 continue;
             }
             let mut clickhouse_filed_vec = vec![];

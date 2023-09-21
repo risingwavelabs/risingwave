@@ -386,7 +386,7 @@ where
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let payload = match self.payload_format {
             SinkPayloadFormat::Json => {
-                let mut row_ops = vec![];
+                let mut row_ops = Vec::with_capacity(chunk.cardinality());
                 let enc = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::String);
                 for (op, row_ref) in chunk.rows() {
                     let map = enc.encode(row_ref)?;
