@@ -25,7 +25,7 @@ use risingwave_pb::stream_plan::DispatcherType;
 
 use super::id::GlobalFragmentId;
 use super::CompleteStreamFragmentGraph;
-use crate::manager::{IdCategory, IdGeneratorManagerRef, WorkerId, WorkerKey, WorkerLocations};
+use crate::manager::{IdCategory, IdGeneratorManagerRef, WorkerId, WorkerLocations};
 use crate::MetaResult;
 
 #[derive(Clone, Debug)]
@@ -58,6 +58,7 @@ pub(super) struct FragmentSchedulings {
     pub building: HashMap<GlobalFragmentId, Scheduling>,
     pub existing: HashMap<GlobalFragmentId, Scheduling>,
 
+    pub existing_assignments: HashMap<ActorGroupId, WorkerId>,
     pub new_assignments: HashMap<ActorGroupId, WorkerId>,
 }
 
@@ -127,11 +128,13 @@ impl<'a> Scheduler<'a> {
     }
 
     pub async fn schedule(&self) -> MetaResult<FragmentSchedulings> {
-        let mut round_robin_assignment =
+        let round_robin_assignment =
             RoundRobinAssignment::new(self.worker_nodes.values().map(|w| w.id).collect_vec());
 
         let mut building = HashMap::new();
         let mut existing = HashMap::new();
+
+        let mut existing_assignments = HashMap::new();
         let mut new_actor_group_ids = Vec::new();
 
         for group in self.split_into_groups() {
@@ -175,14 +178,23 @@ impl<'a> Scheduler<'a> {
                     }
                 }
 
-                [ref_fragment] => Scheduling {
-                    fragment_group_id: ref_fragment.fragment_group_id.into(),
-                    actor_group_mapping: ActorGroupMapping::from_protobuf(
-                        ref_fragment.actor_group_mapping.as_ref().unwrap(),
-                    )
-                    .into(),
-                    distribution_type: ref_fragment.distribution_type(),
-                },
+                [ref_fragment] => {
+                    existing_assignments.extend(
+                        ref_fragment
+                            .actors
+                            .iter()
+                            .map(|a| (a.actor_group_id, a.worker_node_id)),
+                    );
+
+                    Scheduling {
+                        fragment_group_id: ref_fragment.fragment_group_id.into(),
+                        actor_group_mapping: ActorGroupMapping::from_protobuf(
+                            ref_fragment.actor_group_mapping.as_ref().unwrap(),
+                        )
+                        .into(),
+                        distribution_type: ref_fragment.distribution_type(),
+                    }
+                }
 
                 [ref_fragment_1, ref_fragment_2, ..] => {
                     bail!(
@@ -218,6 +230,7 @@ impl<'a> Scheduler<'a> {
         Ok(FragmentSchedulings {
             building,
             existing,
+            existing_assignments,
             new_assignments,
         })
     }
@@ -263,6 +276,10 @@ pub struct LocationsV2 {
 }
 
 impl LocationsV2 {
+    pub fn worker_for_actor(&self, actor_id: ActorId) -> WorkerId {
+        self.assignments[&self.actor_groups[&actor_id]]
+    }
+
     /// Returns all actors for every worker node.
     pub fn worker_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
         self.actor_groups

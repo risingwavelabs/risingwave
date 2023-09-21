@@ -686,7 +686,7 @@ impl DdlController {
         // 3. Build the table fragments structure that will be persisted in the stream manager,
         // and the context that contains all information needed for building the
         // actors on the compute nodes.
-        let table_fragments = TableFragments::new(id.into(), graph, env);
+        let table_fragments = TableFragments::new(id.into(), graph, &building_locations, env);
 
         let ctx = CreateStreamingJobContext {
             dispatchers,
@@ -990,7 +990,7 @@ impl DdlController {
         // 4. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
-        let table_fragments = TableFragments::new(dummy_id.into(), graph, env);
+        let table_fragments = TableFragments::new(dummy_id.into(), graph, &building_locations, env);
 
         let ctx = ReplaceTableContext {
             old_table_fragments,

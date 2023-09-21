@@ -1099,14 +1099,9 @@ impl GlobalBarrierManager {
             .cluster_manager
             .list_active_streaming_compute_nodes()
             .await;
-        let assignments = self
-            .cluster_manager
-            .get_streaming_cluster_info()
-            .await
-            .assignments;
         let all_actor_infos = self
             .fragment_manager
-            .load_all_actors_2(&assignments, check_state)
+            .load_all_actors_3(check_state)
             .await;
 
         let info = BarrierActorInfo::resolve(all_nodes, all_actor_infos);

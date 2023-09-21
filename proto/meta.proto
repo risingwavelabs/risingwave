@@ -86,7 +86,7 @@ message TableFragments {
     common.ParallelUnitMapping vnode_mapping = 5;
 
     uint32 fragment_group_id = 8;
-    stream_plan.ActorMapping actor_group_mapping = 9; // TODO: this can be recorded in other places
+    stream_plan.ActorMapping actor_group_mapping = 9; // TODO: maintain this in a separate assignment map
 
     repeated uint32 state_table_ids = 6;
     // Note that this can be derived backwards from the upstream actors of the Actor held by the Fragment,

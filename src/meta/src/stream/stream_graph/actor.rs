@@ -696,6 +696,13 @@ impl ActorGraphBuilder {
             .unwrap()
     }
 
+    fn get_assignment(&self, actor_group_id: ActorGroupId) -> WorkerId {
+        *(self.schedulings.existing_assignments)
+            .get(&actor_group_id)
+            .or_else(|| self.schedulings.new_assignments.get(&actor_group_id))
+            .unwrap()
+    }
+
     /// Convert the actor location map to the [`Locations`] struct.
     fn build_locations(&self, actor_locations: ActorLocations) -> Locations {
         let actor_locations = actor_locations
@@ -907,6 +914,8 @@ impl ActorGraphBuilder {
                         // let vnode_bitmap = bitmaps.as_ref().map(|m|
                         // &m[&parallel_unit_id]).cloned();
                         let vnode_bitmap = bitmaps.as_ref().map(|m| &m[&actor_group_id]).cloned();
+
+                        let worker_id = self.get_assignment(actor_group_id);
 
                         state.inner.add_actor(
                             actor_id,

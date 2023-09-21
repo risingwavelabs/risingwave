@@ -277,6 +277,7 @@ impl ClusterManager {
         Ok(())
     }
 
+    #[deprecated]
     pub async fn record_new_assignments(&self, assignments: &HashMap<ActorGroupId, WorkerId>) {
         let mut core = self.core.write().await;
 
@@ -506,6 +507,7 @@ pub struct StreamingClusterInfo {
     /// All **active** compute nodes in the cluster.
     pub worker_nodes: HashMap<WorkerId, WorkerNode>,
 
+    #[deprecated]
     pub assignments: HashMap<ActorGroupId, WorkerId>,
 
     /// All parallel units of the **active** compute nodes in the cluster.
@@ -519,6 +521,7 @@ pub struct ClusterManagerCore {
     /// Record for workers in the cluster.
     workers: HashMap<WorkerKey, Worker>,
 
+    #[deprecated]
     assignments: HashMap<ActorGroupId, WorkerId>, // TODO: should we persist this?
 
     /// Record for tracking available machine ids, one is available.

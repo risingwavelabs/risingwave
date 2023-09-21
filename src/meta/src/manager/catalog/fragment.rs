@@ -650,6 +650,46 @@ impl FragmentManager {
         }
     }
 
+    /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
+    /// collected
+    pub async fn load_all_actors_3(
+        &self,
+        check_state: impl Fn(ActorState, TableId, ActorId) -> bool,
+    ) -> ActorInfos {
+        let mut actor_maps = HashMap::new();
+        let mut barrier_inject_actor_maps = HashMap::new();
+
+        let map = &self.core.read().await.table_fragments;
+        for fragments in map.values() {
+            let table_id = fragments.table_id();
+            let barrier_inject_actors = fragments.barrier_inject_actor_ids();
+
+            for actor in fragments.fragments.values().flat_map(|f| &f.actors) {
+                let actor_state = fragments.actor_status[&actor.actor_id].state();
+                let worker_id = actor.worker_node_id;
+
+                if check_state(actor_state, table_id, actor.actor_id) {
+                    actor_maps
+                        .entry(worker_id)
+                        .or_insert_with(Vec::new)
+                        .push(actor.actor_id);
+
+                    if barrier_inject_actors.contains(&actor.actor_id) {
+                        barrier_inject_actor_maps
+                            .entry(worker_id)
+                            .or_insert_with(Vec::new)
+                            .push(actor.actor_id);
+                    }
+                }
+            }
+        }
+
+        ActorInfos {
+            actor_maps,
+            barrier_inject_actor_maps,
+        }
+    }
+
     async fn migrate_fragment_actors_inner(
         &self,
         migration_plan: &MigrationPlan,

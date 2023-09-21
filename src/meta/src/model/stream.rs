@@ -30,7 +30,9 @@ use risingwave_pb::stream_plan::{
 use super::{ActorId, FragmentId};
 use crate::manager::{SourceId, WorkerId};
 use crate::model::{MetadataModel, MetadataModelResult};
-use crate::stream::{build_actor_connector_splits, build_actor_split_impls, SplitAssignment};
+use crate::stream::{
+    build_actor_connector_splits, build_actor_split_impls, LocationsV2, SplitAssignment,
+};
 
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
@@ -122,8 +124,14 @@ impl MetadataModel for TableFragments {
 
 impl TableFragments {
     /// Create a new `TableFragments` with state of `Initial`, with other fields empty.
+    #[cfg(test)]
     pub fn for_test(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
-        Self::new(table_id, fragments, StreamEnvironment::default())
+        Self::new(
+            table_id,
+            fragments,
+            &LocationsV2::default(),
+            StreamEnvironment::default(),
+        )
     }
 
     /// Create a new `TableFragments` with state of `Initial`, with the status of actors set to
@@ -131,7 +139,7 @@ impl TableFragments {
     pub fn new(
         table_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
-        // actor_locations: &BTreeMap<ActorId, ParallelUnit>,
+        locations: &LocationsV2,
         env: StreamEnvironment,
     ) -> Self {
         // let actor_status = actor_locations
@@ -151,13 +159,14 @@ impl TableFragments {
             .values()
             .flat_map(|f| &f.actors)
             .map(|a| {
-                (
-                    a.actor_id,
-                    ActorStatus {
-                        parallel_unit: None,
-                        state: ActorState::Inactive as i32,
-                    },
-                )
+                let actor_id = a.actor_id;
+                let worker_id = locations.worker_for_actor(actor_id);
+                let status = ActorStatus {
+                    parallel_unit: None, // TODO: remove,
+                    state: ActorState::Inactive as i32,
+                };
+
+                (actor_id, status)
             })
             .collect();
 
