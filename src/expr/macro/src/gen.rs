@@ -839,15 +839,26 @@ impl FunctionAttr {
                 .map(|i| quote! { self.return_type.as_struct().types().nth(#i).unwrap().clone() })
                 .collect()
         };
+        #[allow(clippy::disallowed_methods)]
+        let optioned_outputs = user_fn
+            .core_return_type
+            .split(',')
+            .map(|t| t.contains("Option"))
+            // example: "(Option<&str>, i32)" => [true, false]
+            .zip(&outputs)
+            .map(|(optional, o)| match optional {
+                false => quote! { Some(#o.as_scalar_ref()) },
+                true => quote! { #o.map(|o| o.as_scalar_ref()) },
+            })
+            .collect_vec();
         let build_value_array = if return_types.len() == 1 {
             quote! { let [value_array] = value_arrays; }
         } else {
             quote! {
-                let bitmap = value_arrays[0].null_bitmap().clone();
                 let value_array = StructArray::new(
                     self.return_type.as_struct().clone(),
                     value_arrays.to_vec(),
-                    bitmap,
+                    Bitmap::ones(len),
                 ).into_ref();
             }
         };
@@ -938,11 +949,12 @@ impl FunctionAttr {
                                 for output in #iter {
                                     index_builder.append(Some(i as i32));
                                     match #output {
-                                        Some((#(#outputs),*)) => { #(#builders.append(Some(#outputs.as_scalar_ref()));)* }
+                                        Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* }
                                         None => { #(#builders.append_null();)* }
                                     }
 
                                     if index_builder.len() == self.chunk_size {
+                                        let len = index_builder.len();
                                         let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
                                         let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
                                         #build_value_array
