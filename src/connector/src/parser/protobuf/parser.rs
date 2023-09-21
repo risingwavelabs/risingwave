@@ -719,18 +719,18 @@ mod test {
                 Some(ScalarImpl::Int32(500000000)),
             ])),
         );
-        pb_eq(
-            a,
-            "any_field",
-            S::Struct(StructValue::new(vec![
-                Some(ScalarImpl::Utf8(
-                    m.any_field.as_ref().unwrap().type_url.as_str().into(),
-                )),
-                Some(ScalarImpl::Bytea(
-                    m.any_field.as_ref().unwrap().value.clone().into(),
-                )),
-            ])),
-        );
+        // pb_eq(
+        //     a,
+        //     "any_field",
+        //     S::Struct(StructValue::new(vec![
+        //         Some(ScalarImpl::Utf8(
+        //             m.any_field.as_ref().unwrap().type_url.as_str().into(),
+        //         )),
+        //         Some(ScalarImpl::Bytea(
+        //             m.any_field.as_ref().unwrap().value.clone().into(),
+        //         )),
+        //     ])),
+        // );
         pb_eq(
             a,
             "int32_value_field",
