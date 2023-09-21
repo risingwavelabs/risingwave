@@ -92,15 +92,6 @@ impl From<ExprError> for RwError {
     }
 }
 
-impl From<regex::Error> for ExprError {
-    fn from(re: regex::Error) -> Self {
-        Self::InvalidParam {
-            name: "pattern",
-            reason: re.to_string().into(),
-        }
-    }
-}
-
 impl From<chrono::ParseError> for ExprError {
     fn from(e: chrono::ParseError) -> Self {
         Self::Parse(e.to_string().into())

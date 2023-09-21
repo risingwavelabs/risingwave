@@ -413,10 +413,10 @@ impl FunctionAttr {
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::row::OwnedRow;
                 use risingwave_common::util::iter_util::ZipEqFast;
-                use itertools::multizip;
 
                 use risingwave_expr::expr::{Context, BoxedExpression};
                 use risingwave_expr::Result;
+                use risingwave_expr::codegen::*;
 
                 #check_children
                 let prebuilt_arg = #prebuild_const;
@@ -431,7 +431,7 @@ impl FunctionAttr {
                     children: Vec<BoxedExpression>,
                     prebuilt_arg: #prebuilt_arg_type,
                 }
-                #[async_trait::async_trait]
+                #[async_trait]
                 impl risingwave_expr::expr::Expression for #struct_name {
                     fn return_type(&self) -> DataType {
                         self.context.return_type.clone()
@@ -677,6 +677,7 @@ impl FunctionAttr {
 
                 use risingwave_expr::Result;
                 use risingwave_expr::aggregate::AggregateState;
+                use risingwave_expr::codegen::async_trait;
 
                 #[derive(Clone)]
                 struct Agg {
@@ -684,7 +685,7 @@ impl FunctionAttr {
                     #function_field
                 }
 
-                #[async_trait::async_trait]
+                #[async_trait]
                 impl risingwave_expr::aggregate::AggregateFunction for Agg {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
@@ -925,7 +926,7 @@ impl FunctionAttr {
                     #(#child: BoxedExpression,)*
                     prebuilt_arg: #prebuilt_arg_type,
                 }
-                #[async_trait::async_trait]
+                #[async_trait]
                 impl risingwave_expr::table_function::TableFunction for #struct_name {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()

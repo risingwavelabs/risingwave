@@ -14,7 +14,7 @@
 
 use std::collections::BTreeSet;
 
-use futures::FutureExt;
+use futures_util::FutureExt;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::types::{DataType, Datum};
