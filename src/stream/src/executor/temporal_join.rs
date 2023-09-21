@@ -44,7 +44,9 @@ use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::JoinStreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, BoxedExecutor, JoinType, JoinTypePrimitive, PkIndices};
+use crate::executor::{
+    ActorContextRef, BoxedExecutor, JoinType, JoinTypePrimitive, PkIndices, Watermark,
+};
 use crate::task::AtomicU64Ref;
 
 pub struct TemporalJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitive> {
@@ -115,7 +117,7 @@ impl EstimateSize for JoinEntryWrapper {
 }
 
 impl JoinEntryWrapper {
-    const MESSAGE: &str = "the state should always be `Some`";
+    const MESSAGE: &'static str = "the state should always be `Some`";
 
     /// Take the value out of the wrapper. Panic if the value is `None`.
     pub fn take(&mut self) -> JoinEntry {
@@ -207,10 +209,11 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
         right_stream_key_indices: &[usize],
     ) -> StreamExecutorResult<()> {
         for chunk in chunks {
-            // Compact chunk, otherwise the following keys and chunk rows might fail to zip.
-            let chunk = chunk.compact();
             let keys = K::build(join_keys, chunk.data_chunk())?;
-            for ((op, row), key) in chunk.rows().zip_eq_debug(keys.into_iter()) {
+            for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
+                let Some((op, row)) = r else {
+                    continue;
+                };
                 if self.cache.contains(&key) {
                     // Update cache
                     let mut entry = self.cache.get_mut(&key).unwrap();
@@ -235,17 +238,35 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
 enum InternalMessage {
     Chunk(StreamChunk),
     Barrier(Vec<StreamChunk>, Barrier),
+    WaterMark(Watermark),
 }
 
 #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-pub async fn chunks_until_barrier(stream: impl MessageStream, expected_barrier: Barrier) {
+async fn chunks_until_barrier(stream: impl MessageStream, expected_barrier: Barrier) {
     #[for_await]
     for item in stream {
         match item? {
             Message::Watermark(_) => {
-                // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
+                // ignore
             }
             Message::Chunk(c) => yield c,
+            Message::Barrier(b) if b.epoch != expected_barrier.epoch => {
+                return Err(StreamExecutorError::align_barrier(expected_barrier, b));
+            }
+            Message::Barrier(_) => return Ok(()),
+        }
+    }
+}
+
+#[try_stream(ok = InternalMessage, error = StreamExecutorError)]
+async fn internal_messages_until_barrier(stream: impl MessageStream, expected_barrier: Barrier) {
+    #[for_await]
+    for item in stream {
+        match item? {
+            Message::Watermark(w) => {
+                yield InternalMessage::WaterMark(w);
+            }
+            Message::Chunk(c) => yield InternalMessage::Chunk(c),
             Message::Barrier(b) if b.epoch != expected_barrier.epoch => {
                 return Err(StreamExecutorError::align_barrier(expected_barrier, b));
             }
@@ -285,18 +306,20 @@ async fn align_input(left: Box<dyn Executor>, right: Box<dyn Executor>) {
                 }
                 Some(Either::Right(Ok(Message::Barrier(b)))) => {
                     #[for_await]
-                    for chunk in chunks_until_barrier(left.by_ref(), b.clone()) {
-                        yield InternalMessage::Chunk(chunk?);
+                    for internal_message in
+                        internal_messages_until_barrier(left.by_ref(), b.clone())
+                    {
+                        yield internal_message?;
                     }
                     yield InternalMessage::Barrier(right_chunks, b);
                     break 'inner;
                 }
                 Some(Either::Left(Err(e)) | Either::Right(Err(e))) => return Err(e),
-                Some(
-                    Either::Left(Ok(Message::Watermark(_)))
-                    | Either::Right(Ok(Message::Watermark(_))),
-                ) => {
-                    // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
+                Some(Either::Left(Ok(Message::Watermark(w)))) => {
+                    yield InternalMessage::WaterMark(w);
+                }
+                Some(Either::Right(Ok(Message::Watermark(_)))) => {
+                    // ignore right side watermark
                 }
                 None => return Ok(()),
             }
@@ -381,6 +404,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
             self.right.schema().len(),
         );
 
+        let left_to_output: HashMap<usize, usize> = HashMap::from_iter(left_map.iter().cloned());
+
         let right_stream_key_indices = self.right.pk_indices().to_vec();
 
         let null_matched = K::Bitmap::from_bool_vec(self.null_safe);
@@ -398,9 +423,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                 .with_label_values(&[&table_id_str, &actor_id_str])
                 .set(self.right_table.cache.len() as i64);
             match msg? {
+                InternalMessage::WaterMark(watermark) => {
+                    let output_watermark_col_idx = *left_to_output.get(&watermark.col_idx).unwrap();
+                    yield Message::Watermark(watermark.with_idx(output_watermark_col_idx));
+                }
                 InternalMessage::Chunk(chunk) => {
-                    // Compact chunk, otherwise the following keys and chunk rows might fail to zip.
-                    let chunk = chunk.compact();
                     let mut builder = JoinStreamChunkBuilder::new(
                         self.chunk_size,
                         self.schema.data_types(),
@@ -409,7 +436,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                     );
                     let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
                     let keys = K::build(&self.left_join_keys, chunk.data_chunk())?;
-                    for ((op, left_row), key) in chunk.rows().zip_eq_debug(keys.into_iter()) {
+                    for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
+                        let Some((op, left_row)) = r else {
+                            continue;
+                        };
                         if key.null_bitmap().is_subset(&null_matched)
                             && let join_entry = self.right_table.lookup(&key, epoch).await?
                             && !join_entry.is_empty() {

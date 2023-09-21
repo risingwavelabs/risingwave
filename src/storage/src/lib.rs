@@ -18,9 +18,9 @@
 #![feature(bound_as_ref)]
 #![feature(bound_map)]
 #![feature(custom_test_frameworks)]
-#![feature(drain_filter)]
+#![feature(extract_if)]
 #![feature(generators)]
-#![feature(hash_drain_filter)]
+#![feature(hash_extract_if)]
 #![feature(lint_reasons)]
 #![feature(proc_macro_hygiene)]
 #![feature(result_option_inspect)]
@@ -33,16 +33,14 @@
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(assert_matches)]
 #![feature(is_sorted)]
-#![feature(btree_drain_filter)]
+#![feature(btree_extract_if)]
 #![feature(exact_size_is_empty)]
 #![feature(lazy_cell)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![recursion_limit = "256"]
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
 #![feature(let_chains)]
 #![feature(associated_type_bounds)]
-#![feature(local_key_cell_methods)]
 #![feature(exclusive_range_pattern)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(async_fn_in_trait)]
@@ -60,7 +58,6 @@ pub mod error;
 pub mod opts;
 pub mod store_impl;
 pub mod table;
-pub mod write_batch;
 
 pub mod filter_key_extractor;
 pub mod mem_table;

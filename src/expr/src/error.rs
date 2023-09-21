@@ -76,6 +76,12 @@ pub enum ExprError {
 
     #[error("field name must not be null")]
     FieldNameNull,
+
+    #[error("too few arguments for format()")]
+    TooFewArguments,
+
+    #[error("invalid state: {0}")]
+    InvalidState(String),
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);

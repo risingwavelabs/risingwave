@@ -91,8 +91,8 @@ impl LimitExecutor {
             }
             // process chunk
             let mut new_vis;
-            if let Some(old_vis) = data_chunk.visibility() {
-                new_vis = old_vis.iter().collect_vec();
+            if !data_chunk.is_compacted() {
+                new_vis = data_chunk.visibility().iter().collect_vec();
                 for vis in new_vis.iter_mut().filter(|x| **x) {
                     if skipped < self.offset {
                         skipped += 1;

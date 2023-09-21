@@ -301,6 +301,10 @@ impl ClickHouseSinkWriter {
         )?;
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
+                tracing::warn!(
+                    "append only click house sink receive an {:?} which will be ignored.",
+                    op
+                );
                 continue;
             }
             let mut clickhouse_filed_vec = vec![];
@@ -606,7 +610,7 @@ impl Serialize for ClickHouseField {
             ClickHouseField::Bool(v) => serializer.serialize_bool(*v),
             ClickHouseField::List(v) => {
                 let mut s = serializer.serialize_seq(Some(v.len()))?;
-                for i in v.iter() {
+                for i in v {
                     s.serialize_element(i)?;
                 }
                 s.end()

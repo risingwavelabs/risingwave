@@ -6,6 +6,7 @@ auto-retry: &auto-retry
 
 steps:
   - label: "docker-build-push: amd64"
+    if: build.env("SKIP_TARGET_AMD64") != "true"
     command: "ci/scripts/docker.sh"
     key: "build-amd64"
     plugins:
@@ -18,6 +19,7 @@ steps:
     retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
+    if: build.env("SKIP_TARGET_AARCH64") != "true"
     command: "ci/scripts/docker.sh"
     key: "build-aarch64"
     plugins:
@@ -53,10 +55,9 @@ steps:
       - docker-compose#v4.9.0:
           run: release-env
           config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          propagate-environment: true
           environment:
             - BINARY_NAME
-            - BUILDKITE_SOURCE
             - GITHUB_TOKEN
-            - BUILDKITE_COMMIT
-            - BUILDKITE_TAG
     retry: *auto-retry

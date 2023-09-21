@@ -16,15 +16,13 @@ pub mod memory_manager;
 
 // Only enable the non-trivial policies on Linux as it relies on statistics from `jemalloc-ctl`
 // which might be inaccurate on other platforms.
-#[cfg(target_os = "linux")]
 pub mod policy;
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use risingwave_batch::task::BatchManager;
-use risingwave_common::config::{AutoDumpHeapProfileConfig, StorageConfig, StorageMemoryConfig};
-use risingwave_common::error::Result;
+use risingwave_common::config::{HeapProfilingConfig, StorageConfig, StorageMemoryConfig};
 use risingwave_common::util::pretty_bytes::convert;
 use risingwave_stream::task::LocalStreamManager;
 
@@ -69,35 +67,23 @@ pub trait MemoryControl: Send + Sync + std::fmt::Debug {
     ) -> MemoryControlStats;
 }
 
-#[cfg(target_os = "linux")]
 pub fn build_memory_control_policy(
     total_memory_bytes: usize,
-    auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
-) -> Result<MemoryControlRef> {
-    use risingwave_common::bail;
-    use tikv_jemalloc_ctl::opt;
-
+    heap_profiling_config: HeapProfilingConfig,
+) -> MemoryControlRef {
     use self::policy::JemallocMemoryControl;
 
-    if !opt::prof::read().unwrap() && auto_dump_heap_profile_config.enabled() {
-        bail!("Auto heap profile dump should not be enabled with Jemalloc profile disable");
+    if cfg!(target_os = "linux") {
+        Box::new(JemallocMemoryControl::new(
+            total_memory_bytes,
+            heap_profiling_config,
+        ))
+    } else {
+        // We disable memory control on operating systems other than Linux now because jemalloc
+        // stats do not work well.
+        tracing::warn!("memory control is only enabled on Linux now");
+        Box::new(DummyPolicy)
     }
-
-    Ok(Box::new(JemallocMemoryControl::new(
-        total_memory_bytes,
-        auto_dump_heap_profile_config,
-    )))
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn build_memory_control_policy(
-    _total_memory_bytes: usize,
-    _auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
-) -> Result<MemoryControlRef> {
-    // We disable memory control on operating systems other than Linux now because jemalloc
-    // stats do not work well.
-    tracing::warn!("memory control is only enabled on Linux now");
-    Ok(Box::new(DummyPolicy))
 }
 
 /// `DummyPolicy` is used for operarting systems other than Linux. It does nothing as memory control
@@ -122,6 +108,14 @@ impl MemoryControl for DummyPolicy {
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
 /// size must be larger than `MIN_SYSTEM_RESERVED_MEMORY_MB`
 pub fn reserve_memory_bytes(total_memory_bytes: usize) -> (usize, usize) {
+    if total_memory_bytes < MIN_COMPUTE_MEMORY_MB << 20 {
+        panic!(
+            "The total memory size ({}) is too small. It must be at least {} MB.",
+            convert(total_memory_bytes as _),
+            MIN_COMPUTE_MEMORY_MB
+        );
+    }
+
     let reserved = std::cmp::max(
         (total_memory_bytes as f64 * SYSTEM_RESERVED_MEMORY_PROPORTION).ceil() as usize,
         MIN_SYSTEM_RESERVED_MEMORY_MB << 20,

@@ -73,6 +73,7 @@ pub enum Components {
     Sanitizer,
     DynamicLinking,
     HummockTrace,
+    Coredump,
 }
 
 impl Components {
@@ -87,13 +88,14 @@ impl Components {
             Self::Redis => "[Component] Redis",
             Self::BuildConnectorNode => "[Build] Build RisingWave Connector (Java)",
             Self::RustComponents => "[Build] Rust components",
-            Self::Dashboard => "[Build] Dashboard v2",
+            Self::Dashboard => "[Build] Dashboard",
             Self::Tracing => "[Component] Tracing: Grafana Tempo",
             Self::Release => "[Build] Enable release mode",
             Self::AllInOne => "[Build] Enable all-in-one binary",
             Self::Sanitizer => "[Build] Enable sanitizer",
             Self::DynamicLinking => "[Build] Enable dynamic linking",
             Self::HummockTrace => "[Build] Hummock Trace",
+            Self::Coredump => "[Runtime] Enable coredump",
         }
         .into()
     }
@@ -135,7 +137,7 @@ to RiseDev directory."
             }
             Self::Dashboard => {
                 "
-Required if you want to build dashboard v2 from source."
+Required if you want to build dashboard from source."
             }
             Self::Tracing => {
                 "
@@ -179,7 +181,18 @@ but you might need the expertise to install dependencies correctly.
                 "
             }
             Self::HummockTrace => {
-            "With this option enabled, RiseDev will enable tracing for Hummock. See storage/hummock_trace for details."
+                "
+With this option enabled, RiseDev will enable tracing for Hummock.
+See storage/hummock_trace for details.
+                "
+            }
+            Self::Coredump => {
+                "
+With this option enabled, RiseDev will unlimit the size of core
+files before launching RisingWave. On Apple Silicon platforms,
+the binaries will also be codesigned with `get-task-allow` enabled.
+As a result, RisingWave will dump the core on panics.
+                "
             }
         }
         .into()
@@ -194,7 +207,7 @@ but you might need the expertise to install dependencies correctly.
             "ENABLE_KAFKA" => Some(Self::Kafka),
             "ENABLE_PUBSUB" => Some(Self::Pubsub),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
-            "ENABLE_BUILD_DASHBOARD_V2" => Some(Self::Dashboard),
+            "ENABLE_BUILD_DASHBOARD" => Some(Self::Dashboard),
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
             "ENABLE_DYNAMIC_LINKING" => Some(Self::DynamicLinking),
@@ -217,7 +230,7 @@ but you might need the expertise to install dependencies correctly.
             Self::Pubsub => "ENABLE_PUBSUB",
             Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
-            Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",
+            Self::Dashboard => "ENABLE_BUILD_DASHBOARD",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
             Self::Release => "ENABLE_RELEASE_PROFILE",
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
@@ -225,6 +238,7 @@ but you might need the expertise to install dependencies correctly.
             Self::BuildConnectorNode => "ENABLE_BUILD_RW_CONNECTOR",
             Self::DynamicLinking => "ENABLE_DYNAMIC_LINKING",
             Self::HummockTrace => "ENABLE_HUMMOCK_TRACE",
+            Self::Coredump => "ENABLE_COREDUMP",
         }
         .into()
     }
@@ -382,6 +396,12 @@ fn main() -> Result<()> {
         )?;
         if chosen.contains(&component) {
             writeln!(file, "{}=true", component.env())?;
+            if component == Components::BuildConnectorNode {
+                writeln!(
+                    file,
+                    "CONNECTOR_LIBS_PATH=.risingwave/bin/connector-node/libs/"
+                )?;
+            }
         } else {
             writeln!(file, "# {}=true", component.env())?;
         }

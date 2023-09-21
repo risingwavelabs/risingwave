@@ -197,9 +197,11 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
 
 fn check_generated_column_constraints(
     column_name: &String,
+    column_id: ColumnId,
     expr: &ExprImpl,
     column_catalogs: &[ColumnCatalog],
     generated_column_names: &[String],
+    pk_column_ids: &[ColumnId],
 ) -> Result<()> {
     let input_refs = expr.collect_input_refs(column_catalogs.len());
     for idx in input_refs.ones() {
@@ -214,6 +216,14 @@ fn check_generated_column_constraints(
             .into());
         }
     }
+
+    if pk_column_ids.contains(&column_id) && expr.is_impure() {
+        return Err(ErrorCode::BindError(
+            format!("Generated columns should not be part of the primary key. Here column \"{}\" is defined as part of the primary key.", column_name),
+        )
+        .into());
+    }
+
     Ok(())
 }
 
@@ -243,6 +253,7 @@ pub fn bind_sql_column_constraints(
     table_name: String,
     column_catalogs: &mut [ColumnCatalog],
     columns: Vec<ColumnDef>,
+    pk_column_ids: &[ColumnId],
 ) -> Result<()> {
     let generated_column_names = {
         let mut names = vec![];
@@ -271,9 +282,11 @@ pub fn bind_sql_column_constraints(
 
                     check_generated_column_constraints(
                         &column.name.real_value(),
+                        column_catalogs[idx].column_id(),
                         &expr_impl,
                         column_catalogs,
                         &generated_column_names,
+                        pk_column_ids,
                     )?;
 
                     column_catalogs[idx].column_desc.generated_or_default_column = Some(
@@ -460,7 +473,13 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let definition = context.normalized_sql().to_owned();
 
-    bind_sql_column_constraints(session, table_name.real_value(), &mut columns, column_defs)?;
+    bind_sql_column_constraints(
+        session,
+        table_name.real_value(),
+        &mut columns,
+        column_defs,
+        &pk_column_ids,
+    )?;
 
     check_source_schema(&properties, row_id_index, &columns)?;
 
@@ -592,6 +611,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         table_name.real_value(),
         &mut columns,
         column_defs,
+        &pk_column_ids,
     )?;
 
     gen_table_plan_inner(

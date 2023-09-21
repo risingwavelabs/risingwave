@@ -106,7 +106,7 @@ impl HummockManager {
             == Some(true);
         let mut pairs = vec![];
         if let Some(mv_table) = mv_table {
-            if internal_tables.drain_filter(|t| *t == mv_table).count() > 0 {
+            if internal_tables.extract_if(|t| *t == mv_table).count() > 0 {
                 tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
             }
             // materialized_view
@@ -180,7 +180,7 @@ impl HummockManager {
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
 
-        for (table_id, _) in pairs.iter() {
+        for (table_id, _) in pairs {
             if let Some(old_group) =
                 try_get_compaction_group_id_by_table_id(current_version, *table_id)
             {
@@ -198,7 +198,7 @@ impl HummockManager {
             build_version_delta_after_version(current_version),
         );
 
-        for (table_id, raw_group_id) in pairs.iter() {
+        for (table_id, raw_group_id) in pairs {
             let mut group_id = *raw_group_id;
             if group_id == StaticCompactionGroupId::NewCompactionGroup as u64 {
                 let mut is_group_init = false;
@@ -910,6 +910,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::Level0MaxCompactFileNumber(c) => {
                 target.level0_max_compact_file_number = *c;
+            }
+            MutableConfig::EnableEmergencyPicker(c) => {
+                target.enable_emergency_picker = *c;
             }
         }
     }

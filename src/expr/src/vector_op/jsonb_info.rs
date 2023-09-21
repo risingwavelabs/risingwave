@@ -20,7 +20,7 @@ use risingwave_expr_macro::function;
 use crate::{ExprError, Result};
 
 #[function("jsonb_typeof(jsonb) -> varchar")]
-pub fn jsonb_typeof(v: JsonbRef<'_>, writer: &mut dyn Write) {
+pub fn jsonb_typeof(v: JsonbRef<'_>, writer: &mut impl Write) {
     writer.write_str(v.type_name()).unwrap()
 }
 

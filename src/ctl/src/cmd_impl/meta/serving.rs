@@ -50,7 +50,7 @@ pub async fn list_serving_fragment_mappings(context: &CtlContext) -> anyhow::Res
         .flat_map(|(fragment_id, (table_id, mapping))| {
             let mut pu_vnodes: HashMap<ParallelUnitId, Vec<VirtualNode>> = HashMap::new();
             for (vnode, pu) in mapping.iter_with_vnode() {
-                pu_vnodes.entry(pu).or_insert(vec![]).push(vnode);
+                pu_vnodes.entry(pu).or_default().push(vnode);
             }
             pu_vnodes.into_iter().map(|(pu_id, vnodes)| {
                 (

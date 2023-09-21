@@ -33,7 +33,9 @@ use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
-use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
+use risingwave_hummock_sdk::key::{
+    end_bound_of_prefix, map_table_key_range, next_key, prefixed_range, TableKeyRange,
+};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::trace;
 
@@ -448,8 +450,8 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 
         // For each key range, construct an iterator.
         let iterators: Vec<_> = try_join_all(raw_key_ranges.map(|raw_key_range| {
+            let table_key_range = map_table_key_range(raw_key_range);
             let prefix_hint = prefix_hint.clone();
-            let wait_epoch = wait_epoch;
             let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
             async move {
                 let read_options = ReadOptions {
@@ -474,7 +476,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                     self.value_output_indices.clone(),
                     self.output_row_in_key_indices.clone(),
                     self.row_serde.clone(),
-                    raw_key_range,
+                    table_key_range,
                     read_options,
                     wait_epoch,
                 )
@@ -681,13 +683,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         value_output_indices: Vec<usize>,
         output_row_in_key_indices: Vec<usize>,
         row_deserializer: Arc<SD>,
-        raw_key_range: (Bound<Bytes>, Bound<Bytes>),
+        table_key_range: TableKeyRange,
         read_options: ReadOptions,
         epoch: HummockReadEpoch,
     ) -> StorageResult<Self> {
         let raw_epoch = epoch.get_epoch();
         store.try_wait_epoch(epoch).await?;
-        let iter = store.iter(raw_key_range, raw_epoch, read_options).await?;
+        let iter = store.iter(table_key_range, raw_epoch, read_options).await?;
         // For `HummockStorage`, a cluster recovery will clear storage data and make subsequent
         // `HummockReadEpoch::Current` read incomplete.
         // `validate_read_epoch` is a safeguard against that incorrect read. It rejects the read

@@ -20,7 +20,7 @@ use super::*;
 
 #[function(
     "unnest(list) -> setof any",
-    type_infer = "|args| Ok(args[0].unnest_list())"
+    type_infer = "|args| Ok(args[0].unnest_list().clone())"
 )]
 fn unnest(list: ListRef<'_>) -> impl Iterator<Item = Option<ScalarRefImpl<'_>>> {
     list.flatten().into_iter()

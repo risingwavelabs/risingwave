@@ -34,7 +34,7 @@ use risingwave_common::catalog::{
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+    Connection, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source, Table, View,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
@@ -725,8 +725,8 @@ impl CatalogManager {
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
     pub async fn finish_create_table_procedure(
         &self,
-        internal_tables: Vec<Table>,
-        table: Table,
+        mut internal_tables: Vec<Table>,
+        mut table: Table,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -742,8 +742,10 @@ impl CatalogManager {
             .in_progress_creation_streaming_job
             .remove(&table.id);
 
+        table.stream_job_status = PbStreamJobStatus::Created.into();
         tables.insert(table.id, table.clone());
-        for table in &internal_tables {
+        for table in &mut internal_tables {
+            table.stream_job_status = PbStreamJobStatus::Created.into();
             tables.insert(table.id, table.clone());
         }
         commit_meta!(self, tables)?;
@@ -1730,8 +1732,8 @@ impl CatalogManager {
     pub async fn finish_create_table_procedure_with_source(
         &self,
         source: Source,
-        mview: Table,
-        internal_tables: Vec<Table>,
+        mut mview: Table,
+        mut internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -1762,8 +1764,10 @@ impl CatalogManager {
             .remove(&mview.id);
 
         sources.insert(source.id, source.clone());
+        mview.stream_job_status = PbStreamJobStatus::Created.into();
         tables.insert(mview.id, mview.clone());
-        for table in &internal_tables {
+        for table in &mut internal_tables {
+            table.stream_job_status = PbStreamJobStatus::Created.into();
             tables.insert(table.id, table.clone());
         }
         commit_meta!(self, sources, tables)?;
@@ -1870,9 +1874,9 @@ impl CatalogManager {
 
     pub async fn finish_create_index_procedure(
         &self,
-        internal_tables: Vec<Table>,
-        index: Index,
-        table: Table,
+        mut internal_tables: Vec<Table>,
+        mut index: Index,
+        mut table: Table,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -1891,10 +1895,13 @@ impl CatalogManager {
             .in_progress_creation_streaming_job
             .remove(&table.id);
 
+        index.stream_job_status = PbStreamJobStatus::Created.into();
         indexes.insert(index.id, index.clone());
 
+        table.stream_job_status = PbStreamJobStatus::Created.into();
         tables.insert(table.id, table.clone());
-        for table in &internal_tables {
+        for table in &mut internal_tables {
+            table.stream_job_status = PbStreamJobStatus::Created.into();
             tables.insert(table.id, table.clone());
         }
         commit_meta!(self, indexes, tables)?;
@@ -1955,8 +1962,8 @@ impl CatalogManager {
 
     pub async fn finish_create_sink_procedure(
         &self,
-        internal_tables: Vec<Table>,
-        sink: Sink,
+        mut internal_tables: Vec<Table>,
+        mut sink: Sink,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -1974,8 +1981,10 @@ impl CatalogManager {
             .in_progress_creation_streaming_job
             .remove(&sink.id);
 
+        sink.stream_job_status = PbStreamJobStatus::Created.into();
         sinks.insert(sink.id, sink.clone());
-        for table in &internal_tables {
+        for table in &mut internal_tables {
+            table.stream_job_status = PbStreamJobStatus::Created.into();
             tables.insert(table.id, table.clone());
         }
         commit_meta!(self, sinks, tables)?;
@@ -2020,7 +2029,10 @@ impl CatalogManager {
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
-    pub async fn start_replace_table_procedure(&self, table: &Table) -> MetaResult<()> {
+    pub async fn start_replace_table_procedure(&self, stream_job: &StreamingJob) -> MetaResult<()> {
+        let StreamingJob::Table(source, table) = stream_job else {
+            unreachable!("unexpected job: {stream_job:?}")
+        };
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         database_core.ensure_database_id(table.database_id)?;
@@ -2043,6 +2055,13 @@ impl CatalogManager {
         if database_core.has_in_progress_creation(&key) {
             bail!("table is in altering procedure");
         } else {
+            if let Some(source) = source {
+                let source_key = (source.database_id, source.schema_id, source.name.clone());
+                if database_core.has_in_progress_creation(&source_key) {
+                    bail!("source is in altering procedure");
+                }
+                database_core.mark_creating(&source_key);
+            }
             database_core.mark_creating(&key);
             Ok(())
         }
@@ -2051,19 +2070,37 @@ impl CatalogManager {
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
     pub async fn finish_replace_table_procedure(
         &self,
+        source: &Option<Source>,
         table: &Table,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let key = (table.database_id, table.schema_id, table.name.clone());
+
         assert!(
             tables.contains_key(&table.id)
                 && database_core.in_progress_creation_tracker.contains(&key),
             "table must exist and be in altering procedure"
         );
+
+        if let Some(source) = source {
+            let source_key = (source.database_id, source.schema_id, source.name.clone());
+            assert!(
+                sources.contains_key(&source.id)
+                    && database_core
+                        .in_progress_creation_tracker
+                        .contains(&source_key),
+                "source must exist and be in altering procedure"
+            );
+            sources.insert(source.id, source.clone());
+            database_core
+                .in_progress_creation_tracker
+                .remove(&source_key);
+        }
 
         let index_ids: Vec<_> = indexes
             .tree_ref()
@@ -2090,8 +2127,10 @@ impl CatalogManager {
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
         database_core.in_progress_creation_tracker.remove(&key);
 
+        let mut table = table.clone();
+        table.stream_job_status = PbStreamJobStatus::Created.into();
         tables.insert(table.id, table.clone());
-        commit_meta!(self, tables, indexes)?;
+        commit_meta!(self, tables, indexes, sources)?;
 
         // Group notification
         let version = self
@@ -2099,9 +2138,12 @@ impl CatalogManager {
                 Operation::Update,
                 Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
-                        relation_info: RelationInfo::Table(table.to_owned()).into(),
+                        relation_info: RelationInfo::Table(table).into(),
                     }]
                     .into_iter()
+                    .chain(source.iter().map(|source| Relation {
+                        relation_info: RelationInfo::Source(source.to_owned()).into(),
+                    }))
                     .chain(updated_indexes.into_iter().map(|index| Relation {
                         relation_info: RelationInfo::Index(index).into(),
                     }))
@@ -2114,7 +2156,13 @@ impl CatalogManager {
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
-    pub async fn cancel_replace_table_procedure(&self, table: &Table) -> MetaResult<()> {
+    pub async fn cancel_replace_table_procedure(
+        &self,
+        stream_job: &StreamingJob,
+    ) -> MetaResult<()> {
+        let StreamingJob::Table(source, table) = stream_job else {
+            unreachable!("unexpected job: {stream_job:?}")
+        };
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let key = (table.database_id, table.schema_id, table.name.clone());
@@ -2126,6 +2174,17 @@ impl CatalogManager {
                 && database_core.has_in_progress_creation(&key),
             "table must exist and must be in altering procedure"
         );
+
+        if let Some(source) = source {
+            let source_key = (source.database_id, source.schema_id, source.name.clone());
+            assert!(
+                database_core.sources.contains_key(&source.id)
+                    && database_core.has_in_progress_creation(&source_key),
+                "source must exist and must be in altering procedure"
+            );
+
+            database_core.unmark_creating(&source_key);
+        }
 
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
         // occur after it's created. We may need to add a new tracker for `alter` procedure.s
