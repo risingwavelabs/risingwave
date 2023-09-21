@@ -287,10 +287,9 @@ pub async fn restore(opts: RestoreOpts) -> BackupResult<()> {
 mod tests {
     use std::collections::HashMap;
 
-    use clap::Parser;
     use itertools::Itertools;
     use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
-    use risingwave_common::config::SystemConfig;
+    use risingwave_common::config::{MetaBackend, SystemConfig};
     use risingwave_pb::hummock::HummockVersion;
     use risingwave_pb::meta::SystemParams;
 
@@ -303,17 +302,19 @@ mod tests {
     use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
 
     fn get_restore_opts() -> RestoreOpts {
-        RestoreOpts::parse_from([
-            "restore",
-            "--meta-snapshot-id",
-            "1",
-            "--meta-store-type",
-            "mem",
-            "--backup-storage-url",
-            "memory",
-            "--hummock-storage-url",
-            "memory",
-        ])
+        RestoreOpts {
+            meta_snapshot_id: 1,
+            meta_store_type: MetaBackend::Mem,
+            etcd_endpoints: "".to_string(),
+            etcd_auth: false,
+            etcd_username: "".to_string(),
+            etcd_password: "".to_string(),
+            backup_storage_url: "memory".to_string(),
+            backup_storage_directory: "".to_string(),
+            hummock_storage_url: "memory".to_string(),
+            hummock_storage_directory: "".to_string(),
+            dry_run: false,
+        }
     }
 
     fn get_system_params() -> SystemParams {
