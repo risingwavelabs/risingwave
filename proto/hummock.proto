@@ -244,22 +244,26 @@ message TableOption {
   uint32 retention_seconds = 1;
 }
 
-// `info`: parent sstable block indices (compressed)
-//
-// Compression:
-//   The highest bit refer to single index or a two-uint64 range:
-//     0 => single index
-//     1 => two-uint64 range (closed on left, open on right)
-//   e.g.
-//     info(bits) : [0..0010, 0..0011, 1..1000, 1..1010, 0..1111]
-//     indices    : [2, 3, range(8..10), 31]
-message ParentInfo {
-  repeated uint64 info = 1;
+message Parents {
+  message Single {
+    uint64 index = 1;
+  }
+  message Range {
+    uint64 start = 1;
+    uint64 end = 2;
+  }
+  message Parent {
+    oneof info {
+      Single single = 1;
+      Range range = 2;
+    }
+  }
+  repeated Parent parents = 1;
 }
 
 // { parent sst obj id => parent info }
 message BlockInheritance {
-  map<uint64, ParentInfo> parents = 1;
+  map<uint64, Parents> parents = 1;
 }
 
 message SstableInheritance {

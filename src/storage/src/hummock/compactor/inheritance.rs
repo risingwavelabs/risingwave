@@ -16,60 +16,58 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_pb::hummock::{
-    BlockInheritance as PbBlockInheritance, ParentInfo as PbParentInfo,
-    SstableInheritance as PbSstableInheritance,
-};
+use risingwave_pb::hummock::parents::parent::PbInfo;
+use risingwave_pb::hummock::parents::{PbParent, PbRange, PbSingle};
+use risingwave_pb::hummock::{PbBlockInheritance, PbParents, PbSstableInheritance};
 
-const PARENT_INFO_MASK: u64 = 1 << 63;
-
-/// FYI: See format doc in `hummock.proto`.
 pub struct ParentInfo;
 
 impl ParentInfo {
-    pub fn from_proto(proto: &PbParentInfo) -> BTreeSet<usize> {
+    pub fn from_proto(proto: &PbParents) -> BTreeSet<usize> {
         let mut res = BTreeSet::new();
-        let mut iter = proto.info.iter();
-
-        while let Some(u) = iter.next() {
-            // single
-            if u & PARENT_INFO_MASK == 0 {
-                res.insert(*u as usize);
-                continue;
-            }
-            // range
-            let v = iter.next().unwrap();
-            for i in (*u ^ PARENT_INFO_MASK)..(*v ^ PARENT_INFO_MASK) {
-                res.insert(i as usize);
+        for parent in &proto.parents {
+            match parent.info.as_ref().unwrap() {
+                PbInfo::Single(single) => {
+                    res.insert(single.index as usize);
+                }
+                PbInfo::Range(range) => {
+                    for index in range.start..range.end {
+                        res.insert(index as usize);
+                    }
+                }
             }
         }
-
         res
     }
 
-    pub fn to_proto(info: &BTreeSet<usize>) -> PbParentInfo {
-        let mut proto = PbParentInfo::default();
-
-        let handle = |info: &mut Vec<u64>, range: &[usize]| match range.len() {
-            0 => {}
-            1 => info.push(range[0] as u64),
-            _ => {
-                info.push(*range.first().unwrap() as u64 | PARENT_INFO_MASK);
-                info.push((*range.last().unwrap() + 1) as u64 | PARENT_INFO_MASK);
-            }
-        };
+    pub fn to_proto(info: &BTreeSet<usize>) -> PbParents {
+        let mut proto = PbParents::default();
 
         let info = info.iter().copied().collect_vec();
 
-        let mut range = vec![];
+        let handle = |parents: &mut Vec<PbParent>, sequence: &[usize]| match sequence.len() {
+            0 => {}
+            1 => parents.push(PbParent {
+                info: Some(PbInfo::Single(PbSingle {
+                    index: sequence[0] as u64,
+                })),
+            }),
+            _ => parents.push(PbParent {
+                info: Some(PbInfo::Range(PbRange {
+                    start: *sequence.first().unwrap() as u64,
+                    end: *sequence.last().unwrap() as u64 + 1,
+                })),
+            }),
+        };
+
+        let mut sequence = vec![];
         for i in 0..info.len() {
             if i > 0 && info[i - 1] + 1 != info[i] {
-                handle(&mut proto.info, &range);
-                range.clear();
+                handle(&mut proto.parents, &sequence);
+                sequence.clear();
             }
-            range.push(info[i]);
         }
-        handle(&mut proto.info, &range);
+        handle(&mut proto.parents, &sequence);
 
         proto
     }
