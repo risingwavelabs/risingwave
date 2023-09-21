@@ -1274,15 +1274,15 @@ impl HummockManager {
                 trigger_delta_log_stats(&self.metrics, versioning.hummock_version_deltas.len());
                 self.notify_stats(&versioning.version_stats);
                 versioning.current_version = current_version;
+                // Compaction inheritance will not be persisted.
+                versioning
+                    .hummock_version_deltas
+                    .last_entry()
+                    .unwrap()
+                    .get_mut()
+                    .inheritances = compact_task.inheritances.clone();
 
                 if !deterministic_mode {
-                    // Compaction inheritance will not be persisted.
-                    versioning
-                        .hummock_version_deltas
-                        .last_entry()
-                        .unwrap()
-                        .get_mut()
-                        .inheritances = compact_task.inheritances.clone();
                     self.notify_last_version_delta(versioning);
                 }
             } else {
