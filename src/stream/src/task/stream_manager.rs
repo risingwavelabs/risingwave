@@ -105,6 +105,7 @@ pub struct LocalStreamManager {
     total_mem_val: Arc<TrAdder<i64>>,
 }
 
+/// Report expression evaluation errors to the actor context.
 #[derive(Clone)]
 pub struct ActorEvalErrorReport {
     actor_context: ActorContextRef,
@@ -121,7 +122,7 @@ pub struct ExecutorParams {
     pub env: StreamEnvironment,
 
     /// Indices of primary keys
-    // TODO: directly use this for `ExecutorInfo`
+    // TODO: directly use it for `ExecutorInfo`
     pub pk_indices: PkIndices,
 
     /// Executor id, unique across all actors.
@@ -131,15 +132,15 @@ pub struct ExecutorParams {
     pub operator_id: u64,
 
     /// Information of the operator from plan node, like `StreamHashJoin { .. }`.
-    // TODO: use this for `identity`
+    // TODO: use it for `identity`
     pub op_info: String,
 
     /// The output schema of the executor.
-    // TODO: directly use this for `ExecutorInfo`
+    // TODO: directly use it for `ExecutorInfo`
     pub schema: Schema,
 
     /// The identity of the executor, like `HashJoin 1234ABCD`.
-    // TODO: directly use this for `ExecutorInfo`
+    // TODO: directly use it for `ExecutorInfo`
     pub identity: String,
 
     /// The input executor.

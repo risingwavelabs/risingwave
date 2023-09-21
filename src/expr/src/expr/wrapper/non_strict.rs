@@ -22,17 +22,27 @@ use crate::error::Result;
 use crate::expr::{Expression, ValueImpl};
 use crate::ExprError;
 
+/// Report an error during evaluation.
 #[auto_impl(Arc)]
 pub trait EvalErrorReport: Send + Sync {
+    /// Perform the error reporting.
+    ///
+    /// Called when an error occurs during row-level evaluation of a non-strict expression,
+    /// that is, wrapped by [`NonStrict`].
     fn report(&self, error: ExprError);
 }
 
+/// A dummy implementation that panics when called.
 impl EvalErrorReport for ! {
     fn report(&self, _error: ExprError) {
         unreachable!()
     }
 }
 
+/// A wrapper of [`Expression`] that evaluates in a non-strict way. Basically...
+/// - When an error occurs during chunk-level evaluation, recompute in row-based execution and pad
+///   with NULL for each failed row.
+/// - Report all error occurred during row-level evaluation to the [`EvalErrorReport`].
 pub struct NonStrict<E, R> {
     inner: E,
     report: R,
@@ -59,13 +69,12 @@ where
         Self { inner, report }
     }
 
+    /// Evaluate expression in row-based execution with `eval_row_infallible`.
     async fn eval_chunk_infallible_by_row(&self, input: &DataChunk) -> ArrayRef {
-        // When eval failed, recompute in row-based execution
-        // and pad with NULL for each failed row.
         let mut array_builder = self.return_type().create_array_builder(input.capacity());
         for row in input.rows_with_holes() {
             if let Some(row) = row {
-                let datum = self.eval_row_infallible(&row.into_owned_row()).await;
+                let datum = self.eval_row_infallible(&row.into_owned_row()).await; // TODO: use `Row` trait
                 array_builder.append(&datum);
             } else {
                 array_builder.append_null();
@@ -74,12 +83,13 @@ where
         array_builder.finish().into()
     }
 
+    /// Evaluate expression on a single row, report error and return NULL if failed.
     async fn eval_row_infallible(&self, input: &OwnedRow) -> Datum {
         match self.inner.eval_row(input).await {
             Ok(datum) => datum,
             Err(error) => {
                 self.report.report(error);
-                None
+                None // NULL
             }
         }
     }
@@ -115,6 +125,6 @@ where
     }
 
     fn eval_const(&self) -> Result<Datum> {
-        self.inner.eval_const() // TODO?
+        self.inner.eval_const() // do not handle error
     }
 }

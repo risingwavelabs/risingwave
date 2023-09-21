@@ -21,7 +21,7 @@ arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
 async-trait = "0.1"
 auto_enums = "0.8"
-auto_impl = "1.1.0"
+auto_impl = "1"
 await-tree = { workspace = true }
 cfg-or-panic = "0.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
