@@ -201,6 +201,8 @@ where
         // However, they do not contain the vnode key at index 0.
         // That is filled in when we flush the state table.
         let mut current_state: Vec<Datum> = vec![None; state_len];
+        // Old state is just the previous current_state,
+        // We need it to update the state per vnode.
         let mut old_state: Option<Vec<Datum>> = None;
 
         // The first barrier message should be propagated.
