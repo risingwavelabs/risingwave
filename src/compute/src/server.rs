@@ -222,7 +222,6 @@ pub async fn compute_node_serve(
                 compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-                filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
                 memory_limiter,
 
                 task_progress_manager: Default::default(),
@@ -234,6 +233,7 @@ pub async fn compute_node_serve(
                 compactor_context,
                 hummock_meta_client.clone(),
                 storage.sstable_object_id_manager().clone(),
+                storage.filter_key_extractor_manager().clone(),
             );
             sub_tasks.push((handle, shutdown_sender));
         }
