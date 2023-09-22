@@ -82,19 +82,11 @@ message PauseMutation {}
 
 message ResumeMutation {}
 
-message Barrier {
-  enum BarrierKind {
-    BARRIER_KIND_UNSPECIFIED = 0;
-    // The first barrier after a fresh start or recovery.
-    // There will be no data associated with the previous epoch of the barrier.
-    BARRIER_KIND_INITIAL = 1;
-    // A normal barrier. Data should be flushed locally.
-    BARRIER_KIND_BARRIER = 2;
-    // A checkpoint barrier. Data should be synchorized to the shared storage.
-    BARRIER_KIND_CHECKPOINT = 3;
-  }
+message CombinedMutation {
+  repeated BarrierMutation mutations = 1;
+}
 
-  data.Epoch epoch = 1;
+message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
     AddMutation add = 3;
@@ -109,7 +101,27 @@ message Barrier {
     PauseMutation pause = 7;
     // Resume the dataflow of the whole streaming graph, only used for scaling.
     ResumeMutation resume = 8;
+    // Combined mutation.
+    CombinedMutation combined = 100;
   }
+}
+
+message Barrier {
+  enum BarrierKind {
+    BARRIER_KIND_UNSPECIFIED = 0;
+    // The first barrier after a fresh start or recovery.
+    // There will be no data associated with the previous epoch of the barrier.
+    BARRIER_KIND_INITIAL = 1;
+    // A normal barrier. Data should be flushed locally.
+    BARRIER_KIND_BARRIER = 2;
+    // A checkpoint barrier. Data should be synchorized to the shared storage.
+    BARRIER_KIND_CHECKPOINT = 3;
+  }
+
+  data.Epoch epoch = 1;
+
+  BarrierMutation mutation = 3;
+
   // Used for tracing.
   map<string, string> tracing_context = 2;
   // The kind of the barrier.

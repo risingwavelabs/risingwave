@@ -33,7 +33,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_plan::Barrier;
+use risingwave_pb::stream_plan::{Barrier, BarrierMutation};
 use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
 };
@@ -783,7 +783,7 @@ impl GlobalBarrierManager {
                         curr: command_context.curr_epoch.value().0,
                         prev: command_context.prev_epoch.value().0,
                     }),
-                    mutation,
+                    mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
                     tracing_context: TracingContext::from_span(command_context.curr_epoch.span())
                         .to_protobuf(),
                     kind: command_context.kind as i32,

@@ -23,6 +23,7 @@ use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -209,6 +210,14 @@ impl DispatchExecutorInner {
             return Ok(());
         };
 
+        self.pre_mutate_dispatchers_inner(mutation, 0)
+    }
+
+    fn pre_mutate_dispatchers_inner(&mut self, mutation: &Mutation, depth: u8) -> StreamResult<()> {
+        if depth > 2 {
+            bail!("too deep mutation: {:?}", mutation);
+        }
+
         match mutation {
             Mutation::Add { adds, .. } => {
                 if let Some(new_dispatchers) = adds.get(&self.actor_id) {
@@ -230,6 +239,14 @@ impl DispatchExecutorInner {
                     }
                 }
             }
+            Mutation::Combined(v) => match &v[..] {
+                [Mutation::Add { .. }, Mutation::Update { .. }] => {
+                    for mutation in v {
+                        self.pre_mutate_dispatchers_inner(mutation, depth + 1)?;
+                    }
+                }
+                _ => unreachable!(),
+            },
             _ => {}
         };
 
@@ -241,6 +258,24 @@ impl DispatchExecutorInner {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(());
         };
+
+        self.post_mutate_dispatchers_inner(mutation, 0)?;
+
+        // After stopping the downstream mview, the outputs of some dispatcher might be empty and we
+        // should clean up them.
+        self.dispatchers.retain(|d| !d.is_empty());
+
+        Ok(())
+    }
+
+    fn post_mutate_dispatchers_inner(
+        &mut self,
+        mutation: &Mutation,
+        depth: u8,
+    ) -> StreamResult<()> {
+        if depth > 2 {
+            bail!("too deep mutation: {:?}", mutation);
+        }
 
         match mutation {
             Mutation::Stop(stops) => {
@@ -268,13 +303,16 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-
+            Mutation::Combined(v) => match &v[..] {
+                [Mutation::Add { .. }, Mutation::Update { .. }] => {
+                    for mutation in v {
+                        self.post_mutate_dispatchers_inner(mutation, depth + 1)?;
+                    }
+                }
+                _ => unreachable!(),
+            },
             _ => {}
         };
-
-        // After stopping the downstream mview, the outputs of some dispatcher might be empty and we
-        // should clean up them.
-        self.dispatchers.retain(|d| !d.is_empty());
 
         Ok(())
     }
