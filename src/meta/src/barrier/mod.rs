@@ -975,6 +975,7 @@ impl GlobalBarrierManager {
             version_stats,
             senders,
         );
+        drop(tracker);
         for (table, internal_tables, finished) in receivers {
             let catalog_manager = self.catalog_manager.clone();
             tokio::spawn(async move {
@@ -990,6 +991,9 @@ impl GlobalBarrierManager {
                         .finish_create_table_procedure(internal_tables, table)
                         .await?;
                 };
+                if let Err(e) = res.as_ref() {
+                    tracing::error!("Failed to finish stream job: {e:?}");
+                }
                 // FIXME: Should copy the functionality from DDLController,
                 // and call cancel_stream_job here if any part of this failed.
                 res.unwrap();
