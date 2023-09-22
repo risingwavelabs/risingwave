@@ -1,12 +1,12 @@
 package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
-
 import java.sql.SQLException;
 import java.util.Map;
 
 public class CitusValidator extends PostgresValidator {
-    public CitusValidator(Map<String, String> userProps, TableSchema tableSchema) throws SQLException {
+    public CitusValidator(Map<String, String> userProps, TableSchema tableSchema)
+            throws SQLException {
         super(userProps, tableSchema);
     }
 
