@@ -14,8 +14,7 @@ statement ok
 CREATE MATERIALIZED VIEW mv0 AS SELECT * FROM t0;
 
 statement ok
-CREATE SINK sink0
-AS select mv0.v1 as v1, mv0.v2 as v2 from mv0
+CREATE SINK sink0 FROM mv0
 WITH (
     connector = 'pulsar',
     type = 'upsert',
