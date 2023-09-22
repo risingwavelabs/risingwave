@@ -5,8 +5,8 @@ statement ok
 CREATE MATERIALIZED VIEW mv0 AS SELECT * FROM t0;
 
 statement ok
-CREATE SINK sink0 
-AS select mv0.v1 as v1, mv0.v2 as v2 from mv0 
+CREATE SINK sink0
+AS select mv0.v1 as v1, mv0.v2 as v2 from mv0
 WITH (
     connector = 'pulsar',
     type = 'upsert',
@@ -25,13 +25,13 @@ WITH (
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
-INSERT INTO pulsar VALUES (1, 'test1');
+INSERT INTO t0 VALUES (1, 'test1');
 
 statement ok
-INSERT INTO pulsar VALUES (2, 'test2');
+INSERT INTO t0 VALUES (2, 'test2');
 
 statement ok
-INSERT INTO pulsar VALUES (3, 'test3');
+INSERT INTO t0 VALUES (3, 'test3');
 
 query IT rowsort
 SELECT * FROM src0;
