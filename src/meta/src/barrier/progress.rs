@@ -410,7 +410,7 @@ impl CreateMviewProgressTracker {
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingCommand> {
         let actor = progress.chain_actor_id;
-        let Some(epoch) = self.actor_map.get(&actor).copied() else {
+        let Some(table_id) = self.actor_map.get(&actor).copied() else {
             // On restart, backfill will ALWAYS notify CreateMviewProgressTracker,
             // even if backfill is finished on recovery.
             // This is because we don't know if only this actor is finished,
@@ -451,7 +451,10 @@ impl CreateMviewProgressTracker {
                 progress.update(actor, new_state, upstream_total_key_count);
 
                 if progress.is_done() {
-                    tracing::debug!("all actors done for creating mview with table_id {}!", table_id);
+                    tracing::debug!(
+                        "all actors done for creating mview with table_id {}!",
+                        table_id
+                    );
 
                     // Clean-up the mapping from actors to DDL epoch.
                     for actor in o.get().0.actors() {
