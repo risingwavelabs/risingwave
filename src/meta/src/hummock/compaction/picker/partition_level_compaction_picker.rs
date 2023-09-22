@@ -69,7 +69,7 @@ impl CompactionPicker for PartitionLevelCompactionPicker {
         {
             return Some(ret);
         }
-        self.pick_l0_intra(levels, level_handlers, partitions, stats)
+        self.pick_l0_intra(levels, level_handlers, partitions)
     }
 }
 
@@ -114,18 +114,8 @@ impl PartitionLevelCompactionPicker {
     ) -> Option<CompactionInput> {
         let l0 = levels.l0.as_ref().unwrap();
         let target_level = levels.get_level(self.target_level);
-        let min_sub_level_id = l0_partitions
-            .iter()
-            .map(|part| {
-                part.sub_levels
-                    .last()
-                    .map(|info| info.sub_level_id)
-                    .unwrap_or(0)
-            })
-            .min()
-            .unwrap_or(0);
         let vnode_partition_count = levels.vnode_partition_count;
-        if min_sub_level_id > 0 && !self.base_level_partitions.is_empty() {
+        if !self.base_level_partitions.is_empty() {
             let partitions_score = self
                 .base_level_partitions
                 .iter()
@@ -283,9 +273,8 @@ impl PartitionLevelCompactionPicker {
         levels: &Levels,
         level_handlers: &[LevelHandler],
         partitions: Vec<LevelPartition>,
-        stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let mut picker = PartitionIntraSubLevelPicker::new(self.config.clone(), partitions);
-        picker.pick_compaction(levels, level_handlers, stats)
+        picker.pick_compaction(levels, level_handlers, &mut LocalPickerStatistic::default())
     }
 }

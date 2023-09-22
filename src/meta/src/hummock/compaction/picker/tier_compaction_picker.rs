@@ -23,7 +23,7 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
-use crate::hummock::compaction::picker::MAX_COMPACT_LEVEL_COUNT;
+use crate::hummock::compaction::picker::{can_partition_level, MAX_COMPACT_LEVEL_COUNT};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
@@ -55,6 +55,7 @@ impl TierCompactionPicker {
         l0: &OverlappingLevel,
         level_handler: &LevelHandler,
         mut vnode_partition_count: u32,
+        table_id: u32,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         for (idx, level) in l0.sub_levels.iter().enumerate() {
@@ -84,7 +85,14 @@ impl TierCompactionPicker {
                 a.compare(b)
             });
 
-            if can_concat(&input_level.table_infos) && vnode_partition_count == 0 {
+            if can_concat(&input_level.table_infos)
+                && vnode_partition_count > 0
+                && can_partition_level(
+                    table_id,
+                    vnode_partition_count as usize,
+                    &input_level.table_infos,
+                )
+            {
                 return Some(CompactionInput {
                     select_input_size: input_level
                         .table_infos
@@ -95,6 +103,7 @@ impl TierCompactionPicker {
                     input_levels: vec![input_level],
                     target_level: 0,
                     target_sub_level_id: level.sub_level_id,
+                    vnode_partition_count: vnode_partition_count,
                     ..Default::default()
                 });
             }
@@ -180,7 +189,14 @@ impl CompactionPicker for TierCompactionPicker {
             return None;
         }
 
-        self.pick_overlapping_level(l0, &level_handlers[0], levels.vnode_partition_count, stats)
+        let table_id = levels.member_table_ids.first().cloned().unwrap_or(0);
+        self.pick_overlapping_level(
+            l0,
+            &level_handlers[0],
+            levels.vnode_partition_count,
+            table_id,
+            stats,
+        )
     }
 }
 
@@ -287,7 +303,7 @@ pub mod tests {
         // sub_level_max_compaction_bytes.
         let mut picker = TierCompactionPicker::new(config);
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
-        assert!(ret.is_none())
+        assert!(ret.is_none());
     }
 
     #[test]

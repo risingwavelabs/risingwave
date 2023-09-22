@@ -303,9 +303,10 @@ impl LocalSelectorStatistic {
                 .inc();
         }
         if self.vnode_partition_task_count > 0 {
+            let level_label = format!("cg{}", group_id);
             metrics
                 .compact_skip_frequency
-                .with_label_values(&["partition", ""])
+                .with_label_values(&[level_label.as_str(), "partition"])
                 .inc();
         }
     }

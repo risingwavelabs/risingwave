@@ -122,18 +122,6 @@ impl PartitionIntraSubLevelPicker {
         level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput> {
         let l0 = levels.l0.as_ref().unwrap();
-        let max_sub_level_id = self
-            .partitions
-            .iter()
-            .map(|partition| {
-                partition
-                    .sub_levels
-                    .last()
-                    .map(|level| level.sub_level_id)
-                    .unwrap_or(u64::MAX)
-            })
-            .min()
-            .unwrap_or(0);
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type() != LevelType::Nonoverlapping
@@ -142,13 +130,7 @@ impl PartitionIntraSubLevelPicker {
                 continue;
             }
 
-            if levels.vnode_partition_count == 0
-                && level.total_file_size > self.config.sub_level_max_compaction_bytes
-            {
-                continue;
-            }
-
-            if level.vnode_partition_count > 0 && level.sub_level_id <= max_sub_level_id {
+            if level.vnode_partition_count > 0 {
                 continue;
             }
 
@@ -160,10 +142,6 @@ impl PartitionIntraSubLevelPicker {
             let mut compaction_bytes = 0;
             let mut compaction_file_count = 0;
             let mut input_levels = vec![];
-            if l0.sub_levels.len() - idx < self.config.level0_sub_level_compact_level_count as usize
-            {
-                continue;
-            }
 
             let mut wait_enough = true;
             for next_level in l0.sub_levels.iter().skip(idx) {
@@ -360,6 +338,11 @@ pub fn can_partition_level(
     let mut left_idx = 0;
     let mut can_partition = true;
     let partition_size = VirtualNode::COUNT / partition_vnode_count;
+    for sst in table_infos {
+        if sst.table_ids.len() != 1 || sst.table_ids[0] != table_id {
+            return false;
+        }
+    }
     for partition_id in 0..partition_vnode_count {
         let smallest_vnode = partition_id * partition_size;
         let largest_vnode = (partition_id + 1) * partition_size;
