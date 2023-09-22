@@ -11,10 +11,7 @@ statement ok
 INSERT INTO t0 VALUES (3, 'test3');
 
 statement ok
-CREATE MATERIALIZED VIEW mv0 AS SELECT * FROM t0;
-
-statement ok
-CREATE SINK sink0 FROM mv0
+CREATE SINK sink0 FROM t0
 WITH (
     connector = 'pulsar',
     type = 'upsert',
@@ -24,7 +21,7 @@ WITH (
 );
 
 statement ok
-CREATE TABLE src0 (v1 int primary key, v2 varchar)
+CREATE TABLE src0 (v1 int, v2 varchar)
 WITH (
    connector='pulsar',
    topic='persistent://public/default/sink',
