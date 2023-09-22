@@ -95,7 +95,7 @@ impl GrpcCompactorProxyClient {
     }
 
     pub async fn get_new_sst_ids(
-        &mut self,
+        &self,
         request: GetNewSstIdsRequest,
     ) -> std::result::Result<tonic::Response<GetNewSstIdsResponse>, tonic::Status> {
         let mut hummock_client = self.core.read().await.hummock_client.clone();
@@ -103,7 +103,7 @@ impl GrpcCompactorProxyClient {
     }
 
     pub async fn report_compaction_task(
-        &mut self,
+        &self,
         request: ReportCompactionTaskRequest,
     ) -> std::result::Result<tonic::Response<ReportCompactionTaskResponse>, tonic::Status> {
         let mut hummock_client = self.core.read().await.hummock_client.clone();
@@ -111,7 +111,7 @@ impl GrpcCompactorProxyClient {
     }
 
     pub async fn report_full_scan_task(
-        &mut self,
+        &self,
         request: ReportFullScanTaskRequest,
     ) -> std::result::Result<tonic::Response<ReportFullScanTaskResponse>, tonic::Status> {
         let mut hummock_client = self.core.read().await.hummock_client.clone();
@@ -119,7 +119,7 @@ impl GrpcCompactorProxyClient {
     }
 
     pub async fn report_vacuum_task(
-        &mut self,
+        &self,
         request: ReportVacuumTaskRequest,
     ) -> std::result::Result<tonic::Response<ReportVacuumTaskResponse>, tonic::Status> {
         let mut hummock_client = self.core.read().await.hummock_client.clone();
@@ -127,7 +127,7 @@ impl GrpcCompactorProxyClient {
     }
 
     pub async fn get_system_params(
-        &mut self,
+        &self,
     ) -> std::result::Result<tonic::Response<GetSystemParamsResponse>, tonic::Status> {
         let mut system_params_client = self.core.read().await.system_params_client.clone();
         system_params_client

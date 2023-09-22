@@ -328,7 +328,7 @@ pub async fn shared_compactor_serve(
         .connect()
         .await
         .expect("Failed to create channel via proxy rpc endpoint.");
-    let mut grpc_proxy_client = GrpcCompactorProxyClient::new(channel);
+    let grpc_proxy_client = GrpcCompactorProxyClient::new(channel);
     let system_params_response = grpc_proxy_client
         .get_system_params()
         .await

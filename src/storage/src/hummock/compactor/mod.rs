@@ -633,7 +633,7 @@ pub fn start_shared_compactor(
 
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
         let executor = context.compaction_executor.clone();
-        let mut report_heartbeat_client = grpc_proxy_client.clone();
+        let report_heartbeat_client = grpc_proxy_client.clone();
         'consume_stream: loop {
             let request: Option<Request<DispatchCompactionTaskRequest>> = tokio::select! {
                 _ = periodic_event_interval.tick() => {
@@ -667,8 +667,7 @@ pub fn start_shared_compactor(
                     let context = context.clone();
                     let shutdown = shutdown_map.clone();
 
-                    let mut report_task_client = grpc_proxy_client.clone();
-                    let get_sst_id_client = grpc_proxy_client.clone();
+                    let cloned_grpc_proxy_client = grpc_proxy_client.clone();
                     executor.spawn(async move {
                         let DispatchCompactionTaskRequest {
                             tables,
@@ -689,7 +688,7 @@ pub fn start_shared_compactor(
                         let mut output_object_ids_deque: VecDeque<_> = VecDeque::new();
                         output_object_ids_deque.extend(output_object_ids);
                         let shared_compactor_object_id_manager =
-                            SharedComapctorObjectIdManager::new(output_object_ids_deque, get_sst_id_client, context.storage_opts.sstable_id_remote_fetch_number);
+                            SharedComapctorObjectIdManager::new(output_object_ids_deque, cloned_grpc_proxy_client.clone(), context.storage_opts.sstable_id_remote_fetch_number);
                             match dispatch_task.unwrap() {
                                 dispatch_compaction_task_request::Task::CompactTask(compact_task) => {
                                     context.running_task_count.fetch_add(1, Ordering::SeqCst);
@@ -714,7 +713,7 @@ pub fn start_shared_compactor(
                                         })),
                                     };
 
-                                    match report_task_client
+                                    match cloned_grpc_proxy_client
                                         .report_compaction_task(report_compaction_task_request)
                                         .await
                                     {
@@ -733,7 +732,7 @@ pub fn start_shared_compactor(
                                             let report_vacuum_task_request = ReportVacuumTaskRequest {
                                                 vacuum_task: Some(vacuum_task),
                                             };
-                                            match report_task_client.report_vacuum_task(report_vacuum_task_request).await {
+                                            match cloned_grpc_proxy_client.report_vacuum_task(report_vacuum_task_request).await {
                                                 Ok(_) => tracing::info!("Finished vacuuming SSTs"),
                                                 Err(e) => tracing::warn!("Failed to report vacuum task: {:#?}", e),
                                             }
@@ -753,7 +752,7 @@ pub fn start_shared_compactor(
                                                 total_object_count,
                                                 total_object_size,
                                             };
-                                            match report_task_client
+                                            match cloned_grpc_proxy_client
                                                 .report_full_scan_task(report_full_scan_task_request)
                                                 .await
                                             {
