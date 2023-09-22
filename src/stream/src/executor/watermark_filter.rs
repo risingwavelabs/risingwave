@@ -58,8 +58,13 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         event_time_col_idx: usize,
         ctx: ActorContextRef,
         table: StateTable<S>,
+        executor_id: u64,
     ) -> Self {
-        let info = input.info();
+        let info = ExecutorInfo {
+            schema: input.info().schema,
+            pk_indices: input.info().pk_indices,
+            identity: format!("WatermarkFilterExecutor {:X}", executor_id),
+        };
 
         Self {
             input,
@@ -261,11 +266,16 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             // Align watermark
                             let global_max_watermark =
                                 Self::get_global_max_watermark(&table).await?;
-                            current_watermark = cmp::max_by(
-                                current_watermark,
-                                global_max_watermark,
-                                DefaultOrd::default_cmp,
-                            );
+
+                            current_watermark = if let Some(global_max_watermark) = global_max_watermark.clone()  &&  let Some(watermark) = current_watermark.clone(){
+                                Some(cmp::max_by(
+                                    watermark,
+                                    global_max_watermark,
+                                    DefaultOrd::default_cmp,
+                                ))
+                            } else {
+                                current_watermark.or(global_max_watermark)
+                            };
                             if let Some(watermark) = current_watermark.clone() {
                                 yield Message::Watermark(Watermark::new(
                                     event_time_col_idx,
@@ -407,6 +417,7 @@ mod tests {
                 1,
                 ActorContext::create(123),
                 table,
+                0,
             )
             .boxed(),
             tx,
