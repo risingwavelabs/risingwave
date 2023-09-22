@@ -20,6 +20,7 @@
 
 pub mod hummock_iterator;
 pub mod jvm_runtime;
+mod macros;
 pub mod stream_chunk_iterator;
 
 use std::backtrace::Backtrace;
@@ -51,6 +52,7 @@ use thiserror::Error;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
 
+pub use crate::jvm_runtime::register_native_method_for_jvm;
 use crate::stream_chunk_iterator::{StreamChunkIterator, StreamChunkRow};
 pub type GetEventStreamJniSender = Sender<GetEventStreamResponse>;
 
@@ -296,30 +298,44 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(
     VirtualNode::COUNT as jint
 }
 
-#[cfg(not(madsim))]
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNew<'a>(
     env: EnvParam<'a>,
     read_plan: JByteArray<'a>,
 ) -> Pointer<'static, HummockJavaBindingIterator> {
     execute_and_catch(env, move |env| {
-        let read_plan = Message::decode(to_guarded_slice(&read_plan, env)?.deref())?;
-        let iter = RUNTIME.block_on(HummockJavaBindingIterator::new(read_plan))?;
-        Ok(iter.into())
+        #[cfg(madsim)]
+        {
+            unreachable!()
+        }
+
+        #[cfg(not(madsim))]
+        {
+            let read_plan = Message::decode(to_guarded_slice(&read_plan, env)?.deref())?;
+            let iter = RUNTIME.block_on(HummockJavaBindingIterator::new(read_plan))?;
+            Ok(iter.into())
+        }
     })
 }
 
-#[cfg(not(madsim))]
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNext<'a>(
     env: EnvParam<'a>,
     mut pointer: Pointer<'a, HummockJavaBindingIterator>,
 ) -> Pointer<'static, JavaBindingRow> {
     execute_and_catch(env, move |_env| {
-        let iter = pointer.as_mut();
-        match RUNTIME.block_on(iter.next())? {
-            None => Ok(Pointer::null()),
-            Some(row) => Ok(JavaBindingRow::with_keyed(row, iter.class_cache.clone()).into()),
+        #[cfg(madsim)]
+        {
+            unreachable!()
+        }
+
+        #[cfg(not(madsim))]
+        {
+            let iter = pointer.as_mut();
+            match RUNTIME.block_on(iter.next())? {
+                None => Ok(Pointer::null()),
+                Some(row) => Ok(JavaBindingRow::with_keyed(row, iter.class_cache.clone()).into()),
+            }
         }
     })
 }

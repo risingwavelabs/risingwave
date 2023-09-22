@@ -7201,6 +7201,7 @@ dependencies = [
 name = "risingwave_java_binding"
 version = "0.1.0"
 dependencies = [
+ "jni",
  "prost",
  "risingwave_common",
  "risingwave_expr",
@@ -7219,6 +7220,7 @@ dependencies = [
  "itertools 0.11.0",
  "jni",
  "madsim-tokio",
+ "paste",
  "prost",
  "risingwave_common",
  "risingwave_expr",
