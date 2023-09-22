@@ -45,10 +45,11 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-// schema: | vnode | pk ... | backfill_finished | row_count |
-// +1 for vnode, +1 for backfill_finished, +1 for row_count.
+/// vnode, `is_finished`, `row_count`, all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 3;
 
+/// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
+/// We can decode that into `BackfillState` on recovery.
 #[derive(Debug, Eq, PartialEq)]
 pub struct BackfillState {
     current_pos: Option<OwnedRow>,
@@ -436,7 +437,7 @@ where
 
         tracing::trace!(
             actor = self.actor_id,
-            "Backfill has already finished and forward messages directly to the downstream"
+            "Backfill has finished, waiting for checkpoint barrier"
         );
 
         // Wait for first barrier to come after backfill is finished.
@@ -461,13 +462,6 @@ where
                     // Or snapshot was empty and we construct a placeholder state.
                     debug_assert_ne!(current_pos, None);
 
-                    tracing::trace!(
-                        actor = self.actor_id,
-                        epoch = ?barrier.epoch,
-                        ?current_pos,
-                        total_snapshot_processed_rows,
-                        "Backfill position persisted after completion"
-                    );
                     Self::persist_state(
                         barrier.epoch,
                         &mut self.state_table,
@@ -479,12 +473,24 @@ where
                     )
                     .await?;
                     self.progress.finish(barrier.epoch.curr);
+                    tracing::trace!(
+                        actor = self.actor_id,
+                        epoch = ?barrier.epoch,
+                        ?current_pos,
+                        total_snapshot_processed_rows,
+                        "Backfill position persisted after completion"
+                    );
                     yield msg;
                     break;
                 }
                 yield msg;
             }
         }
+
+        tracing::trace!(
+            actor = self.actor_id,
+            "Backfill has already finished and forward messages directly to the downstream"
+        );
 
         // After progress finished + state persisted,
         // we can forward messages directly to the downstream,
