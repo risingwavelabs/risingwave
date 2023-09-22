@@ -10,7 +10,7 @@ CREATE SINK sink0 AS select mv0.v1 as v1, mv0.v2 as v2 from mv0 WITH (
     type = 'upsert',
     primary_key = 'v1',
     topic='persistent://rw/pulsar/sink',
-    service.url='pulsar:6650',
+    service.url='pulsar://pulsar:6650',
 );
 
 statement ok
@@ -18,7 +18,7 @@ CREATE TABLE src0 (v1 int primary key, v2 varchar);
 WITH (
    connector='pulsar',
    topic='persistent://rw/pulsar/sink',
-   service.url='pulsar:6650',
+   service.url='pulsar://pulsar:6650',
    scan.startup.mode='earliest',
 ) FORMAT PLAIN ENCODE JSON;
 
