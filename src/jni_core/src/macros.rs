@@ -27,7 +27,7 @@ macro_rules! gen_jni_sig_inner {
     ($(public)? static native $($rest:tt)*) => {
         gen_jni_sig_inner! { $($rest)* }
     };
-    ($($ret:tt).+  $func_name:ident($($args:tt)*)) => {
+    ($($ret:tt).+  $($func_name:ident)? ($($args:tt)*)) => {
         concat! {"(", gen_jni_sig_inner!{$($args)*}, ")", gen_jni_sig_inner! {$($ret).+} }
     };
     (boolean) => {
@@ -142,7 +142,7 @@ macro_rules! for_all_native_methods {
         $macro! {
             {
                 $(
-                    { $func_name, {gen_jni_sig! {$($ret).+ $func_name($($args)*)}}}
+                    { $func_name, {$($ret).+}, {$($args)*}}
                 ),*
             }
             $(,$extra_args)*
@@ -214,10 +214,10 @@ mod tests {
                     gen_array
                 }
             }};
-            ({$({ $func_name:ident, $sig:expr }),*}) => {{
+            ({$({ $func_name:ident, {$($ret:tt).+}, {$($args:tt)*} }),*}) => {{
                 [
                     $(
-                        (stringify! {$func_name}, $sig),
+                        (stringify! {$func_name}, gen_jni_sig! { $($ret).+ ($($args)*)}),
                     )*
                 ]
         }};

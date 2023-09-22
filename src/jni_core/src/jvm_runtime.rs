@@ -111,19 +111,19 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
         () => {{
             $crate::for_all_native_methods! {gen_native_method_array}
         }};
-        ({$({ $func_name:ident, $sig:expr }),*}) => {
+        ({$({ $func_name:ident, {$($ret:tt).+}, {$($args:tt)*} }),*}) => {
             [
                 $(
                     {
                         let fn_ptr = paste::paste! {[<Java_com_risingwave_java_binding_Binding_ $func_name> ]} as *mut c_void;
+                        let sig = $crate::gen_jni_sig! { $($ret).+ ($($args)*)};
                         NativeMethod {
                             name: JNIString::from(stringify! {$func_name}),
-                            sig: JNIString::from($sig),
+                            sig: JNIString::from(sig),
                             fn_ptr,
                         }
                     },
                 )*
-
             ]
         }
     }
