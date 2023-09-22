@@ -2,6 +2,15 @@ statement ok
 CREATE TABLE t0 (v1 int primary key, v2 varchar);
 
 statement ok
+INSERT INTO t0 VALUES (1, 'test1');
+
+statement ok
+INSERT INTO t0 VALUES (2, 'test2');
+
+statement ok
+INSERT INTO t0 VALUES (3, 'test3');
+
+statement ok
 CREATE MATERIALIZED VIEW mv0 AS SELECT * FROM t0;
 
 statement ok
@@ -23,15 +32,6 @@ WITH (
    service.url='pulsar://pulsar:6650',
    scan.startup.mode='earliest',
 ) FORMAT PLAIN ENCODE JSON;
-
-statement ok
-INSERT INTO t0 VALUES (1, 'test1');
-
-statement ok
-INSERT INTO t0 VALUES (2, 'test2');
-
-statement ok
-INSERT INTO t0 VALUES (3, 'test3');
 
 query IT rowsort
 SELECT * FROM src0;
