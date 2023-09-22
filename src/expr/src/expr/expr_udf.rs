@@ -119,6 +119,14 @@ impl UdfExpression {
             uncompact_builder.append(array.datum_at(idx));
             last_u = Some(u);
         }
+        let zeros = if let Some(last_u) = last_u {
+            vis.len() - last_u - 1
+        } else {
+            vis.len()
+        };        
+        for _ in 0..zeros {
+            uncompact_builder.append_null();
+        }
         let array = uncompact_builder.finish();
         Ok(Arc::new(array))
     }
