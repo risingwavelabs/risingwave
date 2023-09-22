@@ -44,7 +44,7 @@ macro_rules! for_all_params {
     ($macro:ident) => {
         $macro! {
             { barrier_interval_ms, u32, Some(100_u32), true },
-            { checkpoint_frequency, u64, Some(1_u64), true },
+            { checkpoint_frequency, u64, Some(10_u64), true },
             { sstable_size_mb, u32, Some(256_u32), false },
             { parallel_compact_size_mb, u32, Some(512_u32), false },
             { block_size_kb, u32, Some(64_u32), false },
