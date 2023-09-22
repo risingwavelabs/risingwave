@@ -281,10 +281,17 @@ impl CreateMviewProgressTracker {
     ) -> Option<TrackingCommand> {
         let actor = progress.chain_actor_id;
         let Some(epoch) = self.actor_map.get(&actor).copied() else {
-            panic!(
-                "no tracked progress for actor {}, is it already finished?",
+            // On restart, backfill will ALWAYS notify CreateMviewProgressTracker,
+            // even if backfill is finished on recovery.
+            // This is because we don't know if only this actor is finished,
+            // OR the entire stream job is finished.
+            // For the first case, we must notify meta.
+            // For the second case, we can still notify meta, but ignore it here.
+            tracing::info!(
+                "no tracked progress for actor {}, the stream job could already be finished",
                 actor
             );
+            return None;
         };
 
         let new_state = if progress.done {
