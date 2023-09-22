@@ -52,7 +52,7 @@ impl Expression for UdfExpression {
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
             let array = child.eval(input).await?;
-            columns.push(array.as_ref().try_into()?);
+            columns.push(array);
         }
         self.eval_inner(columns, vis).await
     }
@@ -68,9 +68,7 @@ impl Expression for UdfExpression {
         let chunk = DataChunk::from_rows(std::slice::from_ref(&arg_row), &self.arg_types);
         let arg_columns = chunk
             .columns()
-            .iter()
-            .map::<Result<_>, _>(|c| Ok(c.as_ref().try_into()?))
-            .try_collect()?;
+            .to_vec();
         let output_array = self.eval_inner(arg_columns, chunk.visibility()).await?;
         Ok(output_array.to_datum())
     }
@@ -79,19 +77,20 @@ impl Expression for UdfExpression {
 impl UdfExpression {
     async fn eval_inner(
         &self,
-        columns: Vec<arrow_array::ArrayRef>,
+        columns: Vec<ArrayRef>,
         vis: &risingwave_common::buffer::Bitmap,
     ) -> Result<ArrayRef> {
-        let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(vis.len()));
-        let input =
-            arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
-                .expect("failed to build record batch");
+        let chunk = DataChunk::new(columns, vis.clone());
+        let visible_rows: Vec<usize> = vis.iter_ones().collect();
+        let compacted_chunk = chunk.compact_cow();
+        let input = arrow_array::RecordBatch::try_from(compacted_chunk.as_ref())?;
+
         let output = self
             .client
             .call(&self.identifier, input)
             .instrument_await(self.span.clone())
             .await?;
-        if output.num_rows() != vis.len() {
+        if output.num_rows() != vis.count_ones() {
             bail!(
                 "UDF returned {} rows, but expected {}",
                 output.num_rows(),
@@ -101,8 +100,7 @@ impl UdfExpression {
         let Some(arrow_array) = output.columns().get(0) else {
             bail!("UDF returned no columns");
         };
-        let mut array = ArrayImpl::try_from(arrow_array)?;
-        array.set_bitmap(array.null_bitmap() & vis);
+        let array = ArrayImpl::try_from(arrow_array)?;
         if !array.data_type().equals_datatype(&self.return_type) {
             bail!(
                 "UDF returned {:?}, but expected {:?}",
@@ -110,6 +108,17 @@ impl UdfExpression {
                 self.return_type,
             );
         }
+        let mut uncompact_builder = array.create_builder(vis.len());
+        let mut last_u = 0;
+        for (idx, u) in visible_rows.into_iter().enumerate() {
+            let zeros = u - last_u;
+            for _ in 0..zeros {
+                uncompact_builder.append_null();
+            }
+            uncompact_builder.append(array.datum_at(idx));
+            last_u = u;
+        }
+        let array = uncompact_builder.finish();        
         Ok(Arc::new(array))
     }
 }
