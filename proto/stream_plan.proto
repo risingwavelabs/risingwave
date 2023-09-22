@@ -409,6 +409,7 @@ message MergeNode {
   repeated plan_common.Field fields = 4;
   // Whether the upstream is a CDC stream, used in chaining a Table job with a CDC source job.
   bool cdc_upstream = 5;
+  optional map<string, string> connector_properties = 6;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`

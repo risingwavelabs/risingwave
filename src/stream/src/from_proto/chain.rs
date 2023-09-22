@@ -23,8 +23,10 @@ use risingwave_storage::table::Distribution;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
+use crate::executor::external::ExternalStorageTable;
 use crate::executor::{
-    BackfillExecutor, ChainExecutor, FlowControlExecutor, RearrangedChainExecutor,
+    BackfillExecutor, CdcBackfillExecutor, ChainExecutor, FlowControlExecutor,
+    RearrangedChainExecutor,
 };
 
 pub struct ChainExecutorBuilder;
@@ -84,19 +86,32 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .boxed()
             }
             ChainType::CdcBackfill => {
-                todo!("CdcBackfill is not supported yet")
-                // let cdc_backfill = CdcBackfillExecutor::new(
-                //     params.actor_context.clone(),
-                //     external_table,
-                //     Box::new(source_exec),
-                //     (0..source.columns.len()).collect_vec(), /* eliminate the last column (_rw_offset) */
-                //     None,
-                //     schema.clone(),
-                //     pk_indices,
-                //     params.executor_stats,
-                //     source_state_handler,
-                //     source_ctrl_opts.chunk_size,
-                // );
+                // todo!("CdcBackfill is not supported yet")
+
+                let table_reader =
+                    table_type.create_table_reader(source.properties.clone(), schema.clone())?;
+                let external_table = ExternalStorageTable::new(
+                    TableId::new(source.source_id),
+                    upstream_table_name,
+                    table_reader,
+                    schema.clone(),
+                    order_types,
+                    pk_indices.clone(),
+                    (0..table_desc.columns.len()).collect_vec(),
+                );
+
+                let cdc_backfill = CdcBackfillExecutor::new(
+                    params.actor_context.clone(),
+                    external_table,
+                    Box::new(source_exec),
+                    (0..source.columns.len()).collect_vec(), /* eliminate the last column (_rw_offset) */
+                    None,
+                    schema.clone(),
+                    pk_indices,
+                    params.executor_stats,
+                    source_state_handler,
+                    source_ctrl_opts.chunk_size,
+                );
             }
             ChainType::Backfill => {
                 let table_desc: &StorageTableDesc = node.get_table_desc()?;
