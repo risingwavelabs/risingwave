@@ -231,7 +231,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let mut build_row_count = 0;
         #[for_await]
         for build_chunk in self.build_side_source.execute() {
-            let build_chunk = build_chunk?.compact();
+            let build_chunk = build_chunk?;
             if build_chunk.cardinality() > 0 {
                 build_row_count += build_chunk.cardinality();
                 self.mem_ctx.add(build_chunk.estimated_heap_size() as i64);
@@ -252,8 +252,15 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
             let build_keys = K::build(&self.build_key_idxs, build_chunk)?;
 
-            for (build_row_id, build_key) in build_keys.into_iter().enumerate() {
+            for (build_row_id, (build_key, visible)) in build_keys
+                .into_iter()
+                .zip_eq_fast(build_chunk.visibility().iter())
+                .enumerate()
+            {
                 self.shutdown_rx.check()?;
+                if !visible {
+                    continue;
+                }
                 // Only insert key to hash map if it is consistent with the null safe restriction.
                 if build_key.null_bitmap().is_subset(&null_matched) {
                     let row_id = RowId::new(build_chunk_id, build_row_id);
@@ -348,7 +355,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
@@ -404,7 +418,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
@@ -466,7 +487,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 non_equi_state.found_matched = false;
                 non_equi_state
                     .first_output_row_id
@@ -537,7 +565,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 shutdown_rx.check()?;
                 if !ANTI_JOIN {
                     if hash_map.get(probe_key).is_some() {
@@ -594,7 +629,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 non_equi_state
                     .first_output_row_id
                     .push(chunk_builder.buffered_count());
@@ -662,7 +704,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 non_equi_state.found_matched = false;
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     non_equi_state
@@ -737,7 +786,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
@@ -795,7 +851,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
@@ -860,7 +923,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for probe_key in &probe_keys {
+            for (probe_key, visible) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+            {
+                if !visible {
+                    continue;
+                }
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
@@ -908,7 +977,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
@@ -974,7 +1050,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
@@ -1049,7 +1132,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+            for (probe_row_id, (probe_key, visible)) in probe_keys
+                .iter()
+                .zip_eq_fast(probe_chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 left_non_equi_state.found_matched = false;
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     left_non_equi_state
@@ -1905,8 +1995,8 @@ mod tests {
     }
 
     fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) -> bool {
-        assert!(left.visibility().is_none());
-        assert!(right.visibility().is_none());
+        assert!(left.is_compacted());
+        assert!(right.is_compacted());
 
         if left.cardinality() != right.cardinality() {
             return false;

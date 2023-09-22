@@ -409,6 +409,8 @@ mod tests {
     }
 
     #[tokio::test]
+    // see https://github.com/risingwavelabs/risingwave/issues/11979
+    #[ignore]
     async fn test_task_cancel_for_busy_loop() {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
@@ -437,6 +439,8 @@ mod tests {
     }
 
     #[tokio::test]
+    // see https://github.com/risingwavelabs/risingwave/issues/11979
+    #[ignore]
     async fn test_task_abort_for_busy_loop() {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),

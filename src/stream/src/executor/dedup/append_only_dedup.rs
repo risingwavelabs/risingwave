@@ -130,7 +130,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                     if vis.count_ones() > 0 {
                         // Construct the new chunk and write the data to state table.
                         let (ops, columns, _) = chunk.into_inner();
-                        let chunk = StreamChunk::new(ops, columns, Some(vis));
+                        let chunk = StreamChunk::with_visibility(ops, columns, vis);
                         self.state_table.write_chunk(chunk.clone());
 
                         commit_data = true;

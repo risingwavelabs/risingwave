@@ -1007,8 +1007,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             cnt_rows_received,
         } = args;
 
-        let chunk = chunk.compact();
-
         let (side_update, side_match) = if SIDE == SideType::Left {
             (side_l, side_r)
         } else {
@@ -1044,7 +1042,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             ]);
 
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
-        for ((op, row), key) in chunk.rows().zip_eq_debug(keys.iter()) {
+        for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
+            let Some((op, row)) = r else {
+                continue;
+            };
             Self::evict_cache(side_update, side_match, cnt_rows_received);
 
             let matched_rows: Option<HashValueType> = if side_update
