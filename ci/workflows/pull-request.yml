@@ -202,7 +202,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end pulsar sink test"
-    command: "e2e-pulsar-sink-test -p ci-dev"
+    command: "ci/scripts/e2e-pulsar-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
       - "build-other"
