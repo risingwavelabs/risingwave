@@ -410,13 +410,6 @@ where
                     total_snapshot_processed_rows,
                 );
 
-                tracing::trace!(
-                    actor = self.actor_id,
-                    epoch = ?barrier.epoch,
-                    ?current_pos,
-                    total_snapshot_processed_rows,
-                    "Backfill position persisted"
-                );
                 // Persist state on barrier
                 Self::persist_state(
                     barrier.epoch,
@@ -429,16 +422,19 @@ where
                 )
                 .await?;
 
+                tracing::trace!(
+                    ?current_pos,
+                    total_snapshot_processed_rows,
+                    "Backfill state persisted"
+                );
+
                 yield Message::Barrier(barrier);
 
                 // We will switch snapshot at the start of the next iteration of the backfill loop.
             }
         }
 
-        tracing::trace!(
-            actor = self.actor_id,
-            "Backfill has finished, waiting for checkpoint barrier"
-        );
+        tracing::trace!("Backfill has finished, waiting for barrier");
 
         // Wait for first barrier to come after backfill is finished.
         // So we can update our progress + persist the status.
@@ -446,6 +442,8 @@ where
             if let Some(msg) = mapping_message(msg, &self.output_indices) {
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg {
+                    tracing::trace!("Backfill has received barrier for preserving its progress");
+
                     if is_finished {
                         // No need to persist any state, we already finished before.
                     } else {
@@ -476,8 +474,6 @@ where
                         )
                         .await?;
                         tracing::trace!(
-                            actor = self.actor_id,
-                            epoch = ?barrier.epoch,
                             ?current_pos,
                             total_snapshot_processed_rows,
                             "Backfill position persisted after completion"
@@ -497,11 +493,7 @@ where
                     // and backfill which just finished, we need to update mview tracker,
                     // it does not persist this information.
                     self.progress.finish(barrier.epoch.curr);
-                    tracing::trace!(
-                        actor = self.actor_id,
-                        epoch = ?barrier.epoch,
-                        "Updated CreateMaterializedTracker"
-                    );
+                    tracing::trace!("Updated CreateMaterializedTracker");
                     yield msg;
                     break;
                 }
@@ -510,7 +502,6 @@ where
         }
 
         tracing::trace!(
-            actor = self.actor_id,
             "Backfill has already finished and forward messages directly to the downstream"
         );
 

@@ -129,7 +129,12 @@ impl CreateMviewProgress {
     ) {
         match self.state {
             Some(ChainState::ConsumingUpstream(last, last_consumed_rows)) => {
-                assert!(last < consumed_epoch);
+                assert!(
+                    last < consumed_epoch,
+                    "last_epoch: {:#?} must be greater than consumed epoch: {:#?}",
+                    last,
+                    consumed_epoch
+                );
                 assert!(last_consumed_rows <= current_consumed_rows);
             }
             Some(ChainState::Done) => unreachable!(),
