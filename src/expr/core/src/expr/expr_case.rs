@@ -171,12 +171,12 @@ mod tests {
         let els = build_from_pretty("2:int4");
         let case = CaseExpression::new(DataType::Int32, when_clauses, Some(els));
         let (input, expected) = DataChunk::from_pretty(
-            "B f
-             f 1
-             t 2
-             f 1
-             f 1
-             t 2",
+            "B i
+             t 1
+             f 2
+             t 1
+             t 1
+             f 2",
         )
         .split_column_at(1);
 
@@ -200,7 +200,7 @@ mod tests {
         }];
         let case = CaseExpression::new(DataType::Int32, when_clauses, None);
         let (input, expected) = DataChunk::from_pretty(
-            "B f
+            "B i
              t 1
              f .
              t 1

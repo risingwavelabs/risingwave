@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{ListRef, ScalarRefImpl, StructType};
-use risingwave_expr::function;
+use risingwave_common::types::{DataType, ListRef, ScalarRefImpl, StructType};
+use risingwave_expr::{function, Result};
 
 /// Returns the input array as a set of rows with an index.
 ///
@@ -33,7 +33,7 @@ use risingwave_expr::function;
 /// three 3
 /// ```
 #[function(
-    "_pg_expandarray(list) -> setof struct<x any, n int32>",
+    "_pg_expandarray(list) -> setof struct<x any, n int4>",
     type_infer = "infer_type"
 )]
 fn _pg_expandarray(array: ListRef<'_>) -> impl Iterator<Item = (Option<ScalarRefImpl<'_>>, i32)> {

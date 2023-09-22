@@ -126,7 +126,8 @@ pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNo
 /// Build an expression from a string.
 ///
 /// # Example
-/// ```
+///
+/// ```ignore
 /// # use risingwave_expr::expr::build_from_pretty;
 /// build_from_pretty("42:int2"); // literal
 /// build_from_pretty("$0:int8"); // inputref

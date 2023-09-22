@@ -40,7 +40,6 @@ mod table_function;
 #[macro_export]
 macro_rules! enable {
     () => {
-        #[allow(unused_extern_crates)]
-        extern crate risingwave_expr_impl;
+        use risingwave_expr_impl as _;
     };
 }

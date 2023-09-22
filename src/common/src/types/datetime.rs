@@ -74,7 +74,10 @@ impl_chrono_wrapper!(Time, NaiveTime);
 ///
 /// # Example
 /// ```
-/// # use risingwave_common::types::Date;
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::Date;
+///
 /// Date::from_str("1999-01-08").unwrap();
 /// ```
 impl FromStr for Date {
@@ -92,7 +95,10 @@ impl FromStr for Date {
 ///
 /// # Example
 /// ```
-/// # use risingwave_common::types::Time;
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::Time;
+///
 /// Time::from_str("04:05").unwrap();
 /// Time::from_str("04:05:06").unwrap();
 /// ```
@@ -115,7 +121,10 @@ impl FromStr for Time {
 ///
 /// # Example
 /// ```
-/// # use risingwave_common::types::Timestamp;
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::Timestamp;
+///
 /// Timestamp::from_str("1999-01-08 04:02").unwrap();
 /// Timestamp::from_str("1999-01-08 04:05:06").unwrap();
 /// Timestamp::from_str("1999-01-08T04:05:06").unwrap();
@@ -154,7 +163,10 @@ impl FromStr for Timestamp {
 ///
 /// # Example
 /// ```
-/// # use risingwave_common::types::{Date, Timestamp};
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::{Date, Timestamp};
+///
 /// let ts = Timestamp::from_str("1999-01-08 04:02").unwrap();
 /// let date = Date::from(ts);
 /// assert_eq!(date, Date::from_str("1999-01-08").unwrap());
@@ -169,7 +181,10 @@ impl From<Timestamp> for Date {
 ///
 /// # Example
 /// ```
-/// # use risingwave_common::types::{Time, Timestamp};
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::{Time, Timestamp};
+///
 /// let ts = Timestamp::from_str("1999-01-08 04:02").unwrap();
 /// let time = Time::from(ts);
 /// assert_eq!(time, Time::from_str("04:02").unwrap());
@@ -184,7 +199,10 @@ impl From<Timestamp> for Time {
 ///
 /// # Example
 /// ```
-/// # use risingwave_common::types::{Time, Interval};
+/// use std::str::FromStr;
+///
+/// use risingwave_common::types::{Interval, Time};
+///
 /// let interval = Interval::from_month_day_usec(1, 2, 61000003);
 /// let time = Time::from(interval);
 /// assert_eq!(time, Time::from_str("00:01:01.000003").unwrap());
