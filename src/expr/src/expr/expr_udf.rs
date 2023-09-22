@@ -66,9 +66,7 @@ impl Expression for UdfExpression {
         }
         let arg_row = OwnedRow::new(columns);
         let chunk = DataChunk::from_rows(std::slice::from_ref(&arg_row), &self.arg_types);
-        let arg_columns = chunk
-            .columns()
-            .to_vec();
+        let arg_columns = chunk.columns().to_vec();
         let output_array = self.eval_inner(arg_columns, chunk.visibility()).await?;
         Ok(output_array.to_datum())
     }
@@ -118,7 +116,7 @@ impl UdfExpression {
             uncompact_builder.append(array.datum_at(idx));
             last_u = u;
         }
-        let array = uncompact_builder.finish();        
+        let array = uncompact_builder.finish();
         Ok(Arc::new(array))
     }
 }
