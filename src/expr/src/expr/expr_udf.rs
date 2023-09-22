@@ -105,14 +105,19 @@ impl UdfExpression {
             );
         }
         let mut uncompact_builder = array.create_builder(vis.len());
-        let mut last_u = 0;
+        let mut last_u = None;
         for (idx, u) in visible_rows.into_iter().enumerate() {
-            let zeros = u - last_u;
+            // pad unvisible rows with NULL
+            let zeros = if let Some(last_u) = last_u {
+                u - last_u - 1
+            } else {
+                u
+            };
             for _ in 0..zeros {
                 uncompact_builder.append_null();
             }
             uncompact_builder.append(array.datum_at(idx));
-            last_u = u;
+            last_u = Some(u);
         }
         let array = uncompact_builder.finish();
         Ok(Arc::new(array))
