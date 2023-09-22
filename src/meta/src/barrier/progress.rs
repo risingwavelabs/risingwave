@@ -115,6 +115,8 @@ impl Progress {
 
     /// Returns whether all chains are done.
     fn is_done(&self) -> bool {
+        println!("done_count: {:#?}", self.done_count);
+        println!("states_len: {:#?}", self.states.len());
         self.done_count == self.states.len()
     }
 
@@ -433,20 +435,11 @@ impl CreateMviewProgressTracker {
             Entry::Occupied(mut o) => {
                 let progress = &mut o.get_mut().0;
 
-                println!("upstream mv count: {:#?}", &progress.upstream_mv_count);
                 let upstream_total_key_count: u64 = progress
                     .upstream_mv_count
                     .iter()
                     .map(|(upstream_mv, count)| {
                         assert_ne!(*count, 0);
-                        println!("Upstream mv count: {}", count);
-                        println!(
-                            "table count: {:#?}",
-                            version_stats
-                                .table_stats
-                                .get(&upstream_mv.table_id)
-                                .map(|stat| stat.total_key_count as u64)
-                        );
                         *count as u64
                             * version_stats
                                 .table_stats
