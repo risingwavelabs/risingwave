@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
-use arrow_schema::{Field, Fields, Schema, SchemaRef};
 use await_tree::InstrumentAwait;
 use cfg_or_panic::cfg_or_panic;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
@@ -34,7 +33,6 @@ pub struct UdfExpression {
     children: Vec<BoxedExpression>,
     arg_types: Vec<DataType>,
     return_type: DataType,
-    arg_schema: SchemaRef,
     client: Arc<ArrowFlightUdfClient>,
     identifier: String,
     span: await_tree::Span,
@@ -129,20 +127,6 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
 
-        let arg_schema = Arc::new(Schema::new(
-            udf.arg_types
-                .iter()
-                .map::<Result<_>, _>(|t| {
-                    Ok(Field::new(
-                        "",
-                        DataType::from(t)
-                            .try_into()
-                            .map_err(risingwave_udf::Error::Unsupported)?,
-                        true,
-                    ))
-                })
-                .try_collect::<Fields>()?,
-        ));
         // connect to UDF service
         let client = get_or_create_client(&udf.link)?;
 
@@ -150,7 +134,6 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
             children: udf.children.iter().map(build_from_prost).try_collect()?,
             arg_types: udf.arg_types.iter().map(|t| t.into()).collect(),
             return_type,
-            arg_schema,
             client,
             identifier: udf.identifier.clone(),
             span: format!("expr_udf_call ({})", udf.identifier).into(),
