@@ -210,17 +210,21 @@ fn check_generated_column_constraints(
             .iter()
             .any(|c| c == referred_generated_column)
         {
-            return Err(ErrorCode::BindError(
-                format!("Generated can not reference another generated column, but here generated column \"{}\" referenced another generated column \"{}\"", column_name, referred_generated_column),
-            )
+            return Err(ErrorCode::BindError(format!(
+                "Generated can not reference another generated column. \
+                But here generated column \"{}\" referenced another generated column \"{}\"",
+                column_name, referred_generated_column
+            ))
             .into());
         }
     }
 
     if pk_column_ids.contains(&column_id) && expr.is_impure() {
-        return Err(ErrorCode::BindError(
-            format!("Generated columns should not be part of the primary key. Here column \"{}\" is defined as part of the primary key.", column_name),
-        )
+        return Err(ErrorCode::BindError(format!(
+            "Generated columns with impure expressions should not be part of the primary key. \
+            Here column \"{}\" is defined as part of the primary key.",
+            column_name
+        ))
         .into());
     }
 
