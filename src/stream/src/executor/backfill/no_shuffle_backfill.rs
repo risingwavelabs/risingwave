@@ -414,6 +414,13 @@ where
                     total_snapshot_processed_rows,
                 );
 
+                tracing::trace!(
+                    actor = self.actor_id,
+                    epoch = ?barrier.epoch,
+                    ?current_pos,
+                    total_snapshot_processed_rows,
+                    "Backfill position persisted"
+                );
                 // Persist state on barrier
                 Self::persist_state(
                     barrier.epoch,
@@ -459,6 +466,13 @@ where
                     // Or snapshot was empty and we construct a placeholder state.
                     debug_assert_ne!(current_pos, None);
 
+                    tracing::trace!(
+                        actor = self.actor_id,
+                        epoch = ?barrier.epoch,
+                        ?current_pos,
+                        total_snapshot_processed_rows,
+                        "Backfill position persisted after completion"
+                    );
                     Self::persist_state(
                         barrier.epoch,
                         &mut self.state_table,
