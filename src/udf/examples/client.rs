@@ -26,16 +26,16 @@ async fn main() {
     // build `RecordBatch` to send (equivalent to our `DataChunk`)
     let array1 = Arc::new(Int32Array::from_iter(vec![1, 6, 10]));
     let array2 = Arc::new(Int32Array::from_iter(vec![3, 4, 15]));
-    // let array3 = Arc::new(Int32Array::from_iter(vec![6, 8, 3]));
+    let array3 = Arc::new(Int32Array::from_iter(vec![6, 8, 3]));
     let input2_schema = Schema::new(vec![
         Field::new("a", DataType::Int32, true),
         Field::new("b", DataType::Int32, true),
     ]);
-    // let input3_schema = Schema::new(vec![
-    //     Field::new("a", DataType::Int32, true),
-    //     Field::new("b", DataType::Int32, true),
-    //     Field::new("c", DataType::Int32, true),
-    // ]);
+    let input3_schema = Schema::new(vec![
+        Field::new("a", DataType::Int32, true),
+        Field::new("b", DataType::Int32, true),
+        Field::new("c", DataType::Int32, true),
+    ]);
     let output_schema = Schema::new(vec![Field::new("x", DataType::Int32, true)]);
 
     // check function
@@ -43,10 +43,10 @@ async fn main() {
         .check("gcd", &input2_schema, &output_schema)
         .await
         .unwrap();
-    // client
-    //     .check("gcd3", &input3_schema, &output_schema)
-    //     .await
-    //     .unwrap();
+    client
+        .check("gcd3", &input3_schema, &output_schema)
+        .await
+        .unwrap();
 
     let input2 = RecordBatch::try_new(
         Arc::new(input2_schema),
@@ -61,16 +61,16 @@ async fn main() {
 
     println!("{:?}", output);
 
-    // let input3 = RecordBatch::try_new(
-    //     Arc::new(input3_schema),
-    //     vec![array1.clone(), array2.clone(), array3.clone()],
-    // )
-    // .unwrap();
+    let input3 = RecordBatch::try_new(
+        Arc::new(input3_schema),
+        vec![array1.clone(), array2.clone(), array3.clone()],
+    )
+    .unwrap();
 
-    // let output = client
-    //     .call("gcd3", input3)
-    //     .await
-    //     .expect("failed to call function");
+    let output = client
+        .call("gcd3", input3)
+        .await
+        .expect("failed to call function");
 
-    // println!("{:?}", output);
+    println!("{:?}", output);
 }
