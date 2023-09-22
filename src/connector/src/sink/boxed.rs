@@ -76,8 +76,8 @@ impl Sink for BoxSink {
     type Coordinator = BoxCoordinator;
     type Writer = BoxWriter<()>;
 
-    async fn validate(&self, client: Option<ConnectorClient>) -> crate::sink::Result<()> {
-        self.deref().validate(client).await
+    async fn validate(&self) -> crate::sink::Result<()> {
+        self.deref().validate().await
     }
 
     async fn new_writer(&self, writer_param: SinkWriterParam) -> crate::sink::Result<Self::Writer> {
