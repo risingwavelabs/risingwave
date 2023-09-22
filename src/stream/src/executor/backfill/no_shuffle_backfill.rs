@@ -35,7 +35,7 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     check_all_vnode_finished, compute_bounds, construct_initial_finished_state, get_new_pos,
-    iter_chunks, mapping_chunk, mapping_message, mark_chunk, owned_row_iter,
+    get_row_count_state, iter_chunks, mapping_chunk, mapping_message, mark_chunk, owned_row_iter,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -77,6 +77,7 @@ pub struct BackfillExecutor<S: StateStore> {
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
 
+    /// PTAL at the docstring for `CreateMviewProgress` to understand how we compute it.
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
@@ -125,7 +126,10 @@ where
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
-        let state_len = pk_in_output_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
+
+        // schema: | vnode | pk ... | backfill_finished | row_count |
+        // +1 for vnode, +1 for backfill_finished, +1 for row_count.
+        let state_len = pk_in_output_indices.len() + 3;
 
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
 
@@ -140,8 +144,8 @@ where
             state_table.init_epoch(first_barrier.epoch);
         }
 
-        let is_finished = if let Some(state_table) = self.state_table.as_mut() {
-            let is_finished = check_all_vnode_finished(state_table).await?;
+        let is_finished = if let Some(state_table) = self.state_table.as_ref() {
+            let is_finished = check_all_vnode_finished(state_table, state_len).await?;
             if is_finished {
                 assert!(!first_barrier.is_newly_added(self.actor_id));
             }
@@ -215,7 +219,13 @@ where
         let mut snapshot_read_epoch = init_epoch;
 
         // Keep track of rows from the snapshot.
-        let mut total_snapshot_processed_rows: u64 = 0;
+        let mut total_snapshot_processed_rows: u64 =
+            if let Some(state_table) = self.state_table.as_ref() {
+                get_row_count_state(state_table, state_len).await?
+            } else {
+                // Maintain backwards compatibility with no state_table.
+                0
+            };
 
         // Backfill Algorithm:
         //
@@ -404,12 +414,20 @@ where
                     total_snapshot_processed_rows,
                 );
 
+                tracing::trace!(
+                    actor = self.actor_id,
+                    epoch = ?barrier.epoch,
+                    ?current_pos,
+                    total_snapshot_processed_rows,
+                    "Backfill position persisted"
+                );
                 // Persist state on barrier
                 Self::persist_state(
                     barrier.epoch,
                     &mut self.state_table,
                     false,
                     &current_pos,
+                    total_snapshot_processed_rows,
                     &mut old_state,
                     &mut current_state,
                 )
@@ -448,11 +466,19 @@ where
                     // Or snapshot was empty and we construct a placeholder state.
                     debug_assert_ne!(current_pos, None);
 
+                    tracing::trace!(
+                        actor = self.actor_id,
+                        epoch = ?barrier.epoch,
+                        ?current_pos,
+                        total_snapshot_processed_rows,
+                        "Backfill position persisted after completion"
+                    );
                     Self::persist_state(
                         barrier.epoch,
                         &mut self.state_table,
                         true,
                         &current_pos,
+                        total_snapshot_processed_rows,
                         &mut old_state,
                         &mut current_state,
                     )
@@ -468,6 +494,8 @@ where
         // After progress finished + state persisted,
         // we can forward messages directly to the downstream,
         // as backfill is finished.
+        // We don't need to report backfill progress any longer, as it has finished.
+        // It will always be at 100%.
         #[for_await]
         for msg in upstream {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
@@ -528,6 +556,7 @@ where
         table: &mut Option<StateTable<S>>,
         is_finished: bool,
         current_pos: &Option<OwnedRow>,
+        row_count: u64,
         old_state: &mut Option<Vec<Datum>>,
         current_state: &mut [Datum],
     ) -> StreamExecutorResult<()> {
@@ -538,6 +567,7 @@ where
             table,
             is_finished,
             current_pos,
+            row_count,
             old_state,
             current_state,
         )

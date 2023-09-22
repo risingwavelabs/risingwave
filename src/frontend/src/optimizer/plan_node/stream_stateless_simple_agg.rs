@@ -100,7 +100,7 @@ impl StreamNode for StreamStatelessSimpleAgg {
                 .map(|idx| *idx as u32)
                 .collect_vec(),
             agg_call_states: vec![],
-            result_table: None,
+            intermediate_state_table: None,
             is_append_only: self.input().append_only(),
             distinct_dedup_tables: Default::default(),
         })

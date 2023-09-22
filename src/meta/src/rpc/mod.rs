@@ -14,13 +14,14 @@
 
 mod cloud_provider;
 pub mod ddl_controller;
-mod election_client;
+pub mod election;
 mod intercept;
 pub mod metrics;
 pub mod server;
 pub mod service;
 
-pub use election_client::{ElectionClient, ElectionMember, EtcdElectionClient};
+pub use election::etcd::EtcdElectionClient;
+pub use election::{ElectionClient, ElectionMember};
 pub use service::cluster_service::ClusterServiceImpl;
 pub use service::ddl_service::DdlServiceImpl;
 pub use service::heartbeat_service::HeartbeatServiceImpl;

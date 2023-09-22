@@ -185,7 +185,7 @@ pub fn compute_chunk_vnode(
 
         VirtualNode::compute_chunk(chunk, &dist_key_indices)
             .into_iter()
-            .zip_eq_fast(chunk.vis().iter())
+            .zip_eq_fast(chunk.visibility().iter())
             .map(|(vnode, vis)| {
                 // Ignore the invisible rows.
                 if vis {

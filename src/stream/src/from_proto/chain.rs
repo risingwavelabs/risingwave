@@ -43,14 +43,17 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [mview, snapshot]: [_; 2] = params.input.try_into().unwrap();
-
         // For reporting the progress.
         let progress = stream
             .context
             .register_create_mview_progress(params.actor_context.id);
 
-        // The batch query executor scans on a mapped adhoc mview table, thus we should directly use
-        // its schema.
+        let output_indices = node
+            .output_indices
+            .iter()
+            .map(|&i| i as usize)
+            .collect_vec();
+
         let schema = if node.chain_type() == ChainType::ArrangementBackfill {
             let upstream_schema_fields = &snapshot.schema().fields;
             let output_schema_fields = node
@@ -61,26 +64,21 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             Schema {
                 fields: output_schema_fields,
             }
+        }
+        else if matches!(node.chain_type(), ChainType::Backfill) {
+            Schema::new(
+                output_indices
+                    .iter()
+                    .map(|i| snapshot.schema().fields()[*i].clone())
+                    .collect_vec(),
+            )
         } else {
+            // For `Chain`s other than `Backfill`, there should be no extra mapping required. We can
+            // directly output the columns received from the upstream or snapshot.
+            let all_indices = (0..snapshot.schema().len()).collect_vec();
+            assert_eq!(output_indices, all_indices);
             snapshot.schema().clone()
         };
-        println!("schema: {:#?}", schema);
-
-        let output_indices = node
-            .output_indices
-            .iter()
-            .map(|&i| i as usize)
-            .collect_vec();
-
-        // For `Chain`s other than `Backfill`, there should be no extra mapping required. We can
-        // directly output the columns received from the upstream or snapshot.
-        if !matches!(
-            node.chain_type(),
-            ChainType::Backfill | ChainType::ArrangementBackfill
-        ) {
-            let all_indices = (0..schema.len()).collect_vec();
-            assert_eq!(output_indices, all_indices);
-        }
 
         let executor = match node.chain_type() {
             ChainType::Chain | ChainType::UpstreamOnly => {

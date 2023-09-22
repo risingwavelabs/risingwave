@@ -68,6 +68,12 @@ pub async fn handle_alter_source_column(
                 None.into(),
             )));
         }
+        SourceEncode::Json if catalog.info.use_schema_registry => {
+            return Err(RwError::from(ErrorCode::NotImplemented(
+                "Alter source with schema registry".into(),
+                None.into(),
+            )));
+        }
         SourceEncode::Invalid | SourceEncode::Native => {
             return Err(RwError::from(ErrorCode::NotSupported(
                 format!("Alter source with encode {:?}", encode),

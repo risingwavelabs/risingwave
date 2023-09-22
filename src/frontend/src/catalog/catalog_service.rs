@@ -24,7 +24,7 @@ use risingwave_pb::catalog::{
     PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
-use risingwave_pb::ddl_service::create_connection_request;
+use risingwave_pb::ddl_service::{create_connection_request, StreamJobExecutionMode};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
@@ -70,6 +70,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
+        stream_job_execution_mode: StreamJobExecutionMode,
     ) -> Result<()>;
 
     async fn create_table(
@@ -81,6 +82,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn replace_table(
         &self,
+        source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
@@ -189,12 +191,19 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
+        stream_job_execution_mode: StreamJobExecutionMode,
     ) -> Result<()> {
         let (_, version) = self
             .meta_client
-            .create_materialized_view(table, graph)
+            .create_materialized_view(table, graph, stream_job_execution_mode)
             .await?;
-        self.wait_version(version).await
+        if matches!(
+            stream_job_execution_mode,
+            StreamJobExecutionMode::Foreground | StreamJobExecutionMode::Unspecified
+        ) {
+            self.wait_version(version).await?
+        }
+        Ok(())
     }
 
     async fn create_view(&self, view: PbView) -> Result<()> {
@@ -229,13 +238,14 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn replace_table(
         &self,
+        source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .replace_table(table, graph, mapping)
+            .replace_table(source, table, graph, mapping)
             .await?;
         self.wait_version(version).await
     }

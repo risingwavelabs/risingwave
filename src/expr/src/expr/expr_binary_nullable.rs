@@ -17,7 +17,6 @@
 use std::sync::Arc;
 
 use risingwave_common::array::*;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_expr_macro::build_function;
@@ -43,32 +42,27 @@ impl Expression for BinaryShortCircuitExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let left = self.expr_ia1.eval_checked(input).await?;
+        let left = self.expr_ia1.eval(input).await?;
         let left = left.as_bool();
 
-        let res_vis: Vis = match self.expr_type {
+        let res_vis = match self.expr_type {
             // For `Or` operator, if res of left part is not null and is true, we do not want to
             // calculate right part because the result must be true.
-            Type::Or => (!left.to_bitmap()).into(),
+            Type::Or => !left.to_bitmap(),
             // For `And` operator, If res of left part is not null and is false, we do not want
             // to calculate right part because the result must be false.
-            Type::And => (left.data() | !left.null_bitmap()).into(),
+            Type::And => left.data() | !left.null_bitmap(),
             _ => unimplemented!(),
         };
-        let new_vis = input.vis() & res_vis;
+        let new_vis = input.visibility() & res_vis;
         let mut input1 = input.clone();
-        input1.set_vis(new_vis);
+        input1.set_visibility(new_vis);
 
-        let right = self.expr_ia2.eval_checked(&input1).await?;
+        let right = self.expr_ia2.eval(&input1).await?;
         let right = right.as_bool();
         assert_eq!(left.len(), right.len());
 
-        let mut bitmap = match input.visibility() {
-            Some(vis) => vis.clone(),
-            None => Bitmap::ones(input.capacity()),
-        };
-        bitmap &= left.null_bitmap();
-        bitmap &= right.null_bitmap();
+        let mut bitmap = input.visibility() & left.null_bitmap() & right.null_bitmap();
 
         let c = match self.expr_type {
             Type::Or => {

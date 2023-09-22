@@ -17,23 +17,20 @@ use std::str::FromStr;
 
 use futures_util::FutureExt;
 use itertools::Itertools;
-use risingwave_common::array::{
-    ListArray, ListRef, ListValue, StructArray, StructRef, StructValue, Utf8Array,
-};
+use risingwave_common::array::{ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::cast::{
     parse_naive_date, parse_naive_datetime, parse_naive_time, str_to_bytea as str_to_bytea_common,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Date, Decimal, Int256, Interval, IntoOrdered, JsonbRef, ScalarImpl, StructType, Time,
-    Timestamp, Timestamptz, ToText, F32, F64,
+    DataType, Date, Decimal, Int256, Interval, IntoOrdered, JsonbRef, ScalarImpl, Time, Timestamp,
+    Timestamptz, ToText, F32, F64,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr_macro::{build_function, function};
+use risingwave_expr_macro::function;
 use risingwave_pb::expr::expr_node::PbType;
 
-use crate::expr::template::UnaryExpression;
-use crate::expr::{build_func, BoxedExpression, Expression, InputRefExpression};
+use crate::expr::{build_func, Context, Expression, InputRefExpression};
 use crate::{ExprError, Result};
 
 /// String literals for bool type.
@@ -217,25 +214,22 @@ pub fn int32_to_bool(input: i32) -> Result<bool> {
 #[function("cast(jsonb) -> varchar")]
 #[function("cast(bytea) -> varchar")]
 #[function("cast(list) -> varchar")]
-pub fn general_to_text(elem: impl ToText, mut writer: &mut dyn Write) -> Result<()> {
+pub fn general_to_text(elem: impl ToText, mut writer: &mut impl Write) {
     elem.write(&mut writer).unwrap();
-    Ok(())
 }
 
 #[function("cast(boolean) -> varchar")]
-pub fn bool_to_varchar(input: bool, writer: &mut dyn Write) -> Result<()> {
+pub fn bool_to_varchar(input: bool, writer: &mut impl Write) {
     writer
         .write_str(if input { "true" } else { "false" })
         .unwrap();
-    Ok(())
 }
 
 /// `bool_out` is different from `general_to_string<bool>` to produce a single char. `PostgreSQL`
 /// uses different variants of bool-to-string in different situations.
 #[function("bool_out(boolean) -> varchar")]
-pub fn bool_out(input: bool, writer: &mut dyn Write) -> Result<()> {
+pub fn bool_out(input: bool, writer: &mut impl Write) {
     writer.write_str(if input { "t" } else { "f" }).unwrap();
-    Ok(())
 }
 
 #[function("cast(varchar) -> bytea")]
@@ -320,27 +314,11 @@ fn unnest(input: &str) -> Result<Vec<&str>> {
     Ok(items)
 }
 
-#[build_function("cast(varchar) -> list")]
-fn build_cast_str_to_list(
-    return_type: DataType,
-    children: Vec<BoxedExpression>,
-) -> Result<BoxedExpression> {
-    let elem_type = match &return_type {
-        DataType::List(datatype) => (**datatype).clone(),
-        _ => panic!("expected list type"),
-    };
-    let child = children.into_iter().next().unwrap();
-    Ok(Box::new(UnaryExpression::<Utf8Array, ListArray, _>::new(
-        child,
-        return_type,
-        move |x| str_to_list(x, &elem_type),
-    )))
-}
-
-fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
+#[function("cast(varchar) -> list")]
+fn str_to_list(input: &str, ctx: &Context) -> Result<ListValue> {
     let cast = build_func(
         PbType::Cast,
-        target_elem_type.clone(),
+        ctx.return_type.as_list().clone(),
         vec![InputRefExpression::new(DataType::Varchar, 0).boxed()],
     )
     .unwrap();
@@ -355,37 +333,13 @@ fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
     Ok(ListValue::new(values))
 }
 
-#[build_function("cast(list) -> list")]
-fn build_cast_list_to_list(
-    return_type: DataType,
-    children: Vec<BoxedExpression>,
-) -> Result<BoxedExpression> {
-    let child = children.into_iter().next().unwrap();
-    let source_elem_type = match child.return_type() {
-        DataType::List(datatype) => (*datatype).clone(),
-        _ => panic!("expected list type"),
-    };
-    let target_elem_type = match &return_type {
-        DataType::List(datatype) => (**datatype).clone(),
-        _ => panic!("expected list type"),
-    };
-    Ok(Box::new(UnaryExpression::<ListArray, ListArray, _>::new(
-        child,
-        return_type,
-        move |x| list_cast(x, &source_elem_type, &target_elem_type),
-    )))
-}
-
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
-fn list_cast(
-    input: ListRef<'_>,
-    source_elem_type: &DataType,
-    target_elem_type: &DataType,
-) -> Result<ListValue> {
+#[function("cast(list) -> list")]
+fn list_cast(input: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
     let cast = build_func(
         PbType::Cast,
-        target_elem_type.clone(),
-        vec![InputRefExpression::new(source_elem_type.clone(), 0).boxed()],
+        ctx.return_type.as_list().clone(),
+        vec![InputRefExpression::new(ctx.arg_types[0].as_list().clone(), 0).boxed()],
     )
     .unwrap();
     let elements = input.iter();
@@ -400,30 +354,12 @@ fn list_cast(
     Ok(ListValue::new(values))
 }
 
-#[build_function("cast(struct) -> struct")]
-fn build_cast_struct_to_struct(
-    return_type: DataType,
-    children: Vec<BoxedExpression>,
-) -> Result<BoxedExpression> {
-    let child = children.into_iter().next().unwrap();
-    let source_elem_type = child.return_type().as_struct().clone();
-    let target_elem_type = return_type.as_struct().clone();
-    Ok(Box::new(
-        UnaryExpression::<StructArray, StructArray, _>::new(child, return_type, move |x| {
-            struct_cast(x, &source_elem_type, &target_elem_type)
-        }),
-    ))
-}
-
 /// Cast struct of `source_elem_type` to `target_elem_type` by casting each element.
-fn struct_cast(
-    input: StructRef<'_>,
-    source_elem_type: &StructType,
-    target_elem_type: &StructType,
-) -> Result<StructValue> {
+#[function("cast(struct) -> struct")]
+fn struct_cast(input: StructRef<'_>, ctx: &Context) -> Result<StructValue> {
     let fields = (input.iter_fields_ref())
-        .zip_eq_fast(source_elem_type.types())
-        .zip_eq_fast(target_elem_type.types())
+        .zip_eq_fast(ctx.arg_types[0].as_struct().types())
+        .zip_eq_fast(ctx.return_type.as_struct().types())
         .map(|((datum_ref, source_field_type), target_field_type)| {
             if source_field_type == target_field_type {
                 return Ok(datum_ref.map(|scalar_ref| scalar_ref.into_scalar_impl()));
@@ -450,7 +386,7 @@ fn struct_cast(
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDateTime;
-    use risingwave_common::types::Scalar;
+    use risingwave_common::types::{Scalar, StructType};
 
     use super::*;
 
@@ -469,7 +405,7 @@ mod tests {
         macro_rules! test {
             ($fn:ident($value:expr), $right:literal) => {
                 let mut writer = String::new();
-                $fn($value, &mut writer).unwrap();
+                $fn($value, &mut writer);
                 assert_eq!(writer, $right);
             };
         }
@@ -548,10 +484,11 @@ mod tests {
     #[test]
     fn test_str_to_list() {
         // Empty List
-        assert_eq!(
-            str_to_list("{}", &DataType::Int32).unwrap(),
-            ListValue::new(vec![])
-        );
+        let ctx = Context {
+            arg_types: vec![DataType::Varchar],
+            return_type: DataType::from_str("int[]").unwrap(),
+        };
+        assert_eq!(str_to_list("{}", &ctx).unwrap(), ListValue::new(vec![]));
 
         let list123 = ListValue::new(vec![
             Some(1.to_scalar_value()),
@@ -560,14 +497,19 @@ mod tests {
         ]);
 
         // Single List
-        assert_eq!(str_to_list("{1, 2, 3}", &DataType::Int32).unwrap(), list123);
+        let ctx = Context {
+            arg_types: vec![DataType::Varchar],
+            return_type: DataType::from_str("int[]").unwrap(),
+        };
+        assert_eq!(str_to_list("{1, 2, 3}", &ctx).unwrap(), list123);
 
         // Nested List
         let nested_list123 = ListValue::new(vec![Some(ScalarImpl::List(list123))]);
-        assert_eq!(
-            str_to_list("{{1, 2, 3}}", &DataType::List(Box::new(DataType::Int32))).unwrap(),
-            nested_list123
-        );
+        let ctx = Context {
+            arg_types: vec![DataType::Varchar],
+            return_type: DataType::from_str("int[][]").unwrap(),
+        };
+        assert_eq!(str_to_list("{{1, 2, 3}}", &ctx).unwrap(), nested_list123);
 
         let nested_list445566 = ListValue::new(vec![Some(ScalarImpl::List(ListValue::new(vec![
             Some(44.to_scalar_value()),
@@ -581,24 +523,27 @@ mod tests {
         ]);
 
         // Double nested List
+        let ctx = Context {
+            arg_types: vec![DataType::Varchar],
+            return_type: DataType::from_str("int[][][]").unwrap(),
+        };
         assert_eq!(
-            str_to_list(
-                "{{{1, 2, 3}}, {{44, 55, 66}}}",
-                &DataType::List(Box::new(DataType::List(Box::new(DataType::Int32))))
-            )
-            .unwrap(),
+            str_to_list("{{{1, 2, 3}}, {{44, 55, 66}}}", &ctx).unwrap(),
             double_nested_list123_445566
         );
 
         // Cast previous double nested lists to double nested varchar lists
+        let ctx = Context {
+            arg_types: vec![DataType::from_str("int[][]").unwrap()],
+            return_type: DataType::from_str("varchar[][]").unwrap(),
+        };
         let double_nested_varchar_list123_445566 = ListValue::new(vec![
             Some(ScalarImpl::List(
                 list_cast(
                     ListRef::ValueRef {
                         val: &nested_list123,
                     },
-                    &DataType::List(Box::new(DataType::Int32)),
-                    &DataType::List(Box::new(DataType::Varchar)),
+                    &ctx,
                 )
                 .unwrap(),
             )),
@@ -607,20 +552,19 @@ mod tests {
                     ListRef::ValueRef {
                         val: &nested_list445566,
                     },
-                    &DataType::List(Box::new(DataType::Int32)),
-                    &DataType::List(Box::new(DataType::Varchar)),
+                    &ctx,
                 )
                 .unwrap(),
             )),
         ]);
 
         // Double nested Varchar List
+        let ctx = Context {
+            arg_types: vec![DataType::Varchar],
+            return_type: DataType::from_str("varchar[][][]").unwrap(),
+        };
         assert_eq!(
-            str_to_list(
-                "{{{1, 2, 3}}, {{44, 55, 66}}}",
-                &DataType::List(Box::new(DataType::List(Box::new(DataType::Varchar))))
-            )
-            .unwrap(),
+            str_to_list("{{{1, 2, 3}}, {{44, 55, 66}}}", &ctx).unwrap(),
             double_nested_varchar_list123_445566
         );
     }
@@ -628,14 +572,28 @@ mod tests {
     #[test]
     fn test_invalid_str_to_list() {
         // Unbalanced input
-        assert!(str_to_list("{{}", &DataType::Int32).is_err());
-        assert!(str_to_list("{}}", &DataType::Int32).is_err());
-        assert!(str_to_list("{{1, 2, 3}, {4, 5, 6}", &DataType::Int32).is_err());
-        assert!(str_to_list("{{1, 2, 3}, 4, 5, 6}}", &DataType::Int32).is_err());
+        let ctx = Context {
+            arg_types: vec![DataType::Varchar],
+            return_type: DataType::from_str("int[]").unwrap(),
+        };
+        assert!(str_to_list("{{}", &ctx).is_err());
+        assert!(str_to_list("{}}", &ctx).is_err());
+        assert!(str_to_list("{{1, 2, 3}, {4, 5, 6}", &ctx).is_err());
+        assert!(str_to_list("{{1, 2, 3}, 4, 5, 6}}", &ctx).is_err());
     }
 
     #[test]
     fn test_struct_cast() {
+        let ctx = Context {
+            arg_types: vec![DataType::Struct(StructType::new(vec![
+                ("a", DataType::Varchar),
+                ("b", DataType::Float32),
+            ]))],
+            return_type: DataType::Struct(StructType::new(vec![
+                ("a", DataType::Int32),
+                ("b", DataType::Int32),
+            ])),
+        };
         assert_eq!(
             struct_cast(
                 StructValue::new(vec![
@@ -643,8 +601,7 @@ mod tests {
                     Some(F32::from(0.0).to_scalar_value()),
                 ])
                 .as_scalar_ref(),
-                &StructType::new(vec![("a", DataType::Varchar), ("b", DataType::Float32),]),
-                &StructType::new(vec![("a", DataType::Int32), ("b", DataType::Int32),])
+                &ctx,
             )
             .unwrap(),
             StructValue::new(vec![

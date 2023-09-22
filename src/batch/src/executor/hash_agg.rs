@@ -223,10 +223,17 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         // consume all chunks to compute the agg result
         #[for_await]
         for chunk in self.child.execute() {
-            let chunk = StreamChunk::from(chunk?.compact());
+            let chunk = StreamChunk::from(chunk?);
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             let mut memory_usage_diff = 0;
-            for (row_id, key) in keys.into_iter().enumerate() {
+            for (row_id, (key, visible)) in keys
+                .into_iter()
+                .zip_eq_fast(chunk.visibility().iter())
+                .enumerate()
+            {
+                if !visible {
+                    continue;
+                }
                 let mut new_group = false;
                 let states = groups.entry(key).or_insert_with(|| {
                     new_group = true;

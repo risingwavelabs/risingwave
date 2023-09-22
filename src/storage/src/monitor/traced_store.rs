@@ -18,6 +18,7 @@ use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     init_collector, should_use_trace, ConcurrentId, MayTraceSpan, OperationResult, StorageType,
@@ -83,13 +84,13 @@ impl<S> TracedStateStore<S> {
 
     async fn traced_get(
         &self,
-        key: Bytes,
+        key: TableKey<Bytes>,
         epoch: Option<u64>,
         read_options: ReadOptions,
         get_future: impl Future<Output = StorageResult<Option<Bytes>>>,
     ) -> StorageResult<Option<Bytes>> {
         let span = TraceSpan::new_get_span(
-            key.clone(),
+            key.0.clone(),
             epoch,
             read_options.clone().into(),
             self.storage_type,
@@ -112,7 +113,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
 
     fn may_exist(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
         self.inner.may_exist(key_range, read_options)
@@ -120,7 +121,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
 
     fn get(
         &self,
-        key: Bytes,
+        key: TableKey<Bytes>,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<Bytes>>> + '_ {
         self.traced_get(
@@ -133,11 +134,13 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
 
     fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+        let (l, r) = key_range.clone();
+        let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
-            key_range.clone(),
+            bytes_key_range,
             None,
             read_options.clone().into(),
             self.storage_type,
@@ -146,9 +149,14 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
             .map_ok(identity)
     }
 
-    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
+    fn insert(
+        &mut self,
+        key: TableKey<Bytes>,
+        new_val: Bytes,
+        old_val: Option<Bytes>,
+    ) -> StorageResult<()> {
         let span = TraceSpan::new_insert_span(
-            key.clone(),
+            key.0.clone(),
             new_val.clone(),
             old_val.clone(),
             self.storage_type,
@@ -159,8 +167,8 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         res
     }
 
-    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
-        let span = TraceSpan::new_delete_span(key.clone(), old_val.clone(), self.storage_type);
+    fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
+        let span = TraceSpan::new_delete_span(key.0.clone(), old_val.clone(), self.storage_type);
 
         let res = self.inner.delete(key, old_val);
 
@@ -264,7 +272,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
 
     fn get(
         &self,
-        key: Bytes,
+        key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
@@ -278,12 +286,14 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
 
     fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
+        let (l, r) = key_range.clone();
+        let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
         let span = TraceSpan::new_iter_span(
-            key_range.clone(),
+            bytes_key_range,
             Some(epoch),
             read_options.clone().into(),
             self.storage_type,

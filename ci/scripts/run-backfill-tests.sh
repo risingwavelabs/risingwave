@@ -31,54 +31,15 @@ flush() {
 }
 
 test_basic() {
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_base_table.sql
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_seed.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
 
   # Provide snapshot
-  for i in $(seq 1 12)
-  do
-    run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_recurse.sql
-    flush
-  done
-
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql &
-
-  # Provide upstream updates
-  for i in $(seq 1 5)
-  do
-    run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_recurse.sql &
-  done
+  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
 
   wait
-
   run_sql_file "$PARENT_PATH"/sql/backfill/basic/select.sql </dev/null
-
-}
-
-test_basic() {
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_base_table.sql
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_seed.sql
-
-  # Provide snapshot
-  for i in $(seq 1 12)
-  do
-    run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_recurse.sql
-    flush
-  done
-
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql &
-
-  # Provide upstream updates
-  for i in $(seq 1 5)
-  do
-    run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert_recurse.sql &
-  done
-
-  wait
-
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/select.sql </dev/null
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/drop.sql
-
 }
 
 test_replication_with_column_pruning() {
