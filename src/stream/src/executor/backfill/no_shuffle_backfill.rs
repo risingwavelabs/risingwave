@@ -423,6 +423,7 @@ where
                 .await?;
 
                 tracing::trace!(
+                    epoch = ?barrier.epoch,
                     ?current_pos,
                     total_snapshot_processed_rows,
                     "Backfill state persisted"
@@ -442,10 +443,16 @@ where
             if let Some(msg) = mapping_message(msg, &self.output_indices) {
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg {
-                    tracing::trace!("Backfill has received barrier for preserving its progress");
-
                     if is_finished {
-                        // No need to persist any state, we already finished before.
+                        // In the event that some actors already finished,
+                        // on recovery we want to recover the backfill progress for them too,
+                        // so that we can provide an accurate estimate.
+                        // so we call that here, before finally completing the backfill progress.
+                        self.progress.update(
+                            barrier.epoch.curr,
+                            snapshot_read_epoch,
+                            total_snapshot_processed_rows,
+                        );
                     } else {
                         // If snapshot was empty, we do not need to backfill,
                         // but we still need to persist the finished state.
@@ -474,26 +481,21 @@ where
                         )
                         .await?;
                         tracing::trace!(
+                            epoch = ?barrier.epoch,
                             ?current_pos,
                             total_snapshot_processed_rows,
                             "Backfill position persisted after completion"
                         );
                     }
 
-                    // In the event that some actors already finished,
-                    // on recovery we want to recover the backfill progress for them too,
-                    // so that we can provide an accurate estimate.
-                    // so we call that here, before finally completing the backfill progress.
-                    self.progress.update(
-                        barrier.epoch.curr,
-                        snapshot_read_epoch,
-                        total_snapshot_processed_rows,
-                    );
                     // For both backfill finished before recovery,
                     // and backfill which just finished, we need to update mview tracker,
                     // it does not persist this information.
                     self.progress.finish(barrier.epoch.curr);
-                    tracing::trace!("Updated CreateMaterializedTracker");
+                    tracing::trace!(
+                        epoch = ?barrier.epoch,
+                        "Updated CreateMaterializedTracker"
+                    );
                     yield msg;
                     break;
                 }
