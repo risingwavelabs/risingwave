@@ -123,9 +123,9 @@
     Table 0 { columns: [ $expr1, max(t_b), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 1
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
