@@ -445,40 +445,62 @@ where
         while let Some(Ok(msg)) = upstream.next().await {
             if let Some(msg) = mapping_message(msg, &self.output_indices) {
                 // If not finished then we need to update state, otherwise no need.
-                if let Message::Barrier(barrier) = &msg && !is_finished {
-                    // If snapshot was empty, we do not need to backfill,
-                    // but we still need to persist the finished state.
-                    // We currently persist it on the second barrier here rather than first.
-                    // This is because we can't update state table in first epoch,
-                    // since it expects to have been initialized in previous epoch
-                    // (there's no epoch before the first epoch).
-                    if is_snapshot_empty {
-                        current_pos =
-                            Some(construct_initial_finished_state(pk_in_output_indices.len()))
+                if let Message::Barrier(barrier) = &msg {
+                    if is_finished {
+                        // No need to persist any state, we already finished before.
+                    } else {
+                        // If snapshot was empty, we do not need to backfill,
+                        // but we still need to persist the finished state.
+                        // We currently persist it on the second barrier here rather than first.
+                        // This is because we can't update state table in first epoch,
+                        // since it expects to have been initialized in previous epoch
+                        // (there's no epoch before the first epoch).
+                        if is_snapshot_empty {
+                            current_pos =
+                                Some(construct_initial_finished_state(pk_in_output_indices.len()))
+                        }
+
+                        // We will update current_pos at least once,
+                        // since snapshot read has to be non-empty,
+                        // Or snapshot was empty and we construct a placeholder state.
+                        debug_assert_ne!(current_pos, None);
+
+                        Self::persist_state(
+                            barrier.epoch,
+                            &mut self.state_table,
+                            true,
+                            &current_pos,
+                            total_snapshot_processed_rows,
+                            &mut old_state,
+                            &mut current_state,
+                        )
+                        .await?;
+                        tracing::trace!(
+                            actor = self.actor_id,
+                            epoch = ?barrier.epoch,
+                            ?current_pos,
+                            total_snapshot_processed_rows,
+                            "Backfill position persisted after completion"
+                        );
                     }
 
-                    // We will update current_pos at least once,
-                    // since snapshot read has to be non-empty,
-                    // Or snapshot was empty and we construct a placeholder state.
-                    debug_assert_ne!(current_pos, None);
-
-                    Self::persist_state(
-                        barrier.epoch,
-                        &mut self.state_table,
-                        true,
-                        &current_pos,
+                    // In the event that some actors already finished,
+                    // on recovery we want to recover the backfill progress for them too,
+                    // so that we can provide an accurate estimate.
+                    // so we call that here, before finally completing the backfill progress.
+                    self.progress.update(
+                        barrier.epoch.curr,
+                        snapshot_read_epoch,
                         total_snapshot_processed_rows,
-                        &mut old_state,
-                        &mut current_state,
-                    )
-                    .await?;
+                    );
+                    // For both backfill finished before recovery,
+                    // and backfill which just finished, we need to update mview tracker,
+                    // it does not persist this information.
                     self.progress.finish(barrier.epoch.curr);
                     tracing::trace!(
                         actor = self.actor_id,
                         epoch = ?barrier.epoch,
-                        ?current_pos,
-                        total_snapshot_processed_rows,
-                        "Backfill position persisted after completion"
+                        "Updated CreateMaterializedTracker"
                     );
                     yield msg;
                     break;
@@ -500,9 +522,6 @@ where
         #[for_await]
         for msg in upstream {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
-                if let Some(state_table) = self.state_table.as_mut() && let Message::Barrier(barrier) = &msg {
-                        state_table.commit_no_data_expected(barrier.epoch);
-                    }
                 yield msg;
             }
         }
