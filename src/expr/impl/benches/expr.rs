@@ -19,6 +19,8 @@
 // `zip_eq` is a source of poor performance.
 #![allow(clippy::disallowed_methods)]
 
+risingwave_expr_impl::enable!();
+
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
