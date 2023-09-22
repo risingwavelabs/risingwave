@@ -64,8 +64,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             Schema {
                 fields: output_schema_fields,
             }
-        }
-        else if matches!(node.chain_type(), ChainType::Backfill) {
+        } else if matches!(node.chain_type(), ChainType::Backfill) {
             Schema::new(
                 output_indices
                     .iter()
