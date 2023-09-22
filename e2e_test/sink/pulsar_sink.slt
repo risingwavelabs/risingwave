@@ -5,7 +5,9 @@ statement ok
 CREATE MATERIALIZED VIEW mv0 AS SELECT * FROM t0;
 
 statement ok
-CREATE SINK sink0 AS select mv0.v1 as v1, mv0.v2 as v2 from mv0 WITH (
+CREATE SINK sink0 
+AS select mv0.v1 as v1, mv0.v2 as v2 from mv0 
+WITH (
     connector = 'pulsar',
     type = 'upsert',
     primary_key = 'v1',
@@ -14,7 +16,7 @@ CREATE SINK sink0 AS select mv0.v1 as v1, mv0.v2 as v2 from mv0 WITH (
 );
 
 statement ok
-CREATE TABLE src0 (v1 int primary key, v2 varchar);
+CREATE TABLE src0 (v1 int primary key, v2 varchar)
 WITH (
    connector='pulsar',
    topic='persistent://public/default/sink',
@@ -32,7 +34,6 @@ statement ok
 INSERT INTO pulsar VALUES (3, 'test3');
 
 query IT rowsort
-select * FROM t;
 SELECT * FROM src0;
 ----
 1 test1
