@@ -208,7 +208,6 @@ impl KinesisSinkWriter {
         );
         let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
         let f = UpsertFormatter::new(key_encoder, val_encoder);
-
         self.write_chunk(chunk, f).await
     }
 
@@ -220,7 +219,6 @@ impl KinesisSinkWriter {
         );
         let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
         let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
-
         self.write_chunk(chunk, f).await
     }
 

@@ -51,7 +51,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::{CheckRelationError, SessionImpl};
 use crate::stream_fragmenter::build_graph;
-use crate::utils::resolve_connection_in_with_option;
+use crate::utils::resolve_privatelink_in_with_option;
 use crate::{Binder, TableCatalog, WithOptions};
 
 /// Column ID generator for a new table or a new version of an existing table to alter.
@@ -653,7 +653,7 @@ fn gen_table_plan_inner(
     // resolve privatelink connection for Table backed by Kafka source
     let mut with_options = WithOptions::new(properties);
     let connection_id =
-        resolve_connection_in_with_option(&mut with_options, &schema_name, &session)?;
+        resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
 
     let source = source_info.map(|source_info| PbSource {
         id: TableId::placeholder().table_id,
