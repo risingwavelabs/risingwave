@@ -551,7 +551,6 @@ impl PlanRoot {
                 }
             };
 
-
             let dummy_source_node = LogicalSource::new(
                 None,
                 columns.clone(),
@@ -573,7 +572,6 @@ impl PlanRoot {
 
             vec![external_source_node, dml_node]
         } else {
-
             let dml_node = inject_dml_node(
                 &columns,
                 append_only,

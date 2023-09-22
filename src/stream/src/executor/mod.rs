@@ -34,12 +34,14 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::{Expression, NonStrictExpression};
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
-use risingwave_pb::stream_plan::barrier::{BarrierKind, PbMutation};
+use risingwave_pb::stream_plan::barrier::BarrierKind;
+use risingwave_pb::stream_plan::barrier_mutation::PbMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AddMutation, Dispatchers, PauseMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbWatermark,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, ThrottleMutation, UpdateMutation,
+    AddMutation, BarrierMutation, CombinedMutation, Dispatchers, PauseMutation, PbBarrier,
+    PbDispatcher, PbStreamMessage, PbWatermark, ResumeMutation, SourceChangeSplitMutation,
+    StopMutation, ThrottleMutation, UpdateMutation,
 };
 use smallvec::SmallVec;
 
@@ -243,6 +245,7 @@ pub enum Mutation {
     Pause,
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
+    Combined(Vec<Mutation>),
 }
 
 #[derive(Debug, Clone)]
@@ -484,6 +487,15 @@ impl Mutation {
                     .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit }))
                     .collect(),
             }),
+
+            Mutation::Combined(c) => PbMutation::Combined(CombinedMutation {
+                mutations: c
+                    .iter()
+                    .map(|m| BarrierMutation {
+                        mutation: Some(m.to_protobuf()),
+                    })
+                    .collect(),
+            }),
         }
     }
 
@@ -581,6 +593,13 @@ impl Mutation {
                     .map(|(actor_id, limit)| (*actor_id, limit.rate_limit))
                     .collect(),
             ),
+
+            PbMutation::Combined(CombinedMutation { mutations }) => Mutation::Combined(
+                mutations
+                    .iter()
+                    .map(|m| Mutation::from_protobuf(m.mutation.as_ref().unwrap()))
+                    .try_collect()?,
+            ),
         };
         Ok(mutation)
     }
@@ -602,7 +621,9 @@ impl Barrier {
                 curr: epoch.curr,
                 prev: epoch.prev,
             }),
-            mutation: mutation.map(|mutation| mutation.to_protobuf()),
+            mutation: mutation.map(|m| BarrierMutation {
+                mutation: Some(m.to_protobuf()),
+            }),
             tracing_context: tracing_context.to_protobuf(),
             kind: kind as _,
             passed_actors,
@@ -613,7 +634,7 @@ impl Barrier {
         let mutation = prost
             .mutation
             .as_ref()
-            .map(Mutation::from_protobuf)
+            .map(|m| Mutation::from_protobuf(m.mutation.as_ref().unwrap()))
             .transpose()?
             .map(Arc::new);
         let epoch = prost.get_epoch()?;
