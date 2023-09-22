@@ -194,3 +194,8 @@ services:
     expose:
       - "8080"
       - "6650"
+    healthcheck:
+      test: [ "CMD-SHELL", "bin/pulsar-admin brokers healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
