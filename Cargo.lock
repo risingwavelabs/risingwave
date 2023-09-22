@@ -7672,7 +7672,6 @@ dependencies = [
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",
- "risingwave_frontend",
  "risingwave_hummock_sdk",
  "risingwave_hummock_test",
  "risingwave_pb",
