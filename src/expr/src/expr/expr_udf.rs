@@ -123,7 +123,7 @@ impl UdfExpression {
             vis.len() - last_u - 1
         } else {
             vis.len()
-        };        
+        };
         for _ in 0..zeros {
             uncompact_builder.append_null();
         }
