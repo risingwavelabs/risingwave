@@ -21,7 +21,7 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" source
 
 echo "--- starting risingwave cluster"
-cargo make ci-start ci-clickhouse-test
+cargo make ci-start ci-pulsar-sink-test
 sleep 1
 
 echo "--- testing pulsar health"
