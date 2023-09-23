@@ -113,6 +113,6 @@ mvn install --pl java-binding-benchmark --am -DskipTests=true -Dmaven.javadoc.sk
 
 mvn dependency:copy-dependencies --pl java-binding-benchmark
 
-java -cp "java-binding-benchmark/target/dependency/*:java-binding-benchmark/target/java-binding-benchmark-1.0-SNAPSHOT.jar" \
+java -cp "java-binding-benchmark/target/dependency/*:java-binding-benchmark/target/java-binding-benchmark-0.1.0-SNAPSHOT.jar" \
              com.risingwave.java.binding.BenchmarkRunner
 '''

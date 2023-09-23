@@ -254,11 +254,8 @@ public class EsSink extends SinkWriterBase {
     @Override
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
-            try (SinkRow row = rows.next()) {
-                writeRow(row);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+            SinkRow row = rows.next();
+            writeRow(row);
         }
     }
 

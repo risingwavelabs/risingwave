@@ -57,13 +57,12 @@ public class StreamchunkBenchmark {
     public void streamchunkTest() {
         int count = 0;
         while (true) {
-            try (StreamChunkRow row = iter.next()) {
-                if (row == null) {
-                    break;
-                }
-                count += 1;
-                getValue(row);
+            StreamChunkRow row = iter.next();
+            if (row == null) {
+                break;
             }
+            count += 1;
+            getValue(row);
         }
         if (count != loopTime) {
             throw new RuntimeException(
