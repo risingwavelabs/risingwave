@@ -44,4 +44,3 @@ sleep 1
 
 echo "--- Kill cluster"
 cargo make ci-kill
-pkill -f connector-node

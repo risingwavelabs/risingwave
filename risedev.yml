@@ -804,7 +804,7 @@ profile:
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
-  
+
   ci-pulsar-test:
     config-path: src/config/ci.toml
     steps:
