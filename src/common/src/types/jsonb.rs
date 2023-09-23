@@ -210,6 +210,12 @@ impl From<Value> for JsonbVal {
     }
 }
 
+impl<'a> From<&'a Value> for JsonbRef<'a> {
+    fn from(value: &'a Value) -> Self {
+        JsonbRef(value)
+    }
+}
+
 impl<'a> JsonbRef<'a> {
     pub fn memcmp_serialize(
         &self,
@@ -344,6 +350,10 @@ impl<'a> JsonbRef<'a> {
             Value::Object(object) => Ok(object.iter().map(|(k, v)| (k.as_str(), Self(v)))),
             _ => Err(format!("cannot deconstruct a jsonb {}", self.type_name())),
         }
+    }
+
+    pub fn value(&self) -> &'a Value {
+        self.0
     }
 }
 

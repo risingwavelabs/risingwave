@@ -40,6 +40,7 @@ pub mod extract;
 pub mod format_type;
 pub mod int256;
 pub mod jsonb_access;
+pub mod jsonb_concat;
 pub mod jsonb_info;
 pub mod length;
 pub mod like;

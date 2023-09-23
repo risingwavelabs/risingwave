@@ -206,6 +206,7 @@ message ExprNode {
     HEX_TO_INT256 = 560;
 
     // Jsonb functions
+    JSONB_CONCAT = 575;
 
     // jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb
     JSONB_ACCESS_INNER = 600;
