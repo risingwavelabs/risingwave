@@ -63,7 +63,7 @@ message IntraLevelDelta {
   uint64 l0_sub_level_id = 2;
   repeated uint64 removed_table_ids = 3;
   repeated SstableInfo inserted_table_infos = 4;
-  uint32 partition_vnode_count = 5;
+  uint32 vnode_partition_count = 5;
 }
 
 enum CompatibilityVersion {

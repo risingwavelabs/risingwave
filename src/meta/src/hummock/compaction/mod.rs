@@ -30,7 +30,8 @@ use std::sync::Arc;
 
 use picker::{ManualCompactionPicker, PartitionLevelCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::{
-    can_concat, CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
+    can_concat, can_partition_level, CompactionGroupId, HummockCompactionTaskId, HummockEpoch,
+    HummockSstableId,
 };
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -41,12 +42,10 @@ pub use crate::hummock::compaction::level_selector::{
     LevelSelector, ManualCompactionSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
-use crate::hummock::compaction::picker::{
-    can_partition_level, CompactionInput, LocalPickerStatistic,
-};
 pub use crate::hummock::compaction::picker::{
     partition_level, partition_sub_levels, LevelPartition,
 };
+use crate::hummock::compaction::picker::{CompactionInput, LocalPickerStatistic};
 pub use crate::hummock::compaction::tombstone_compaction_selector::TombstoneCompactionSelector;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;

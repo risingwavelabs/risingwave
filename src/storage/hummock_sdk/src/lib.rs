@@ -41,6 +41,7 @@ pub mod prost_key_range;
 pub mod table_stats;
 
 pub use compact::*;
+pub use compaction_group::hummock_version_ext::can_partition_level;
 
 pub type HummockSstableObjectId = u64;
 pub type HummockSstableId = u64;

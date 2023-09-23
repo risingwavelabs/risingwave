@@ -16,13 +16,12 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::can_partition_level;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{
-    CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel, SstableInfo,
-};
+use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel};
 
 use crate::hummock::compaction::picker::{
     CompactionInput, CompactionPicker, LocalPickerStatistic, PartitionLevelInfo, TrivialMovePicker,
@@ -54,6 +53,10 @@ impl PartitionIntraSubLevelPicker {
             }
 
             if l0.sub_levels[idx + 1].level_type == LevelType::Overlapping as i32 {
+                continue;
+            }
+
+            if l0.sub_levels[idx + 1].vnode_partition_count != level.vnode_partition_count {
                 continue;
             }
 
@@ -131,6 +134,11 @@ impl PartitionIntraSubLevelPicker {
             }
 
             if level.vnode_partition_count > 0 {
+                assert!(can_partition_level(
+                    levels.member_table_ids[0],
+                    level.vnode_partition_count as usize,
+                    &level.table_infos
+                ));
                 continue;
             }
 
@@ -171,7 +179,7 @@ impl PartitionIntraSubLevelPicker {
             }
 
             if input_levels.len() < self.config.level0_sub_level_compact_level_count as usize
-                && (!wait_enough || level.vnode_partition_count > 0)
+                && !wait_enough
             {
                 continue;
             }
@@ -305,12 +313,12 @@ pub fn partition_sub_levels(levels: &Levels) -> Vec<LevelPartition> {
         return vec![];
     }
 
-    let mut partition_vnode_count: usize = 1;
-    while partition_vnode_count * 2 <= (levels.vnode_partition_count as usize) {
-        partition_vnode_count *= 2;
+    let mut vnode_partition_count: usize = 1;
+    while vnode_partition_count * 2 <= (levels.vnode_partition_count as usize) {
+        vnode_partition_count *= 2;
     }
-    let mut partitions = Vec::with_capacity(partition_vnode_count);
-    for _ in 0..partition_vnode_count {
+    let mut partitions = Vec::with_capacity(vnode_partition_count);
+    for _ in 0..vnode_partition_count {
         partitions.push(LevelPartition::default());
     }
     for level in &levels.l0.as_ref().unwrap().sub_levels {
@@ -320,7 +328,7 @@ pub fn partition_sub_levels(levels: &Levels) -> Vec<LevelPartition> {
         assert_eq!(levels.member_table_ids.len(), 1);
         if !partition_level(
             levels.member_table_ids[0],
-            partition_vnode_count,
+            vnode_partition_count,
             level,
             &mut partitions,
         ) {
@@ -330,102 +338,16 @@ pub fn partition_sub_levels(levels: &Levels) -> Vec<LevelPartition> {
     partitions
 }
 
-pub fn can_partition_level(
-    table_id: u32,
-    partition_vnode_count: usize,
-    table_infos: &[SstableInfo],
-) -> bool {
-    let mut left_idx = 0;
-    let mut can_partition = true;
-    let partition_size = VirtualNode::COUNT / partition_vnode_count;
-    for sst in table_infos {
-        if sst.table_ids.len() != 1 || sst.table_ids[0] != table_id {
-            return false;
-        }
-    }
-    for partition_id in 0..partition_vnode_count {
-        let smallest_vnode = partition_id * partition_size;
-        let largest_vnode = (partition_id + 1) * partition_size;
-        let smallest_table_key =
-            UserKey::prefix_of_vnode(table_id, VirtualNode::from_index(smallest_vnode));
-        let largest_table_key = if largest_vnode >= VirtualNode::COUNT {
-            Bound::Unbounded
-        } else {
-            Bound::Excluded(UserKey::prefix_of_vnode(
-                table_id,
-                VirtualNode::from_index(largest_vnode),
-            ))
-        };
-        while left_idx < table_infos.len() {
-            let key_range = table_infos[left_idx].key_range.as_ref().unwrap();
-            let ret = key_range.compare_right_with_user_key(smallest_table_key.as_ref());
-            if ret != std::cmp::Ordering::Less {
-                break;
-            }
-            left_idx += 1;
-        }
-        if left_idx >= table_infos.len() {
-            return true;
-        }
-
-        if FullKey::decode(&table_infos[left_idx].key_range.as_ref().unwrap().left)
-            .user_key
-            .lt(&smallest_table_key.as_ref())
-        {
-            can_partition = false;
-            break;
-        }
-        let mut right_idx = left_idx;
-        while right_idx < table_infos.len() {
-            let key_range = table_infos[right_idx].key_range.as_ref().unwrap();
-            let ret = match &largest_table_key {
-                Bound::Excluded(key) => key_range.compare_right_with_user_key(key.as_ref()),
-                Bound::Unbounded => {
-                    let right_key = FullKey::decode(&key_range.right);
-                    assert!(right_key.user_key.table_id.table_id == table_id);
-                    // We would assign partition_vnode_count to a level only when we compact all
-                    // sstable of it, so there will never be another stale table in this sstable
-                    // file.
-                    std::cmp::Ordering::Less
-                }
-                _ => unreachable!(),
-            };
-
-            if ret != std::cmp::Ordering::Less {
-                break;
-            }
-            right_idx += 1;
-        }
-
-        if right_idx < table_infos.len()
-            && match &largest_table_key {
-                Bound::Excluded(key) => {
-                    FullKey::decode(&table_infos[right_idx].key_range.as_ref().unwrap().left)
-                        .user_key
-                        .lt(&key.as_ref())
-                }
-                _ => unreachable!(),
-            }
-        {
-            can_partition = false;
-            break;
-        }
-        left_idx = right_idx;
-    }
-
-    can_partition
-}
-
 pub fn partition_level(
     table_id: u32,
-    partition_vnode_count: usize,
+    vnode_partition_count: usize,
     level: &Level,
     partitions: &mut Vec<LevelPartition>,
 ) -> bool {
-    assert_eq!(partition_vnode_count, partitions.len());
+    assert_eq!(vnode_partition_count, partitions.len());
     let mut left_idx = 0;
     let mut can_partition = true;
-    let partition_size = VirtualNode::COUNT / partition_vnode_count;
+    let partition_size = VirtualNode::COUNT / vnode_partition_count;
     for (partition_id, partition) in partitions.iter_mut().enumerate() {
         let smallest_vnode = partition_id * partition_size;
         let largest_vnode = (partition_id + 1) * partition_size;
@@ -474,7 +396,7 @@ pub fn partition_level(
                 Bound::Unbounded => {
                     let right_key = FullKey::decode(&key_range.right);
                     assert!(right_key.user_key.table_id.table_id == table_id);
-                    // We would assign partition_vnode_count to a level only when we compact all
+                    // We would assign vnode_partition_count to a level only when we compact all
                     // sstable of it, so there will never be another stale table in this sstable
                     // file.
                     std::cmp::Ordering::Less

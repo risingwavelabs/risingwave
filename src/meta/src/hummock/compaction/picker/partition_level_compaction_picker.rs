@@ -93,6 +93,12 @@ impl PartitionLevelCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
+        if l0.sub_levels[0].vnode_partition_count != target_level.vnode_partition_count
+            && !target_level.table_infos.is_empty()
+        {
+            return None;
+        }
+
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let trivial_move_picker =
             TrivialMovePicker::new(0, self.target_level, overlap_strategy.clone());

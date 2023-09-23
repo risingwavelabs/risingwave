@@ -265,8 +265,8 @@ pub struct MetaConfig {
     #[serde(default)]
     pub do_not_config_object_storage_lifecycle: bool,
 
-    #[serde(default = "default::meta::partition_vnode_count")]
-    pub partition_vnode_count: u32,
+    #[serde(default = "default::meta::vnode_partition_count")]
+    pub vnode_partition_count: u32,
 
     #[serde(default = "default::meta::table_write_throughput_threshold")]
     pub table_write_throughput_threshold: u64,
@@ -891,7 +891,7 @@ pub mod default {
             64 * 1024 * 1024 * 1024 // 64GB
         }
 
-        pub fn partition_vnode_count() -> u32 {
+        pub fn vnode_partition_count() -> u32 {
             32
         }
 

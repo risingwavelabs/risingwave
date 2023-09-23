@@ -2087,7 +2087,7 @@ pub(crate) mod tests {
                 group_destroy: None,
                 group_meta_changes: vec![],
                 group_table_change: None,
-                new_partition_vnode_count: compact_task.split_weight_by_vnode,
+                new_vnode_partition_count: compact_task.split_weight_by_vnode,
             });
         }
     }

@@ -2388,7 +2388,7 @@ impl HummockManager {
         group_infos.reverse();
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
-        let partition_vnode_count = self.env.opts.partition_vnode_count;
+        let vnode_partition_count = self.env.opts.vnode_partition_count;
         let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / (checkpoint_secs as usize);
         for group in &group_infos {
             if group.table_statistic.len() == 1 {
@@ -2444,7 +2444,7 @@ impl HummockManager {
                         &[*table_id],
                         None,
                         false,
-                        partition_vnode_count,
+                        vnode_partition_count,
                     )
                     .await;
                 match ret {
@@ -2840,7 +2840,7 @@ fn gen_version_delta<'a>(
             level_idx: compact_task.target_level,
             inserted_table_infos: compact_task.sorted_output_ssts.clone(),
             l0_sub_level_id: compact_task.target_sub_level_id,
-            partition_vnode_count: compact_task.split_weight_by_vnode,
+            vnode_partition_count: compact_task.split_weight_by_vnode,
             ..Default::default()
         })),
     };

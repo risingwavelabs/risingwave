@@ -294,7 +294,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 min_table_split_size: config.meta.move_table_size_limit,
                 table_write_throughput_threshold: config.meta.table_write_throughput_threshold,
                 min_table_split_write_throughput: config.meta.min_table_split_write_throughput,
-                partition_vnode_count: config.meta.partition_vnode_count,
+                vnode_partition_count: config.meta.vnode_partition_count,
                 do_not_config_object_storage_lifecycle: config
                     .meta
                     .do_not_config_object_storage_lifecycle,

@@ -148,7 +148,7 @@ pub struct MetaOpts {
     /// Whether config object storage bucket lifecycle to purge stale data.
     pub do_not_config_object_storage_lifecycle: bool,
 
-    pub partition_vnode_count: u32,
+    pub vnode_partition_count: u32,
 
     /// threshold of high write throughput of state-table, unit: B/sec
     pub table_write_throughput_threshold: u64,
@@ -193,7 +193,7 @@ impl MetaOpts {
             table_write_throughput_threshold: 128 * 1024 * 1024,
             min_table_split_write_throughput: 64 * 1024 * 1024,
             do_not_config_object_storage_lifecycle: true,
-            partition_vnode_count: 16,
+            vnode_partition_count: 16,
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_config: None,
         }

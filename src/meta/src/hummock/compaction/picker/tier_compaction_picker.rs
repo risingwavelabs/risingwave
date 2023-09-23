@@ -14,8 +14,8 @@
 
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
+use risingwave_hummock_sdk::{can_concat, can_partition_level};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
@@ -23,7 +23,7 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
-use crate::hummock::compaction::picker::{can_partition_level, MAX_COMPACT_LEVEL_COUNT};
+use crate::hummock::compaction::picker::MAX_COMPACT_LEVEL_COUNT;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
@@ -103,7 +103,7 @@ impl TierCompactionPicker {
                     input_levels: vec![input_level],
                     target_level: 0,
                     target_sub_level_id: level.sub_level_id,
-                    vnode_partition_count: vnode_partition_count,
+                    vnode_partition_count,
                     ..Default::default()
                 });
             }

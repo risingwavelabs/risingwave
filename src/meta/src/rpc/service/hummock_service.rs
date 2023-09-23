@@ -580,7 +580,7 @@ impl HummockManagerService for HummockServiceImpl {
             split_group_size_limit,
             min_table_split_size,
             do_not_config_object_storage_lifecycle,
-            partition_vnode_count,
+            vnode_partition_count,
             table_write_throughput_threshold,
             min_table_split_write_throughput,
             compaction_task_max_heartbeat_interval_secs

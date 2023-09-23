@@ -15,9 +15,11 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ops::Bound;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
@@ -30,6 +32,7 @@ use tracing::warn;
 
 use super::StateTableId;
 use crate::compaction_group::StaticCompactionGroupId;
+use crate::key::{FullKey, UserKey};
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
@@ -44,7 +47,7 @@ pub struct GroupDeltasSummary {
     pub group_destroy: Option<GroupDestroy>,
     pub group_meta_changes: Vec<GroupMetaChange>,
     pub group_table_change: Option<GroupTableChange>,
-    pub new_partition_vnode_count: u32,
+    pub new_vnode_partition_count: u32,
 }
 
 pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary {
@@ -57,7 +60,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
     let mut group_destroy = None;
     let mut group_meta_changes = vec![];
     let mut group_table_change = None;
-    let mut new_partition_vnode_count = 0;
+    let mut new_vnode_partition_count = 0;
 
     for group_delta in &group_deltas.group_deltas {
         match group_delta.get_delta_type().unwrap() {
@@ -71,7 +74,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
                     insert_sub_level_id = intra_level.l0_sub_level_id;
                     insert_table_infos.extend(intra_level.inserted_table_infos.iter().cloned());
                 }
-                new_partition_vnode_count = intra_level.partition_vnode_count;
+                new_vnode_partition_count = intra_level.vnode_partition_count;
             }
             DeltaType::GroupConstruct(construct_delta) => {
                 assert!(group_construct.is_none());
@@ -103,7 +106,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
         group_destroy,
         group_meta_changes,
         group_table_change,
-        new_partition_vnode_count,
+        new_vnode_partition_count,
     }
 }
 
@@ -656,7 +659,7 @@ impl HummockLevelsExt for Levels {
             insert_sst_level_id,
             insert_sub_level_id,
             insert_table_infos,
-            new_partition_vnode_count,
+            new_vnode_partition_count,
             ..
         } = summary;
 
@@ -702,11 +705,29 @@ impl HummockLevelsExt for Levels {
                     insert_sub_level_id, delete_sst_ids_set, l0.sub_levels.iter().map(|level| level.sub_level_id).collect_vec()
                 );
                 if l0.sub_levels[index].table_infos.is_empty()
-                    && insert_table_infos
-                        .iter()
-                        .all(|sst| sst.table_ids.len() == 1)
+                    && self.member_table_ids.len() == 1
+                    && insert_table_infos.iter().all(|sst| {
+                        sst.table_ids.len() == 1 && sst.table_ids[0] == self.member_table_ids[0]
+                    })
                 {
-                    l0.sub_levels[index].vnode_partition_count = new_partition_vnode_count;
+                    if new_vnode_partition_count > 0
+                        && !can_partition_level(
+                            self.member_table_ids[0],
+                            new_vnode_partition_count as usize,
+                            &insert_table_infos,
+                        )
+                    {
+                        tracing::error!(
+                            "can not partition sub level {}. tables: {:?}",
+                            insert_sub_level_id,
+                            insert_table_infos
+                                .iter()
+                                .map(|sst| sst.sst_id)
+                                .collect_vec()
+                        );
+                    } else {
+                        l0.sub_levels[index].vnode_partition_count = new_vnode_partition_count;
+                    }
                 }
                 level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
             } else {
@@ -716,9 +737,9 @@ impl HummockLevelsExt for Levels {
                         .iter()
                         .all(|sst| sst.table_ids.len() == 1)
                 {
-                    self.levels[idx].vnode_partition_count = new_partition_vnode_count;
+                    self.levels[idx].vnode_partition_count = new_vnode_partition_count;
                 } else if self.levels[idx].vnode_partition_count != 0
-                    && new_partition_vnode_count == 0
+                    && new_vnode_partition_count == 0
                     && self.member_table_ids.len() > 1
                 {
                     self.levels[idx].vnode_partition_count = 0;
@@ -1230,6 +1251,91 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
         }
     }
     res
+}
+pub fn can_partition_level(
+    table_id: u32,
+    vnode_partition_count: usize,
+    table_infos: &[SstableInfo],
+) -> bool {
+    let mut left_idx = 0;
+    let mut can_partition = true;
+    let partition_size = VirtualNode::COUNT / vnode_partition_count;
+    for sst in table_infos {
+        if sst.table_ids.len() != 1 || sst.table_ids[0] != table_id {
+            return false;
+        }
+    }
+    for partition_id in 0..vnode_partition_count {
+        let smallest_vnode = partition_id * partition_size;
+        let largest_vnode = (partition_id + 1) * partition_size;
+        let smallest_table_key =
+            UserKey::prefix_of_vnode(table_id, VirtualNode::from_index(smallest_vnode));
+        let largest_table_key = if largest_vnode >= VirtualNode::COUNT {
+            Bound::Unbounded
+        } else {
+            Bound::Excluded(UserKey::prefix_of_vnode(
+                table_id,
+                VirtualNode::from_index(largest_vnode),
+            ))
+        };
+        while left_idx < table_infos.len() {
+            let key_range = table_infos[left_idx].key_range.as_ref().unwrap();
+            let ret = key_range.compare_right_with_user_key(smallest_table_key.as_ref());
+            if ret != std::cmp::Ordering::Less {
+                break;
+            }
+            left_idx += 1;
+        }
+        if left_idx >= table_infos.len() {
+            return true;
+        }
+
+        if FullKey::decode(&table_infos[left_idx].key_range.as_ref().unwrap().left)
+            .user_key
+            .lt(&smallest_table_key.as_ref())
+        {
+            can_partition = false;
+            break;
+        }
+        let mut right_idx = left_idx;
+        while right_idx < table_infos.len() {
+            let key_range = table_infos[right_idx].key_range.as_ref().unwrap();
+            let ret = match &largest_table_key {
+                Bound::Excluded(key) => key_range.compare_right_with_user_key(key.as_ref()),
+                Bound::Unbounded => {
+                    let right_key = FullKey::decode(&key_range.right);
+                    assert!(right_key.user_key.table_id.table_id == table_id);
+                    // We would assign vnode_partition_count to a level only when we compact all
+                    // sstable of it, so there will never be another stale table in this sstable
+                    // file.
+                    std::cmp::Ordering::Less
+                }
+                _ => unreachable!(),
+            };
+
+            if ret != std::cmp::Ordering::Less {
+                break;
+            }
+            right_idx += 1;
+        }
+
+        if right_idx < table_infos.len()
+            && match &largest_table_key {
+                Bound::Excluded(key) => {
+                    FullKey::decode(&table_infos[right_idx].key_range.as_ref().unwrap().left)
+                        .user_key
+                        .lt(&key.as_ref())
+                }
+                _ => unreachable!(),
+            }
+        {
+            can_partition = false;
+            break;
+        }
+        left_idx = right_idx;
+    }
+
+    can_partition
 }
 
 #[cfg(test)]
