@@ -320,6 +320,7 @@ pub async fn shared_compactor_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     let endpoint: &'static str = Box::leak(opts.proxy_rpc_endpoint.clone().into_boxed_str());
+    let endpoint_str = endpoint.to_string();
     let endpoint = Endpoint::from_static(endpoint);
     let channel = endpoint
         .http2_keep_alive_interval(Duration::from_secs(ENDPOINT_KEEP_ALIVE_INTERVAL_SEC))
@@ -328,7 +329,7 @@ pub async fn shared_compactor_serve(
         .connect()
         .await
         .expect("Failed to create channel via proxy rpc endpoint.");
-    let grpc_proxy_client = GrpcCompactorProxyClient::new(channel);
+    let grpc_proxy_client = GrpcCompactorProxyClient::new(channel, endpoint_str);
     let system_params_response = grpc_proxy_client
         .get_system_params()
         .await
