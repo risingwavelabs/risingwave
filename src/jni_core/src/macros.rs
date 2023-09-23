@@ -27,8 +27,11 @@ macro_rules! gen_jni_sig_inner {
     ($(public)? static native $($rest:tt)*) => {
         gen_jni_sig_inner! { $($rest)* }
     };
-    ($($ret:tt).+  $($func_name:ident)? ($($args:tt)*)) => {
+    ($($ret:ident).+  $($func_name:ident)? ($($args:tt)*)) => {
         concat! {"(", gen_jni_sig_inner!{$($args)*}, ")", gen_jni_sig_inner! {$($ret).+} }
+    };
+    ($($ret:ident).+ []  $($func_name:ident)? ($($args:tt)*)) => {
+        concat! {"(", gen_jni_sig_inner!{$($args)*}, ")", gen_jni_sig_inner! {$($ret).+ []} }
     };
     (boolean) => {
         "Z"
@@ -72,6 +75,9 @@ macro_rules! gen_jni_sig_inner {
     ($($class_part:ident).+ $(.)? [] $($param_name:ident)? $(,$($rest:tt)*)?) => {
         concat! { "[", gen_jni_sig_inner! {$($class_part).+}, gen_jni_sig_inner! {$($($rest)*)?}}
     };
+    (Class $(< ? >)? $($param_name:ident)? $(,$($rest:tt)*)?) => {
+        concat! { gen_jni_sig_inner! { Class }, gen_jni_sig_inner! {$($($rest)*)?}}
+    };
     ($($class_part:ident).+ $($param_name:ident)? $(,$($rest:tt)*)?) => {
         concat! { gen_jni_sig_inner! {$($class_part).+}, gen_jni_sig_inner! {$($($rest)*)?}}
     };
@@ -97,32 +103,69 @@ macro_rules! for_all_plain_native_methods {
         $macro! {
             {
                 public static native int vnodeCount();
+
+                // hummock iterator method
+                // Return a pointer to the iterator
                 static native long hummockIteratorNew(byte[] readPlan);
+
+                // return a pointer to the next row
                 static native long hummockIteratorNext(long pointer);
+
+                // Since the underlying rust does not have garbage collection, we will have to manually call
+                // close on the iterator to release the iterator instance pointed by the pointer.
                 static native void hummockIteratorClose(long pointer);
-                static native byte.[] rowGetKey(long pointer);
+
+                // row method
+                static native byte[] rowGetKey(long pointer);
+
                 static native int rowGetOp(long pointer);
+
                 static native boolean rowIsNull(long pointer, int index);
+
                 static native short rowGetInt16Value(long pointer, int index);
+
                 static native int rowGetInt32Value(long pointer, int index);
+
                 static native long rowGetInt64Value(long pointer, int index);
+
                 static native float rowGetFloatValue(long pointer, int index);
+
                 static native double rowGetDoubleValue(long pointer, int index);
+
                 static native boolean rowGetBooleanValue(long pointer, int index);
+
                 static native String rowGetStringValue(long pointer, int index);
+
                 static native java.sql.Timestamp rowGetTimestampValue(long pointer, int index);
+
                 static native java.math.BigDecimal rowGetDecimalValue(long pointer, int index);
+
                 static native java.sql.Time rowGetTimeValue(long pointer, int index);
+
                 static native java.sql.Date rowGetDateValue(long pointer, int index);
+
                 static native String rowGetIntervalValue(long pointer, int index);
+
                 static native String rowGetJsonbValue(long pointer, int index);
-                static native byte.[] rowGetByteaValue(long pointer, int index);
-                static native Object rowGetArrayValue(long pointer, int index, Class clazz);
+
+                static native byte[] rowGetByteaValue(long pointer, int index);
+
+                // TODO: object or object array?
+                static native Object rowGetArrayValue(long pointer, int index, Class<?> clazz);
+
+                // Since the underlying rust does not have garbage collection, we will have to manually call
+                // close on the row to release the row instance pointed by the pointer.
                 static native void rowClose(long pointer);
+
+                // stream chunk iterator method
                 static native long streamChunkIteratorNew(byte[] streamChunkPayload);
+
                 static native long streamChunkIteratorNext(long pointer);
+
                 static native void streamChunkIteratorClose(long pointer);
+
                 static native long streamChunkIteratorFromPretty(String str);
+
                 public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
             }
             $(,$args)*
@@ -131,30 +174,107 @@ macro_rules! for_all_plain_native_methods {
 }
 
 #[macro_export]
+macro_rules! for_single_native_method {
+    (
+        {$($ret:tt).+ $func_name:ident ($($args:tt)*)},
+        $macro:path
+        $(,$extra_args:tt)*
+    ) => {
+        $macro! {
+            $func_name,
+            {$($ret).+},
+            {$($args)*}
+        }
+    };
+    (
+        {$($ret:tt).+ [] $func_name:ident ($($args:tt)*)},
+        $macro:path
+        $(,$extra_args:tt)*
+    ) => {
+        $macro! {
+            $func_name,
+            {$($ret).+ []},
+            {$($args)*}
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! for_all_native_methods {
     (
+        {$($input:tt)*},
+        $macro:path
+        $(,$extra_args:tt)*
+    ) => {{
+        $crate::for_all_native_methods! {
+            {$($input)*},
+            {},
+            $macro
+            $(,$extra_args)*
+        }
+    }};
+    (
         {
-            $($(public)? static native $($ret:tt).+  $func_name:ident($($args:tt)*);)*
+            $(public)? static native $($ret:tt).+ $func_name:ident($($args:tt)*); $($rest:tt)*
+        },
+        {
+            $({$prev_func_name:ident, {$($prev_ret:tt)*}, {$($prev_args:tt)*}})*
+        },
+        $macro:path
+        $(,$extra_args:tt)*
+    ) => {
+        $crate::for_all_native_methods! {
+            {$($rest)*},
+            {
+                $({$prev_func_name, {$($prev_ret)*}, {$($prev_args)*}})*
+                {$func_name, {$($ret).+}, {$($args)*}}
+            },
+            $macro
+            $(,$extra_args)*
+        }
+    };
+    (
+        {
+            $(public)? static native $($ret:tt).+ [] $func_name:ident($($args:tt)*); $($rest:tt)*
+        },
+        {
+            $({$prev_func_name:ident, {$($prev_ret:tt)*}, {$($prev_args:tt)*}})*
+        },
+        $macro:path
+        $(,$extra_args:tt)*
+    ) => {
+        $crate::for_all_native_methods! {
+            {$($rest)*},
+            {
+                $({$prev_func_name, {$($prev_ret)*}, {$($prev_args)*}})*
+                {$func_name, {$($ret).+ []}, {$($args)*}}
+            },
+            $macro
+            $(,$extra_args)*
+        }
+    };
+    (
+        {},
+        {
+            $({$func_name:ident, {$($ret:tt)*}, {$($args:tt)*}})*
         },
         $macro:path
         $(,$extra_args:tt)*
     ) => {
         $macro! {
             {
-                $(
-                    { $func_name, {$($ret).+}, {$($args)*}}
-                ),*
+                $({$func_name, {$($ret)*}, {$($args)*}}),*
             }
             $(,$extra_args)*
         }
     };
-    ($macro:path $(,$args:tt)*) => {
+    ($macro:path $(,$args:tt)*) => {{
         $crate::for_all_plain_native_methods! {
             $crate::for_all_native_methods,
             $macro
             $(,$args)*
         }
-    };
+    }};
 }
 
 #[cfg(test)]
@@ -181,7 +301,7 @@ mod tests {
             gen_jni_sig!(void hummockIteratorClose(long pointer)),
             "(J)V"
         );
-        assert_eq!(gen_jni_sig!(byte.[] rowGetKey(long pointer)), "(J)[B");
+        assert_eq!(gen_jni_sig!(byte[] rowGetKey(long pointer)), "(J)[B");
         assert_eq!(
             gen_jni_sig!(java.sql.Timestamp rowGetTimestampValue(long pointer, int index)),
             "(JI)Ljava/sql/Timestamp;"
@@ -204,7 +324,7 @@ mod tests {
                     {
                         public static native int vnodeCount();
                         static native long hummockIteratorNew(byte[] readPlan);
-                        public static native byte.[] rowGetKey(long pointer);
+                        public static native byte[] rowGetKey(long pointer);
                     },
                     gen_array
                 }
@@ -214,14 +334,14 @@ mod tests {
                     gen_array
                 }
             }};
-            ({$({ $func_name:ident, {$($ret:tt).+}, {$($args:tt)*} }),*}) => {{
+            ({$({ $func_name:ident, {$($ret:tt)+}, {$($args:tt)*} }),*}) => {{
                 [
                     $(
-                        (stringify! {$func_name}, gen_jni_sig! { $($ret).+ ($($args)*)}),
+                        (stringify! {$func_name}, gen_jni_sig! { $($ret)+ ($($args)*)}),
                     )*
                 ]
-        }};
-}
+            }};
+        }
         let sig: [(_, _); 3] = gen_array!(test);
         assert_eq!(
             sig,
