@@ -16,6 +16,32 @@ use risingwave_common::types::{JsonbRef, JsonbVal};
 use risingwave_expr_macro::function;
 use serde_json::{json, Value};
 
+/// Concatenates the two jsonbs.
+///
+/// Examples:
+///
+/// ```slt
+/// # concat
+/// query T
+/// SELECT '[1,2]'::jsonb || '[3,4]'::jsonb;
+/// ----
+/// [1, 2, 3, 4]
+///
+/// query T
+/// SELECT '{"a": 1}'::jsonb || '{"b": 2}'::jsonb;
+/// ----
+/// {"a": 1, "b": 2}
+///
+/// query T
+/// SELECT '[1,2]'::jsonb || '{"a": 1}'::jsonb;
+/// ----
+/// [1, 2, {"a": 1}]
+///
+/// query T
+/// SELECT '1'::jsonb || '2'::jsonb;
+/// ----
+/// [1, 2]
+/// ```
 #[function("jsonb_cat(jsonb, jsonb) -> jsonb")]
 pub fn jsonb_cat(
     left: JsonbRef<'_>, 
@@ -51,51 +77,6 @@ pub fn jsonb_cat(
         // Both elements would be placed together in an array
         // Eg left:1 right: 2 -> [1,2]
         (left, right) => JsonbVal::from(json!([left, right])),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_jsonb_cat_objects() {
-        let v1 = json!({"a": 1});
-        let v2 = json!({"b": 2});
-        let left = JsonbRef::from(&v1);
-        let right = JsonbRef::from(&v2);
-        let result = jsonb_cat(left, right);
-        assert_eq!(result, JsonbVal::from(json!({"a": 1, "b": 2})));
-    }
-
-    #[test]
-    fn test_jsonb_cat_arrays() {
-        let v1 = json!([1, 2]);
-        let v2 = json!([3, 4]);
-        let left = JsonbRef::from(&v1);
-        let right = JsonbRef::from(&v2);
-        let result = jsonb_cat(left, right);
-        assert_eq!(result, JsonbVal::from(json!([1, 2, 3, 4])));
-    }
-
-    #[test]
-    fn test_jsonb_cat_array_and_single() {
-        let v1 = json!([1, 2]);
-        let v2 = json!({"a": 1});
-        let left = JsonbRef::from(&v1);
-        let right = JsonbRef::from(&v2);
-        let result = jsonb_cat(left, right);
-        assert_eq!(result, JsonbVal::from(json!([1, 2, {"a": 1}])));
-    }
-
-    #[test]
-    fn test_jsonb_cat_single_values() {
-        let v1 = json!(1);
-        let v2 = json!(2);
-        let left = JsonbRef::from(&v1);
-        let right = JsonbRef::from(&v2);
-        let result = jsonb_cat(left, right);
-        assert_eq!(result, JsonbVal::from(json!([1, 2])));
     }
 }
 

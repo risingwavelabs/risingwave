@@ -37,7 +37,7 @@
     select '1'::jsonb || '2'::jsonb;
   name: jsonb || jsonb -> jsonb
   expected_outputs:
-  - binder_error
+  - batch_plan
 - sql: |
     select '1'::jsonb || '2';
   name: jsonb || unknown (as jsonb) -> jsonb

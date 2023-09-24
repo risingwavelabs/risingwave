@@ -34,11 +34,7 @@
 - name: jsonb || jsonb -> jsonb
   sql: |
     select '1'::jsonb || '2'::jsonb;
-  binder_error: |-
-    Bind error: failed to bind expression: CAST('1' AS jsonb) || CAST('2' AS jsonb)
-
-    Caused by:
-      Bind error: operator not implemented yet: jsonb || jsonb
+  batch_plan: 'BatchValues { rows: [[''[1, 2]'':Jsonb]] }'
 - name: jsonb || unknown (as jsonb) -> jsonb
   sql: |
     select '1'::jsonb || '2';
