@@ -25,7 +25,7 @@ use risingwave_common::catalog::{
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_connector::source::cdc::{CDC_LATEST_OFFSET_MODE, CDC_SNAPSHOT_MODE_KEY};
+use risingwave_connector::source::cdc::{CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY};
 use risingwave_connector::source::external::ExternalTableType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
@@ -503,7 +503,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         columns.push(offset_column);
 
         // debezium connector will only consume changelogs from latest offset on this mode
-        properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_LATEST_OFFSET_MODE.into());
+        properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
 
         let pk_column_indices = {
             let mut id_to_idx = HashMap::new();
@@ -530,7 +530,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
             stream_key: pk_column_indices,
             append_only,
             retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
-            value_indices: (0..columns.len()).collect_vec(),
+            value_indices: (0..columns.len()).collect_vec(), /* FIXME: maybe we can remove `_rw_offset` from TableDesc */
             read_prefix_len_hint: 0,
             watermark_columns: Default::default(),
             versioned: false,
@@ -807,6 +807,8 @@ fn gen_create_table_plan_for_cdc_source(
         versioned: false,
         table_name: Some(external_table_name),
     };
+
+    tracing::debug!(target: "cdc_table", ?external_table_desc, "create table");
 
     // TODO: we'll parse the information on Meta to construct the fragment plan
     let scan_external: PlanRef = LogicalScan::create(

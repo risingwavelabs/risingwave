@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
+use maplit::hashmap;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_connector::source::external::{ExternalTableType, SchemaTableName};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{ChainNode, ChainType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -26,7 +29,7 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::external::ExternalStorageTable;
 use crate::executor::{
     BackfillExecutor, CdcBackfillExecutor, ChainExecutor, FlowControlExecutor,
-    RearrangedChainExecutor,
+    RearrangedChainExecutor, SourceStateTableHandler,
 };
 
 pub struct ChainExecutorBuilder;
@@ -41,7 +44,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         state_store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let [mview, snapshot]: [_; 2] = params.input.try_into().unwrap();
+        let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
         // For reporting the progress.
         let progress = stream
             .context
@@ -73,7 +76,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 let upstream_only = matches!(node.chain_type(), ChainType::UpstreamOnly);
                 ChainExecutor::new(
                     snapshot,
-                    mview,
+                    upstream,
                     progress,
                     schema,
                     params.pk_indices,
@@ -81,18 +84,61 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 )
                 .boxed()
             }
-            ChainType::Rearrange => {
-                RearrangedChainExecutor::new(snapshot, mview, progress, schema, params.pk_indices)
-                    .boxed()
-            }
+            ChainType::Rearrange => RearrangedChainExecutor::new(
+                snapshot,
+                upstream,
+                progress,
+                schema,
+                params.pk_indices,
+            )
+            .boxed(),
             ChainType::CdcBackfill => {
-                // todo!("CdcBackfill is not supported yet")
+                // TODO: pass the connector properties via barrier
+                let properties: HashMap<String, String> = hashmap!(
+                    "connector" => "mysql-cdc",
+                    "host" => "localhost",
+                    "port" => "8306",
+                    "username" => "root",
+                    "password" => "123456",
+                    "database.name" => "mydb",
+                    "table.name" => "products",
+                    "server.id" => "5085"
+                )
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
 
+                let table_desc: &StorageTableDesc = node.get_table_desc()?;
+                // last column may be `_rw_offset`
+                let schema = Schema::new(
+                    table_desc
+                        .columns
+                        .iter()
+                        .map(|col| Field::from(col))
+                        .collect_vec(),
+                );
+
+                let table_type = ExternalTableType::from_properties(&properties);
+                // TODO: use fixed properties for test, then pass the properties via barrier
                 let table_reader =
-                    table_type.create_table_reader(source.properties.clone(), schema.clone())?;
+                    table_type.create_table_reader(properties.clone(), schema.clone())?;
+
+                let order_types = table_desc
+                    .pk
+                    .iter()
+                    .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
+                    .collect_vec();
+
+                let pk_indices = table_desc
+                    .pk
+                    .iter()
+                    .map(|k| k.column_index as usize)
+                    .collect_vec();
+
+                let schema_table_name = SchemaTableName::from_properties(&properties);
                 let external_table = ExternalStorageTable::new(
-                    TableId::new(source.source_id),
-                    upstream_table_name,
+                    TableId::new(table_desc.table_id),
+                    schema_table_name,
                     table_reader,
                     schema.clone(),
                     order_types,
@@ -100,18 +146,24 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     (0..table_desc.columns.len()).collect_vec(),
                 );
 
-                let cdc_backfill = CdcBackfillExecutor::new(
+                let source_state_handler = SourceStateTableHandler::from_table_catalog(
+                    node.get_state_table().as_ref().unwrap(),
+                    state_store.clone(),
+                )
+                .await;
+                CdcBackfillExecutor::new(
                     params.actor_context.clone(),
                     external_table,
-                    Box::new(source_exec),
-                    (0..source.columns.len()).collect_vec(), /* eliminate the last column (_rw_offset) */
+                    upstream,
+                    (0..table_desc.columns.len()).collect_vec(), /* eliminate the last column (_rw_offset) */
                     None,
                     schema.clone(),
                     pk_indices,
                     params.executor_stats,
                     source_state_handler,
-                    source_ctrl_opts.chunk_size,
-                );
+                    true,
+                    params.env.config().developer.chunk_size,
+                ).boxed()
             }
             ChainType::Backfill => {
                 let table_desc: &StorageTableDesc = node.get_table_desc()?;
@@ -194,7 +246,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
 
                 BackfillExecutor::new(
                     upstream_table,
-                    mview,
+                    upstream,
                     state_table,
                     output_indices,
                     progress,

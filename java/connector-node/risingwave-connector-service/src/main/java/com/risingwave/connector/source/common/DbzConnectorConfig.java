@@ -130,12 +130,8 @@ public class DbzConnectorConfig {
                 mysqlProps.setProperty("snapshot.locking.mode", "none");
             }
 
-            // disable table filtering for the shared cdc stream
-            if (!userProps.containsKey(CDC_SHARING_MODE)) {
-                dbzProps.remove("table.include.list");
-            }
-
             dbzProps.putAll(mysqlProps);
+
         } else if (source == SourceTypeE.POSTGRES || source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
 
@@ -169,9 +165,19 @@ public class DbzConnectorConfig {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
+        if (userProps.containsKey(CDC_SHARING_MODE)) {
+            adjustConfigForSharedCdcStream(dbzProps);
+        }
+
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
+    }
+
+    private void adjustConfigForSharedCdcStream(Properties dbzProps) {
+        // disable table filtering for the shared cdc stream
+        LOG.info("Disable table filtering for the shared cdc stream");
+        dbzProps.remove("table.include.list");
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {

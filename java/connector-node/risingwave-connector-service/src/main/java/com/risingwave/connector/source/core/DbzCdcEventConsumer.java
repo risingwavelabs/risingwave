@@ -55,7 +55,7 @@ public class DbzCdcEventConsumer
         // only serialize the value part
         configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.VALUE.getName());
         // include record schema
-        configs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, false);
+        configs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, true);
         jsonConverter.configure(configs);
         this.converter = jsonConverter;
     }
@@ -103,7 +103,7 @@ public class DbzCdcEventConsumer
             // - PG: serverName.schemaName.tableName
             // - MySQL: serverName.databaseName.tableName
             // We can extract the full table name from the topic
-            var fullTableName = record.topic().substring(record.topic().indexOf('.'));
+            var fullTableName = record.topic().substring(record.topic().indexOf('.') + 1);
             var message =
                     CdcMessage.newBuilder()
                             .setOffset(offsetStr)
@@ -111,7 +111,8 @@ public class DbzCdcEventConsumer
                             .setPartition(String.valueOf(sourceId))
                             .setPayload(new String(payload, StandardCharsets.UTF_8))
                             .build();
-            LOG.info("record => {}", message.getPayload());
+            LOG.info("fullTableName => {}", fullTableName);
+            LOG.debug("record => {}", message.getPayload());
             builder.addEvents(message);
             committer.markProcessed(event);
         }

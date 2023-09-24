@@ -79,13 +79,13 @@ public class SourceValidateHandler {
         ensurePropNotNull(props, DbzConnectorConfig.HOST);
         ensurePropNotNull(props, DbzConnectorConfig.PORT);
         ensurePropNotNull(props, DbzConnectorConfig.DB_NAME);
-        ensurePropNotNull(props, DbzConnectorConfig.TABLE_NAME);
         ensurePropNotNull(props, DbzConnectorConfig.USER);
         ensurePropNotNull(props, DbzConnectorConfig.PASSWORD);
 
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
             case POSTGRES:
+                ensurePropNotNull(props, DbzConnectorConfig.TABLE_NAME);
                 ensurePropNotNull(props, DbzConnectorConfig.PG_SCHEMA_NAME);
                 ensurePropNotNull(props, DbzConnectorConfig.PG_SLOT_NAME);
                 ensurePropNotNull(props, DbzConnectorConfig.PG_PUB_NAME);
@@ -96,6 +96,7 @@ public class SourceValidateHandler {
                 break;
 
             case CITUS:
+                ensurePropNotNull(props, DbzConnectorConfig.TABLE_NAME);
                 ensurePropNotNull(props, DbzConnectorConfig.PG_SCHEMA_NAME);
                 try (var coordinatorValidator = new PostgresValidator(props, tableSchema)) {
                     coordinatorValidator.validateDistributedTable();

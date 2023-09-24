@@ -1087,7 +1087,7 @@ pub enum Statement {
 
         cdc_source_name: Option<ObjectName>,
 
-        external_table_name: Option<Ident>,
+        external_table_name: Option<String>,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1556,7 +1556,7 @@ impl fmt::Display for Statement {
                     write!(f, " FROM {}", source)?;
                 }
                 if let Some(table_name) = external_table_name {
-                    write!(f, " TABLE {}", table_name.real_value())?;
+                    write!(f, " TABLE {}", table_name)?;
                 }
                 Ok(())
             }

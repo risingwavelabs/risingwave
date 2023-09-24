@@ -81,12 +81,14 @@ impl ExternalTableType {
 
 #[derive(Debug, Clone)]
 pub struct SchemaTableName {
+    // namespace of the table, e.g. database in mysql, schema in postgres
     pub schema_name: String,
     pub table_name: String,
 }
 
 pub const TABLE_NAME_KEY: &str = "table.name";
 pub const SCHEMA_NAME_KEY: &str = "schema.name";
+pub const DATABASE_NAME_KEY: &str = "database.name";
 
 impl SchemaTableName {
     pub fn new(schema_name: String, table_name: String) -> Self {
@@ -97,15 +99,25 @@ impl SchemaTableName {
     }
 
     pub fn from_properties(properties: &HashMap<String, String>) -> Self {
+        let table_type = ExternalTableType::from_properties(properties);
         let table_name = properties
             .get(TABLE_NAME_KEY)
-            .map(|c| c.to_ascii_lowercase())
+            .map(|c| c.clone())
             .unwrap_or_default();
 
-        let schema_name = properties
-            .get(SCHEMA_NAME_KEY)
-            .map(|c| c.to_ascii_lowercase())
-            .unwrap_or_default();
+        let schema_name = match table_type {
+            ExternalTableType::MySql => properties
+                .get(DATABASE_NAME_KEY)
+                .map(|c| c.clone())
+                .unwrap_or_default(),
+            ExternalTableType::Postgres | ExternalTableType::Citus => properties
+                .get(SCHEMA_NAME_KEY)
+                .map(|c| c.clone())
+                .unwrap_or_default(),
+            _ => {
+                unreachable!("invalid external table type: {:?}", table_type);
+            }
+        };
 
         Self {
             schema_name,
@@ -245,7 +257,8 @@ pub struct ExternalTableConfig {
 
 impl ExternalTableReader for MySqlExternalTableReader {
     fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
-        format!("`{}`", table_name.table_name)
+        // schema name is the database name in mysql
+        format!("`{}`.`{}`", table_name.schema_name, table_name.table_name)
     }
 
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {

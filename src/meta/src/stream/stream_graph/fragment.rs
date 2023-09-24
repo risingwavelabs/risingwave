@@ -578,6 +578,8 @@ impl CompleteStreamFragmentGraph {
                                 .expect("table name column not found")
                         };
 
+                        tracing::debug!(target: "cdc_table", ?full_table_name, ?source_fragment_id, ?rw_table_name_index, ?output_columns, "chain with upstream source fragment");
+
                         let edge = StreamFragmentEdge {
                             id: EdgeId::UpstreamExternal {
                                 upstream_table_id,

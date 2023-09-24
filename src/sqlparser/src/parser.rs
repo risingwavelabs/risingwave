@@ -2508,7 +2508,7 @@ impl Parser {
         };
 
         let external_table = if self.parse_keyword(Keyword::TABLE) {
-            Some(self.parse_identifier()?)
+            Some(self.parse_literal_string()?)
         } else {
             None
         };

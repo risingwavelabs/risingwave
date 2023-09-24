@@ -195,7 +195,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         tracing::debug!("start cdc backfill: actor {:?}", self.actor_ctx.id);
 
-        self.source_state_handler.init_epoch(first_barrier.epoch);
+        // self.source_state_handler.init_epoch(first_barrier.epoch);
 
         // start from the beginning
         // TODO(siyuan): restore backfill offset from state store
@@ -208,13 +208,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             if let Some(split_id) = split_id.as_ref() {
                 let mut key = split_id.to_string();
                 key.push_str(BACKFILL_STATE_KEY_SUFFIX);
-                match self.source_state_handler.get(key.into()).await? {
-                    Some(row) => match row.datum_at(1) {
-                        Some(ScalarRefImpl::Jsonb(jsonb_ref)) => jsonb_ref.as_bool()?,
-                        _ => unreachable!("invalid backfill persistent state"),
-                    },
-                    None => false,
-                }
+                // match self.source_state_handler.get(key.into()).await? {
+                //     Some(row) => match row.datum_at(1) {
+                //         Some(ScalarRefImpl::Jsonb(jsonb_ref)) => jsonb_ref.as_bool()?,
+                //         _ => unreachable!("invalid backfill persistent state"),
+                //     },
+                //     None => false,
+                // }
+                false
             } else {
                 false
             }
@@ -356,11 +357,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     }
 
                                     // seal current epoch even though there is no data
-                                    Self::persist_state(
-                                        &mut self.source_state_handler,
-                                        barrier.epoch,
-                                    )
-                                    .await?;
+                                    // Self::persist_state(
+                                    //     &mut self.source_state_handler,
+                                    //     barrier.epoch,
+                                    // )
+                                    // .await?;
 
                                     yield Message::Barrier(barrier);
                                     // Break the for loop and start a new snapshot read stream.
@@ -426,14 +427,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         ));
                                     }
 
-                                    Self::write_backfill_state(
-                                        &mut self.source_state_handler,
-                                        upstream_table_id,
-                                        &split_id,
-                                        &mut cdc_split,
-                                        last_binlog_offset.clone(),
-                                    )
-                                    .await?;
+                                    // Self::write_backfill_state(
+                                    //     &mut self.source_state_handler,
+                                    //     upstream_table_id,
+                                    //     &split_id,
+                                    //     &mut cdc_split,
+                                    //     last_binlog_offset.clone(),
+                                    // )
+                                    // .await?;
                                     break 'backfill_loop;
                                 }
                                 Some(chunk) => {
@@ -461,14 +462,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 }
             }
         } else {
-            Self::write_backfill_state(
-                &mut self.source_state_handler,
-                upstream_table_id,
-                &split_id,
-                &mut cdc_split,
-                None,
-            )
-            .await?;
+            // Self::write_backfill_state(
+            //     &mut self.source_state_handler,
+            //     upstream_table_id,
+            //     &split_id,
+            //     &mut cdc_split,
+            //     None,
+            // )
+            // .await?;
         }
 
         tracing::debug!(
@@ -486,7 +487,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
                 // persist the backfill state if any
                 if let Message::Barrier(barrier) = &msg {
-                    Self::persist_state(&mut self.source_state_handler, barrier.epoch).await?;
+                    // Self::persist_state(&mut self.source_state_handler, barrier.epoch).await?;
                 }
                 yield msg;
             }
@@ -612,12 +613,17 @@ async fn parse_debezium_chunk(
 
     // TODO: preserve the transaction semantics
     for payload in payloads.rows() {
-        let ScalarRefImpl::Utf8(str) = payload.datum_at(0).expect("payload must exist") else {
-            unreachable!("payload must be utf8 string");
+        let ScalarRefImpl::Jsonb(jsonb_ref) = payload.datum_at(0).expect("payload must exist")
+        else {
+            unreachable!("payload must be jsonb");
         };
 
         parser
-            .parse_inner(None, Some(str.as_bytes().to_vec()), builder.row_writer())
+            .parse_inner(
+                None,
+                Some(jsonb_ref.to_string().as_bytes().to_vec()),
+                builder.row_writer(),
+            )
             .await
             .unwrap();
     }
@@ -683,10 +689,12 @@ impl<S: StateStore> Executor for CdcBackfillExecutor<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use futures::{pin_mut, StreamExt};
     use risingwave_common::array::{DataChunk, Op, StreamChunk, Vis};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, Datum};
+    use risingwave_common::types::{DataType, Datum, JsonbVal};
     use risingwave_common::util::iter_util::ZipEqFast;
 
     use crate::executor::backfill::cdc_backfill::transform_upstream;
@@ -696,16 +704,17 @@ mod tests {
     #[tokio::test]
     async fn test_transform_upstream_chunk() {
         let schema = Schema::new(vec![
-            Field::unnamed(DataType::Varchar), // debezium json payload
+            Field::unnamed(DataType::Jsonb),   // debezium json payload
             Field::unnamed(DataType::Varchar), // _rw_offset
             Field::unnamed(DataType::Varchar), // _rw_table_name
         ]);
         let pk_indices = vec![1];
         let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
-        let payload = r#"{"before": null,"after":{"O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" },"source":{"version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null},"op":"r","ts_ms":1695277757017,"transaction":null}"#.to_string();
+        // let payload = r#"{"before": null,"after":{"O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" },"source":{"version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null},"op":"r","ts_ms":1695277757017,"transaction":null}"#.to_string();
+        let payload = r#"{ "payload": { "before": null, "after": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null }, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#;
 
         let mut datums: Vec<Datum> = vec![
-            Some(payload.into()),
+            Some(JsonbVal::from_str(payload).unwrap().into()),
             Some("file: 1.binlog, pos: 100".to_string().into()),
             Some("mydb.orders".to_string().into()),
         ];

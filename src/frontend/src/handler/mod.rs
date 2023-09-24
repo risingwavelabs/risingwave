@@ -266,7 +266,7 @@ pub async fn handle(
                 append_only,
                 notice,
                 cdc_source_name,
-                external_table_name.map(|name| name.real_value()),
+                external_table_name,
             )
             .await
         }

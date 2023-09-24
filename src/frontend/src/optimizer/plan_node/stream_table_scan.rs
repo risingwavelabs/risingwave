@@ -43,21 +43,11 @@ pub struct StreamTableScan {
     logical: generic::Scan,
     batch_plan_id: PlanNodeId,
     chain_type: ChainType,
-    connector_properties: Option<HashMap<String, String>>,
 }
 
 impl StreamTableScan {
     pub fn new(logical: generic::Scan) -> Self {
         Self::new_with_chain_type(logical, ChainType::Backfill)
-    }
-
-    pub fn new_for_cdc_scan(
-        logical: generic::Scan,
-        connector_properties: HashMap<String, String>,
-    ) -> Self {
-        let mut plan = Self::new_with_chain_type(logical, ChainType::CdcBackfill);
-        plan.connector_properties = Some(connector_properties);
-        plan
     }
 
     pub fn new_with_chain_type(logical: generic::Scan, chain_type: ChainType) -> Self {
@@ -281,7 +271,6 @@ impl StreamTableScan {
                 PbStreamNode {
                     node_body: Some(PbNodeBody::Merge(MergeNode {
                         cdc_upstream,
-                        connector_properties: self.connector_properties.clone(),
                         ..Default::default()
                     })),
                     identity: "Upstream".into(),

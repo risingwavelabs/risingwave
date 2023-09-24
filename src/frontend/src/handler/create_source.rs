@@ -32,7 +32,8 @@ use risingwave_connector::parser::{
     ProtobufParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::cdc::{
-    CDC_SHARING_MODE_KEY, CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::external::TABLE_NAME_KEY;
@@ -1142,8 +1143,8 @@ pub async fn handle_create_source(
     .await?;
 
     if create_cdc_source_job {
-        // TODO: set connector to latest offset mode
-        // with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_LATEST_OFFSET_MODE.into());
+        // set connector to backfill mode
+        with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
         // ignore table name option, default to capture all tables
         with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
     }
