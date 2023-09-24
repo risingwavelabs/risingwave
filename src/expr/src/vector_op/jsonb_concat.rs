@@ -43,10 +43,7 @@ use serde_json::{json, Value};
 /// [1, 2]
 /// ```
 #[function("jsonb_cat(jsonb, jsonb) -> jsonb")]
-pub fn jsonb_cat(
-    left: JsonbRef<'_>, 
-    right: JsonbRef<'_>
-) -> JsonbVal {
+pub fn jsonb_cat(left: JsonbRef<'_>, right: JsonbRef<'_>) -> JsonbVal {
     let left_val = left.value().clone();
     let right_val = right.value().clone();
     match (left_val, right_val) {
@@ -79,4 +76,3 @@ pub fn jsonb_cat(
         (left, right) => JsonbVal::from(json!([left, right])),
     }
 }
-
