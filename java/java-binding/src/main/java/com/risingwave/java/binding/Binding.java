@@ -17,13 +17,8 @@ package com.risingwave.java.binding;
 import io.questdb.jar.jni.JarJniLoader;
 
 public class Binding {
-    private static final boolean IS_EMBEDDED_CONNECTOR =
-            Boolean.parseBoolean(System.getProperty("is_embedded_connector"));
-
     static {
-        if (!IS_EMBEDDED_CONNECTOR) {
-            JarJniLoader.loadLib(Binding.class, "/risingwave/jni", "risingwave_java_binding");
-        }
+        JarJniLoader.loadLib(Binding.class, "/risingwave/jni", "risingwave_java_binding");
     }
 
     public static native int vnodeCount();
@@ -89,6 +84,4 @@ public class Binding {
     static native void streamChunkIteratorClose(long pointer);
 
     static native long streamChunkIteratorFromPretty(String str);
-
-    public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
 }

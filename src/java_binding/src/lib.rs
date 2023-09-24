@@ -12,4 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(error_generic_member_access)]
+#![feature(lazy_cell)]
+#![feature(once_cell_try)]
+#![feature(type_alias_impl_trait)]
+
 pub use risingwave_jni_core::*;

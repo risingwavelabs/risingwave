@@ -55,7 +55,6 @@ hyper = "0.14"
 hyper-tls = "0.5"
 icelake = { workspace = true }
 itertools = "0.11"
-jni = { version = "0.21.1", features = ["invocation"] }
 jsonschema-transpiler = { git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 maplit = "1.0.2"
 moka = { version = "0.11", features = ["future"] }
@@ -90,7 +89,6 @@ rdkafka = { workspace = true, features = [
 ] }
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { workspace = true }
-risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 rust_decimal = "1"

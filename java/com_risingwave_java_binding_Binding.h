@@ -223,14 +223,6 @@ JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_streamChunkItera
 JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIteratorFromPretty
   (JNIEnv *, jclass, jstring);
 
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    sendCdcSourceMsgToChannel
- * Signature: (J[B)Z
- */
-JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToChannel
-  (JNIEnv *, jclass, jlong, jbyteArray);
-
 #ifdef __cplusplus
 }
 #endif
