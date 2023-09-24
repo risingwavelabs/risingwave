@@ -30,8 +30,6 @@ public class ArrayListBenchmark {
     @Param({"100", "1000", "10000"})
     static int loopTime;
 
-    ArrayList<ArrayList<Object>> data = new ArrayList<>();
-
     public ArrayList<Object> getRow(int index) {
         short v1 = (short) index;
         int v2 = (int) index;
@@ -61,17 +59,10 @@ public class ArrayListBenchmark {
         Integer mayNull = (Integer) rowData.get(6);
     }
 
-    @Setup
-    public void setup() {
-        for (int i = 0; i < loopTime; i++) {
-            data.add(getRow(i));
-        }
-    }
-
     @Benchmark
     public void arrayListTest() {
         for (int i = 0; i < loopTime; i++) {
-            getValue(data.get(i));
+            getValue(getRow(i));
         }
     }
 }
