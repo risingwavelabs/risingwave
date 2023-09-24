@@ -56,7 +56,7 @@ public class SourceValidateHandler {
         }
     }
 
-    public static ConnectorServiceProto.ValidateSourceResponse validateResponse(String message) {
+    private ConnectorServiceProto.ValidateSourceResponse validateResponse(String message) {
         return ConnectorServiceProto.ValidateSourceResponse.newBuilder()
                 .setError(
                         ConnectorServiceProto.ValidationError.newBuilder()
@@ -65,14 +65,14 @@ public class SourceValidateHandler {
                 .build();
     }
 
-    public static void ensurePropNotNull(Map<String, String> props, String name) {
+    private void ensurePropNotNull(Map<String, String> props, String name) {
         if (!props.containsKey(name)) {
             throw ValidatorUtils.invalidArgument(
                     String.format("'%s' not found, please check the WITH properties", name));
         }
     }
 
-    public static void validateSource(ConnectorServiceProto.ValidateSourceRequest request)
+    private void validateSource(ConnectorServiceProto.ValidateSourceRequest request)
             throws Exception {
         var props = request.getPropertiesMap();
 
