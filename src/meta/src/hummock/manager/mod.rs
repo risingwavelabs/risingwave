@@ -1161,7 +1161,7 @@ impl HummockManager {
     pub async fn report_compact_task_impl(
         &self,
         task_id: u64,
-        compact_task: Option<CompactTask>,
+        trivial_move_compact_task: Option<CompactTask>,
         task_status: TaskStatus,
         sorted_output_ssts: Vec<SstableInfo>,
         compaction_guard: &mut RwLockWriteGuard<'_, Compaction>,
@@ -1176,7 +1176,7 @@ impl HummockManager {
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
 
         // remove task_assignment
-        let mut compact_task = if let Some(input_task) = compact_task {
+        let mut compact_task = if let Some(input_task) = trivial_move_compact_task {
             input_task
         } else {
             match compact_task_assignment.remove(task_id) {
@@ -1315,8 +1315,6 @@ impl HummockManager {
         let label = if is_trivial_reclaim {
             "trivial-space-reclaim"
         } else if is_trivial_move {
-            // TODO: only support can_trivial_move in DynamicLevelCompcation, will check
-            // task_type next PR
             "trivial-move"
         } else {
             self.compactor_manager
@@ -1971,6 +1969,9 @@ impl HummockManager {
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
         let mut guard = write_lock!(self, compaction).await;
+
+        // In the test, the contents of the compact task may have been modified directly, while the contents of compact_task_assignment were not modified.
+        // So we pass the modified compact_task directly into the `report_compact_task_impl`
         self.report_compact_task_impl(
             task_id,
             compact_task,
