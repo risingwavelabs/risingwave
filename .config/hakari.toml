@@ -15,14 +15,16 @@ resolver = "2"
 # Add triples corresponding to platforms commonly used by developers here.
 # https://doc.rust-lang.org/rustc/platform-support.html
 platforms = [
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
-    "x86_64-apple-darwin",
-    "aarch64-apple-darwin",
+    # "x86_64-unknown-linux-gnu",
+    # "aarch64-unknown-linux-gnu",
+    # "x86_64-apple-darwin",
+    # "aarch64-apple-darwin",
 ]
 
 # Write out exact versions rather than a semver range. (Defaults to false.)
 # exact-versions = true
+
+unify-target-host = "unify-if-both"
 
 [traversal-excludes]
 workspace-members = [

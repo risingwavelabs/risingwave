@@ -385,7 +385,7 @@ alias = "build-risingwave"
 private = true
 category = "RiseDev - Build"
 description = "Extract dashboard artifact"
-condition = { env_not_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
+condition = { env_not_set = ["ENABLE_BUILD_DASHBOARD"] }
 script = '''
 #!/usr/bin/env bash
 
@@ -398,11 +398,19 @@ git worktree prune
 git worktree add "${PREFIX_UI}" origin/dashboard-artifact
 '''
 
-[tasks.export-dashboard-v2]
+[tasks.export-dashboard]
 private = true
 category = "RiseDev - Build"
-description = "Build dashboard v2"
-condition = { env_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
+description = "Build dashboard"
+condition = { env_set = [
+  "ENABLE_BUILD_DASHBOARD",
+], files_modified = { input = [
+  "./dashboard/**/*.js",
+  "./dashboard/package.json",
+  "./dashboard/next.config.js",
+], output = [
+  "./dashboard/out/**/*.html",
+] } }
 script = """
 #!/usr/bin/env bash
 set -e
@@ -544,7 +552,7 @@ dependencies = [
   "build-connector-node",
   "post-build-risingwave",
   "extract-dashboard-artifact",
-  "export-dashboard-v2",
+  "export-dashboard",
   "prepare-config",
 ]
 
@@ -1305,7 +1313,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.15.3", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.17.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
 command = "sqllogictest"

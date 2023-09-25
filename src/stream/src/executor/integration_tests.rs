@@ -111,6 +111,7 @@ async fn test_merger_sum_aggr() {
             0,
         ))],
         0,
+        0,
         ctx,
         metrics,
     );
@@ -186,7 +187,6 @@ async fn test_merger_sum_aggr() {
             let chunk = StreamChunk::new(
                 vec![op; i],
                 vec![I64Array::from_iter(vec![1; i]).into_ref()],
-                None,
             );
             input.send(Message::Chunk(chunk)).await.unwrap();
         }

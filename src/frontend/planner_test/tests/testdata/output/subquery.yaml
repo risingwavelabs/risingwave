@@ -582,29 +582,29 @@
     create table t(x int[], y int[], k int primary key);
     select *, (select sum(i) from (select unnest(x) i, 1 c) Q where k = c ) as sum_x from t;
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.y, t.k, sum(Unnest($0))] }
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, first_value(t.x order_by(t.x ASC))) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.y, t.k, sum(Unnest($0))] }
     ├─LogicalScan { table: t, columns: [t.x, t.y, t.k] }
-    └─LogicalAgg { group_key: [t.x, t.k], aggs: [sum(Unnest($0))] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.k, Unnest($0)] }
-        ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+    └─LogicalAgg { group_key: [first_value(t.x order_by(t.x ASC)), t.k], aggs: [sum(Unnest($0))] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(first_value(t.x order_by(t.x ASC)), first_value(t.x order_by(t.x ASC))) AND IsNotDistinctFrom(t.k, t.k), output: [first_value(t.x order_by(t.x ASC)), t.k, Unnest($0)] }
+        ├─LogicalAgg { group_key: [t.k], aggs: [first_value(t.x order_by(t.x ASC))] }
         │ └─LogicalScan { table: t, columns: [t.x, t.k] }
-        └─LogicalProject { exprs: [t.x, t.k, Unnest($0)] }
+        └─LogicalProject { exprs: [first_value(t.x order_by(t.x ASC)), t.k, Unnest($0)] }
           └─LogicalProjectSet { select_list: [$0, $1, Unnest($0)] }
-            └─LogicalJoin { type: Inner, on: true, output: all }
-              ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+            └─LogicalJoin { type: Inner, on: true, output: [first_value(t.x order_by(t.x ASC)), t.k] }
+              ├─LogicalAgg { group_key: [t.k], aggs: [first_value(t.x order_by(t.x ASC))] }
               │ └─LogicalScan { table: t, columns: [t.x, t.k], predicate: (t.k = 1:Int32) }
               └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan_for_stream: |-
-    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.y, t.k, sum(Unnest($0))] }
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, first_value(t.x order_by(t.x ASC))) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.y, t.k, sum(Unnest($0))] }
     ├─LogicalScan { table: t, columns: [t.x, t.y, t.k] }
-    └─LogicalAgg { group_key: [t.x, t.k], aggs: [sum(Unnest($0))] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.k, Unnest($0)] }
-        ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+    └─LogicalAgg { group_key: [first_value(t.x order_by(t.x ASC)), t.k], aggs: [sum(Unnest($0))] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(first_value(t.x order_by(t.x ASC)), first_value(t.x order_by(t.x ASC))) AND IsNotDistinctFrom(t.k, t.k), output: [first_value(t.x order_by(t.x ASC)), t.k, Unnest($0)] }
+        ├─LogicalAgg { group_key: [t.k], aggs: [first_value(t.x order_by(t.x ASC))] }
         │ └─LogicalScan { table: t, columns: [t.x, t.k] }
-        └─LogicalProject { exprs: [t.x, t.k, Unnest($0)] }
+        └─LogicalProject { exprs: [first_value(t.x order_by(t.x ASC)), t.k, Unnest($0)] }
           └─LogicalProjectSet { select_list: [$0, $1, Unnest($0)] }
-            └─LogicalJoin { type: Inner, on: true, output: all }
-              ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+            └─LogicalJoin { type: Inner, on: true, output: [first_value(t.x order_by(t.x ASC)), t.k] }
+              ├─LogicalAgg { group_key: [t.k], aggs: [first_value(t.x order_by(t.x ASC))] }
               │ └─LogicalScan { table: t, columns: [t.x, t.k], predicate: (t.k = 1:Int32) }
               └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: CorrelatedInputRef in ProjectSet and apply on condition refers to table function.
