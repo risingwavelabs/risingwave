@@ -41,7 +41,6 @@ impl CompactionTaskValidator {
             ValidationRuleType::Tier,
             Box::new(TierCompactionTaskValidationRule {
                 config: config.clone(),
-                enable: true,
             }),
         );
 
@@ -49,16 +48,12 @@ impl CompactionTaskValidator {
             ValidationRuleType::Intra,
             Box::new(IntraCompactionTaskValidationRule {
                 config: config.clone(),
-                enable: true,
             }),
         );
 
         validation_rules.insert(
             ValidationRuleType::ToBase,
-            Box::new(BaseCompactionTaskValidationRule {
-                config,
-                enable: true,
-            }),
+            Box::new(BaseCompactionTaskValidationRule { config }),
         );
 
         CompactionTaskValidator { validation_rules }
@@ -83,12 +78,19 @@ pub trait CompactionTaskValidationRule {
 
 struct TierCompactionTaskValidationRule {
     config: Arc<CompactionConfig>,
-    enable: bool,
 }
 
 impl CompactionTaskValidationRule for TierCompactionTaskValidationRule {
     fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
-        if !self.enable {
+        // Limit sstable file count to avoid using too much memory.
+        let overlapping_max_compact_file_numer = std::cmp::min(
+            self.config.level0_max_compact_file_number,
+            MAX_COMPACT_LEVEL_COUNT as u64,
+        );
+
+        if input.total_file_count >= overlapping_max_compact_file_numer
+            || input.input_levels.len() >= MAX_COMPACT_LEVEL_COUNT
+        {
             return true;
         }
 
@@ -99,25 +101,13 @@ impl CompactionTaskValidationRule for TierCompactionTaskValidationRule {
                 * self.config.level0_overlapping_sub_level_compact_level_count as u64,
         );
 
-        // Limit sstable file count to avoid using too much memory.
-        let overlapping_max_compact_file_numer = std::cmp::min(
-            self.config.level0_max_compact_file_number,
-            MAX_COMPACT_LEVEL_COUNT as u64,
-        );
-
-        let waiting_enough_files = {
-            if input.select_input_size > max_compaction_bytes {
-                false
-            } else {
-                input.total_file_count <= overlapping_max_compact_file_numer
-            }
-        };
-
         // If waiting_enough_files is not satisfied, we will raise the priority of the number of
         // levels to ensure that we can merge as many sub_levels as possible
         let tier_sub_level_compact_level_count =
             self.config.level0_overlapping_sub_level_compact_level_count as usize;
-        if input.input_levels.len() < tier_sub_level_compact_level_count && waiting_enough_files {
+        if input.input_levels.len() < tier_sub_level_compact_level_count
+            && input.select_input_size < max_compaction_bytes
+        {
             stats.skip_by_count_limit += 1;
             return false;
         }
@@ -128,12 +118,13 @@ impl CompactionTaskValidationRule for TierCompactionTaskValidationRule {
 
 struct IntraCompactionTaskValidationRule {
     config: Arc<CompactionConfig>,
-    enable: bool,
 }
 
 impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
     fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
-        if !self.enable {
+        if input.total_file_count >= self.config.level0_max_compact_file_number
+            || input.input_levels.len() >= MAX_COMPACT_LEVEL_COUNT
+        {
             return true;
         }
 
@@ -182,12 +173,13 @@ impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
 
 struct BaseCompactionTaskValidationRule {
     config: Arc<CompactionConfig>,
-    enable: bool,
 }
 
 impl CompactionTaskValidationRule for BaseCompactionTaskValidationRule {
     fn validate(&self, input: &CompactionInput, stats: &mut LocalPickerStatistic) -> bool {
-        if !self.enable {
+        if input.total_file_count >= self.config.level0_max_compact_file_number
+            || input.input_levels.len() >= MAX_COMPACT_LEVEL_COUNT
+        {
             return true;
         }
 
