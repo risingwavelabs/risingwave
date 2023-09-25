@@ -51,7 +51,7 @@ impl Expression for UdfExpression {
         let vis = input.visibility();
         let mut columns = Vec::with_capacity(self.children.len());
         for child in &self.children {
-            let array = child.eval_checked(input).await?;
+            let array = child.eval(input).await?;
             columns.push(array.as_ref().try_into()?);
         }
         self.eval_inner(columns, vis).await

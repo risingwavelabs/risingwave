@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 use tracing::error;
 
-use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::CompactorContext;
 use crate::hummock::compactor::{CompactOutput, Compactor};
@@ -59,6 +59,7 @@ pub async fn compact(
     sstable_object_id_manager: SstableObjectIdManagerRef,
     payload: UploadTaskPayload,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
+    filter_key_extractor_manager: FilterKeyExtractorManager,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
     for imm in payload {
@@ -86,6 +87,7 @@ pub async fn compact(
             compact_shared_buffer(
                 context.clone(),
                 sstable_object_id_manager.clone(),
+                filter_key_extractor_manager.clone(),
                 group_payload,
             )
             .map_ok(move |results| {
@@ -112,6 +114,7 @@ pub async fn compact(
 async fn compact_shared_buffer(
     context: CompactorContext,
     sstable_object_id_manager: SstableObjectIdManagerRef,
+    filter_key_extractor_manager: FilterKeyExtractorManager,
     mut payload: UploadTaskPayload,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     // Local memory compaction looks at all key ranges.
@@ -124,8 +127,7 @@ async fn compact_shared_buffer(
 
     assert!(!existing_table_ids.is_empty());
 
-    let multi_filter_key_extractor = context
-        .filter_key_extractor_manager
+    let multi_filter_key_extractor = filter_key_extractor_manager
         .acquire(existing_table_ids.clone())
         .await?;
     if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
