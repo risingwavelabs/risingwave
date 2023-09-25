@@ -106,6 +106,8 @@ pub struct LocalStreamManager {
 }
 
 /// Report expression evaluation errors to the actor context.
+///
+/// The struct can be cheaply cloned.
 #[derive(Clone)]
 pub struct ActorEvalErrorReport {
     pub actor_context: ActorContextRef,

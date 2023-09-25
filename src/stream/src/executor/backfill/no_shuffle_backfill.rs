@@ -104,12 +104,13 @@ where
         pk_indices: PkIndices,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
+        executor_id: u64,
     ) -> Self {
         Self {
             info: ExecutorInfo {
                 schema,
                 pk_indices,
-                identity: "BackfillExecutor".to_owned(),
+                identity: format!("BackfillExecutor {:X}", executor_id),
             },
             upstream_table,
             upstream,
