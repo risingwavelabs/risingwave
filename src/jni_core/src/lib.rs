@@ -29,6 +29,7 @@ use std::ops::{Deref, DerefMut};
 use std::slice::from_raw_parts;
 use std::sync::{Arc, LazyLock, OnceLock};
 
+use cfg_or_panic::cfg_or_panic;
 use hummock_iterator::{HummockJavaBindingIterator, KeyedRow};
 use jni::objects::{
     AutoElements, GlobalRef, JByteArray, JClass, JMethodID, JObject, JStaticMethodID, JString,
@@ -298,44 +299,30 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(
     VirtualNode::COUNT as jint
 }
 
+#[cfg_or_panic(not(madsim))]
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNew<'a>(
     env: EnvParam<'a>,
     read_plan: JByteArray<'a>,
 ) -> Pointer<'static, HummockJavaBindingIterator> {
     execute_and_catch(env, move |env| {
-        #[cfg(madsim)]
-        {
-            unreachable!()
-        }
-
-        #[cfg(not(madsim))]
-        {
-            let read_plan = Message::decode(to_guarded_slice(&read_plan, env)?.deref())?;
-            let iter = RUNTIME.block_on(HummockJavaBindingIterator::new(read_plan))?;
-            Ok(iter.into())
-        }
+        let read_plan = Message::decode(to_guarded_slice(&read_plan, env)?.deref())?;
+        let iter = RUNTIME.block_on(HummockJavaBindingIterator::new(read_plan))?;
+        Ok(iter.into())
     })
 }
 
+#[cfg_or_panic(not(madsim))]
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNext<'a>(
     env: EnvParam<'a>,
     mut pointer: Pointer<'a, HummockJavaBindingIterator>,
 ) -> Pointer<'static, JavaBindingRow> {
     execute_and_catch(env, move |_env| {
-        #[cfg(madsim)]
-        {
-            unreachable!()
-        }
-
-        #[cfg(not(madsim))]
-        {
-            let iter = pointer.as_mut();
-            match RUNTIME.block_on(iter.next())? {
-                None => Ok(Pointer::null()),
-                Some(row) => Ok(JavaBindingRow::with_keyed(row, iter.class_cache.clone()).into()),
-            }
+        let iter = pointer.as_mut();
+        match RUNTIME.block_on(iter.next())? {
+            None => Ok(Pointer::null()),
+            Some(row) => Ok(JavaBindingRow::with_keyed(row, iter.class_cache.clone()).into()),
         }
     })
 }
