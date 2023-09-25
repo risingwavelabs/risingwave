@@ -76,7 +76,7 @@ pub trait StreamPlanNode: GenericPlanNode {
             id: ctx.next_plan_node_id(),
             ctx,
             schema: self.schema(),
-            logical_pk: self.stream_key().unwrap_or_default(),
+            stream_key: self.stream_key().unwrap_or_default(),
             dist: self.distribution(),
             append_only: self.append_only(),
             emit_on_window_close: self.emit_on_window_close(),
@@ -96,7 +96,7 @@ impl generic::GenericPlanRef for PlanRef {
     }
 
     fn stream_key(&self) -> &[usize] {
-        &self.0.logical_pk
+        &self.0.stream_key
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -114,7 +114,7 @@ impl generic::GenericPlanRef for PlanBase {
     }
 
     fn stream_key(&self) -> &[usize] {
-        &self.logical_pk
+        &self.stream_key
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -410,7 +410,7 @@ pub struct PlanBase {
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
-    pub logical_pk: Vec<usize>,
+    pub stream_key: Vec<usize>,
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
     pub dist: Distribution,

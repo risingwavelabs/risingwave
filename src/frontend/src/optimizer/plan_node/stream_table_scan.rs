@@ -202,7 +202,7 @@ impl Distill for StreamTableScan {
 
         if verbose {
             let pk = IndicesDisplay {
-                indices: self.logical_pk(),
+                indices: self.stream_key(),
                 schema: &self.base.schema,
             };
             vec.push(("pk", pk.distill()));

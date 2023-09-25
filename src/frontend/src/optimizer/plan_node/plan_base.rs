@@ -35,7 +35,7 @@ pub struct PlanBase {
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
-    /// the pk indices of the PlanNode's output, a empty logical_pk vec means there is no pk
+    /// the pk indices of the PlanNode's output, a empty stream key vec means there is no stream key
     pub stream_key: Vec<usize>,
     /// The order property of the PlanNode's output, store an `&Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
@@ -94,7 +94,7 @@ impl PlanBase {
     pub fn new_logical(
         ctx: OptimizerContextRef,
         schema: Schema,
-        logical_pk: Vec<usize>,
+        stream_key: Vec<usize>,
         functional_dependency: FunctionalDependencySet,
     ) -> Self {
         let id = ctx.next_plan_node_id();
@@ -103,7 +103,7 @@ impl PlanBase {
             id,
             ctx,
             schema,
-            stream_key: logical_pk,
+            stream_key,
             dist: Distribution::Single,
             order: Order::any(),
             // Logical plan node won't touch `append_only` field
@@ -145,7 +145,7 @@ impl PlanBase {
     pub fn new_stream(
         ctx: OptimizerContextRef,
         schema: Schema,
-        logical_pk: Vec<usize>,
+        stream_key: Vec<usize>,
         functional_dependency: FunctionalDependencySet,
         dist: Distribution,
         append_only: bool,
@@ -160,7 +160,7 @@ impl PlanBase {
             schema,
             dist,
             order: Order::any(),
-            stream_key: logical_pk,
+            stream_key,
             append_only,
             emit_on_window_close,
             functional_dependency,
@@ -233,7 +233,7 @@ macro_rules! impl_base_delegate {
                 pub fn schema(&self) -> &Schema {
                     &self.plan_base().schema
                 }
-                pub fn logical_pk(&self) -> &[usize] {
+                pub fn stream_key(&self) -> &[usize] {
                     &self.plan_base().stream_key
                 }
                 pub fn order(&self) -> &Order {

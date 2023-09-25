@@ -514,7 +514,7 @@ impl dyn PlanNode {
         &self.plan_base().schema
     }
 
-    pub fn logical_pk(&self) -> &[usize] {
+    pub fn stream_key(&self) -> &[usize] {
         &self.plan_base().stream_key
     }
 
@@ -566,7 +566,7 @@ impl dyn PlanNode {
             identity: self.explain_myself_to_string(),
             node_body: node,
             operator_id: self.id().0 as _,
-            stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
+            stream_key: self.stream_key().iter().map(|x| *x as u32).collect(),
             fields: self.schema().to_prost(),
             append_only: self.append_only(),
         }
