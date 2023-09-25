@@ -16,9 +16,10 @@ with cte1 as (Select i as j from a) select * from cte1;
 ----
 42
 
-# FIXME: this should succeed
-query error failed to bind expression: x
+query I
 with cte1 as (Select i as j from a) select x from cte1 t1(x);
+----
+42
 
 query I
 with cte1(xxx) as (Select i as j from a) select xxx from cte1;
