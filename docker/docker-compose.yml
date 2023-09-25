@@ -12,7 +12,7 @@ services:
       - "--prometheus-listener-addr"
       - "0.0.0.0:1260"
       - "--metrics-level"
-      - "info"
+      - "2"
       - "--meta-address"
       - "http://meta-node-0:5690"
       - "--config-path"
@@ -49,7 +49,7 @@ services:
       - "--prometheus-listener-addr"
       - "0.0.0.0:1222"
       - "--metrics-level"
-      - "info"
+      - "2"
       - "--meta-address"
       - "http://meta-node-0:5690"
       - "--connector-rpc-endpoint"
@@ -140,7 +140,7 @@ services:
       - "--prometheus-listener-addr"
       - "0.0.0.0:2222"
       - "--metrics-level"
-      - "info"
+      - "2"
     expose:
       - "4566"
     ports:
