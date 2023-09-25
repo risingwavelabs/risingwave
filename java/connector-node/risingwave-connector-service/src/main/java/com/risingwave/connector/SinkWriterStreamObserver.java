@@ -183,7 +183,7 @@ public class SinkWriterStreamObserver
 
     @Override
     public void onCompleted() {
-        LOG.debug("sink task completed");
+        LOG.info("sink task completed");
         cleanup();
         responseObserver.onCompleted();
     }

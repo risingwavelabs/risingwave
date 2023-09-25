@@ -337,11 +337,7 @@ impl<SM> RemoteSinkWriterInner<SM> {
         };
 
         std::thread::spawn(move || {
-            let mut env = JVM
-                .as_ref()
-                .unwrap()
-                .attach_current_thread_as_daemon()
-                .unwrap();
+            let mut env = JVM.as_ref().unwrap().attach_current_thread().unwrap();
 
             let result = env.call_static_method(
                 "com/risingwave/connector/JniSinkWriterHandler",
@@ -360,7 +356,7 @@ impl<SM> RemoteSinkWriterInner<SM> {
                 Err(e) => {
                     tracing::error!("jni call error: {:?}", e);
                 }
-            }
+            };
         });
 
         let sink_writer_stream_request = SinkWriterStreamRequest {
