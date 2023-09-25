@@ -246,6 +246,7 @@ macro_rules! impl_default_from_other_params {
 
 macro_rules! impl_set_system_param {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+        /// Set a system parameter with the given value or default one, returns the new value.
         pub fn set_system_param(params: &mut PbSystemParams, key: &str, value: Option<String>) -> Result<String> {
              match key {
                 $(

@@ -25,9 +25,9 @@ use sea_orm::sea_query::{
     WithClause,
 };
 use sea_orm::{
-    ActiveModelBehavior, ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait,
-    DatabaseConnection, DatabaseTransaction, EntityTrait, Iden, JoinType, ModelTrait, Order,
-    QueryFilter, Statement, TransactionTrait,
+    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseConnection,
+    DatabaseTransaction, EntityTrait, Iden, JoinType, ModelTrait, Order, QueryFilter, Statement,
+    TransactionTrait,
 };
 use tokio::sync::RwLock;
 
@@ -94,9 +94,13 @@ impl CatalogController {
         obj_type: ObjectType,
         owner_id: UserId,
     ) -> MetaResult<object::Model> {
-        let mut active_db = object::ActiveModel::new();
-        active_db.obj_type = ActiveValue::Set(obj_type);
-        active_db.owner_id = ActiveValue::Set(owner_id as _);
+        let active_db = object::ActiveModel {
+            oid: Default::default(),
+            obj_type: ActiveValue::Set(obj_type),
+            owner_id: ActiveValue::Set(owner_id as _),
+            initialized_at: Default::default(),
+            created_at: Default::default(),
+        };
         Ok(active_db.insert(txn).await?)
     }
 
@@ -112,13 +116,13 @@ impl CatalogController {
 
         let mut schemas = vec![];
         for schema_name in iter::once(DEFAULT_SCHEMA_NAME).chain(SYSTEM_SCHEMAS) {
-            let mut schema = schema::ActiveModel::new();
             let schema_obj = Self::create_object(&txn, ObjectType::Schema, owner_id).await?;
-            schema.schema_id = ActiveValue::Set(schema_obj.oid);
-            schema.database_id = ActiveValue::Set(db.database_id);
-            schema.name = ActiveValue::Set(schema_name.into());
+            let schema = schema::ActiveModel {
+                schema_id: ActiveValue::Set(schema_obj.oid),
+                name: ActiveValue::Set(schema_name.into()),
+                database_id: ActiveValue::Set(db.database_id),
+            };
             let schema = schema.insert(&txn).await?;
-
             schemas.push(ObjectModel(schema, schema_obj).into());
         }
         txn.commit().await?;
