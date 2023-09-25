@@ -68,8 +68,12 @@ impl StreamOverWindow {
                 tbl_builder.add_order_column(o.column_index, o.order_type);
             }
         }
-        for &idx in self.logical.input.stream_key().unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
-            self.logical.input.explain_to_string())) {
+        for &idx in self.logical.input.stream_key().unwrap_or_else(|| {
+            panic!(
+                "should always have a stream key in the stream plan but not, sub plan: {}",
+                self.logical.input.explain_to_string()
+            )
+        }) {
             if order_cols.insert(idx) {
                 tbl_builder.add_order_column(idx, OrderType::ascending());
             }

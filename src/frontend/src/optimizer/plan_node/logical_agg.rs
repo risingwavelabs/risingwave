@@ -221,22 +221,21 @@ impl LogicalAgg {
         // The only remaining strategy is Vnode-based 2-phase agg.
         // We shall first distribute it by PK,
         // so it obeys consistent hash strategy via [`Distribution::HashShard`].
-        let stream_input = if *input_dist == Distribution::SomeShard
-            && self.core.must_try_two_phase_agg()
-        {
-            RequiredDist::shard_by_key(
-                stream_input.schema().len(),
-                stream_input.stream_key().unwrap_or_else(|| {
-                    panic!(
+        let stream_input =
+            if *input_dist == Distribution::SomeShard && self.core.must_try_two_phase_agg() {
+                RequiredDist::shard_by_key(
+                    stream_input.schema().len(),
+                    stream_input.stream_key().unwrap_or_else(|| {
+                        panic!(
                         "should always have a stream key in the stream plan but not, sub plan: {}",
                         stream_input.explain_to_string()
                     )
-                }),
-            )
-            .enforce_if_not_satisfies(stream_input, &Order::any())?
-        } else {
-            stream_input
-        };
+                    }),
+                )
+                .enforce_if_not_satisfies(stream_input, &Order::any())?
+            } else {
+                stream_input
+            };
         let input_dist = stream_input.distribution();
 
         // Vnode-based 2-phase agg
