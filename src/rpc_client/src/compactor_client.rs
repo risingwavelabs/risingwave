@@ -37,7 +37,7 @@ const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
 
 const DEFAULT_RETRY_INTERVAL: u64 = 20;
 const DEFAULT_RETRY_MAX_DELAY: Duration = Duration::from_secs(5);
-const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 10;
+const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 3;
 #[derive(Clone)]
 pub struct CompactorClient {
     pub monitor_client: MonitorServiceClient<Channel>,
@@ -99,7 +99,7 @@ impl GrpcCompactorProxyClient {
     }
 
     async fn recreate_core(&self) {
-        tracing::info!("rpc sending failed, try to reconnect");
+        tracing::info!("GrpcCompactorProxyClient rpc transfer failed, try to reconnect");
         let channel = self.connect_to_endpoint().await;
         let mut core = self.core.write().await;
         *core = GrpcCompactorProxyClientCore::new(channel);
@@ -121,12 +121,11 @@ impl GrpcCompactorProxyClient {
         &self,
         request: GetNewSstIdsRequest,
     ) -> std::result::Result<tonic::Response<GetNewSstIdsResponse>, tonic::Status> {
-        // let mut hummock_client = self.core.read().await.hummock_client.clone();
         tokio_retry::RetryIf::spawn(
             Self::get_retry_strategy(),
             || async {
                 let mut hummock_client = self.core.read().await.hummock_client.clone();
-                let rpc_res = hummock_client.get_new_sst_ids(request).await;
+                let rpc_res = hummock_client.get_new_sst_ids(request.clone()).await;
                 if rpc_res.is_err() {
                     self.recreate_core().await;
                 }
@@ -141,49 +140,77 @@ impl GrpcCompactorProxyClient {
         &self,
         request: ReportCompactionTaskRequest,
     ) -> std::result::Result<tonic::Response<ReportCompactionTaskResponse>, tonic::Status> {
-        let mut hummock_client = self.core.read().await.hummock_client.clone();
-        let rpc_res = hummock_client.report_compaction_task(request).await;
-        if rpc_res.is_err() {
-            self.recreate_core().await;
-        }
-        rpc_res
+        tokio_retry::RetryIf::spawn(
+            Self::get_retry_strategy(),
+            || async {
+                let mut hummock_client = self.core.read().await.hummock_client.clone();
+                let rpc_res = hummock_client.report_compaction_task(request.clone()).await;
+                if rpc_res.is_err() {
+                    self.recreate_core().await;
+                }
+                rpc_res
+            },
+            Self::should_retry,
+        )
+        .await
     }
 
     pub async fn report_full_scan_task(
         &self,
         request: ReportFullScanTaskRequest,
     ) -> std::result::Result<tonic::Response<ReportFullScanTaskResponse>, tonic::Status> {
-        let mut hummock_client = self.core.read().await.hummock_client.clone();
-        let rpc_res = hummock_client.report_full_scan_task(request).await;
-        if rpc_res.is_err() {
-            self.recreate_core().await;
-        }
-        rpc_res
+        tokio_retry::RetryIf::spawn(
+            Self::get_retry_strategy(),
+            || async {
+                let mut hummock_client = self.core.read().await.hummock_client.clone();
+                let rpc_res = hummock_client.report_full_scan_task(request.clone()).await;
+                if rpc_res.is_err() {
+                    self.recreate_core().await;
+                }
+                rpc_res
+            },
+            Self::should_retry,
+        )
+        .await
     }
 
     pub async fn report_vacuum_task(
         &self,
         request: ReportVacuumTaskRequest,
     ) -> std::result::Result<tonic::Response<ReportVacuumTaskResponse>, tonic::Status> {
-        let mut hummock_client = self.core.read().await.hummock_client.clone();
-        let rpc_res = hummock_client.report_vacuum_task(request).await;
-        if rpc_res.is_err() {
-            self.recreate_core().await;
-        }
-        rpc_res
+        tokio_retry::RetryIf::spawn(
+            Self::get_retry_strategy(),
+            || async {
+                let mut hummock_client = self.core.read().await.hummock_client.clone();
+                let rpc_res = hummock_client.report_vacuum_task(request.clone()).await;
+                if rpc_res.is_err() {
+                    self.recreate_core().await;
+                }
+                rpc_res
+            },
+            Self::should_retry,
+        )
+        .await
     }
 
     pub async fn get_system_params(
         &self,
     ) -> std::result::Result<tonic::Response<GetSystemParamsResponse>, tonic::Status> {
-        let mut system_params_client = self.core.read().await.system_params_client.clone();
-        let rpc_res = system_params_client
-            .get_system_params(GetSystemParamsRequest {})
-            .await;
-        if rpc_res.is_err() {
-            self.recreate_core().await;
-        }
-        rpc_res
+        tokio_retry::RetryIf::spawn(
+            Self::get_retry_strategy(),
+            || async {
+                let mut system_params_client = self.core.read().await.system_params_client.clone();
+                let rpc_res = system_params_client
+                    .get_system_params(GetSystemParamsRequest {})
+                    .await;
+                if rpc_res.is_err() {
+                    self.recreate_core().await;
+                }
+                rpc_res
+            },
+            Self::should_retry,
+        )
+        .await
     }
 
     #[inline(always)]
@@ -196,6 +223,13 @@ impl GrpcCompactorProxyClient {
 
     #[inline(always)]
     fn should_retry(status: &tonic::Status) -> bool {
-        true
+        if status.code() == tonic::Code::Unavailable
+            || status.code() == tonic::Code::Unknown
+            || (status.code() == tonic::Code::Unauthenticated
+                && status.message().contains("invalid auth token"))
+        {
+            return true;
+        }
+        false
     }
 }
