@@ -395,8 +395,13 @@ message SubscribeCompactionEventRequest {
 
   // ReportTask provides the compact task to report to the meta.
   message ReportTask {
-    CompactTask compact_task = 2;
+    reserved 2;
+    reserved "compact_task";
     map<uint32, TableStats> table_stats_change = 3;
+
+    uint64 task_id = 4;
+    CompactTask.TaskStatus task_status = 5;
+    repeated SstableInfo sorted_output_ssts = 6;
   }
 
   // HeartBeat provides the progress status of all tasks on the Compactor.
