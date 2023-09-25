@@ -36,7 +36,7 @@ pub struct PlanBase {
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     /// the pk indices of the PlanNode's output, a empty logical_pk vec means there is no pk
-    pub logical_pk: Vec<usize>,
+    pub stream_key: Vec<usize>,
     /// The order property of the PlanNode's output, store an `&Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
     pub order: Order,
@@ -59,8 +59,8 @@ impl generic::GenericPlanRef for PlanBase {
         &self.schema
     }
 
-    fn logical_pk(&self) -> &[usize] {
-        &self.logical_pk
+    fn stream_key(&self) -> &[usize] {
+        &self.stream_key
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -103,7 +103,7 @@ impl PlanBase {
             id,
             ctx,
             schema,
-            logical_pk,
+            stream_key: logical_pk,
             dist: Distribution::Single,
             order: Order::any(),
             // Logical plan node won't touch `append_only` field
@@ -118,7 +118,7 @@ impl PlanBase {
         Self::new_logical(
             node.ctx(),
             node.schema(),
-            node.logical_pk().unwrap_or_default(),
+            node.stream_key().unwrap_or_default(),
             node.functional_dependency(),
         )
     }
@@ -133,7 +133,7 @@ impl PlanBase {
         Self::new_stream(
             logical.ctx(),
             logical.schema(),
-            logical.logical_pk().unwrap_or_default().to_vec(),
+            logical.stream_key().unwrap_or_default().to_vec(),
             logical.functional_dependency(),
             dist,
             append_only,
@@ -160,7 +160,7 @@ impl PlanBase {
             schema,
             dist,
             order: Order::any(),
-            logical_pk,
+            stream_key: logical_pk,
             append_only,
             emit_on_window_close,
             functional_dependency,
@@ -191,7 +191,7 @@ impl PlanBase {
             schema,
             dist,
             order,
-            logical_pk: vec![],
+            stream_key: vec![],
             // Batch plan node won't touch `append_only` field
             append_only: true,
             emit_on_window_close: false, // TODO(rc): batch EOWC support?
@@ -204,7 +204,7 @@ impl PlanBase {
         PlanBase::new_stream(
             plan_node.ctx(),
             plan_node.schema().clone(),
-            plan_node.logical_pk().to_vec(),
+            plan_node.stream_key().to_vec(),
             plan_node.functional_dependency().clone(),
             plan_node.distribution().clone(),
             plan_node.append_only(),
@@ -234,7 +234,7 @@ macro_rules! impl_base_delegate {
                     &self.plan_base().schema
                 }
                 pub fn logical_pk(&self) -> &[usize] {
-                    &self.plan_base().logical_pk
+                    &self.plan_base().stream_key
                 }
                 pub fn order(&self) -> &Order {
                     &self.plan_base().order

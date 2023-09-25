@@ -43,7 +43,7 @@ impl StreamTopN {
         let mut base =
             PlanBase::new_stream_with_logical(&logical, dist, false, false, watermark_columns);
         if let Some(stream_key) = stream_key {
-            base.logical_pk = stream_key;
+            base.stream_key = stream_key;
         }
         StreamTopN { base, logical }
     }

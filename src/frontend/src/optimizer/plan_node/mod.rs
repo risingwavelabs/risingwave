@@ -435,8 +435,8 @@ impl GenericPlanRef for PlanRef {
         &self.plan_base().schema
     }
 
-    fn logical_pk(&self) -> &[usize] {
-        &self.plan_base().logical_pk
+    fn stream_key(&self) -> &[usize] {
+        &self.plan_base().stream_key
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -515,7 +515,7 @@ impl dyn PlanNode {
     }
 
     pub fn logical_pk(&self) -> &[usize] {
-        &self.plan_base().logical_pk
+        &self.plan_base().stream_key
     }
 
     pub fn order(&self) -> &Order {

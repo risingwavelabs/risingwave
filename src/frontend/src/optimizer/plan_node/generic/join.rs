@@ -90,11 +90,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
         Schema { fields }
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         let _left_len = self.left.schema().len();
         let _right_len = self.right.schema().len();
-        let left_pk = self.left.logical_pk();
-        let right_pk = self.right.logical_pk();
+        let left_pk = self.left.stream_key();
+        let right_pk = self.right.stream_key();
         let l2i = self.l2i_col_mapping();
         let r2i = self.r2i_col_mapping();
         let full_out_col_num = self.internal_column_num();

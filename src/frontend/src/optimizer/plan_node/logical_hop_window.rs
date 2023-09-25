@@ -64,7 +64,7 @@ impl LogicalHopWindow {
         };
 
         let _schema = core.schema();
-        let _pk_indices = core.logical_pk();
+        let _pk_indices = core.stream_key();
         let ctx = core.ctx();
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
@@ -79,7 +79,7 @@ impl LogicalHopWindow {
         let base = PlanBase::new_logical(
             ctx,
             core.schema(),
-            core.logical_pk().unwrap_or_default(),
+            core.stream_key().unwrap_or_default(),
             core.functional_dependency(),
         );
 

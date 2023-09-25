@@ -227,7 +227,7 @@ impl StreamTableScan {
     pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
         use risingwave_pb::stream_plan::*;
 
-        let stream_key = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
+        let stream_key = self.base.stream_key.iter().map(|x| *x as u32).collect_vec();
 
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.chain_type {

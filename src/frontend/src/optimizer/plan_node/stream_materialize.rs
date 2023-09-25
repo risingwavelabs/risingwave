@@ -292,7 +292,7 @@ impl PlanTreeNodeUnary for StreamMaterialize {
                 assert_eq!(a.type_name, b.type_name);
                 assert_eq!(a.sub_fields, b.sub_fields);
             });
-        assert_eq!(new.plan_base().logical_pk, self.plan_base().logical_pk);
+        assert_eq!(new.plan_base().stream_key, self.plan_base().stream_key);
         new
     }
 }
