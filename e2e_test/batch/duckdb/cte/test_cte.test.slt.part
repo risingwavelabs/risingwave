@@ -123,8 +123,8 @@ SELECT 1 UNION ALL (WITH cte AS (SELECT 42) SELECT * FROM cte);
 # ----
 # 1
 
-# FIXME: this should succeed
 # test CTE with nested aliases in where clause
+# Note: postgres doesn't support this: column "alias1" does not exist
 query error failed to bind expression: alias1
 with cte (a) as (
     select 1
