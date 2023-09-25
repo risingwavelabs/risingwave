@@ -222,6 +222,7 @@ where
                     reclaim_rate_limit: foyer_store_config.reclaim_rate_limit,
                     recover_concurrency: foyer_store_config.recover_concurrency,
                     event_listeners: foyer_store_config.event_listener,
+                    allocation_timeout: Duration::from_millis(10),
                     clean_region_threshold: foyer_store_config.reclaimers
                         + foyer_store_config.reclaimers / 2,
                 };
