@@ -210,7 +210,6 @@ impl From<Value> for JsonbVal {
     }
 }
 
-
 impl<'a> JsonbRef<'a> {
     pub fn memcmp_serialize(
         &self,
