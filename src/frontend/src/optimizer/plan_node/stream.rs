@@ -765,7 +765,9 @@ pub fn to_stream_prost_body(
                     me.infer_internal_table_catalog(
                         input.schema(),
                         input.ctx(),
-                        input.stream_key().expect("should always have a stream key in the stream plan but not"),
+                        input
+                            .stream_key()
+                            .expect("should always have a stream key in the stream plan but not"),
                         None,
                     )
                     .with_id(state.gen_table_id_wrapped())

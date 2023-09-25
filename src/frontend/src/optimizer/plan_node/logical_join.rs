@@ -1397,8 +1397,12 @@ impl ToStream for LogicalJoin {
         // Add missing pk indices to the logical join
         let mut left_to_add = left
             .stream_key()
-            .unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
-                left.explain_to_string()))
+            .unwrap_or_else(|| {
+                panic!(
+                    "should always have a stream key in the stream plan but not, sub plan: {}",
+                    left.explain_to_string()
+                )
+            })
             .iter()
             .cloned()
             .filter(|i| l2o.try_map(*i).is_none())
@@ -1406,8 +1410,12 @@ impl ToStream for LogicalJoin {
 
         let mut right_to_add = right
             .stream_key()
-            .unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
-                right.explain_to_string()))
+            .unwrap_or_else(|| {
+                panic!(
+                    "should always have a stream key in the stream plan but not, sub plan: {}",
+                    right.explain_to_string()
+                )
+            })
             .iter()
             .filter(|&&i| r2o.try_map(i).is_none())
             .map(|&i| i + left_len)

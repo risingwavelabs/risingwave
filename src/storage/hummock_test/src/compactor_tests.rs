@@ -173,6 +173,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap()
                 .uncommitted_ssts;
+
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
     }
@@ -223,7 +224,6 @@ pub(crate) mod tests {
             Default::default(),
         )
         .await;
-
         let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
         {
             FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
@@ -255,7 +255,7 @@ pub(crate) mod tests {
             .pin_snapshot(worker_node2.id)
             .await
             .unwrap();
-        let key = TableKey(key.freeze());
+        let key = key.freeze();
         const SST_COUNT: u64 = 32;
         const TEST_WATERMARK: u64 = 8;
         prepare_test_put_data(
@@ -287,7 +287,7 @@ pub(crate) mod tests {
             compact_task.current_epoch_time = 0;
 
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let (mut result_task, task_stats) = compact(
+            let (result_task, task_stats) = compact(
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
@@ -297,7 +297,13 @@ pub(crate) mod tests {
             .await;
 
             hummock_manager_ref
-                .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+                .report_compact_task_for_test(
+                    result_task.task_id,
+                    Some(compact_task),
+                    result_task.task_status(),
+                    result_task.sorted_output_ssts,
+                    Some(to_prost_table_stats_map(task_stats)),
+                )
                 .await
                 .unwrap();
         }
@@ -346,7 +352,7 @@ pub(crate) mod tests {
 
         let get_ret = storage
             .get(
-                key.clone(),
+                TableKey(key.clone()),
                 read_epoch,
                 ReadOptions {
                     cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -359,10 +365,10 @@ pub(crate) mod tests {
         assert_eq!(get_val, val);
         let ret = storage
             .get(
-                key.clone(),
+                TableKey(key.clone()),
                 ((TEST_WATERMARK - 1) * 1000) << 16,
                 ReadOptions {
-                    prefix_hint: Some(key.clone().0),
+                    prefix_hint: Some(key.clone()),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -410,7 +416,7 @@ pub(crate) mod tests {
         let mut key = BytesMut::default();
         key.put_u16(0);
         key.put_slice(b"same_key");
-        let key = TableKey(key.freeze());
+        let key = key.freeze();
         const SST_COUNT: u64 = 16;
 
         let mut val = b"0"[..].repeat(1 << 20);
@@ -437,7 +443,7 @@ pub(crate) mod tests {
         {
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let (mut result_task, task_stats) = compact(
+            let (result_task, task_stats) = compact(
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
@@ -447,7 +453,12 @@ pub(crate) mod tests {
             .await;
 
             hummock_manager_ref
-                .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+                .report_compact_task(
+                    result_task.task_id,
+                    result_task.task_status(),
+                    result_task.sorted_output_ssts,
+                    Some(to_prost_table_stats_map(task_stats)),
+                )
                 .await
                 .unwrap();
         }
@@ -478,7 +489,7 @@ pub(crate) mod tests {
         storage.wait_version(version).await;
         let get_val = storage
             .get(
-                key.clone(),
+                TableKey(key.clone()),
                 SST_COUNT + 1,
                 ReadOptions {
                     cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -607,6 +618,7 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
+
         assert!(compact_task.is_none());
 
         // 3. get the latest version and check
@@ -763,7 +775,7 @@ pub(crate) mod tests {
 
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) = compact(
+        let (result_task, task_stats) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -773,7 +785,12 @@ pub(crate) mod tests {
         .await;
 
         hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .report_compact_task(
+                result_task.task_id,
+                result_task.task_status(),
+                result_task.sorted_output_ssts,
+                Some(to_prost_table_stats_map(task_stats)),
+            )
             .await
             .unwrap();
 
@@ -953,7 +970,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) = compact(
+        let (result_task, task_stats) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -963,7 +980,12 @@ pub(crate) mod tests {
         .await;
 
         hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .report_compact_task(
+                result_task.task_id,
+                result_task.task_status(),
+                result_task.sorted_output_ssts,
+                Some(to_prost_table_stats_map(task_stats)),
+            )
             .await
             .unwrap();
 
@@ -1139,7 +1161,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) = compact(
+        let (result_task, task_stats) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -1149,7 +1171,12 @@ pub(crate) mod tests {
         .await;
 
         hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .report_compact_task(
+                result_task.task_id,
+                result_task.task_status(),
+                result_task.sorted_output_ssts,
+                Some(to_prost_table_stats_map(task_stats)),
+            )
             .await
             .unwrap();
 
@@ -1299,7 +1326,7 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) = compact(
+        let (result_task, task_stats) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
@@ -1309,7 +1336,12 @@ pub(crate) mod tests {
         .await;
 
         hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .report_compact_task(
+                result_task.task_id,
+                result_task.task_status(),
+                result_task.sorted_output_ssts,
+                Some(to_prost_table_stats_map(task_stats)),
+            )
             .await
             .unwrap();
 

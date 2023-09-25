@@ -529,7 +529,9 @@ pub fn start_compactor(
                                         if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
                                             event: Some(RequestEvent::ReportTask(
                                                 ReportTask {
-                                                    compact_task: Some(compact_task),
+                                                    task_id: compact_task.task_id,
+                                                    task_status: compact_task.task_status,
+                                                    sorted_output_ssts: compact_task.sorted_output_ssts,
                                                     table_stats_change:to_prost_table_stats_map(table_stats),
                                                 }
                                             )),

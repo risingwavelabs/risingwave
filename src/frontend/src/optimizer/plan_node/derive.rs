@@ -85,8 +85,12 @@ pub(crate) fn derive_pk(
     // Note(congyi): avoid pk duplication
     let stream_key = input
         .stream_key()
-        .unwrap_or_else(|| panic!("should always have a stream key on the top of the stream plan but not, plan: {}",
-            input.explain_to_string()))
+        .unwrap_or_else(|| {
+            panic!(
+                "should always have a stream key on the top of the stream plan but not, plan: {}",
+                input.explain_to_string()
+            )
+        })
         .iter()
         .copied()
         .unique()

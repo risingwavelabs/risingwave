@@ -229,8 +229,12 @@ impl StreamTableScan {
 
         let stream_key = self
             .stream_key()
-            .unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
-                PlanRef::from(self.clone()).explain_to_string()))
+            .unwrap_or_else(|| {
+                panic!(
+                    "should always have a stream key in the stream plan but not, sub plan: {}",
+                    PlanRef::from(self.clone()).explain_to_string()
+                )
+            })
             .iter()
             .map(|x| *x as u32)
             .collect_vec();

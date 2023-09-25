@@ -335,8 +335,12 @@ impl ToStream for LogicalHopWindow {
         output_indices.extend(
             input
                 .stream_key()
-                .unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
-                    input.explain_to_string()))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "should always have a stream key in the stream plan but not, sub plan: {}",
+                        input.explain_to_string()
+                    )
+                })
                 .iter()
                 .cloned()
                 .filter(|i| i2o.try_map(*i).is_none()),
