@@ -55,7 +55,7 @@ pub enum StateStoreImpl {
     /// Example URLs:
     ///
     /// * `hummock+s3://bucket`
-    /// * `hummock+minio://KEY:SECRET@minio-ip:port`
+    /// * `hummock+minio://KEY:SECRET@minio-ip:port#is_https_endpoint`
     /// * `hummock+memory` (should only be used in 1 compute node mode)
     HummockStateStore(Monitored<HummockStorageType>),
     /// In-memory B-Tree state store. Should only be used in unit and integration tests. If you

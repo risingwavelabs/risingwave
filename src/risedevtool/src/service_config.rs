@@ -142,6 +142,8 @@ pub struct MinioConfig {
     pub hummock_bucket: String,
 
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+
+    pub is_https_endpoint: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

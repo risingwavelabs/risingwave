@@ -102,12 +102,13 @@ pub fn add_hummock_backend(
         }
         ([minio], [], []) => {
             cmd.arg("--state-store").arg(format!(
-                "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
+                "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}#{minio_is_https_endpoint}",
                 hummock_user = minio.root_user,
                 hummock_password = minio.root_password,
                 hummock_bucket = minio.hummock_bucket,
                 minio_addr = minio.address,
                 minio_port = minio.port,
+                minio_is_https_endpoint = minio.is_https_endpoint,
             ));
             (true, true)
         }

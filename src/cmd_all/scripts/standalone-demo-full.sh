@@ -20,7 +20,7 @@ start_standalone() {
                     --connector-rpc-endpoint 127.0.0.1:50051 \
                     --backend etcd \
                     --etcd-endpoints 127.0.0.1:2388 \
-                    --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+                    --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001#false \
                     --data-directory hummock_001 \
                     --config-path src/config/standalone-example.toml \
                     --dashboard-ui-path $RW_PREFIX/ui" \
