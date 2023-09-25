@@ -33,7 +33,6 @@ use tonic::transport::{Channel, Endpoint};
 use crate::error::Result;
 use crate::retry_rpc;
 const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
-// See `Endpoint::keep_alive_timeout`
 const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
 
 const DEFAULT_RETRY_INTERVAL: u64 = 20;
