@@ -689,6 +689,7 @@ mod stream_eowc_over_window;
 mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
+mod stream_fs_fetch;
 mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
@@ -773,6 +774,7 @@ pub use stream_eowc_over_window::StreamEowcOverWindow;
 pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
+pub use stream_fs_fetch::StreamFsFetch;
 pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
@@ -898,6 +900,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, EowcOverWindow }
             , { Stream, EowcSort }
             , { Stream, OverWindow }
+            , { Stream, FsFetch }
         }
     };
 }
@@ -1005,6 +1008,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, EowcOverWindow }
             , { Stream, EowcSort }
             , { Stream, OverWindow }
+            , { Stream, FsFetch }
         }
     };
 }

@@ -18,3 +18,5 @@ mod file_common;
 pub mod nd_streaming;
 pub use file_common::FsSplit;
 mod s3;
+
+pub const S3_V2_CONNECTOR: &str = "s3_v2";
