@@ -15,22 +15,24 @@
 #[cfg(test)]
 pub(crate) mod tests {
 
-    use std::collections::{BTreeSet, HashMap};
+    use std::collections::{BTreeSet, HashMap, VecDeque};
     use std::ops::Bound;
     use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
 
     use bytes::{BufMut, Bytes, BytesMut};
     use itertools::Itertools;
-    use rand::Rng;
+    use rand::{Rng, RngCore, SeedableRng};
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::util::epoch::Epoch;
     use risingwave_common_service::observer_manager::NotificationClient;
+    use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::key::{next_key, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::key::{next_key, FullKey, TableKey, TABLE_PREFIX_LEN};
+    use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use risingwave_meta::hummock::compaction::selector::{
@@ -42,19 +44,27 @@ pub(crate) mod tests {
     };
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
     use risingwave_pb::common::{HostAddress, WorkerType};
-    use risingwave_pb::hummock::{HummockVersion, TableOption};
+    use risingwave_pb::hummock::{CompactTask, HummockVersion, InputLevel, KeyRange, TableOption};
     use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::filter_key_extractor::{
-        FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
-        FixedLengthFilterKeyExtractor, FullKeyFilterKeyExtractor,
+        FilterKeyExtractorImpl, FilterKeyExtractorManager, FixedLengthFilterKeyExtractor,
+        FullKeyFilterKeyExtractor,
     };
-    use risingwave_storage::hummock::compactor::compactor_runner::compact;
-    use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
+    use risingwave_storage::hummock::compactor::compactor_runner::{compact, CompactorRunner};
+    use risingwave_storage::hummock::compactor::fast_compactor_runner::CompactorRunner as FastCompactorRunner;
+    use risingwave_storage::hummock::compactor::{
+        CompactionExecutor, CompactorContext, DummyCompactionFilter, TaskProgress,
+    };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
+    use risingwave_storage::hummock::iterator::{ConcatIterator, UserIterator};
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
+    use risingwave_storage::hummock::test_utils::gen_test_sstable_info;
+    use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
-        CachePolicy, HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
+        CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
+        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
+        SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions, SstableIteratorReadOptions,
         SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
@@ -143,7 +153,10 @@ pub(crate) mod tests {
             new_val.extend_from_slice(&epoch.to_be_bytes());
             local
                 .ingest_batch(
-                    vec![(key.clone(), StorageValue::new_put(Bytes::from(new_val)))],
+                    vec![(
+                        TableKey(key.clone()),
+                        StorageValue::new_put(Bytes::from(new_val)),
+                    )],
                     vec![],
                     WriteOptions {
                         epoch,
@@ -162,25 +175,18 @@ pub(crate) mod tests {
                 .await
                 .unwrap()
                 .uncommitted_ssts;
+
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
     }
 
-    fn get_compactor_context_with_filter_key_extractor_manager(
-        storage: &HummockStorage,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-    ) -> CompactorContext {
-        get_compactor_context_with_filter_key_extractor_manager_impl(
-            storage.storage_opts().clone(),
-            storage.sstable_store(),
-            filter_key_extractor_manager,
-        )
+    fn get_compactor_context(storage: &HummockStorage) -> CompactorContext {
+        get_compactor_context_impl(storage.storage_opts().clone(), storage.sstable_store())
     }
 
-    fn get_compactor_context_with_filter_key_extractor_manager_impl(
+    fn get_compactor_context_impl(
         options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
-        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
         CompactorContext {
             storage_opts: options,
@@ -189,9 +195,6 @@ pub(crate) mod tests {
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
             memory_limiter: MemoryLimiter::unlimit(),
-            filter_key_extractor_manager: FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                filter_key_extractor_manager,
-            ),
             task_progress_manager: Default::default(),
             await_tree_reg: None,
             running_task_count: Arc::new(AtomicU32::new(0)),
@@ -223,7 +226,6 @@ pub(crate) mod tests {
             Default::default(),
         )
         .await;
-
         let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
         {
             FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
@@ -231,10 +233,10 @@ pub(crate) mod tests {
             ) => rpc_filter_key_extractor_manager,
             FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
         };
-        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
-            &storage,
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
             rpc_filter_key_extractor_manager,
         );
+        let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
@@ -287,16 +289,23 @@ pub(crate) mod tests {
             compact_task.current_epoch_time = 0;
 
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let (mut result_task, task_stats) = compact(
+            let (result_task, task_stats) = compact(
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
                 Box::new(sstable_object_id_manager.clone()),
+                filter_key_extractor_manager.clone(),
             )
             .await;
 
             hummock_manager_ref
-                .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+                .report_compact_task_for_test(
+                    result_task.task_id,
+                    Some(compact_task),
+                    result_task.task_status(),
+                    result_task.sorted_output_ssts,
+                    Some(to_prost_table_stats_map(task_stats)),
+                )
                 .await
                 .unwrap();
         }
@@ -345,7 +354,7 @@ pub(crate) mod tests {
 
         let get_ret = storage
             .get(
-                key.clone(),
+                TableKey(key.clone()),
                 read_epoch,
                 ReadOptions {
                     cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -358,7 +367,7 @@ pub(crate) mod tests {
         assert_eq!(get_val, val);
         let ret = storage
             .get(
-                key.clone(),
+                TableKey(key.clone()),
                 ((TEST_WATERMARK - 1) * 1000) << 16,
                 ReadOptions {
                     prefix_hint: Some(key.clone()),
@@ -394,10 +403,10 @@ pub(crate) mod tests {
             ) => rpc_filter_key_extractor_manager,
             FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
         };
-        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
-            &storage,
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
             rpc_filter_key_extractor_manager,
         );
+        let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
@@ -436,16 +445,22 @@ pub(crate) mod tests {
         {
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let (mut result_task, task_stats) = compact(
+            let (result_task, task_stats) = compact(
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
                 Box::new(sstable_object_id_manager.clone()),
+                filter_key_extractor_manager.clone(),
             )
             .await;
 
             hummock_manager_ref
-                .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+                .report_compact_task(
+                    result_task.task_id,
+                    result_task.task_status(),
+                    result_task.sorted_output_ssts,
+                    Some(to_prost_table_stats_map(task_stats)),
+                )
                 .await
                 .unwrap();
         }
@@ -472,12 +487,11 @@ pub(crate) mod tests {
                 target_table_size
             );
         }
-
         // 5. storage get back the correct kv after compaction
         storage.wait_version(version).await;
         let get_val = storage
             .get(
-                key.clone(),
+                TableKey(key.clone()),
                 SST_COUNT + 1,
                 ReadOptions {
                     cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -530,7 +544,9 @@ pub(crate) mod tests {
                 let mut key = idx.to_be_bytes().to_vec();
                 let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
                 key.extend_from_slice(&ramdom_key);
-                local.insert(Bytes::from(key), val.clone(), None).unwrap();
+                local
+                    .insert(TableKey(Bytes::from(key)), val.clone(), None)
+                    .unwrap();
             }
             local.flush(Vec::new()).await.unwrap();
             local.seal_current_epoch(epoch + 1);
@@ -539,10 +555,10 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) fn prepare_compactor_and_filter(
+    pub fn prepare_compactor_and_filter(
         storage: &HummockStorage,
         existing_table_id: u32,
-    ) -> CompactorContext {
+    ) -> (CompactorContext, FilterKeyExtractorManager) {
         let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
         {
             FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
@@ -555,10 +571,11 @@ pub(crate) mod tests {
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
 
-        get_compactor_context_with_filter_key_extractor_manager(
-            storage,
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
             rpc_filter_key_extractor_manager,
-        )
+        );
+
+        (get_compactor_context(storage), filter_key_extractor_manager)
     }
 
     #[tokio::test]
@@ -603,6 +620,7 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
+
         assert!(compact_task.is_none());
 
         // 3. get the latest version and check
@@ -666,11 +684,12 @@ pub(crate) mod tests {
             2,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
-
-        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager_impl(
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            rpc_filter_key_extractor_manager,
+        );
+        let compact_ctx = get_compactor_context_impl(
             global_storage.storage_opts().clone(),
             global_storage.sstable_store(),
-            rpc_filter_key_extractor_manager,
         );
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
@@ -711,7 +730,9 @@ pub(crate) mod tests {
             prefix.put_u16(1);
             prefix.put_slice(random_key.as_slice());
 
-            storage.insert(prefix.freeze(), val.clone(), None).unwrap();
+            storage
+                .insert(TableKey(prefix.freeze()), val.clone(), None)
+                .unwrap();
             storage.flush(Vec::new()).await.unwrap();
             storage.seal_current_epoch(next_epoch);
             other.seal_current_epoch(next_epoch);
@@ -756,16 +777,22 @@ pub(crate) mod tests {
 
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) = compact(
+        let (result_task, task_stats) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
+            filter_key_extractor_manager,
         )
         .await;
 
         hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .report_compact_task(
+                result_task.task_id,
+                result_task.task_status(),
+                result_task.sorted_output_ssts,
+                Some(to_prost_table_stats_map(task_stats)),
+            )
             .await
             .unwrap();
 
@@ -854,10 +881,7 @@ pub(crate) mod tests {
             FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
         };
 
-        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
-            &storage,
-            rpc_filter_key_extractor_manager.clone(),
-        );
+        let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
@@ -869,7 +893,9 @@ pub(crate) mod tests {
             2,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
-
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+            rpc_filter_key_extractor_manager,
+        );
         // 1. add sstables
         let val = Bytes::from(b"0"[..].to_vec()); // 1 Byte value
 
@@ -895,7 +921,9 @@ pub(crate) mod tests {
             prefix.put_u16(1);
             prefix.put_slice(random_key.as_slice());
 
-            local.insert(prefix.freeze(), val.clone(), None).unwrap();
+            local
+                .insert(TableKey(prefix.freeze()), val.clone(), None)
+                .unwrap();
             local.flush(Vec::new()).await.unwrap();
             local.seal_current_epoch(next_epoch);
 
@@ -944,16 +972,22 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) = compact(
+        let (result_task, task_stats) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
+            filter_key_extractor_manager,
         )
         .await;
 
         hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .report_compact_task(
+                result_task.task_id,
+                result_task.task_status(),
+                result_task.sorted_output_ssts,
+                Some(to_prost_table_stats_map(task_stats)),
+            )
             .await
             .unwrap();
 
@@ -1053,10 +1087,10 @@ pub(crate) mod tests {
                 FixedLengthFilterKeyExtractor::new(TABLE_PREFIX_LEN + key_prefix.len()),
             )),
         );
-        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
-            &storage,
+        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
             rpc_filter_key_extractor_manager,
         );
+        let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
@@ -1086,7 +1120,7 @@ pub(crate) mod tests {
 
             let ramdom_key = [key_prefix.as_ref(), &rand::thread_rng().gen::<[u8; 32]>()].concat();
             local
-                .insert(Bytes::from(ramdom_key), val.clone(), None)
+                .insert(TableKey(Bytes::from(ramdom_key)), val.clone(), None)
                 .unwrap();
             local.flush(Vec::new()).await.unwrap();
             local.seal_current_epoch(next_epoch);
@@ -1129,16 +1163,22 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) = compact(
+        let (result_task, task_stats) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
+            filter_key_extractor_manager,
         )
         .await;
 
         hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .report_compact_task(
+                result_task.task_id,
+                result_task.task_status(),
+                result_task.sorted_output_ssts,
+                Some(to_prost_table_stats_map(task_stats)),
+            )
             .await
             .unwrap();
 
@@ -1185,8 +1225,8 @@ pub(crate) mod tests {
             key_prefix.to_vec(),
         ]
         .concat();
-        let start_bound_key = key_prefix;
-        let end_bound_key = Bytes::from(next_key(start_bound_key.as_ref()));
+        let start_bound_key = TableKey(key_prefix);
+        let end_bound_key = TableKey(Bytes::from(next_key(start_bound_key.as_ref())));
         let scan_result = storage
             .scan(
                 (
@@ -1231,7 +1271,8 @@ pub(crate) mod tests {
             TableId::from(existing_table_id),
         )
         .await;
-        let compact_ctx = prepare_compactor_and_filter(&storage, existing_table_id);
+        let (compact_ctx, filter_key_extractor_manager) =
+            prepare_compactor_and_filter(&storage, existing_table_id);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
@@ -1287,16 +1328,22 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let (mut result_task, task_stats) = compact(
+        let (result_task, task_stats) = compact(
             compact_ctx,
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
+            filter_key_extractor_manager,
         )
         .await;
 
         hummock_manager_ref
-            .report_compact_task(&mut result_task, Some(to_prost_table_stats_map(task_stats)))
+            .report_compact_task(
+                result_task.task_id,
+                result_task.task_status(),
+                result_task.sorted_output_ssts,
+                Some(to_prost_table_stats_map(task_stats)),
+            )
             .await
             .unwrap();
 
@@ -1309,5 +1356,261 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(1, output_level_info.table_infos.len());
         assert_eq!(252, output_level_info.table_infos[0].total_key_count);
+    }
+
+    type KeyValue = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>);
+
+    async fn test_fast_compact_impl(
+        data1: Vec<KeyValue>,
+        data2: Vec<KeyValue>,
+        data3: Vec<KeyValue>,
+        data4: Vec<KeyValue>,
+    ) {
+        let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+            setup_compute_env(8080).await;
+        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+            hummock_manager_ref.clone(),
+            worker_node.id,
+        ));
+        let existing_table_id: u32 = 1;
+        let storage = get_hummock_storage(
+            hummock_meta_client.clone(),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
+            &hummock_manager_ref,
+            TableId::from(existing_table_id),
+        )
+        .await;
+        hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
+        let (compact_ctx, _) = prepare_compactor_and_filter(&storage, existing_table_id);
+
+        let sstable_store = compact_ctx.sstable_store.clone();
+        let capacity = 256 * 1024;
+        let mut options = SstableBuilderOptions {
+            capacity,
+            block_capacity: 2048,
+            restart_interval: 16,
+            bloom_false_positive: 0.1,
+            ..Default::default()
+        };
+        let sst1 = gen_test_sstable_info(options.clone(), 1, data1, sstable_store.clone()).await;
+        let sst2 = gen_test_sstable_info(options.clone(), 2, data2, sstable_store.clone()).await;
+        options.compression_algorithm = CompressionAlgorithm::Lz4;
+        let sst3 = gen_test_sstable_info(options.clone(), 3, data3, sstable_store.clone()).await;
+        let sst4 = gen_test_sstable_info(options, 4, data4, sstable_store.clone()).await;
+        let read_options = Arc::new(SstableIteratorReadOptions::default());
+
+        let task = CompactTask {
+            input_ssts: vec![
+                InputLevel {
+                    level_idx: 5,
+                    level_type: 1,
+                    table_infos: vec![sst1, sst2],
+                },
+                InputLevel {
+                    level_idx: 6,
+                    level_type: 1,
+                    table_infos: vec![sst3, sst4],
+                },
+            ],
+            existing_table_ids: vec![1],
+            task_id: 1,
+            watermark: 1000,
+            splits: vec![KeyRange::inf()],
+            target_level: 6,
+            base_level: 4,
+            target_file_size: capacity as u64,
+            compression_algorithm: 1,
+            gc_delete_keys: true,
+            ..Default::default()
+        };
+        let deg = Arc::new(CompactionDeleteRanges::default());
+        let multi_filter_key_extractor =
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
+        let compaction_filter = DummyCompactionFilter {};
+        let slow_compact_runner = CompactorRunner::new(
+            0,
+            compact_ctx.clone(),
+            task.clone(),
+            Box::new(SharedComapctorObjectIdManager::for_test(
+                VecDeque::from_iter([5, 6, 7, 8, 9]),
+            )),
+        );
+        let fast_compact_runner = FastCompactorRunner::new(
+            compact_ctx.clone(),
+            task.clone(),
+            multi_filter_key_extractor.clone(),
+            Box::new(SharedComapctorObjectIdManager::for_test(
+                VecDeque::from_iter([10, 11, 12, 13, 14]),
+            )),
+            Arc::new(TaskProgress::default()),
+        );
+        let (_, ret1, _) = slow_compact_runner
+            .run(
+                compaction_filter,
+                multi_filter_key_extractor,
+                deg,
+                Arc::new(TaskProgress::default()),
+            )
+            .await
+            .unwrap();
+        let ret = ret1.into_iter().map(|sst| sst.sst_info).collect_vec();
+        let fast_ret = fast_compact_runner
+            .run()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|sst| sst.sst_info)
+            .collect_vec();
+        println!("ssts: {} vs {}", fast_ret.len(), ret.len());
+        let mut fast_tables = Vec::with_capacity(fast_ret.len());
+        let mut normal_tables = Vec::with_capacity(ret.len());
+        let mut stats = StoreLocalStatistic::default();
+        for sst_info in &fast_ret {
+            fast_tables.push(
+                compact_ctx
+                    .sstable_store
+                    .sstable(sst_info, &mut stats)
+                    .await
+                    .unwrap(),
+            );
+        }
+
+        for sst_info in &ret {
+            normal_tables.push(
+                compact_ctx
+                    .sstable_store
+                    .sstable(sst_info, &mut stats)
+                    .await
+                    .unwrap(),
+            );
+        }
+        println!(
+            "fast sstables {}.file size={}",
+            fast_ret[0].object_id, fast_ret[0].file_size,
+        );
+        assert!(can_concat(&ret));
+        assert!(can_concat(&fast_ret));
+
+        let mut normal_iter = UserIterator::for_test(
+            ConcatIterator::new(ret, compact_ctx.sstable_store.clone(), read_options.clone()),
+            (Bound::Unbounded, Bound::Unbounded),
+        );
+        let mut fast_iter = UserIterator::for_test(
+            ConcatIterator::new(
+                fast_ret,
+                compact_ctx.sstable_store.clone(),
+                read_options.clone(),
+            ),
+            (Bound::Unbounded, Bound::Unbounded),
+        );
+
+        normal_iter.rewind().await.unwrap();
+        fast_iter.rewind().await.unwrap();
+        let mut count = 0;
+        while normal_iter.is_valid() {
+            assert_eq!(
+                normal_iter.key(),
+                fast_iter.key(),
+                "not equal in {}, len: {} {} vs {}",
+                count,
+                normal_iter.key().user_key.table_key.as_ref().len(),
+                u64::from_be_bytes(
+                    normal_iter.key().user_key.table_key.as_ref()[0..8]
+                        .try_into()
+                        .unwrap()
+                ),
+                u64::from_be_bytes(
+                    fast_iter.key().user_key.table_key.as_ref()[0..8]
+                        .try_into()
+                        .unwrap()
+                ),
+            );
+            let hash = Sstable::hash_for_bloom_filter(
+                fast_iter.key().user_key.encode().as_slice(),
+                fast_iter.key().user_key.table_id.table_id,
+            );
+            assert_eq!(normal_iter.value(), fast_iter.value());
+            let key_ref = fast_iter.key().user_key.as_ref();
+            assert!(normal_tables.iter().any(|table| {
+                table
+                    .value()
+                    .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+            }));
+            assert!(fast_tables.iter().any(|table| {
+                table
+                    .value()
+                    .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+            }));
+            normal_iter.next().await.unwrap();
+            fast_iter.next().await.unwrap();
+            count += 1;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fast_compact() {
+        const KEY_COUNT: usize = 20000;
+        let mut last_k: u64 = 0;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        );
+        let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
+        let mut data = Vec::with_capacity(KEY_COUNT);
+        let mut last_epoch = 400;
+        for _ in 0..KEY_COUNT {
+            let rand_v = rng.next_u32() % 100;
+            let (k, epoch) = if rand_v == 0 {
+                (last_k + 3000, 400)
+            } else if rand_v < 5 {
+                (last_k, last_epoch - 1)
+            } else {
+                (last_k + 1, 400)
+            };
+            let key = k.to_be_bytes().to_vec();
+            let key = FullKey::new(TableId::new(1), TableKey(key), epoch);
+            let rand_v = rng.next_u32() % 10;
+            let v = if rand_v == 1 {
+                HummockValue::delete()
+            } else {
+                HummockValue::put(format!("sst1-{}", epoch).into_bytes())
+            };
+            if last_k != k && data1.is_empty() && data.len() >= KEY_COUNT / 2 {
+                std::mem::swap(&mut data, &mut data1);
+            }
+            data.push((key, v));
+            last_k = k;
+            last_epoch = epoch;
+        }
+        let data2 = data;
+        let mut data3 = Vec::with_capacity(KEY_COUNT);
+        let mut data = Vec::with_capacity(KEY_COUNT);
+        let mut last_k: u64 = 0;
+        let max_epoch = std::cmp::min(300, last_epoch - 1);
+        last_epoch = max_epoch;
+
+        for _ in 0..KEY_COUNT * 2 {
+            let rand_v = rng.next_u32() % 100;
+            let (k, epoch) = if rand_v == 0 {
+                (last_k + 1000, max_epoch)
+            } else if rand_v < 5 {
+                (last_k, last_epoch - 1)
+            } else {
+                (last_k + 1, max_epoch)
+            };
+            let key = k.to_be_bytes().to_vec();
+            let key = FullKey::new(TableId::new(1), TableKey(key), epoch);
+            let v = HummockValue::put(format!("sst2-{}", epoch).into_bytes());
+            if last_k != k && data3.is_empty() && data.len() >= KEY_COUNT {
+                std::mem::swap(&mut data, &mut data3);
+            }
+            data.push((key, v));
+            last_k = k;
+            last_epoch = epoch;
+        }
+        let data4 = data;
+        test_fast_compact_impl(data1, data2, data3, data4).await;
     }
 }

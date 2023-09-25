@@ -308,17 +308,21 @@ def section_compaction(outer_panels):
                     "KBs read from next level during history compactions to next level",
                     [
                         panels.target(
-                            f"sum(rate({metric('storage_level_compact_read_next')}[$__rate_interval])) by(job,instance) + sum(rate("
-                            f"{metric('storage_level_compact_read_curr')}[$__rate_interval])) by(job,instance)",
-                            "read - {{job}} @ {{instance}}",
+                            f"sum(rate({metric('storage_level_compact_read_next')}[$__rate_interval])) by(job) + sum(rate("
+                            f"{metric('storage_level_compact_read_curr')}[$__rate_interval])) by(job)",
+                            "read - {{job}}",
                         ),
                         panels.target(
-                            f"sum(rate({metric('storage_level_compact_write')}[$__rate_interval])) by(job,instance)",
-                            "write - {{job}} @ {{instance}}",
+                            f"sum(rate({metric('storage_level_compact_write')}[$__rate_interval])) by(job)",
+                            "write - {{job}}",
                         ),
                         panels.target(
-                            f"sum(rate({metric('compactor_write_build_l0_bytes')}[$__rate_interval]))by (job,instance)",
-                            "flush - {{job}} @ {{instance}}",
+                            f"sum(rate({metric('compactor_write_build_l0_bytes')}[$__rate_interval]))by (job)",
+                            "flush - {{job}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('compactor_fast_compact_bytes')}[$__rate_interval]))by (job)",
+                            "fast compact - {{job}}",
                         ),
                     ],
                 ),
@@ -1234,6 +1238,22 @@ def section_streaming_actors(outer_panels):
                                       "stream agg cached keys count | table {{table_id}} actor {{actor_id}}"),
                         panels.target(f"{metric('stream_agg_distinct_cached_keys')}",
                                       "stream agg distinct cached keys count |table {{table_id}} actor {{actor_id}}"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Aggregation Dirty Group Count",
+                    "Statistics for dirty (unflushed) groups in each hash aggregation executor's executor cache.",
+                    [
+                        panels.target(f"{metric('stream_agg_dirty_group_count')}",
+                                      "stream agg dirty group count | table {{table_id}} actor {{actor_id}}"),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Aggregation Dirty Group Heap Size",
+                    "Statistics for dirty (unflushed) groups in each hash aggregation executor's executor cache.",
+                    [
+                        panels.target(f"{metric('stream_agg_dirty_group_heap_size')}",
+                                      "stream agg dirty group heap size | table {{table_id}} actor {{actor_id}}"),
                     ],
                 ),
                 panels.timeseries_count(
@@ -3196,7 +3216,7 @@ def section_memory_manager(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"{metric('lru_evicted_watermark_time_diff_ms')}",
+                            f"{metric('lru_current_watermark_time_ms')} - on() group_right() {metric('lru_evicted_watermark_time_ms')}",
                             "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
                         ),
                     ],

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 
@@ -77,4 +79,10 @@ impl<T> SerTo<T> for T {
 pub enum TimestampHandlingMode {
     Milli,
     String,
+}
+
+#[derive(Clone)]
+pub enum CustomJsonType {
+    Doris(HashMap<String, (u8, u8)>),
+    None,
 }

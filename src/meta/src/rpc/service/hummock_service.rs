@@ -526,6 +526,13 @@ impl HummockManagerService for HummockServiceImpl {
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
+    async fn report_compaction_task(
+        &self,
+        _request: Request<ReportCompactionTaskRequest>,
+    ) -> Result<Response<ReportCompactionTaskResponse>, Status> {
+        unreachable!()
+    }
+
     async fn list_branched_object(
         &self,
         _request: Request<ListBranchedObjectRequest>,

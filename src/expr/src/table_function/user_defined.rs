@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use arrow_array::RecordBatch;
 use arrow_schema::{Field, Fields, Schema, SchemaRef};
+use cfg_or_panic::cfg_or_panic;
 use futures_util::stream;
 use risingwave_common::array::{DataChunk, I32Array};
 use risingwave_common::bail;
@@ -35,13 +36,13 @@ pub struct UserDefinedTableFunction {
     chunk_size: usize,
 }
 
-#[cfg(not(madsim))]
 #[async_trait::async_trait]
 impl TableFunction for UserDefinedTableFunction {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
+    #[cfg_or_panic(not(madsim))]
     async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
         self.eval_inner(input)
     }
@@ -54,13 +55,13 @@ impl UserDefinedTableFunction {
         // evaluate children expressions
         let mut columns = Vec::with_capacity(self.children.len());
         for c in &self.children {
-            let val = c.eval_checked(input).await?;
+            let val = c.eval(input).await?;
             columns.push(val);
         }
-        let direct_input = DataChunk::new(columns, input.vis().clone());
+        let direct_input = DataChunk::new(columns, input.visibility().clone());
 
         // compact the input chunk and record the row mapping
-        let visible_rows = direct_input.vis().iter_ones().collect_vec();
+        let visible_rows = direct_input.visibility().iter_ones().collect_vec();
         let compacted_input = direct_input.compact_cow();
         let arrow_input = RecordBatch::try_from(compacted_input.as_ref())?;
 
@@ -85,7 +86,7 @@ impl UserDefinedTableFunction {
 
             let output = DataChunk::new(
                 vec![origin_indices.into_ref(), output.column_at(1).clone()],
-                output.vis().clone(),
+                output.visibility().clone(),
             );
             yield output;
         }
@@ -124,7 +125,7 @@ impl UserDefinedTableFunction {
     }
 }
 
-#[cfg(not(madsim))]
+#[cfg_or_panic(not(madsim))]
 pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<BoxedTableFunction> {
     let Some(udtf) = &prost.udtf else {
         bail!("expect UDTF");
@@ -156,24 +157,4 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         chunk_size,
     }
     .boxed())
-}
-
-#[cfg(madsim)]
-#[async_trait::async_trait]
-impl TableFunction for UserDefinedTableFunction {
-    fn return_type(&self) -> DataType {
-        panic!("UDF is not supported in simulation yet");
-    }
-
-    async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
-        panic!("UDF is not supported in simulation yet");
-    }
-}
-
-#[cfg(madsim)]
-pub fn new_user_defined(
-    _prost: &PbTableFunction,
-    _chunk_size: usize,
-) -> Result<BoxedTableFunction> {
-    panic!("UDF is not supported in simulation yet");
 }
