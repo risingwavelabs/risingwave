@@ -41,6 +41,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
+use crate::Explain;
 
 /// `LogicalJoin` combines two relations according to some condition.
 ///
@@ -1396,6 +1397,10 @@ impl ToStream for LogicalJoin {
         // Add missing pk indices to the logical join
         let mut left_to_add = left
             .stream_key()
+            .expect(&format!(
+                "should always have a stream key in the stream plan but not, sub plan: {}",
+                left.explain_to_string()
+            ))
             .iter()
             .cloned()
             .filter(|i| l2o.try_map(*i).is_none())
@@ -1403,6 +1408,10 @@ impl ToStream for LogicalJoin {
 
         let mut right_to_add = right
             .stream_key()
+            .expect(&format!(
+                "should always have a stream key in the stream plan but not, sub plan: {}",
+                right.explain_to_string()
+            ))
             .iter()
             .filter(|&&i| r2o.try_map(i).is_none())
             .map(|&i| i + left_len)
@@ -1465,12 +1474,19 @@ impl ToStream for LogicalJoin {
             let left_right_stream_keys = join_with_pk
                 .left()
                 .stream_key()
+                .expect(&format!(
+                    "should always have a stream key in the stream plan but not, sub plan: {}",
+                    left.explain_to_string()
+                ))
                 .iter()
                 .map(|i| l2o.map(*i))
                 .chain(
                     join_with_pk
                         .right()
-                        .stream_key()
+                        .stream_key()                .expect(&format!(
+                            "should always have a stream key in the stream plan but not, sub plan: {}",
+                            join_with_pk.right().explain_to_string()
+                        ))
                         .iter()
                         .map(|i| r2o.map(*i)),
                 )

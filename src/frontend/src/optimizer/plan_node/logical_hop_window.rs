@@ -28,6 +28,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
+use crate::Explain;
 
 /// `LogicalHopWindow` implements Hop Table Function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -63,23 +64,12 @@ impl LogicalHopWindow {
             output_indices,
         };
 
-        let _schema = core.schema();
-        let _pk_indices = core.stream_key();
         let ctx = core.ctx();
-
-        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
-        // key.
-        // let pk_indices = match pk_indices {
-        //     Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
-        //         functional_dependency.minimize_key(&pk_indices)
-        //     }
-        //     _ => pk_indices.unwrap_or_default(),
-        // };
 
         let base = PlanBase::new_logical(
             ctx,
             core.schema(),
-            core.stream_key().unwrap_or_default(),
+            core.stream_key(),
             core.functional_dependency(),
         );
 
@@ -345,6 +335,10 @@ impl ToStream for LogicalHopWindow {
         output_indices.extend(
             input
                 .stream_key()
+                .expect(&format!(
+                    "should always have a stream key in the stream plan but not, sub plan: {}",
+                    input.explain_to_string()
+                ))
                 .iter()
                 .cloned()
                 .filter(|i| i2o.try_map(*i).is_none()),

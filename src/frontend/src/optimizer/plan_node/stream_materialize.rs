@@ -32,6 +32,7 @@ use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::Explain;
 
 /// Materializes a stream.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -140,7 +141,13 @@ impl StreamMaterialize {
                 TableType::MaterializedView => {
                     assert_matches!(user_distributed_by, RequiredDist::Any);
                     // ensure the same pk will not shuffle to different node
-                    RequiredDist::shard_by_key(input.schema().len(), input.stream_key())
+                    RequiredDist::shard_by_key(
+                        input.schema().len(),
+                        input.stream_key().expect(&format!(
+                        "should always have a stream key in the stream plan but not, sub plan: {}",
+                        input.explain_to_string()
+                    )),
+                    )
                 }
                 TableType::Index => {
                     assert_matches!(

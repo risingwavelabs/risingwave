@@ -23,7 +23,7 @@ use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::TableCatalog;
+use crate::{Explain, TableCatalog};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamEowcOverWindow {
@@ -101,7 +101,10 @@ impl StreamEowcOverWindow {
             tbl_builder.add_order_column(order_key_index, OrderType::ascending());
             order_cols.insert(order_key_index);
         }
-        for idx in self.logical.input.stream_key() {
+        for idx in self.logical.input.stream_key().expect(&format!(
+            "should always have a stream key in the stream plan but not, sub plan: {}",
+            self.logical.input.explain_to_string()
+        )) {
             if !order_cols.contains(idx) {
                 tbl_builder.add_order_column(*idx, OrderType::ascending());
                 order_cols.insert(*idx);

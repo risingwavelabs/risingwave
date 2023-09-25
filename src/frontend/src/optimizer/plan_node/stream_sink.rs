@@ -39,7 +39,7 @@ use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::{TableCatalog, WithOptions};
+use crate::{Explain, TableCatalog, WithOptions};
 
 const DOWNSTREAM_PK_KEY: &str = "primary_key";
 
@@ -138,7 +138,10 @@ impl StreamSink {
                     }
                     _ => {
                         assert_matches!(user_distributed_by, RequiredDist::Any);
-                        RequiredDist::shard_by_key(input.schema().len(), input.stream_key())
+                        RequiredDist::shard_by_key(input.schema().len(), input.stream_key().expect(&format!(
+                            "should always have a stream key on the top of the stream plan but not, plan: {}",
+                            input.explain_to_string()
+                        )))
                     }
                 }
             }

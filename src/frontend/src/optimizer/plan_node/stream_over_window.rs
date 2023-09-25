@@ -22,7 +22,7 @@ use super::generic::{GenericPlanNode, PlanWindowFunction};
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::TableCatalog;
+use crate::{Explain, TableCatalog};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamOverWindow {
@@ -68,7 +68,10 @@ impl StreamOverWindow {
                 tbl_builder.add_order_column(o.column_index, o.order_type);
             }
         }
-        for &idx in self.logical.input.stream_key() {
+        for &idx in self.logical.input.stream_key().expect(&format!(
+            "should always have a stream key in the stream plan but not, sub plan: {}",
+            self.logical.input.explain_to_string()
+        )) {
             if order_cols.insert(idx) {
                 tbl_builder.add_order_column(idx, OrderType::ascending());
             }

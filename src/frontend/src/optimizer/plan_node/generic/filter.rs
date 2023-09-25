@@ -54,7 +54,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        Some(self.input.stream_key().to_vec())
+        Some(self.input.stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {

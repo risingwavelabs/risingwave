@@ -21,7 +21,7 @@ use super::utils::{plan_node_name, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Order;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::PlanRef;
+use crate::{Explain, PlanRef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGroupTopN {
@@ -93,7 +93,10 @@ impl StreamNode for StreamGroupTopN {
             .infer_internal_table_catalog(
                 input.schema(),
                 input.ctx(),
-                input.stream_key(),
+                input.stream_key().expect(&format!(
+                    "should always have a stream key in the stream plan but not, sub plan: {}",
+                    input.explain_to_string()
+                )),
                 self.vnode_col_idx,
             )
             .with_id(state.gen_table_id_wrapped());

@@ -22,6 +22,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::PlanRef;
 use crate::optimizer::property::Order;
+use crate::Explain;
 
 pub(crate) fn derive_columns(
     input_schema: &Schema,
@@ -82,7 +83,16 @@ pub(crate) fn derive_pk(
     columns: &[ColumnCatalog],
 ) -> (Vec<ColumnOrder>, Vec<usize>) {
     // Note(congyi): avoid pk duplication
-    let stream_key = input.stream_key().iter().copied().unique().collect_vec();
+    let stream_key = input
+        .stream_key()
+        .expect(&format!(
+            "should always have a stream key on the top of the stream plan but not, plan: {}",
+            input.explain_to_string()
+        ))
+        .iter()
+        .copied()
+        .unique()
+        .collect_vec();
     let schema = input.schema();
 
     // Assert the uniqueness of column names and IDs, including hidden columns.

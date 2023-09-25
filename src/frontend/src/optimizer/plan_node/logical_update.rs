@@ -44,13 +44,7 @@ pub struct LogicalUpdate {
 impl From<generic::Update<PlanRef>> for LogicalUpdate {
     fn from(core: generic::Update<PlanRef>) -> Self {
         let ctx = core.input.ctx();
-        let schema = if core.returning {
-            core.input.schema().clone()
-        } else {
-            Schema::new(vec![Field::unnamed(DataType::Int64)])
-        };
-        let fd_set = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
+        let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 }

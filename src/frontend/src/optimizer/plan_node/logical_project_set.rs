@@ -30,6 +30,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition, Substitute};
+use crate::Explain;
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
 ///
@@ -363,7 +364,10 @@ impl ToStream for LogicalProjectSet {
             self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
-        let input_pk = input.stream_key();
+        let input_pk = input.stream_key().expect(&format!(
+            "should always have a stream key in the stream plan but not, sub plan: {}",
+            input.explain_to_string()
+        ));
         let i2o = self.core.i2o_col_mapping();
         let col_need_to_add = input_pk
             .iter()

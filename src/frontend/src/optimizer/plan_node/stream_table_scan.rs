@@ -32,7 +32,7 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::TableCatalog;
+use crate::{Explain, TableCatalog};
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -202,7 +202,7 @@ impl Distill for StreamTableScan {
 
         if verbose {
             let pk = IndicesDisplay {
-                indices: self.stream_key(),
+                indices: self.stream_key().unwrap_or_default(),
                 schema: &self.base.schema,
             };
             vec.push(("pk", pk.distill()));
@@ -227,7 +227,15 @@ impl StreamTableScan {
     pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
         use risingwave_pb::stream_plan::*;
 
-        let stream_key = self.base.stream_key.iter().map(|x| *x as u32).collect_vec();
+        let stream_key = self
+            .stream_key()
+            .expect(&format!(
+                "should always have a stream key in the stream plan but not, sub plan: {}",
+                PlanRef::from(self.clone()).explain_to_string()
+            ))
+            .iter()
+            .map(|x| *x as u32)
+            .collect_vec();
 
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.chain_type {

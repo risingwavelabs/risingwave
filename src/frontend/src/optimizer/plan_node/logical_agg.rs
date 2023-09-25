@@ -39,6 +39,7 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, GroupBy, IndexSet, Substitute,
 };
+use crate::Explain;
 
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.
 ///
@@ -222,8 +223,14 @@ impl LogicalAgg {
         // so it obeys consistent hash strategy via [`Distribution::HashShard`].
         let stream_input =
             if *input_dist == Distribution::SomeShard && self.core.must_try_two_phase_agg() {
-                RequiredDist::shard_by_key(stream_input.schema().len(), stream_input.stream_key())
-                    .enforce_if_not_satisfies(stream_input, &Order::any())?
+                RequiredDist::shard_by_key(
+                    stream_input.schema().len(),
+                    stream_input.stream_key().expect(&format!(
+                        "should always have a stream key in the stream plan but not, sub plan: {}",
+                        stream_input.explain_to_string()
+                    )),
+                )
+                .enforce_if_not_satisfies(stream_input, &Order::any())?
             } else {
                 stream_input
             };

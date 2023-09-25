@@ -344,7 +344,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         window_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
         let in_fields = self.input.schema().fields().to_vec();
-        let in_pks = self.input.stream_key().to_vec();
+        let in_pks = self.input.stream_key().unwrap().to_vec();
         let in_append_only = self.input.append_only();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
 

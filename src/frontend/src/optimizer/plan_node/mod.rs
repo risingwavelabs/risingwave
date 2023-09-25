@@ -566,7 +566,15 @@ impl dyn PlanNode {
             identity: self.explain_myself_to_string(),
             node_body: node,
             operator_id: self.id().0 as _,
-            stream_key: self.stream_key().iter().map(|x| *x as u32).collect(),
+            stream_key: self
+                .stream_key()
+                .expect(&format!(
+                    "should always have a stream key in the stream plan but not, sub plan: {}",
+                    self.explain_myself_to_string()
+                ))
+                .iter()
+                .map(|x| *x as u32)
+                .collect(),
             fields: self.schema().to_prost(),
             append_only: self.append_only(),
         }
