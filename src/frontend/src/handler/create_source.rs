@@ -17,6 +17,7 @@ use std::rc::Rc;
 use std::sync::LazyLock;
 
 use anyhow::anyhow;
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -65,6 +66,8 @@ use crate::handler::create_table::{
 use crate::handler::util::{get_connector, is_cdc_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalScan, LogicalSource, ToStream, ToStreamContext};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::PlanRoot;
 use crate::session::SessionImpl;
 use crate::utils::resolve_connection_in_with_option;
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
@@ -1185,9 +1188,9 @@ pub async fn handle_create_source(
         &pk_column_ids,
     )?;
 
-    check_source_schema(&with_properties, row_id_index, &columns)?;
+    check_source_schema(&with_properties, row_id_index.clone(), &columns)?;
 
-    let row_id_index = row_id_index.map(|index| index as _);
+    // let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 
     // resolve privatelink connection for Kafka source
@@ -1201,7 +1204,7 @@ pub async fn handle_create_source(
         schema_id,
         database_id,
         name,
-        row_id_index,
+        row_id_index: row_id_index.map(|idx| idx as u32),
         columns: columns.iter().map(|c| c.to_protobuf()).collect_vec(),
         pk_column_ids,
         properties: with_options.into_inner().into_iter().collect(),
@@ -1222,18 +1225,29 @@ pub async fn handle_create_source(
         let graph = {
             let context = OptimizerContext::from_handler_args(handler_args);
             // cdc source is an append-only source in plain json format
-            let logical_source = LogicalSource::new(
+            let source_node = LogicalSource::new(
                 Some(Rc::new(SourceCatalog::from(&source))),
-                columns,
-                row_id_index.map(|idx| idx as _),
+                columns.clone(),
+                row_id_index.map(|idx| idx),
                 true,
                 false,
                 context.into(),
             )?;
+            // .into();
 
+            // let required_cols = FixedBitSet::with_capacity(columns.len());
+            // let mut plan = PlanRoot::new(
+            //     source_node,
+            //     RequiredDist::PhysicalDist(Distribution::HashShard(vec![row_id_index.unwrap()])),
+            //     Order::any(),
+            //     required_cols,
+            //     vec![],
+            // );
+            //
+            // let stream_plan = plan.gen_optimized_stream_plan(false)?;
             // generate stream graph for cdc source job
-            let stream_node = logical_source.to_stream(&mut ToStreamContext::new(false))?;
-            let mut graph = build_graph(stream_node);
+            let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
+            let mut graph = build_graph(stream_plan);
             // set parallelism to 1
             graph.parallelism = Some(Parallelism { parallelism: 1 });
             graph

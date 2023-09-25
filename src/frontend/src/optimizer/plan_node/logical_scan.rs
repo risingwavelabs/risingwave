@@ -45,17 +45,12 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 pub struct LogicalScan {
     pub base: PlanBase,
     core: generic::Scan,
-    scan_cdc_source: bool,
 }
 
 impl From<generic::Scan> for LogicalScan {
     fn from(core: generic::Scan) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
-        Self {
-            base,
-            core,
-            scan_cdc_source: false,
-        }
+        Self { base, core }
     }
 }
 
@@ -70,16 +65,17 @@ impl LogicalScan {
     pub fn create(
         table_name: String, // explain-only
         is_sys_table: bool,
+        is_cdc_table: bool,
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         for_system_time_as_of_proctime: bool,
         table_cardinality: Cardinality,
-        scan_source: bool,
     ) -> Self {
-        let scan = generic::Scan::new(
+        generic::Scan::new(
             table_name,
             is_sys_table,
+            is_cdc_table,
             (0..table_desc.columns.len()).collect(),
             table_desc,
             indexes,
@@ -88,11 +84,7 @@ impl LogicalScan {
             for_system_time_as_of_proctime,
             table_cardinality,
         )
-        .into();
-        Self {
-            scan_cdc_source: scan_source,
-            ..scan
-        }
+        .into()
     }
 
     pub fn table_name(&self) -> &str {
@@ -101,6 +93,10 @@ impl LogicalScan {
 
     pub fn is_sys_table(&self) -> bool {
         self.core.is_sys_table
+    }
+
+    pub fn is_cdc_table(&self) -> bool {
+        self.core.is_cdc_table
     }
 
     pub fn for_system_time_as_of_proctime(&self) -> bool {
@@ -261,6 +257,7 @@ impl LogicalScan {
         let scan_without_predicate = generic::Scan::new(
             self.table_name().to_string(),
             self.is_sys_table(),
+            self.is_cdc_table(),
             self.required_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.indexes().to_vec(),
@@ -281,6 +278,7 @@ impl LogicalScan {
         generic::Scan::new(
             self.table_name().to_string(),
             self.is_sys_table(),
+            self.is_cdc_table(),
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.indexes().to_vec(),
@@ -296,6 +294,7 @@ impl LogicalScan {
         generic::Scan::new(
             self.table_name().to_string(),
             self.is_sys_table(),
+            self.is_cdc_table(),
             output_col_idx,
             self.core.table_desc.clone(),
             self.indexes().to_vec(),
@@ -394,7 +393,6 @@ impl ExprRewritable for LogicalScan {
         Self {
             base: self.base.clone_with_new_plan_id(),
             core,
-            scan_cdc_source: self.scan_cdc_source,
         }
         .into()
     }
@@ -540,7 +538,7 @@ impl ToStream for LogicalScan {
             )));
         }
         if self.predicate().always_true() {
-            if self.scan_cdc_source {
+            if self.is_cdc_table() {
                 Ok(
                     StreamTableScan::new_with_chain_type(self.core.clone(), ChainType::CdcBackfill)
                         .into(),

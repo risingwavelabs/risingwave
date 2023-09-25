@@ -581,7 +581,7 @@ impl CompleteStreamFragmentGraph {
                             }
                         });
 
-                        let source_fragment_id = GlobalFragmentId::new(source_fragment.fragment_id);
+                        let source_frag_id = GlobalFragmentId::new(source_fragment.fragment_id);
 
                         // extract `_rw_table_name` column index
                         let rw_table_name_index = {
@@ -594,7 +594,7 @@ impl CompleteStreamFragmentGraph {
                                 .expect("table name column not found")
                         };
 
-                        tracing::debug!(target: "cdc_table", ?full_table_name, ?source_fragment_id, ?rw_table_name_index, ?output_columns, "chain with upstream source fragment");
+                        tracing::debug!(target: "cdc_table", ?full_table_name, ?source_frag_id, ?rw_table_name_index, ?output_columns, "chain with upstream source fragment");
 
                         let edge = StreamFragmentEdge {
                             id: EdgeId::UpstreamExternal {
@@ -611,14 +611,14 @@ impl CompleteStreamFragmentGraph {
                         };
 
                         extra_downstreams
-                            .entry(source_fragment_id)
+                            .entry(source_frag_id)
                             .or_insert_with(HashMap::new)
                             .try_insert(id, edge.clone())
                             .unwrap();
                         extra_upstreams
                             .entry(id)
                             .or_insert_with(HashMap::new)
-                            .try_insert(source_fragment_id, edge)
+                            .try_insert(source_frag_id, edge)
                             .unwrap();
                     } else {
                         let mview_fragment = upstream_mview_fragments
@@ -686,6 +686,14 @@ impl CompleteStreamFragmentGraph {
                     .into_values()
                     .map(|f| (GlobalFragmentId::new(f.fragment_id), f)),
             );
+
+            if let Some(up_source_fragments) = upstream_source_fragments {
+                existing_fragments.extend(
+                    up_source_fragments
+                        .into_values()
+                        .map(|f| (GlobalFragmentId::new(f.fragment_id), f)),
+                );
+            }
         }
 
         if let Some(FragmentGraphDownstreamContext {

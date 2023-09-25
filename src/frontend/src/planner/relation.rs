@@ -59,12 +59,12 @@ impl Planner {
         Ok(LogicalScan::create(
             sys_table.sys_table_catalog.name().to_string(),
             true,
+            false,
             Rc::new(sys_table.sys_table_catalog.table_desc()),
             vec![],
             self.ctx(),
             false,
             Cardinality::unknown(),
-            false,
         )
         .into())
     }
@@ -72,6 +72,7 @@ impl Planner {
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
+            false,
             false,
             Rc::new(base_table.table_catalog.table_desc()),
             base_table
@@ -82,7 +83,6 @@ impl Planner {
             self.ctx(),
             base_table.for_system_time_as_of_proctime,
             base_table.table_catalog.cardinality,
-            false,
         )
         .into())
     }

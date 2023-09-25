@@ -56,7 +56,10 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             .map(|&i| i as usize)
             .collect_vec();
 
-        let schema = if matches!(node.chain_type(), ChainType::Backfill) {
+        let schema = if matches!(
+            node.chain_type(),
+            ChainType::Backfill | ChainType::CdcBackfill
+        ) {
             Schema::new(
                 output_indices
                     .iter()
@@ -110,13 +113,13 @@ impl ExecutorBuilder for ChainExecutorBuilder {
 
                 let table_desc: &StorageTableDesc = node.get_table_desc()?;
                 // last column may be `_rw_offset`
-                let schema = Schema::new(
-                    table_desc
-                        .columns
-                        .iter()
-                        .map(|col| Field::from(col))
-                        .collect_vec(),
-                );
+                // let schema = Schema::new(
+                //     table_desc
+                //         .columns
+                //         .iter()
+                //         .map(|col| Field::from(col))
+                //         .collect_vec(),
+                // );
 
                 let table_type = ExternalTableType::from_properties(&properties);
                 // TODO: use fixed properties for test, then pass the properties via barrier

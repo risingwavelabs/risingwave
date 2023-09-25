@@ -513,6 +513,7 @@ pub(crate) mod tests {
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
             false,
+            false,
             Rc::new(TableDesc {
                 table_id,
                 table_name: None,
@@ -535,7 +536,6 @@ pub(crate) mod tests {
             ctx,
             false,
             Cardinality::unknown(),
-            false,
         )
         .to_batch()
         .unwrap()

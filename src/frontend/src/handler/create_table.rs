@@ -812,22 +812,21 @@ fn gen_create_table_plan_for_cdc_source(
 
     tracing::debug!(target: "cdc_table", ?external_table_desc, "create table");
 
-    // TODO: we'll parse the information on Meta to construct the fragment plan
-    let scan_external: PlanRef = LogicalScan::create(
+    let logical_scan = LogicalScan::create(
         source_name,
+        false,
         false,
         Rc::new(external_table_desc),
         vec![],
         context.clone(),
         false,
         Cardinality::unknown(),
-        false,
-    )
-    .into();
+    );
 
+    let scan_node: PlanRef = logical_scan.into();
     let required_cols = FixedBitSet::with_capacity(columns.len());
     let mut plan_root = PlanRoot::new(
-        scan_external,
+        scan_node,
         RequiredDist::Any,
         Order::any(),
         required_cols,

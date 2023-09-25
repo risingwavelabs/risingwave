@@ -160,7 +160,7 @@ impl ActorBuilder {
 
             // "Leaf" node `Chain`.
             NodeBody::Chain(chain_node) => {
-                let cdc_backfill = chain_node.chain_type == ChainType::Backfill as i32;
+                let cdc_backfill = chain_node.chain_type == ChainType::CdcBackfill as i32;
 
                 let input = stream_node.get_input();
                 assert_eq!(input.len(), 2);
@@ -181,13 +181,14 @@ impl ActorBuilder {
                 let upstream_actor_id = upstreams.actors.as_global_ids();
                 assert_eq!(upstream_actor_id.len(), 1);
 
-                let cdc_upstream =
-                    if let Some(NodeBody::Merge(merge_node)) = merge_node.node_body.as_ref() {
-                        merge_node.cdc_upstream
-                    } else {
-                        false
-                    };
+                // let cdc_upstream =
+                //     if let Some(NodeBody::Merge(merge_node)) = merge_node.node_body.as_ref() {
+                //         merge_node.cdc_upstream
+                //     } else {
+                //         false
+                //     };
 
+                let cdc_upstream = false;
                 let chain_input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {

@@ -291,7 +291,7 @@ impl PlanRoot {
     }
 
     /// Generate optimized stream plan
-    fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
+    pub fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
         let _explain_trace = ctx.is_explain_trace();
 
@@ -386,6 +386,8 @@ impl PlanRoot {
                     ctx.trace(plan.explain_to_string());
                 }
 
+                tracing::info!("Logical Rewrite For Stream: {}", plan.explain_to_string());
+
                 self.required_dist =
                     out_col_change.rewrite_required_distribution(&self.required_dist);
                 self.required_order = out_col_change
@@ -405,6 +407,7 @@ impl PlanRoot {
             ctx.trace("To Stream Plan:");
             ctx.trace(plan.explain_to_string());
         }
+        tracing::info!("To Stream Plan: {}", plan.explain_to_string());
         Ok(plan)
     }
 
