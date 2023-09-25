@@ -88,7 +88,7 @@ impl LogicalApply {
         let schema = join_core.schema();
         let stream_key = join_core.stream_key();
         let functional_dependency = match &stream_key {
-            Some(stream_key) => FunctionalDependencySet::with_key(schema.len(), &stream_key),
+            Some(stream_key) => FunctionalDependencySet::with_key(schema.len(), stream_key),
             None => FunctionalDependencySet::new(schema.len()),
         };
         let (left, right, on, join_type, _output_indices) = join_core.decompose();

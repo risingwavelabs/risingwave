@@ -140,10 +140,8 @@ impl ToBatch for LogicalUnion {
 impl ToStream for LogicalUnion {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         // TODO: use round robin distribution instead of using hash distribution of all inputs.
-        let dist = RequiredDist::hash_shard(self.base.stream_key().expect(&format!(
-            "should always have a stream key in the stream plan but not, sub plan: {}",
-            PlanRef::from(self.clone()).explain_to_string()
-        )));
+        let dist = RequiredDist::hash_shard(self.base.stream_key().unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
+            PlanRef::from(self.clone()).explain_to_string())));
         let new_inputs: Result<Vec<_>> = self
             .inputs()
             .iter()

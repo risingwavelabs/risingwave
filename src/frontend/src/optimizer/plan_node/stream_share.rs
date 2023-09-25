@@ -99,10 +99,8 @@ impl StreamShare {
                     operator_id: self.id().0 as _,
                     stream_key: self
                         .stream_key()
-                        .expect(&format!(
-                        "should always have a stream key in the stream plan but not, sub plan: {}",
-                       PlanRef::from(self.clone()).explain_to_string()
-                    ))
+                        .unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
+                       PlanRef::from(self.clone()).explain_to_string()))
                         .iter()
                         .map(|x| *x as u32)
                         .collect(),

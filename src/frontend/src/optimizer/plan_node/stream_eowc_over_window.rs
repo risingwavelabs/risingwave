@@ -101,10 +101,8 @@ impl StreamEowcOverWindow {
             tbl_builder.add_order_column(order_key_index, OrderType::ascending());
             order_cols.insert(order_key_index);
         }
-        for idx in self.logical.input.stream_key().expect(&format!(
-            "should always have a stream key in the stream plan but not, sub plan: {}",
-            self.logical.input.explain_to_string()
-        )) {
+        for idx in self.logical.input.stream_key().unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
+            self.logical.input.explain_to_string())) {
             if !order_cols.contains(idx) {
                 tbl_builder.add_order_column(*idx, OrderType::ascending());
                 order_cols.insert(*idx);

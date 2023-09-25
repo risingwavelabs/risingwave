@@ -36,7 +36,7 @@ impl CardinalityVisitor {
         input_card: Cardinality,
         eq_set: HashSet<usize>,
     ) -> Cardinality {
-        let mut unique_keys: Vec<HashSet<_>> = if let Some(stream_key) = input.stream_key() {
+        let mut unique_keys: Vec<HashSet<_>> = if let Some(_stream_key) = input.stream_key() {
             vec![input.stream_key().unwrap().iter().copied().collect()]
         } else {
             vec![]

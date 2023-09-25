@@ -225,10 +225,8 @@ impl LogicalAgg {
             if *input_dist == Distribution::SomeShard && self.core.must_try_two_phase_agg() {
                 RequiredDist::shard_by_key(
                     stream_input.schema().len(),
-                    stream_input.stream_key().expect(&format!(
-                        "should always have a stream key in the stream plan but not, sub plan: {}",
-                        stream_input.explain_to_string()
-                    )),
+                    stream_input.stream_key().unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
+                        stream_input.explain_to_string())),
                 )
                 .enforce_if_not_satisfies(stream_input, &Order::any())?
             } else {
