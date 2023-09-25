@@ -48,6 +48,7 @@ pub struct CacheRefillMetrics {
 
     pub data_refill_filtered_total: GenericCounter<AtomicU64>,
     pub data_refill_attempts_total: GenericCounter<AtomicU64>,
+    pub data_refill_started_total: GenericCounter<AtomicU64>,
     pub meta_refill_attempts_total: GenericCounter<AtomicU64>,
 
     pub refill_queue_total: IntGauge,
@@ -83,6 +84,9 @@ impl CacheRefillMetrics {
         let data_refill_attempts_total = refill_total
             .get_metric_with_label_values(&["data", "attempts"])
             .unwrap();
+        let data_refill_started_total = refill_total
+            .get_metric_with_label_values(&["data", "started"])
+            .unwrap();
         let meta_refill_attempts_total = refill_total
             .get_metric_with_label_values(&["meta", "attempts"])
             .unwrap();
@@ -102,6 +106,7 @@ impl CacheRefillMetrics {
             meta_refill_success_duration,
             data_refill_filtered_total,
             data_refill_attempts_total,
+            data_refill_started_total,
             meta_refill_attempts_total,
             refill_queue_total,
         }
@@ -236,23 +241,22 @@ impl CacheRefillTask {
         context: &CacheRefillContext,
         delta: &SstDeltaInfo,
     ) -> HummockResult<Vec<TableHolder>> {
-        let stats = StoreLocalStatistic::default();
         let tasks = delta
             .insert_sst_infos
             .iter()
             .map(|info| async {
+                let mut stats = StoreLocalStatistic::default();
                 GLOBAL_CACHE_REFILL_METRICS.meta_refill_attempts_total.inc();
 
                 let now = Instant::now();
-                let res = context.sstable_store.sstable_syncable(info, &stats).await;
+                let res = context.sstable_store.sstable(info, &mut stats).await;
                 GLOBAL_CACHE_REFILL_METRICS
                     .meta_refill_success_duration
                     .observe(now.elapsed().as_secs_f64());
                 res
             })
             .collect_vec();
-        let res = try_join_all(tasks).await?;
-        let holders = res.into_iter().map(|(holder, _, _)| holder).collect_vec();
+        let holders = try_join_all(tasks).await?;
         Ok(holders)
     }
 
@@ -290,9 +294,12 @@ impl CacheRefillTask {
         let mut tasks = vec![];
         for sst_info in &holders {
             let task = async move {
+                GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
+
                 let permit = context.concurrency.acquire().await.unwrap();
 
-                GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
+                GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
+
                 match context
                     .sstable_store
                     .fill_data_file_cache(sst_info.value())

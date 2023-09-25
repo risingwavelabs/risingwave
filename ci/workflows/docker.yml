@@ -6,6 +6,7 @@ auto-retry: &auto-retry
 
 steps:
   - label: "docker-build-push: amd64"
+    if: build.env("SKIP_TARGET_AMD64") != "true"
     command: "ci/scripts/docker.sh"
     key: "build-amd64"
     plugins:
@@ -18,6 +19,7 @@ steps:
     retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
+    if: build.env("SKIP_TARGET_AARCH64") != "true"
     command: "ci/scripts/docker.sh"
     key: "build-aarch64"
     plugins:
@@ -44,7 +46,7 @@ steps:
             DOCKER_TOKEN: docker-token
     retry: *auto-retry
 
-  - label: "release"
+  - label: "pre build binary"
     command: "ci/scripts/release.sh"
     plugins:
       - seek-oss/aws-sm#v2.3.1:

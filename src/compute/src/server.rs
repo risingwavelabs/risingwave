@@ -209,7 +209,7 @@ pub async fn compute_node_serve(
     observer_manager.start().await;
 
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
-    if let Some(storage) = state_store.as_hummock_trait() {
+    if let Some(storage) = state_store.as_hummock() {
         extra_info_sources.push(storage.sstable_object_id_manager().clone());
         if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
@@ -222,7 +222,6 @@ pub async fn compute_node_serve(
                 compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-                filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
                 memory_limiter,
 
                 task_progress_manager: Default::default(),
@@ -234,6 +233,7 @@ pub async fn compute_node_serve(
                 compactor_context,
                 hummock_meta_client.clone(),
                 storage.sstable_object_id_manager().clone(),
+                storage.filter_key_extractor_manager().clone(),
             );
             sub_tasks.push((handle, shutdown_sender));
         }
@@ -287,7 +287,7 @@ pub async fn compute_node_serve(
     let memory_mgr = GlobalMemoryManager::new(
         streaming_metrics.clone(),
         total_memory_bytes,
-        config.server.auto_dump_heap_profile.clone(),
+        config.server.heap_profiling.clone(),
     );
     // Run a background memory monitor
     tokio::spawn(memory_mgr.clone().run(
@@ -372,7 +372,11 @@ pub async fn compute_node_serve(
     let exchange_srv =
         ExchangeServiceImpl::new(batch_mgr.clone(), stream_mgr.clone(), exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
-    let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), grpc_await_tree_reg.clone());
+    let monitor_srv = MonitorServiceImpl::new(
+        stream_mgr.clone(),
+        grpc_await_tree_reg.clone(),
+        config.server.clone(),
+    );
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
     let health_srv = HealthServiceImpl::new();
 

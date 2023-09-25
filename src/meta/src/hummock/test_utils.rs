@@ -114,10 +114,15 @@ pub async fn add_test_tables(
             .unwrap();
         assert_eq!(compactor.context_id(), context_id);
     }
-    compact_task.sorted_output_ssts = test_tables_2.clone();
-    compact_task.set_task_status(TaskStatus::Success);
+
     let ret = hummock_manager
-        .report_compact_task(&mut compact_task, None)
+        .report_compact_task_for_test(
+            compact_task.task_id,
+            Some(compact_task),
+            TaskStatus::Success,
+            test_tables_2.clone(),
+            None,
+        )
         .await
         .unwrap();
     assert!(ret);

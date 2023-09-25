@@ -805,6 +805,16 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-pulsar-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
   hummock-trace:
     config-path: src/config/hummock-trace.toml
     steps:

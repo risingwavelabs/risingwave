@@ -19,7 +19,6 @@ use async_nats::jetstream::context::Context;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
-use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -85,7 +84,7 @@ impl Sink for NatsSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = NatsSinkWriter;
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Nats(anyhow!(
                 "Nats sink only support append-only mode"
