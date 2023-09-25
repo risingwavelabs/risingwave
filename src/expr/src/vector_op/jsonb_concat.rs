@@ -41,11 +41,21 @@ use serde_json::{json, Value};
 /// SELECT '1'::jsonb || '2'::jsonb;
 /// ----
 /// [1, 2]
+/// 
+/// query T
+/// SELECT '[1,2]'::jsonb || NULL::jsonb;
+/// ----
+/// NULL
+/// 
+/// query T
+/// SELECT NULL::jsonb || '[1,2]'::jsonb;
+/// ----
+/// NULL
 /// ```
 #[function("jsonb_cat(jsonb, jsonb) -> jsonb")]
-pub fn jsonb_cat(left: JsonbRef<'_>, right: JsonbRef<'_>) -> JsonbVal {
-    let left_val = left.value().clone();
-    let right_val = right.value().clone();
+pub fn jsonb_cat(left: Option<JsonbRef<'_>>, right: Option<JsonbRef<'_>>) -> JsonbVal {
+    let left_val = left.map_or(Value::Null,|v| v.value().clone());
+    let right_val = right.map_or(Value::Null,|v| v.value().clone());
     match (left_val, right_val) {
         // left and right are object based.
         // This would have left:{'a':1}, right:{'b':2} -> {'a':1,'b':2}
@@ -65,9 +75,19 @@ pub fn jsonb_cat(left: JsonbRef<'_>, right: JsonbRef<'_>) -> JsonbVal {
         // One operand is an array, and the other is a single element.
         // This would insert the non-array value as another element into the array
         // Eg left:[1,2] right: {'a':1} -> [1,2,{'a':1}]
-        (Value::Array(mut left_arr), single_val) | (single_val, Value::Array(mut left_arr)) => {
+        (Value::Array(mut left_arr), single_val) 
+        | (single_val, Value::Array(mut left_arr))  
+        if single_val != Value::Null => {
             left_arr.push(single_val);
             JsonbVal::from(Value::Array(left_arr))
+        }
+
+        // Either left/right is None
+        // This return a None value
+        // This would have left:[1,2], right:None -> None
+        (Value::Null, _) 
+        | (_, Value::Null) => {
+            JsonbVal::from(Value::Null)
         }
 
         // Both are non-array inputs.

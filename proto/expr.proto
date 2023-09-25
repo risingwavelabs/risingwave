@@ -206,7 +206,7 @@ message ExprNode {
     HEX_TO_INT256 = 560;
 
     // Jsonb functions
-    JSONB_CAT = 575;
+    
 
     // jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb
     JSONB_ACCESS_INNER = 600;
@@ -215,6 +215,7 @@ message ExprNode {
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
+    JSONB_CAT = 605;
 
     // Non-pure functions below (> 1000)
     // ------------------------
