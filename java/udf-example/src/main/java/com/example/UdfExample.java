@@ -41,7 +41,7 @@ public class UdfExample {
             server.addFunction("hex_to_dec", new HexToDec());
             server.addFunction("array_access", new ArrayAccess());
             server.addFunction("jsonb_access", new JsonbAccess());
-            server.addFunction("jsonb_cat", new JsonbCat());
+            server.addFunction("jsonb_concat", new JsonbConcat());
             server.addFunction("jsonb_array_identity", new JsonbArrayIdentity());
             server.addFunction("jsonb_array_struct_identity", new JsonbArrayStructIdentity());
             server.addFunction("return_all", new ReturnAll());
@@ -136,7 +136,7 @@ public class UdfExample {
         }
     }
 
-    public static class JsonbCat implements ScalarFunction {
+    public static class JsonbConcat implements ScalarFunction {
         public @DataTypeHint("JSONB") String eval(@DataTypeHint("JSONB[]") String[] jsons) {
             if (jsons == null) {
                 return null;
