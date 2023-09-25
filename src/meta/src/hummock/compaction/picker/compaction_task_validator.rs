@@ -108,13 +108,13 @@ impl CompactionTaskValidationRule for TierCompactionTaskValidationRule {
                 * self.config.level0_overlapping_sub_level_compact_level_count as u64,
         );
 
-        let waiting_enough_files = input.select_input_size < max_compaction_bytes;
-
         // If waiting_enough_files is not satisfied, we will raise the priority of the number of
         // levels to ensure that we can merge as many sub_levels as possible
         let tier_sub_level_compact_level_count =
             self.config.level0_overlapping_sub_level_compact_level_count as usize;
-        if input.input_levels.len() < tier_sub_level_compact_level_count && waiting_enough_files {
+        if input.input_levels.len() < tier_sub_level_compact_level_count
+            && input.select_input_size < max_compaction_bytes
+        {
             stats.skip_by_count_limit += 1;
             return false;
         }
