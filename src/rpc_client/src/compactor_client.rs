@@ -106,8 +106,8 @@ impl GrpcCompactorProxyClient {
     }
 
     async fn connect_to_endpoint(&self) -> Channel {
-        let endpoint_str: &'static str = Box::leak(self.endpoint.clone().into_boxed_str());
-        let endpoint = Endpoint::from_static(endpoint_str);
+        let endpoint =
+            Endpoint::from_shared(self.endpoint.clone()).expect("Fail to construct tonic Endpoint");
         endpoint
             .http2_keep_alive_interval(Duration::from_secs(ENDPOINT_KEEP_ALIVE_INTERVAL_SEC))
             .keep_alive_timeout(Duration::from_secs(ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
