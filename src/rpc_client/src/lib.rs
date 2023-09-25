@@ -58,7 +58,7 @@ mod sink_coordinate_client;
 mod stream_client;
 mod tracing;
 
-pub use compactor_client::CompactorClient;
+pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
 pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
