@@ -25,16 +25,16 @@ use serde_json::{json, Map, Value};
 use super::{Result, RowEncoder, SerTo, TimestampHandlingMode};
 use crate::sink::SinkError;
 
-pub struct JsonEncoder<'a> {
-    schema: &'a Schema,
-    col_indices: Option<&'a [usize]>,
+pub struct JsonEncoder {
+    schema: Schema,
+    col_indices: Option<Vec<usize>>,
     timestamp_handling_mode: TimestampHandlingMode,
 }
 
-impl<'a> JsonEncoder<'a> {
+impl JsonEncoder {
     pub fn new(
-        schema: &'a Schema,
-        col_indices: Option<&'a [usize]>,
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
         timestamp_handling_mode: TimestampHandlingMode,
     ) -> Self {
         Self {
@@ -45,15 +45,15 @@ impl<'a> JsonEncoder<'a> {
     }
 }
 
-impl<'a> RowEncoder for JsonEncoder<'a> {
+impl RowEncoder for JsonEncoder {
     type Output = Map<String, Value>;
 
     fn schema(&self) -> &Schema {
-        self.schema
+        &self.schema
     }
 
     fn col_indices(&self) -> Option<&[usize]> {
-        self.col_indices
+        self.col_indices.as_ref().map(Vec::as_ref)
     }
 
     fn encode_cols(
