@@ -41,16 +41,11 @@ impl MinioService {
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &MinioConfig) -> Result<()> {
-        // let cert_file_content = fs::read_to_string("/Users/wangcongyi/singularity/risingwave/public.crt")?;
-        // let cert_file_content2= fs::read_to_string("/Users/wangcongyi/singularity/risingwave/public.crt")?;
-        // let ab = fs::read_to_string("/Users/wangcongyi/singularity/risingwave/private.key")?;
         cmd.arg("server")
             .arg("--address")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--console-address")
             .arg(format!("{}:{}", config.listen_address, config.console_port))
-            // .arg("--protocol")
-            // .arg("=https")
             .env("MINIO_ROOT_USER", &config.root_user)
             .env("MINIO_ROOT_PASSWORD", &config.root_password)
             .env("MINIO_PROMETHEUS_AUTH_TYPE", "public")
@@ -93,8 +88,6 @@ impl Task for MinioService {
         let mut cmd = self.minio()?;
 
         Self::apply_command_args(&mut cmd, &self.config)?;
-
-        println!("command = {:?}", cmd);
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
 
