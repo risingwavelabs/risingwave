@@ -36,7 +36,7 @@ pub struct PlanBase {
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     /// the pk indices of the PlanNode's output, a empty stream key vec means there is no stream key
-    pub stream_key: Vec<usize>,
+    pub stream_key: Option<Vec<usize>>,
     /// The order property of the PlanNode's output, store an `&Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
     pub order: Order,
@@ -59,8 +59,8 @@ impl generic::GenericPlanRef for PlanBase {
         &self.schema
     }
 
-    fn stream_key(&self) -> &[usize] {
-        &self.stream_key
+    fn stream_key(&self) -> Option<&[usize]> {
+        self.stream_key.as_deref()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -233,8 +233,8 @@ macro_rules! impl_base_delegate {
                 pub fn schema(&self) -> &Schema {
                     &self.plan_base().schema
                 }
-                pub fn stream_key(&self) -> &[usize] {
-                    &self.plan_base().stream_key
+                pub fn stream_key(&self) -> Option<&[usize]> {
+                    &self.plan_base().stream_key()
                 }
                 pub fn order(&self) -> &Order {
                     &self.plan_base().order

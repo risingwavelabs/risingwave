@@ -435,8 +435,8 @@ impl GenericPlanRef for PlanRef {
         &self.plan_base().schema
     }
 
-    fn stream_key(&self) -> &[usize] {
-        &self.plan_base().stream_key
+    fn stream_key(&self) -> Option<&[usize]> {
+        self.plan_base().stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -514,8 +514,8 @@ impl dyn PlanNode {
         &self.plan_base().schema
     }
 
-    pub fn stream_key(&self) -> &[usize] {
-        &self.plan_base().stream_key
+    pub fn stream_key(&self) -> Option<&[usize]> {
+        self.plan_base().stream_key()
     }
 
     pub fn order(&self) -> &Order {
