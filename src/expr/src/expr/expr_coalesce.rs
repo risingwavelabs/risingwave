@@ -44,7 +44,7 @@ impl Expression for CoalesceExpression {
         let mut selection: Vec<Option<usize>> = vec![None; len];
         let mut children_array = Vec::with_capacity(self.children.len());
         for (child_idx, child) in self.children.iter().enumerate() {
-            let res = child.eval_checked(&input).await?;
+            let res = child.eval(&input).await?;
             let res_bitmap = res.null_bitmap();
             let orig_vis = input.visibility();
             for pos in orig_vis.bitand(res_bitmap).iter_ones() {

@@ -189,6 +189,9 @@ impl StreamChunk {
     }
 
     pub fn to_protobuf(&self) -> PbStreamChunk {
+        if !self.is_compacted() {
+            return self.clone().compact().to_protobuf();
+        }
         PbStreamChunk {
             cardinality: self.cardinality() as u32,
             ops: self.ops.iter().map(|op| op.to_protobuf() as i32).collect(),
