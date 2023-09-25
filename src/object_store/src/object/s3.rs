@@ -617,8 +617,7 @@ impl S3ObjectStore {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
         let (secret_access_key, rest) = rest.split_once('@').unwrap();
-        let (address, rest) = rest.split_once('/').unwrap();
-        let (bucket, is_https_endpoint) = rest.split_once('#').unwrap();
+        let (address, bucket) = rest.split_once('/').unwrap();
         #[cfg(madsim)]
         let builder = aws_sdk_s3::config::Builder::new();
         #[cfg(not(madsim))]
@@ -626,26 +625,15 @@ impl S3ObjectStore {
             aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
                 .force_path_style(true)
                 .http_connector(Self::new_http_connector(&S3ObjectStoreConfig::default()));
-        let config = match is_https_endpoint {
-            "true" => builder
-                .region(Region::new("custom"))
-                .endpoint_url(format!("https://{}", address))
-                .credentials_provider(Credentials::from_keys(
-                    access_key_id,
-                    secret_access_key,
-                    None,
-                ))
-                .build(),
-            _ => builder
-                .region(Region::new("custom"))
-                .endpoint_url(format!("http://{}", address))
-                .credentials_provider(Credentials::from_keys(
-                    access_key_id,
-                    secret_access_key,
-                    None,
-                ))
-                .build(),
-        };
+        let config = builder
+            .region(Region::new("custom"))
+            .endpoint_url(address)
+            .credentials_provider(Credentials::from_keys(
+                access_key_id,
+                secret_access_key,
+                None,
+            ))
+            .build();
 
         let client = Client::from_conf(config);
         Self {

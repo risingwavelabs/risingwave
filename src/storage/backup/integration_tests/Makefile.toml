@@ -12,7 +12,7 @@ BACKUP_TEST_BACKUP_RESTORE="${BUILD_BIN}/backup-restore" \
 BACKUP_TEST_MCLI="${PREFIX_BIN}/mcli" \
 BACKUP_TEST_MCLI_CONFIG="${PREFIX_CONFIG}/mcli" \
 BACKUP_TEST_RW_ALL_IN_ONE="${BUILD_BIN}/risingwave" \
-RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001#false" \
+RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001" \
 RW_META_ADDR="http://127.0.0.1:5690" \
 bash "${test_root}/run_all.sh"
 """

@@ -116,7 +116,7 @@ if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
     chmod +x ./target/debug/delete-range-test
 
     config_path=".risingwave/config/risingwave.toml"
-    ./target/debug/delete-range-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001#false --config-path "${config_path}"
+    ./target/debug/delete-range-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@http://127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"
     cluster_stop
@@ -132,7 +132,7 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     # We should ingest about 100 version deltas before the test
     echo "--- Wait for data ingestion"
 
-    export RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001#false"
+    export RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@http://127.0.0.1:9301/hummock001"
     export RW_META_ADDR="http://127.0.0.1:5690"
 
     # Poll the current version id until we have around 100 version deltas
@@ -155,7 +155,7 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     # Use the config of ci-compaction-test for replay.
     config_path=".risingwave/config/risingwave.toml"
     RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    ./target/debug/compaction-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001#false --config-path "${config_path}"
+    ./target/debug/compaction-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@http://127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"
     cluster_stop
@@ -172,7 +172,7 @@ if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     BACKUP_TEST_MCLI=".risingwave/bin/mcli" \
     BACKUP_TEST_MCLI_CONFIG=".risingwave/config/mcli" \
     BACKUP_TEST_RW_ALL_IN_ONE="target/debug/risingwave" \
-    RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001#false" \
+    RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@http://127.0.0.1:9301/hummock001" \
     RW_META_ADDR="http://127.0.0.1:5690" \
     RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
     bash "${test_root}/run_all.sh"

@@ -101,15 +101,24 @@ pub fn add_hummock_backend(
             }
         }
         ([minio], [], []) => {
-            cmd.arg("--state-store").arg(format!(
-                "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}#{minio_is_https_endpoint}",
-                hummock_user = minio.root_user,
-                hummock_password = minio.root_password,
-                hummock_bucket = minio.hummock_bucket,
-                minio_addr = minio.address,
-                minio_port = minio.port,
-                minio_is_https_endpoint = minio.is_https_endpoint,
-            ));
+            match minio.is_https_endpoint{
+                true => cmd.arg("--state-store").arg(format!(
+                    "hummock+minio://{hummock_user}:{hummock_password}@https://{minio_addr}:{minio_port}/{hummock_bucket}",
+                    hummock_user = minio.root_user,
+                    hummock_password = minio.root_password,
+                    hummock_bucket = minio.hummock_bucket,
+                    minio_addr = minio.address,
+                    minio_port = minio.port,
+                )),
+                false => cmd.arg("--state-store").arg(format!(
+                    "hummock+minio://{hummock_user}:{hummock_password}@http://{minio_addr}:{minio_port}/{hummock_bucket}",
+                    hummock_user = minio.root_user,
+                    hummock_password = minio.root_password,
+                    hummock_bucket = minio.hummock_bucket,
+                    minio_addr = minio.address,
+                    minio_port = minio.port,
+                )),
+            };
             (true, true)
         }
         ([], [aws_s3], []) => {
