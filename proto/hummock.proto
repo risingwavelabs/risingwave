@@ -439,6 +439,26 @@ message SubscribeCompactionEventResponse {
   uint64 create_at = 7;
 }
 
+message ReportCompactionTaskRequest {
+  // ReportTask provides the compact task to report to the meta.
+  message ReportTask {
+    CompactTask compact_task = 2;
+    map<uint32, TableStats> table_stats_change = 3;
+  }
+  // HeartBeat provides the progress status of all tasks on the Compactor.
+  message HeartBeat {
+    repeated CompactTaskProgress progress = 2;
+  }
+  oneof event {
+    ReportTask report_task = 1;
+    HeartBeat heart_beat = 2;
+  }
+}
+
+message ReportCompactionTaskResponse {
+  common.Status status = 1;
+}
+
 message ValidationTask {
   repeated SstableInfo sst_infos = 1;
   map<uint64, uint32> sst_id_to_worker_id = 2;
@@ -685,6 +705,7 @@ service HummockManagerService {
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
   rpc RiseCtlListCompactionStatus(RiseCtlListCompactionStatusRequest) returns (RiseCtlListCompactionStatusResponse);
   rpc SubscribeCompactionEvent(stream SubscribeCompactionEventRequest) returns (stream SubscribeCompactionEventResponse);
+  rpc ReportCompactionTask(ReportCompactionTaskRequest) returns (ReportCompactionTaskResponse);
   rpc ListBranchedObject(ListBranchedObjectRequest) returns (ListBranchedObjectResponse);
   rpc ListActiveWriteLimit(ListActiveWriteLimitRequest) returns (ListActiveWriteLimitResponse);
   rpc ListHummockMetaConfig(ListHummockMetaConfigRequest) returns (ListHummockMetaConfigResponse);

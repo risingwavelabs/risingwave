@@ -658,6 +658,16 @@ impl AsyncStackTraceOption {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, ValueEnum)]
+pub enum CompactorMode {
+    #[default]
+    #[clap(alias = "dedicated")]
+    Dedicated,
+
+    #[clap(alias = "shared")]
+    Shared,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct HeapProfilingConfig {
     /// Enable to auto dump heap profile when memory usage is high
