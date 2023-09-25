@@ -348,7 +348,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();
             while let Some(result) = buffered.next().await {
                 let (key, agg_group) = result?;
-                vars.dirty_groups.insert(key, Box::new(agg_group));
+                let none = vars.dirty_groups.insert(key, Box::new(agg_group));
+                debug_assert!(none.is_none());
             }
         }
         Ok(())
