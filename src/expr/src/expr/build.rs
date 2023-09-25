@@ -22,13 +22,12 @@ use risingwave_pb::expr::ExprNode;
 use super::expr_array_transform::ArrayTransformExpression;
 use super::expr_case::CaseExpression;
 use super::expr_coalesce::CoalesceExpression;
-use super::expr_concat_ws::ConcatWsExpression;
 use super::expr_field::FieldExpression;
 use super::expr_in::InExpression;
-use super::expr_nested_construct::NestedConstructExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
+use super::wrapper::Checked;
 use crate::expr::{
     BoxedExpression, Expression, InputRefExpression, LiteralExpression, TryFromExprNodeBoxed,
 };
@@ -37,7 +36,7 @@ use crate::sig::FuncSigDebug;
 use crate::{bail, ExprError, Result};
 
 /// Build an expression from protobuf.
-pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_from_prost_inner(prost: &ExprNode) -> Result<BoxedExpression> {
     use PbType as E;
 
     let func_call = match prost.get_rex_node()? {
@@ -56,10 +55,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         E::In => InExpression::try_from_boxed(prost),
         E::Case => CaseExpression::try_from_boxed(prost),
         E::Coalesce => CoalesceExpression::try_from_boxed(prost),
-        E::ConcatWs => ConcatWsExpression::try_from_boxed(prost),
         E::Field => FieldExpression::try_from_boxed(prost),
-        E::Array => NestedConstructExpression::try_from_boxed(prost),
-        E::Row => NestedConstructExpression::try_from_boxed(prost),
         E::Vnode => VnodeExpression::try_from_boxed(prost),
 
         _ => {
@@ -73,6 +69,15 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             build_func(func_type, ret_type, children)
         }
     }
+}
+
+/// Build an expression from protobuf with wrappers.
+pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
+    let expr = build_from_prost_inner(prost)?;
+
+    let checked = Checked(expr);
+
+    Ok(checked.boxed())
 }
 
 /// Build an expression in `FuncCall` variant.

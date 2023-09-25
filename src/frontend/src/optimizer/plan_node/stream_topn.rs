@@ -43,7 +43,7 @@ impl StreamTopN {
         let mut base =
             PlanBase::new_stream_with_logical(&logical, dist, false, false, watermark_columns);
         if let Some(stream_key) = stream_key {
-            base.logical_pk = stream_key;
+            base.stream_key = stream_key;
         }
         StreamTopN { base, logical }
     }
@@ -86,7 +86,7 @@ impl PlanTreeNodeUnary for StreamTopN {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut logical = self.logical.clone();
         logical.input = input;
-        Self::new_inner(logical, Some(self.logical_pk().to_vec()))
+        Self::new_inner(logical, Some(self.stream_key().to_vec()))
     }
 }
 
@@ -106,7 +106,7 @@ impl StreamNode for StreamTopN {
                     .infer_internal_table_catalog(
                         input.schema(),
                         input.ctx(),
-                        input.logical_pk(),
+                        input.stream_key(),
                         None,
                     )
                     .with_id(state.gen_table_id_wrapped())

@@ -923,3 +923,9 @@
     SELECT count(DISTINCT i) FROM integers;
   expected_outputs:
   - batch_plan
+- sql: |
+    CREATE TABLE t(id int primary key, a int, b int);
+    SELECT count(*) FROM t group by a, id, b;
+  expected_outputs:
+    - batch_plan
+    - stream_plan

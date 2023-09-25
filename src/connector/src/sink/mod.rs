@@ -16,11 +16,15 @@ pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
+pub mod doris;
+pub mod doris_connector;
 pub mod encoder;
+pub mod formatter;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 pub mod nats;
+pub mod pulsar;
 pub mod redis;
 pub mod remote;
 #[cfg(any(test, madsim))]
@@ -47,14 +51,20 @@ pub use tracing;
 
 use self::catalog::SinkType;
 use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
+use self::doris::{DorisConfig, DorisSink};
+use self::encoder::SerTo;
+use self::formatter::SinkFormatter;
 use self::iceberg::{IcebergSink, ICEBERG_SINK, REMOTE_ICEBERG_SINK};
+use self::pulsar::{PulsarConfig, PulsarSink};
 use crate::sink::boxed::BoxSink;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::clickhouse::CLICKHOUSE_SINK;
+use crate::sink::doris::DORIS_SINK;
 use crate::sink::iceberg::{IcebergConfig, RemoteIcebergConfig, RemoteIcebergSink};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
 use crate::sink::nats::{NatsConfig, NatsSink, NATS_SINK};
+use crate::sink::pulsar::PULSAR_SINK;
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig, RemoteSink};
 #[cfg(any(test, madsim))]
@@ -151,7 +161,7 @@ pub trait Sink {
     type Writer: SinkWriter<CommitMetadata = ()>;
     type Coordinator: SinkCommitCoordinator;
 
-    async fn validate(&self, client: Option<ConnectorClient>) -> Result<()>;
+    async fn validate(&self) -> Result<()>;
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
     async fn new_coordinator(
         &self,
@@ -200,6 +210,44 @@ pub trait SinkWriterV1: Send + 'static {
     // aborts the current transaction because some error happens. we should rollback to the last
     // commit point.
     async fn abort(&mut self) -> Result<()>;
+}
+
+/// A free-form sink that may output in multiple formats and encodings. Examples include kafka,
+/// kinesis, nats and redis.
+///
+/// The implementor specifies required key & value type (likely string or bytes), as well as how to
+/// write a single pair. The provided `write_chunk` method would handle the interaction with a
+/// `SinkFormatter`.
+///
+/// Currently kafka takes `&mut self` while kinesis takes `&self`. So we use `&mut self` in trait
+/// but implement it for `&Kinesis`. This allows us to hold `&mut &Kinesis` and `&Kinesis`
+/// simultaneously, preventing the schema clone issue propagating from kafka to kinesis.
+pub trait FormattedSink {
+    type K;
+    type V;
+    async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()>;
+
+    async fn write_chunk<F: SinkFormatter>(
+        &mut self,
+        chunk: StreamChunk,
+        formatter: F,
+    ) -> Result<()>
+    where
+        F::K: SerTo<Self::K>,
+        F::V: SerTo<Self::V>,
+    {
+        for r in formatter.format_chunk(&chunk) {
+            let (event_key_object, event_object) = r?;
+
+            self.write_one(
+                event_key_object.map(SerTo::ser_to).transpose()?,
+                event_object.map(SerTo::ser_to).transpose()?,
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
 }
 
 pub struct SinkWriterV1Adapter<W: SinkWriterV1> {
@@ -280,8 +328,10 @@ pub enum SinkConfig {
     Kinesis(Box<KinesisSinkConfig>),
     Iceberg(IcebergConfig),
     RemoteIceberg(RemoteIcebergConfig),
+    Pulsar(PulsarConfig),
     BlackHole,
     ClickHouse(Box<ClickHouseConfig>),
+    Doris(Box<DorisConfig>),
     Nats(NatsConfig),
     #[cfg(any(test, madsim))]
     Test,
@@ -301,7 +351,7 @@ impl Sink for BlackHoleSink {
         Ok(Self)
     }
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         Ok(())
     }
 }
@@ -344,7 +394,11 @@ impl SinkConfig {
             CLICKHOUSE_SINK => Ok(SinkConfig::ClickHouse(Box::new(
                 ClickHouseConfig::from_hashmap(properties)?,
             ))),
+            DORIS_SINK => Ok(SinkConfig::Doris(Box::new(DorisConfig::from_hashmap(
+                properties,
+            )?))),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
+            PULSAR_SINK => Ok(SinkConfig::Pulsar(PulsarConfig::from_hashmap(properties)?)),
             REMOTE_ICEBERG_SINK => Ok(SinkConfig::RemoteIceberg(
                 RemoteIcebergConfig::from_hashmap(properties)?,
             )),
@@ -370,9 +424,11 @@ pub enum SinkImpl {
     Redis(RedisSink),
     Kafka(KafkaSink),
     Remote(RemoteSink),
+    Pulsar(PulsarSink),
     BlackHole(BlackHoleSink),
     Kinesis(KinesisSink),
     ClickHouse(ClickHouseSink),
+    Doris(DorisSink),
     Iceberg(IcebergSink),
     Nats(NatsSink),
     RemoteIceberg(RemoteIcebergSink),
@@ -385,13 +441,15 @@ impl SinkImpl {
             SinkImpl::Kafka(_) => "kafka",
             SinkImpl::Redis(_) => "redis",
             SinkImpl::Remote(_) => "remote",
+            SinkImpl::Pulsar(_) => "pulsar",
             SinkImpl::BlackHole(_) => "blackhole",
             SinkImpl::Kinesis(_) => "kinesis",
             SinkImpl::ClickHouse(_) => "clickhouse",
             SinkImpl::Iceberg(_) => "iceberg",
             SinkImpl::Nats(_) => "nats",
-            SinkImpl::RemoteIceberg(_) => "iceberg",
+            SinkImpl::RemoteIceberg(_) => "iceberg_java",
             SinkImpl::TestSink(_) => "test",
+            SinkImpl::Doris(_) => "doris",
         }
     }
 }
@@ -405,9 +463,11 @@ macro_rules! dispatch_sink {
             SinkImpl::Redis($sink) => $body,
             SinkImpl::Kafka($sink) => $body,
             SinkImpl::Remote($sink) => $body,
+            SinkImpl::Pulsar($sink) => $body,
             SinkImpl::BlackHole($sink) => $body,
             SinkImpl::Kinesis($sink) => $body,
             SinkImpl::ClickHouse($sink) => $body,
+            SinkImpl::Doris($sink) => $body,
             SinkImpl::Iceberg($sink) => $body,
             SinkImpl::Nats($sink) => $body,
             SinkImpl::RemoteIceberg($sink) => $body,
@@ -423,6 +483,7 @@ impl SinkImpl {
             SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(*cfg, param)),
             SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(*cfg, param)),
             SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(cfg, param)),
+            SinkConfig::Pulsar(cfg) => SinkImpl::Pulsar(PulsarSink::new(cfg, param)),
             SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),
             SinkConfig::ClickHouse(cfg) => SinkImpl::ClickHouse(ClickHouseSink::new(
                 *cfg,
@@ -441,6 +502,12 @@ impl SinkImpl {
             }
             #[cfg(any(test, madsim))]
             SinkConfig::Test => SinkImpl::TestSink(build_test_sink(param)?),
+            SinkConfig::Doris(cfg) => SinkImpl::Doris(DorisSink::new(
+                *cfg,
+                param.schema(),
+                param.downstream_pk,
+                param.sink_type.is_append_only(),
+            )?),
         })
     }
 }
@@ -467,6 +534,14 @@ pub enum SinkError {
     ClickHouse(String),
     #[error("Nats error: {0}")]
     Nats(anyhow::Error),
+    #[error("Doris http error: {0}")]
+    Http(anyhow::Error),
+    #[error("Doris error: {0}")]
+    Doris(String),
+    #[error("Pulsar error: {0}")]
+    Pulsar(anyhow::Error),
+    #[error("Internal error: {0}")]
+    Internal(anyhow::Error),
 }
 
 impl From<RpcError> for SinkError {

@@ -37,16 +37,15 @@ mod expr_binary_nonnull;
 mod expr_binary_nullable;
 mod expr_case;
 mod expr_coalesce;
-mod expr_concat_ws;
 mod expr_field;
 mod expr_in;
 mod expr_input_ref;
 mod expr_literal;
-mod expr_nested_construct;
 mod expr_some_all;
 pub(crate) mod expr_udf;
 mod expr_unary;
 mod expr_vnode;
+pub(crate) mod wrapper;
 
 mod build;
 pub mod test_utils;
@@ -76,16 +75,6 @@ pub use super::{ExprError, Result};
 pub trait Expression: std::fmt::Debug + Sync + Send {
     /// Get the return data type.
     fn return_type(&self) -> DataType;
-
-    /// Eval the result with extra checks.
-    async fn eval_checked(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let res = self.eval(input).await?;
-
-        // TODO: Decide to use assert or debug_assert by benchmarks.
-        assert_eq!(res.len(), input.capacity());
-
-        Ok(res)
-    }
 
     /// Evaluate the expression in vectorized execution. Returns an array.
     ///
@@ -176,6 +165,34 @@ impl dyn Expression {
 
 /// An owned dynamically typed [`Expression`].
 pub type BoxedExpression = Box<dyn Expression>;
+
+// TODO: avoid the overhead of extra boxing.
+#[async_trait::async_trait]
+impl Expression for BoxedExpression {
+    fn return_type(&self) -> DataType {
+        (**self).return_type()
+    }
+
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        (**self).eval(input).await
+    }
+
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        (**self).eval_v2(input).await
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        (**self).eval_row(input).await
+    }
+
+    fn eval_const(&self) -> Result<Datum> {
+        (**self).eval_const()
+    }
+
+    fn boxed(self) -> BoxedExpression {
+        self
+    }
+}
 
 /// Controls the behavior when a compute error happens.
 ///

@@ -20,7 +20,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::anyhow;
 use futures::future::try_join_all;
 use futures::{Future, FutureExt};
-use futures_async_stream::for_await;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
@@ -28,21 +27,19 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_rpc_client::ConnectorClient;
 use serde_derive::{Deserialize, Serialize};
-use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
+use strum_macros::{Display, EnumString};
 
 use super::encoder::{JsonEncoder, TimestampHandlingMode};
+use super::formatter::{
+    AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, UpsertFormatter,
+};
 use super::{
-    Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
+    FormattedSink, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM,
+    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
-use crate::sink::utils::{
-    gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
-    AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
-};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
 };
@@ -72,6 +69,16 @@ const fn _default_use_transaction() -> bool {
 
 const fn _default_force_append_only() -> bool {
     false
+}
+
+#[derive(Debug, Clone, PartialEq, Display, Serialize, Deserialize, EnumString)]
+#[strum(serialize_all = "snake_case")]
+enum CompressionCodec {
+    None,
+    Gzip,
+    Snappy,
+    Lz4,
+    Zstd,
 }
 
 #[serde_as]
@@ -129,6 +136,11 @@ pub struct RdKafkaPropertiesProducer {
     #[serde(rename = "properties.batch.size")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     batch_size: Option<usize>,
+
+    /// Compression codec to use for compressing message sets.
+    #[serde(rename = "properties.compression.codec")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    compression_codec: Option<CompressionCodec>,
 }
 
 impl RdKafkaPropertiesProducer {
@@ -156,6 +168,9 @@ impl RdKafkaPropertiesProducer {
         }
         if let Some(v) = self.batch_size {
             c.set("batch.size", v.to_string());
+        }
+        if let Some(v) = &self.compression_codec {
+            c.set("compression.codec", v.to_string());
         }
     }
 }
@@ -301,7 +316,7 @@ impl Sink for KafkaSink {
         ))
     }
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
@@ -434,7 +449,14 @@ impl KafkaSinkWriter {
                 Err((e, rec)) => {
                     record = rec;
                     match e {
-                        KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
+                        err @ KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull)
+                        | err @ KafkaError::MessageProduction(RDKafkaErrorCode::MessageTimedOut) => {
+                            tracing::warn!(
+                                "producing message (key {:?}) to topic {} failed, err {:?}, retrying",
+                                record.key.map(|k| k.to_bytes()),
+                                record.topic,
+                                err
+                            );
                             tokio::time::sleep(self.config.retry_interval).await;
                             continue;
                         }
@@ -453,20 +475,20 @@ impl KafkaSinkWriter {
         ret
     }
 
-    async fn write_json_objects(
+    async fn write_inner(
         &mut self,
-        event_key_object: Option<Value>,
-        event_object: Option<Value>,
+        event_key_object: Option<Vec<u8>>,
+        event_object: Option<Vec<u8>>,
     ) -> Result<()> {
         let topic = self.config.common.topic.clone();
         // here we assume the key part always exists and value part is optional.
         // if value is None, we will skip the payload part.
-        let key_str = event_key_object.unwrap().to_string();
-        let mut record = FutureRecord::<[u8], [u8]>::to(topic.as_str()).key(key_str.as_bytes());
+        let key_str = event_key_object.unwrap();
+        let mut record = FutureRecord::<[u8], [u8]>::to(topic.as_str()).key(&key_str);
         let payload;
         if let Some(value) = event_object {
-            payload = value.to_string();
-            record = record.payload(payload.as_bytes());
+            payload = value;
+            record = record.payload(&payload);
         }
         // Send the data but not wait it to finish sinking
         // Will join all `DeliveryFuture` during commit
@@ -524,23 +546,16 @@ impl KafkaSinkWriter {
         let sink_from_name = self.sink_from_name.clone();
 
         // Initialize the dbz_stream
-        let dbz_stream = gen_debezium_message_stream(
+        let f = DebeziumJsonFormatter::new(
             &schema,
             &pk_indices,
-            chunk,
-            ts_ms,
-            DebeziumAdapterOpts::default(),
             &db_name,
             &sink_from_name,
+            DebeziumAdapterOpts::default(),
+            ts_ms,
         );
 
-        #[for_await]
-        for msg in dbz_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
-        }
-        Ok(())
+        self.write_chunk(chunk, f).await
     }
 
     async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -552,20 +567,9 @@ impl KafkaSinkWriter {
         let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
         // Initialize the upsert_stream
-        let upsert_stream = gen_upsert_message_stream(
-            chunk,
-            UpsertAdapterOpts::default(),
-            key_encoder,
-            val_encoder,
-        );
+        let f = UpsertFormatter::new(key_encoder, val_encoder);
 
-        #[for_await]
-        for msg in upsert_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
-        }
-        Ok(())
+        self.write_chunk(chunk, f).await
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -577,20 +581,18 @@ impl KafkaSinkWriter {
         let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
 
         // Initialize the append_only_stream
-        let append_only_stream = gen_append_only_message_stream(
-            chunk,
-            AppendOnlyAdapterOpts::default(),
-            key_encoder,
-            val_encoder,
-        );
+        let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
 
-        #[for_await]
-        for msg in append_only_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
-        }
-        Ok(())
+        self.write_chunk(chunk, f).await
+    }
+}
+
+impl FormattedSink for KafkaSinkWriter {
+    type K = Vec<u8>;
+    type V = Vec<u8>;
+
+    async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
+        self.write_inner(k, v).await
     }
 }
 
@@ -643,11 +645,9 @@ impl SinkWriterV1 for KafkaSinkWriter {
 mod test {
     use maplit::hashmap;
     use risingwave_common::catalog::Field;
-    use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::sink::utils::*;
 
     #[test]
     fn parse_rdkafka_props() {
@@ -669,11 +669,16 @@ mod test {
             "properties.retry.backoff.ms".to_string() => "114514".to_string(),
             "properties.batch.num.messages".to_string() => "114514".to_string(),
             "properties.batch.size".to_string() => "114514".to_string(),
+            "properties.compression.codec".to_string() => "zstd".to_string(),
         };
         let c = KafkaConfig::from_hashmap(props).unwrap();
         assert_eq!(
             c.rdkafka_properties.queue_buffering_max_ms,
             Some(114.514f64)
+        );
+        assert_eq!(
+            c.rdkafka_properties.compression_codec,
+            Some(CompressionCodec::Zstd)
         );
 
         let props: HashMap<String, String> = hashmap! {
@@ -694,6 +699,16 @@ mod test {
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "append-only".to_string(),
             "properties.queue.buffering.max.kbytes".to_string() => "-114514".to_string(), // usize cannot be negative
+        };
+        assert!(KafkaConfig::from_hashmap(props).is_err());
+
+        let props: HashMap<String, String> = hashmap! {
+            // basic
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "append-only".to_string(),
+            "properties.compression.codec".to_string() => "notvalid".to_string(), // has to be a valid CompressionCodec
         };
         assert!(KafkaConfig::from_hashmap(props).is_err());
     }
@@ -781,6 +796,7 @@ mod test {
             "properties.bootstrap.server".to_string() => "localhost:29092".to_string(),
             "type".to_string() => "append-only".to_string(),
             "topic".to_string() => "test_topic".to_string(),
+            "properties.compression.codec".to_string() => "zstd".to_string(),
         };
 
         // Create a table with two columns (| id : INT32 | v2 : VARCHAR |) here
@@ -842,71 +858,6 @@ mod test {
                 println!("commit success");
             }
         }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_chunk_to_json() -> Result<()> {
-        let chunk = StreamChunk::from_pretty(
-            " i   f   {i,f}
-            + 0 0.0 {0,0.0}
-            + 1 1.0 {1,1.0}
-            + 2 2.0 {2,2.0}
-            + 3 3.0 {3,3.0}
-            + 4 4.0 {4,4.0}
-            + 5 5.0 {5,5.0}
-            + 6 6.0 {6,6.0}
-            + 7 7.0 {7,7.0}
-            + 8 8.0 {8,8.0}
-            + 9 9.0 {9,9.0}",
-        );
-
-        let schema = Schema::new(vec![
-            Field {
-                data_type: DataType::Int32,
-                name: "v1".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
-            },
-            Field {
-                data_type: DataType::Float32,
-                name: "v2".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
-            },
-            Field {
-                data_type: DataType::new_struct(
-                    vec![DataType::Int32, DataType::Float32],
-                    vec!["v4".to_string(), "v5".to_string()],
-                ),
-                name: "v3".into(),
-                sub_fields: vec![
-                    Field {
-                        data_type: DataType::Int32,
-                        name: "v4".into(),
-                        sub_fields: vec![],
-                        type_name: "".into(),
-                    },
-                    Field {
-                        data_type: DataType::Float32,
-                        name: "v5".into(),
-                        sub_fields: vec![],
-                        type_name: "".into(),
-                    },
-                ],
-                type_name: "".into(),
-            },
-        ]);
-
-        let json_chunk = chunk_to_json(chunk, &schema).unwrap();
-        let schema_json = schema_to_json(&schema, "test_db", "test_table");
-        assert_eq!(schema_json, serde_json::from_str::<Value>("{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"source\",\"fields\":[{\"field\":\"db\",\"optional\":false,\"type\":\"string\"},{\"field\":\"table\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Source\",\"optional\":false,\"type\":\"struct\"},{\"field\":\"op\",\"optional\":false,\"type\":\"string\"},{\"field\":\"ts_ms\",\"optional\":false,\"type\":\"int64\"}],\"name\":\"RisingWave.test_db.test_table.Envelope\",\"optional\":false,\"type\":\"struct\"}").unwrap());
-        assert_eq!(
-            serde_json::from_str::<Value>(&json_chunk[0]).unwrap(),
-            serde_json::from_str::<Value>("{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":0,\"v5\":0.0}}")
-                .unwrap()
-        );
 
         Ok(())
     }

@@ -90,7 +90,8 @@ pub(crate) fn resolve_private_link_connection(
         if svc.get_provider()? == PrivateLinkProvider::Mock {
             return Ok(());
         }
-        insert_privatelink_broker_rewrite_map(svc, properties).map_err(RwError::from)?;
+        insert_privatelink_broker_rewrite_map(properties, Some(svc), None)
+            .map_err(RwError::from)?;
     }
     Ok(())
 }

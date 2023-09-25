@@ -60,7 +60,7 @@ use crate::handler::create_table::{
 use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
-use crate::utils::resolve_connection_in_with_option;
+use crate::utils::resolve_privatelink_in_with_option;
 use crate::{bind_data_type, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -1068,7 +1068,10 @@ pub async fn handle_create_source(
         )));
     }
 
-    let source_schema = stmt.source_schema.into_source_schema_v2();
+    let (source_schema, notice) = stmt.source_schema.into_source_schema_v2();
+    if let Some(notice) = notice {
+        session.notice_to_user(notice)
+    };
 
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
     validate_compatibility(&source_schema, &mut with_properties)?;
@@ -1122,10 +1125,10 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
-    // resolve privatelink connection for Kafka source
     let mut with_options = WithOptions::new(with_properties);
+    // resolve privatelink connection for Kafka source
     let connection_id =
-        resolve_connection_in_with_option(&mut with_options, &schema_name, &session)?;
+        resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
     let definition = handler_args.normalized_sql;
 
     let source = PbSource {
