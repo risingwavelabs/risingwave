@@ -71,12 +71,26 @@ else
   set_env BUILD_HUMMOCK_TRACE_CMD ""
 end
 
-query_log_path = get_env RW_QUERY_LOG_PATH
-no_query_log_path = not ${query_log_path}
+is_ci = get_env RISINGWAVE_CI
+is_not_ci = not ${is_ci}
 
-if ${no_query_log_path}
-  set_env RW_QUERY_LOG_PATH "${PREFIX_LOG}"
-fi
+if ${is_not_ci}
+  query_log_path = get_env RW_QUERY_LOG_PATH
+  no_query_log_path = not ${query_log_path}
+
+  if ${no_query_log_path}
+    set_env RW_QUERY_LOG_PATH "${PREFIX_LOG}"
+  fi
+
+  rust_log = get_env RUST_LOG
+  no_rust_log = not ${rust_log}
+
+  if ${no_rust_log}
+    set_env RUST_LOG "pgwire_query_log=info"
+  else
+    set_env RUST_LOG "pgwire_query_log=info,${rust_log}"
+  end
+end
 ''',
 ]
 
@@ -610,12 +624,6 @@ if [[ $ENABLE_COREDUMP == "true" ]]; then
   ulimit -c unlimited
 fi
 
-if [[ -z "$RUST_LOG" ]]; then
-  export RUST_LOG="pgwire_query_log=info"
-else
-  export RUST_LOG="pgwire_query_log=info,${RUST_LOG}"
-fi
-
 set -x
 target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave playground $@
 '''
@@ -631,12 +639,6 @@ set -e
 if [[ $ENABLE_COREDUMP == "true" ]]; then
   echo "+ ulimit -c unlimited"
   ulimit -c unlimited
-fi
-
-if [[ -z "$RUST_LOG" ]]; then
-  export RUST_LOG="pgwire_query_log=info"
-else
-  export RUST_LOG="pgwire_query_log=info,${RUST_LOG}"
 fi
 
 set -x
@@ -671,12 +673,6 @@ set -e
 if [[ $ENABLE_COREDUMP == "true" ]]; then
   echo "+ ulimit -c unlimited"
   ulimit -c unlimited
-fi
-
-if [[ -z "$RUST_LOG" ]]; then
-  export RUST_LOG="pgwire_query_log=info"
-else
-  export RUST_LOG="pgwire_query_log=info,${RUST_LOG}"
 fi
 
 set -x
