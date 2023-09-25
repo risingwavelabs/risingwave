@@ -41,7 +41,7 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     /// The metrics of memory usage
     memory_usage_metrics: IntGauge,
     // The metrics of evicted watermark time
-    lru_evicted_watermark_time_diff_ms: IntGauge,
+    lru_evicted_watermark_time_ms: IntGauge,
     // Metrics info
     metrics_info: MetricsInfo,
     /// The size reported last time
@@ -65,11 +65,11 @@ impl<K, V, S, A: Clone + Allocator> Drop for ManagedLruCache<K, V, S, A> {
         };
         if let Err(e) = info
             .metrics
-            .lru_evicted_watermark_time_diff_ms
+            .lru_evicted_watermark_time_ms
             .remove_label_values(&[&info.table_id, &info.actor_id, &info.desc])
         {
             warn!(
-                "unable to remove lru_evicted_watermark_time_diff_ms of {} {} {}: {:?}",
+                "unable to remove lru_evicted_watermark_time_ms of {} {} {}: {:?}",
                 info.table_id, info.actor_id, info.desc, e
             );
         }
@@ -94,22 +94,21 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
             ]);
         memory_usage_metrics.set(0.into());
 
-        let lru_evicted_watermark_time_diff_ms = metrics_info
+        let lru_evicted_watermark_time_ms = metrics_info
             .metrics
-            .lru_evicted_watermark_time_diff_ms
+            .lru_evicted_watermark_time_ms
             .with_label_values(&[
                 &metrics_info.table_id,
                 &metrics_info.actor_id,
                 &metrics_info.desc,
             ]);
-        lru_evicted_watermark_time_diff_ms.set(watermark_epoch.load(Ordering::Relaxed) as _);
 
         Self {
             inner,
             watermark_epoch,
             kv_heap_size: 0,
             memory_usage_metrics,
-            lru_evicted_watermark_time_diff_ms,
+            lru_evicted_watermark_time_ms,
             metrics_info,
             last_reported_size_bytes: 0,
         }
@@ -244,9 +243,8 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     }
 
     fn report_evicted_watermark_time(&self, epoch: u64) {
-        self.lru_evicted_watermark_time_diff_ms.set(
-            (Epoch(self.load_cur_epoch()).physical_time() - Epoch(epoch).physical_time()) as _,
-        );
+        self.lru_evicted_watermark_time_ms
+            .set(Epoch(epoch).physical_time() as _);
     }
 
     fn load_cur_epoch(&self) -> u64 {
