@@ -164,7 +164,8 @@ impl StreamService for StreamServiceImpl {
         }
 
         self.mgr
-            .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;
+            .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
+            .await?;
 
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,

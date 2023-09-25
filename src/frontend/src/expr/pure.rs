@@ -212,7 +212,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Proctime
             | expr_node::Type::PgSleep
             | expr_node::Type::PgSleepFor
-            | expr_node::Type::PgSleepUntil => true,
+            | expr_node::Type::PgSleepUntil
+            | expr_node::Type::ColDescription => true,
         }
     }
 }

@@ -14,7 +14,7 @@
 
 use risingwave_common::session_config::OverWindowCachePolicy;
 use risingwave_expr::agg::{AggArgs, AggKind};
-use risingwave_expr::function::window::{
+use risingwave_expr::window_function::{
     Frame, FrameBound, FrameExclusion, WindowFuncCall, WindowFuncKind,
 };
 use risingwave_stream::executor::monitor::StreamingMetrics;

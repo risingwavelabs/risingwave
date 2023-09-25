@@ -35,7 +35,7 @@ use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationC
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::utils::resolve_connection_in_with_option;
+use crate::utils::resolve_privatelink_in_with_option;
 use crate::Planner;
 
 pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
@@ -106,7 +106,7 @@ pub fn gen_sink_plan(
     let mut with_options = context.with_options().clone();
     let connection_id = {
         let conn_id =
-            resolve_connection_in_with_option(&mut with_options, &sink_schema_name, session)?;
+            resolve_privatelink_in_with_option(&mut with_options, &sink_schema_name, session)?;
         conn_id.map(ConnectionId)
     };
 

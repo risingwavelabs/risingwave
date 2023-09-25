@@ -20,20 +20,19 @@ use aws_sdk_kinesis::error::DisplayErrorContext;
 use aws_sdk_kinesis::operation::put_record::PutRecordOutput;
 use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::Client as KinesisClient;
-use futures_async_stream::for_await;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
-use super::formatter::{AppendOnlyFormatter, UpsertFormatter};
+use super::formatter::{
+    AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, UpsertFormatter,
+};
 use super::{FormattedSink, SinkParam};
 use crate::common::KinesisCommon;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
-use crate::sink::utils::{gen_debezium_message_stream, DebeziumAdapterOpts};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterParam,
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -69,7 +68,7 @@ impl Sink for KinesisSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = KinesisSinkWriter;
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
@@ -209,7 +208,6 @@ impl KinesisSinkWriter {
         );
         let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
         let f = UpsertFormatter::new(key_encoder, val_encoder);
-
         self.write_chunk(chunk, f).await
     }
 
@@ -221,37 +219,20 @@ impl KinesisSinkWriter {
         );
         let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
         let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
-
         self.write_chunk(chunk, f).await
     }
 
-    async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
-        let dbz_stream = gen_debezium_message_stream(
+    async fn debezium_update(mut self: &Self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
+        let f = DebeziumJsonFormatter::new(
             &self.schema,
             &self.pk_indices,
-            chunk,
-            ts_ms,
-            DebeziumAdapterOpts::default(),
             &self.db_name,
             &self.sink_from_name,
+            DebeziumAdapterOpts::default(),
+            ts_ms,
         );
 
-        #[for_await]
-        for msg in dbz_stream {
-            let (event_key_object, event_object) = msg?;
-            let key_str = event_key_object.unwrap().to_string();
-            self.put_record(
-                &key_str,
-                if let Some(value) = event_object {
-                    value.to_string().into_bytes()
-                } else {
-                    vec![]
-                },
-            )
-            .await?;
-        }
-
-        Ok(())
+        self.write_chunk(chunk, f).await
     }
 }
 
