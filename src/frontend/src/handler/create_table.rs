@@ -765,8 +765,9 @@ fn gen_create_table_plan_for_cdc_source(
     let mut columns = bind_sql_columns(&column_defs)?;
 
     // Add `_rw_offset` hidden column for storing upstream cdc offset
-    let offset_column_idx = columns.len();
-    columns.push(ColumnCatalog::offset_column());
+    // TODO: do we need to add this column for cdc table?
+    // let offset_column_idx = columns.len();
+    // columns.push(ColumnCatalog::offset_column());
 
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
@@ -797,13 +798,14 @@ fn gen_create_table_plan_for_cdc_source(
         table_id: source.id.into(), // FIXME: which id to use?
         pk: table_pk,
         columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
-        distribution_key: vec![offset_column_idx], // use offset column as distribution key
+        // distribution_key: vec![offset_column_idx], // use offset column as distribution key
+        distribution_key: pk_column_indices.clone(),
         stream_key: pk_column_indices,
         append_only,
         retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
         value_indices: (0..columns.len()).collect_vec(),
         read_prefix_len_hint: 0,
-        watermark_columns: Default::default(),
+        watermark_columns: FixedBitSet::with_capacity(columns.len()), // no watermarks
         versioned: false,
         table_name: Some(external_table_name),
     };
@@ -819,6 +821,7 @@ fn gen_create_table_plan_for_cdc_source(
         context.clone(),
         false,
         Cardinality::unknown(),
+        false,
     )
     .into();
 

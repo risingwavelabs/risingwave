@@ -277,6 +277,7 @@ impl StreamTableScan {
                     fields: upstream_schema.clone(),
                     stream_key: if cdc_upstream {
                         // the `_rw_offset` column
+                        // TODO: may remove this part, we don't parse upstream chunk in the Merger
                         self.logical
                             .table_desc
                             .distribution_key

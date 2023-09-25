@@ -227,6 +227,7 @@ impl IndexSelectionRule {
             logical_scan.ctx(),
             false,
             index.index_table.cardinality,
+            false,
         );
 
         let primary_table_scan = LogicalScan::create(
@@ -237,6 +238,7 @@ impl IndexSelectionRule {
             logical_scan.ctx(),
             false,
             index.primary_table.cardinality,
+            false,
         );
 
         let conjunctions = index
@@ -337,6 +339,7 @@ impl IndexSelectionRule {
             logical_scan.ctx(),
             false,
             logical_scan.table_cardinality(),
+            false,
         );
 
         let conjunctions = primary_table_desc

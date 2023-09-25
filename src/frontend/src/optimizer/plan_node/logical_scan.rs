@@ -21,6 +21,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::stream_plan::ChainType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
@@ -44,12 +45,17 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 pub struct LogicalScan {
     pub base: PlanBase,
     core: generic::Scan,
+    scan_cdc_source: bool,
 }
 
 impl From<generic::Scan> for LogicalScan {
     fn from(core: generic::Scan) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
-        Self { base, core }
+        Self {
+            base,
+            core,
+            scan_cdc_source: false,
+        }
     }
 }
 
@@ -69,8 +75,9 @@ impl LogicalScan {
         ctx: OptimizerContextRef,
         for_system_time_as_of_proctime: bool,
         table_cardinality: Cardinality,
+        scan_source: bool,
     ) -> Self {
-        generic::Scan::new(
+        let scan = generic::Scan::new(
             table_name,
             is_sys_table,
             (0..table_desc.columns.len()).collect(),
@@ -81,7 +88,11 @@ impl LogicalScan {
             for_system_time_as_of_proctime,
             table_cardinality,
         )
-        .into()
+        .into();
+        Self {
+            scan_cdc_source: scan_source,
+            ..scan
+        }
     }
 
     pub fn table_name(&self) -> &str {
@@ -383,6 +394,7 @@ impl ExprRewritable for LogicalScan {
         Self {
             base: self.base.clone_with_new_plan_id(),
             core,
+            scan_cdc_source: self.scan_cdc_source,
         }
         .into()
     }
@@ -528,7 +540,14 @@ impl ToStream for LogicalScan {
             )));
         }
         if self.predicate().always_true() {
-            Ok(StreamTableScan::new(self.core.clone()).into())
+            if self.scan_cdc_source {
+                Ok(
+                    StreamTableScan::new_with_chain_type(self.core.clone(), ChainType::CdcBackfill)
+                        .into(),
+                )
+            } else {
+                Ok(StreamTableScan::new(self.core.clone()).into())
+            }
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);

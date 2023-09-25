@@ -63,7 +63,8 @@ impl Planner {
             vec![],
             self.ctx(),
             false,
-            Cardinality::unknown(), // TODO(card): cardinality of system table
+            Cardinality::unknown(),
+            false,
         )
         .into())
     }
@@ -81,6 +82,7 @@ impl Planner {
             self.ctx(),
             base_table.for_system_time_as_of_proctime,
             base_table.table_catalog.cardinality,
+            false,
         )
         .into())
     }

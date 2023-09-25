@@ -515,6 +515,7 @@ pub(crate) mod tests {
             false,
             Rc::new(TableDesc {
                 table_id,
+                table_name: None,
                 stream_key: vec![],
                 pk: vec![],
                 columns: vec![
@@ -534,6 +535,7 @@ pub(crate) mod tests {
             ctx,
             false,
             Cardinality::unknown(),
+            false,
         )
         .to_batch()
         .unwrap()

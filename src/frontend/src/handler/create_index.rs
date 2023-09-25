@@ -330,6 +330,7 @@ fn assemble_materialize(
         context,
         false,
         cardinality,
+        false,
     );
 
     let exprs = index_columns

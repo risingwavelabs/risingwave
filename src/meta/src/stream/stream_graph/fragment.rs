@@ -512,7 +512,23 @@ impl CompleteStreamFragmentGraph {
             graph,
             Some(FragmentGraphUpstreamContext {
                 upstream_mview_fragments,
+                // TODO: fill in the upstream fragments
                 upstream_source_fragments: None,
+            }),
+            None,
+        )
+    }
+
+    pub fn with_upstreams_new(
+        graph: StreamFragmentGraph,
+        upstream_mview_fragments: HashMap<TableId, Fragment>,
+        upstream_source_fragments: HashMap<TableId, Fragment>,
+    ) -> MetaResult<Self> {
+        Self::build_helper(
+            graph,
+            Some(FragmentGraphUpstreamContext {
+                upstream_mview_fragments,
+                upstream_source_fragments: Some(upstream_source_fragments),
             }),
             None,
         )
@@ -589,7 +605,7 @@ impl CompleteStreamFragmentGraph {
                             dispatch_strategy: DispatchStrategy {
                                 r#type: DispatcherType::Hash as _, /* there may have multiple downstream table jobs, so we use `Hash` here */
                                 dist_key_indices: vec![rw_table_name_index as _], /* index to `_rw_table_name` column */
-                                output_indices: output_columns.iter().map(|i| *i as _).collect(), /* require all columns from the upstream source */
+                                output_indices: (0..output_columns.len() as _).collect_vec(), /* require all columns from the upstream source */
                                 downstream_table_name: full_table_name,
                             },
                         };

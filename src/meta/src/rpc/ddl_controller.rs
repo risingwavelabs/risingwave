@@ -606,8 +606,15 @@ impl DdlController {
             .fragment_manager
             .get_upstream_mview_fragments(fragment_graph.dependent_table_ids())
             .await?;
+
+        let upstream_source_fragments = self
+            .fragment_manager
+            .get_upstream_source_fragments(fragment_graph.dependent_table_ids())
+            .await?;
+
         let upstream_mview_actors = upstream_mview_fragments
             .iter()
+            .chain(upstream_source_fragments.iter())
             .map(|(&table_id, fragment)| {
                 (
                     table_id,
@@ -616,8 +623,11 @@ impl DdlController {
             })
             .collect();
 
-        let complete_graph =
-            CompleteStreamFragmentGraph::with_upstreams(fragment_graph, upstream_mview_fragments)?;
+        let complete_graph = CompleteStreamFragmentGraph::with_upstreams_new(
+            fragment_graph,
+            upstream_mview_fragments,
+            upstream_source_fragments,
+        )?;
 
         // 2. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
