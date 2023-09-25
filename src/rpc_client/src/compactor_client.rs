@@ -31,6 +31,7 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
 
 use crate::error::Result;
+use crate::retry_rpc;
 const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
 // See `Endpoint::keep_alive_timeout`
 const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
@@ -121,76 +122,38 @@ impl GrpcCompactorProxyClient {
         &self,
         request: GetNewSstIdsRequest,
     ) -> std::result::Result<tonic::Response<GetNewSstIdsResponse>, tonic::Status> {
-        tokio_retry::RetryIf::spawn(
-            Self::get_retry_strategy(),
-            || async {
-                let mut hummock_client = self.core.read().await.hummock_client.clone();
-                let rpc_res = hummock_client.get_new_sst_ids(request.clone()).await;
-                if rpc_res.is_err() {
-                    self.recreate_core().await;
-                }
-                rpc_res
-            },
-            Self::should_retry,
-        )
-        .await
+        retry_rpc!(self, get_new_sst_ids, request, GetNewSstIdsResponse)
     }
 
     pub async fn report_compaction_task(
         &self,
         request: ReportCompactionTaskRequest,
     ) -> std::result::Result<tonic::Response<ReportCompactionTaskResponse>, tonic::Status> {
-        tokio_retry::RetryIf::spawn(
-            Self::get_retry_strategy(),
-            || async {
-                let mut hummock_client = self.core.read().await.hummock_client.clone();
-                let rpc_res = hummock_client.report_compaction_task(request.clone()).await;
-                if rpc_res.is_err() {
-                    self.recreate_core().await;
-                }
-                rpc_res
-            },
-            Self::should_retry,
+        retry_rpc!(
+            self,
+            report_compaction_task,
+            request,
+            ReportCompactionTaskResponse
         )
-        .await
     }
 
     pub async fn report_full_scan_task(
         &self,
         request: ReportFullScanTaskRequest,
     ) -> std::result::Result<tonic::Response<ReportFullScanTaskResponse>, tonic::Status> {
-        tokio_retry::RetryIf::spawn(
-            Self::get_retry_strategy(),
-            || async {
-                let mut hummock_client = self.core.read().await.hummock_client.clone();
-                let rpc_res = hummock_client.report_full_scan_task(request.clone()).await;
-                if rpc_res.is_err() {
-                    self.recreate_core().await;
-                }
-                rpc_res
-            },
-            Self::should_retry,
+        retry_rpc!(
+            self,
+            report_full_scan_task,
+            request,
+            ReportFullScanTaskResponse
         )
-        .await
     }
 
     pub async fn report_vacuum_task(
         &self,
         request: ReportVacuumTaskRequest,
     ) -> std::result::Result<tonic::Response<ReportVacuumTaskResponse>, tonic::Status> {
-        tokio_retry::RetryIf::spawn(
-            Self::get_retry_strategy(),
-            || async {
-                let mut hummock_client = self.core.read().await.hummock_client.clone();
-                let rpc_res = hummock_client.report_vacuum_task(request.clone()).await;
-                if rpc_res.is_err() {
-                    self.recreate_core().await;
-                }
-                rpc_res
-            },
-            Self::should_retry,
-        )
-        .await
+        retry_rpc!(self, report_vacuum_task, request, ReportVacuumTaskResponse)
     }
 
     pub async fn get_system_params(
@@ -232,4 +195,23 @@ impl GrpcCompactorProxyClient {
         }
         false
     }
+}
+
+#[macro_export]
+macro_rules! retry_rpc {
+    ($self:expr, $rpc_call:ident, $request:expr, $response:ty) => {
+        tokio_retry::RetryIf::spawn(
+            Self::get_retry_strategy(),
+            || async {
+                let mut hummock_client = $self.core.read().await.hummock_client.clone();
+                let rpc_res = hummock_client.$rpc_call($request.clone()).await;
+                if rpc_res.is_err() {
+                    $self.recreate_core().await;
+                }
+                rpc_res
+            },
+            Self::should_retry,
+        )
+        .await
+    };
 }
