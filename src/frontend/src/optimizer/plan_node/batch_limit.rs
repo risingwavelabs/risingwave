@@ -52,7 +52,7 @@ impl BatchLimit {
             single_dist.enforce_if_not_satisfies(batch_partial_limit.into(), &any_order)?
         } else {
             // The input's distribution is singleton, so use one phase limit is enough.
-            return Ok(batch_partial_limit.into());
+            return Ok(self.clone().into());
         };
 
         let batch_global_limit = self.clone_with_input(ensure_single_dist);
