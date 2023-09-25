@@ -207,7 +207,6 @@ message ExprNode {
 
     // Jsonb functions
 
-
     // jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb
     JSONB_ACCESS_INNER = 600;
     // jsonb ->> int, jsonb ->> text, jsonb #>> text[] that returns text
