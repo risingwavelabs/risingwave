@@ -20,6 +20,7 @@ use std::sync::LazyLock;
 
 use anyhow::Result;
 use clap::Parser;
+use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER};
 use tempfile::TempPath;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -286,9 +287,12 @@ pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
             risedev_env,
         )?;
 
-        "./risedev psql"
+        "./risedev psql".to_string()
     } else {
-        "psql -h localhost -p 4566 -d dev -U root"
+        format!(
+            "psql -h localhost -p 4566 -d {} -U {}",
+            *DEFAULT_DATABASE_NAME, *DEFAULT_SUPER_USER
+        )
     };
     eprintln!(
         "* Run {} in a different terminal to start Postgres interactive shell.",

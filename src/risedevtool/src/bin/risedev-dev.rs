@@ -30,6 +30,7 @@ use risedev::{
     PrometheusService, PubsubService, RedisService, ServiceConfig, Task, TempoService,
     ZooKeeperService, RISEDEV_SESSION_NAME,
 };
+use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER};
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
 
@@ -209,8 +210,8 @@ fn task_main(
                     log_buffer,
                     "* Run {} to start Postgres interactive shell.",
                     style(format_args!(
-                        "psql -h localhost -p {} -d dev -U root",
-                        c.port
+                        "psql -h localhost -p {} -d {} -U {}",
+                        c.port, *DEFAULT_DATABASE_NAME, *DEFAULT_SUPER_USER
                     ))
                     .blue()
                     .bold()

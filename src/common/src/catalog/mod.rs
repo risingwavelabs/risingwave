@@ -19,7 +19,7 @@ mod schema;
 pub mod test_utils;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 pub use column::*;
@@ -46,13 +46,23 @@ pub type SourceVersionId = u64;
 /// The default version ID for a new source.
 pub const INITIAL_SOURCE_VERSION_ID: u64 = 0;
 
-pub const DEFAULT_DATABASE_NAME: &str = "dev";
+use std::env;
+
+pub static DEFAULT_DATABASE_NAME: LazyLock<String> =
+    LazyLock::new(|| match env::var("POSTGRES_DB") {
+        Ok(val) => val,
+        Err(_) => "dev".to_string(),
+    });
+pub static DEFAULT_SUPER_USER: LazyLock<String> =
+    LazyLock::new(|| match env::var("POSTGRES_USER") {
+        Ok(val) => val,
+        Err(_) => "root".to_string(),
+    });
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
 pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
 pub const INFORMATION_SCHEMA_SCHEMA_NAME: &str = "information_schema";
 pub const RW_CATALOG_SCHEMA_NAME: &str = "rw_catalog";
 pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
-pub const DEFAULT_SUPER_USER: &str = "root";
 pub const DEFAULT_SUPER_USER_ID: u32 = 1;
 // This is for compatibility with customized utils for PostgreSQL.
 pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";

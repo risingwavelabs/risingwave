@@ -2315,7 +2315,7 @@ impl CatalogManager {
     async fn init_user(&self) -> MetaResult<()> {
         let core = &mut self.core.lock().await.user;
         for (user, id) in [
-            (DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID),
+            (&(*DEFAULT_SUPER_USER)[..], DEFAULT_SUPER_USER_ID),
             (DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID),
         ] {
             if !core.has_user_name(user) {
@@ -2420,7 +2420,7 @@ impl CatalogManager {
 
         let user = users.remove(id).unwrap();
 
-        if user.name == DEFAULT_SUPER_USER || user.name == DEFAULT_SUPER_USER_FOR_PG {
+        if user.name == *DEFAULT_SUPER_USER || user.name == DEFAULT_SUPER_USER_FOR_PG {
             return Err(MetaError::permission_denied(format!(
                 "Cannot drop default super user {}",
                 id
