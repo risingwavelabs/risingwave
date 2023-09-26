@@ -100,7 +100,8 @@ macro_rules! dispatch_sink {
 
 #[macro_export]
 macro_rules! match_sink_name_str {
-    ({$({$variant_name:ident, $sink_type:ty}),*}, $name_str:tt, $type_name:ident, $body:tt, $on_other_closure:tt) => {
+    ({$({$variant_name:ident, $sink_type:ty}),*}, $name_str:tt, $type_name:ident, $body:tt, $on_other_closure:tt) => {{
+        use $crate::sink::Sink;
         match $name_str {
             $(
                 <$sink_type>::SINK_NAME => {
@@ -112,7 +113,7 @@ macro_rules! match_sink_name_str {
             )*
             other => ($on_other_closure)(other),
         }
-    };
+    }};
     ($name_str:expr, $type_name:ident, $body:expr, $on_other_closure:expr) => {{
         $crate::for_all_sinks! {$crate::match_sink_name_str, {$name_str}, $type_name, {$body}, {$on_other_closure}}
     }};
@@ -224,6 +225,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
+
+    fn default_sink_decouple() -> bool {
+        false
+    }
 
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
