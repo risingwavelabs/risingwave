@@ -42,7 +42,7 @@ enum StreamJobStatus {
 // How the stream job was created will determine
 // whether they are persisted.
 enum CreateType {
-  CREATE_STATUS_UNSPECIFIED = 0;
+  CREATE_TYPE_UNSPECIFIED = 0;
   BACKGROUND = 1;
   FOREGROUND = 2;
 }
