@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::fmt::Debug;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use clickhouse::{Client, Row as ClickHouseRow};
@@ -22,7 +22,6 @@ use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarRefImpl, Serial};
-use risingwave_common::util::iter_util::ZipEqFast;
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::Serialize;
 use serde_derive::Deserialize;
@@ -87,24 +86,57 @@ impl ClickHouseSink {
     }
 
     /// Check that the column names and types of risingwave and clickhouse are identical
-    fn check_column_name_and_type(&self, clickhouse_column: Vec<SystemColumn>) -> Result<()> {
-        let ck_fields_name = build_fields_name_type_from_schema(&self.schema)?;
-        if !ck_fields_name.len().eq(&clickhouse_column.len()) {
-            return Err(SinkError::ClickHouse("Schema len not match".to_string()));
+    fn check_column_name_and_type(&self, clickhouse_columns_desc: &[SystemColumn]) -> Result<()> {
+        let rw_fields_name = build_fields_name_type_from_schema(&self.schema)?;
+        let clickhouse_columns_desc: HashMap<String, SystemColumn> = clickhouse_columns_desc
+            .iter()
+            .map(|s| (s.name.clone(), s.clone()))
+            .collect();
+
+        if rw_fields_name.len().gt(&clickhouse_columns_desc.len()) {
+            return Err(SinkError::ClickHouse("The nums of the RisingWave column must be greater than/equal to the length of the Clickhouse column".to_string()));
         }
 
-        ck_fields_name
-            .iter()
-            .zip_eq_fast(clickhouse_column)
-            .try_for_each(|(key, value)| {
-                if !key.0.eq(&value.name) {
-                    return Err(SinkError::ClickHouse(format!(
-                        "Column name is not match, risingwave is {:?} and clickhouse is {:?}",
-                        key.0, value.name
-                    )));
-                }
-                Self::check_and_correct_column_type(&key.1, &value)
+        for i in rw_fields_name {
+            let value = clickhouse_columns_desc.get(&i.0).ok_or_else(|| {
+                SinkError::ClickHouse(format!(
+                    "Column name don't find in clickhouse, risingwave is {:?} ",
+                    i.0
+                ))
             })?;
+
+            Self::check_and_correct_column_type(&i.1, value)?;
+        }
+        Ok(())
+    }
+
+    /// Check that the column names and types of risingwave and clickhouse are identical
+    fn check_pk_match(&self, clickhouse_columns_desc: &[SystemColumn]) -> Result<()> {
+        let mut clickhouse_pks: HashSet<String> = clickhouse_columns_desc
+            .iter()
+            .filter(|s| s.is_in_primary_key == 1)
+            .map(|s| s.name.clone())
+            .collect();
+
+        for (_, field) in self
+            .schema
+            .fields()
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| self.pk_indices.contains(index))
+        {
+            if !clickhouse_pks.remove(&field.name) {
+                return Err(SinkError::ClickHouse(
+                    "Clicklhouse and RisingWave pk is not match".to_string(),
+                ));
+            }
+        }
+
+        if !clickhouse_pks.is_empty() {
+            return Err(SinkError::ClickHouse(
+                "Clicklhouse and RisingWave pk is not match".to_string(),
+            ));
+        }
         Ok(())
     }
 
@@ -201,7 +233,10 @@ impl Sink for ClickHouseSink {
                 self.config.common.database, self.config.common.table
             )));
         }
-        self.check_column_name_and_type(clickhouse_column)?;
+        self.check_column_name_and_type(&clickhouse_column)?;
+        if !self.is_append_only {
+            self.check_pk_match(&clickhouse_column)?;
+        }
         Ok(())
     }
 
@@ -443,10 +478,11 @@ impl SinkWriter for ClickHouseSinkWriter {
     }
 }
 
-#[derive(ClickHouseRow, Deserialize)]
+#[derive(ClickHouseRow, Deserialize, Clone)]
 struct SystemColumn {
     name: String,
     r#type: String,
+    is_in_primary_key: u8,
 }
 
 /// Serialize this structure to simulate the `struct` call clickhouse interface

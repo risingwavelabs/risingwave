@@ -230,7 +230,7 @@ pub trait FormattedSink {
     async fn write_chunk<F: SinkFormatter>(
         &mut self,
         chunk: StreamChunk,
-        formatter: F,
+        formatter: &F,
     ) -> Result<()>
     where
         F::K: SerTo<Self::K>,
