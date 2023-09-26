@@ -96,15 +96,6 @@ async fn extract_json_table_schema(
 }
 
 pub fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
-    // let debezium_columns = vec![
-    //     ("before", DataType::Jsonb),
-    //     ("after", DataType::Jsonb),
-    //     ("source", DataType::Jsonb),
-    //     ("op", DataType::Varchar),
-    //     ("ts_ms", DataType::Int64),
-    //     ("transaction", DataType::Jsonb),
-    // ];
-
     let debezium_columns = vec![("payload", DataType::Jsonb)];
     let mut columns = debezium_columns
         .into_iter()

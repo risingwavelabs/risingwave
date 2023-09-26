@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VirtualNode;
@@ -37,7 +38,8 @@ use crate::barrier::BarrierManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
     IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
-    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId,
+    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, TableJobSubType,
+    ViewId,
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -444,10 +446,33 @@ impl DdlController {
 
             internal_tables = ctx.internal_tables();
 
-            match &stream_job {
-                StreamingJob::Table(Some(source), _) => {
+            match &mut stream_job {
+                StreamingJob::Table(Some(source), _, TableJobSubType::Normal) => {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
+                }
+                StreamingJob::Table(None, table, TableJobSubType::SharedCdcSource) => {
+                    // fill in cdc connector properties to the table
+                    // get the upstream source id from the table fragment
+                    let source_id = table_fragments
+                        .dependent_table_ids()
+                        .into_iter()
+                        .exactly_one()
+                        .map_err(|err| {
+                            MetaError::from(anyhow!("expect only one source for shared cdc table"))
+                        })?;
+                    let source = self
+                        .catalog_manager
+                        .get_source(source_id.table_id.into())
+                        .await
+                        .ok_or(MetaError::from(anyhow!(
+                            "upstream cdc source {} not found",
+                            source_id.table_id
+                        )))?;
+                    table
+                        .properties
+                        .extend(source.properties.clone().into_iter());
+                    tracing::debug!("table properties: {:?}", table.properties);
                 }
                 StreamingJob::Sink(sink) => {
                     // Validate the sink on the connector node.
@@ -618,27 +643,31 @@ impl DdlController {
             })
             .collect();
 
-        let complete_graph = if stream_job.is_table() {
-            let upstream_source_fragments = self
-                .fragment_manager
-                .get_upstream_source_fragments(fragment_graph.dependent_table_ids())
-                .await?;
+        let complete_graph = match stream_job.table_sub_type().as_ref() {
+            Some(TableJobSubType::SharedCdcSource) => {
+                let upstream_source_fragments = self
+                    .fragment_manager
+                    .get_upstream_source_fragments(fragment_graph.dependent_table_ids())
+                    .await?;
 
-            upstream_source_fragments
-                .iter()
-                .for_each(|(&table_id, fragment)| {
-                    upstream_mview_actors
-                        .entry(table_id)
-                        .or_insert_with(Vec::new)
-                        .extend(fragment.actors.iter().map(|a| a.actor_id));
-                });
-            CompleteStreamFragmentGraph::with_upstreams_new(
+                upstream_source_fragments
+                    .iter()
+                    .for_each(|(&table_id, fragment)| {
+                        upstream_mview_actors
+                            .entry(table_id)
+                            .or_insert_with(Vec::new)
+                            .extend(fragment.actors.iter().map(|a| a.actor_id));
+                    });
+                CompleteStreamFragmentGraph::with_upstreams_new(
+                    fragment_graph,
+                    upstream_mview_fragments,
+                    upstream_source_fragments,
+                )?
+            }
+            _ => CompleteStreamFragmentGraph::with_upstreams(
                 fragment_graph,
                 upstream_mview_fragments,
-                upstream_source_fragments,
-            )?
-        } else {
-            CompleteStreamFragmentGraph::with_upstreams(fragment_graph, upstream_mview_fragments)?
+            )?,
         };
 
         // 2. Build the actor graph.
@@ -708,7 +737,7 @@ impl DdlController {
                     .cancel_create_sink_procedure(sink)
                     .await;
             }
-            StreamingJob::Table(source, table) => {
+            StreamingJob::Table(source, table, ..) => {
                 creating_internal_table_ids.push(table.id);
                 if let Some(source) = source {
                     self.catalog_manager
@@ -762,7 +791,7 @@ impl DdlController {
                     .finish_create_sink_procedure(internal_tables, sink)
                     .await?
             }
-            StreamingJob::Table(source, table) => {
+            StreamingJob::Table(source, table, ..) => {
                 creating_internal_table_ids.push(table.id);
                 if let Some(source) = source {
                     self.catalog_manager
@@ -999,7 +1028,7 @@ impl DdlController {
         stream_job: &StreamingJob,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
-        let StreamingJob::Table(source, table) = stream_job else {
+        let StreamingJob::Table(source, table, ..) = stream_job else {
             unreachable!("unexpected job: {stream_job:?}")
         };
 

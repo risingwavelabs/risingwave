@@ -139,12 +139,20 @@ message DropViewResponse {
   uint64 version = 2;
 }
 
+enum TableSubType {
+    UNSPECIFIED = 0;
+    NORMAL = 1;
+    // The table is shared a CDC source
+    SHARED_CDC_SOURCE = 2;
+}
+
 message CreateTableRequest {
   // An optional field and will be `Some` for tables with an external connector. If so, the table
   // will subscribe to the changes of the external connector and materialize the data.
   catalog.Source source = 1;
   catalog.Table materialized_view = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
+  TableSubType sub_type = 4;
 }
 
 message CreateTableResponse {

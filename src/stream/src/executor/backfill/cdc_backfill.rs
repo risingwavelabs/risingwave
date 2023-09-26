@@ -607,7 +607,7 @@ async fn parse_debezium_chunk(
     let column_descs = get_rw_columns(schema);
     let mut builder = SourceStreamChunkBuilder::with_capacity(column_descs, chunk.capacity());
 
-    // The schema of input chunk (payload varchar, _rw_offset varchar, _rw_table_name varchar)
+    // The schema of input chunk (payload varchar, _rw_offset varchar, _rw_table_name varchar, _row_id)
     // We should use the debezium parser to parse the first column,
     // then chain the parsed row with `_rw_offset` row to get a new row.
     let payloads = chunk.data_chunk().project(vec![0].as_slice());

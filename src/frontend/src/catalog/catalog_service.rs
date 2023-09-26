@@ -24,7 +24,7 @@ use risingwave_pb::catalog::{
     PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
-use risingwave_pb::ddl_service::create_connection_request;
+use risingwave_pb::ddl_service::{create_connection_request, PbTableSubType};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
@@ -77,6 +77,7 @@ pub trait CatalogWriter: Send + Sync {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
+        sub_type: PbTableSubType,
     ) -> Result<()>;
 
     async fn replace_table(
@@ -224,8 +225,12 @@ impl CatalogWriter for CatalogWriterImpl {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
+        sub_type: PbTableSubType,
     ) -> Result<()> {
-        let (_, version) = self.meta_client.create_table(source, table, graph).await?;
+        let (_, version) = self
+            .meta_client
+            .create_table(source, table, graph, sub_type)
+            .await?;
         self.wait_version(version).await
     }
 

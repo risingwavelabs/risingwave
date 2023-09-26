@@ -410,11 +410,13 @@ impl MetaClient {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
+        sub_type: PbTableSubType,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
             source,
+            sub_type: sub_type as _,
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
