@@ -25,7 +25,7 @@ use risingwave_pb::catalog::connection::private_link_service::{
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Connection, PbSource, PbTable};
+use risingwave_pb::catalog::{connection, Connection, CreateType, PbSource, PbTable};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
@@ -232,7 +232,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob(
                 stream_job,
                 fragment_graph,
-                StreamJobExecutionMode::Foreground,
+                CreateType::Foreground,
             ))
             .await?;
 
@@ -276,6 +276,7 @@ impl DdlService for DdlServiceImpl {
 
         let req = request.into_inner();
         let mview = req.get_materialized_view()?.clone();
+        let create_type = mview.get_create_type().unwrap_or(CreateType::Foreground);
         let fragment_graph = req.get_fragment_graph()?.clone();
 
         let mut stream_job = StreamingJob::MaterializedView(mview);
@@ -287,7 +288,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob(
                 stream_job,
                 fragment_graph,
-                req.stream_job_execution_mode(),
+                create_type,
             ))
             .await?;
 
@@ -342,7 +343,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob(
                 stream_job,
                 fragment_graph,
-                StreamJobExecutionMode::Foreground,
+                CreateType::Foreground,
             ))
             .await?;
 
@@ -438,7 +439,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob(
                 stream_job,
                 fragment_graph,
-                StreamJobExecutionMode::Foreground,
+                CreateType::Foreground,
             ))
             .await?;
 
