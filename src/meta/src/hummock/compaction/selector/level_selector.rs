@@ -25,18 +25,13 @@ use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{compact_task, CompactionConfig, LevelType};
 
-use super::picker::{
-    CompactionTaskValidator, EmergencyCompactionPicker, IntraCompactionPicker,
-    SpaceReclaimCompactionPicker, SpaceReclaimPickerState, TtlPickerState,
-    TtlReclaimCompactionPicker,
-};
 use super::{
-    create_compaction_task, CompactionSelector, LevelCompactionPicker, ManualCompactionOption,
-    ManualCompactionPicker, TierCompactionPicker,
+    create_compaction_task, CompactionSelector, LevelCompactionPicker, TierCompactionPicker,
 };
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::{
-    CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
+    CompactionPicker, CompactionTaskValidator, IntraCompactionPicker, LocalPickerStatistic,
+    MinOverlappingPicker,
 };
 use crate::hummock::compaction::{create_overlap_strategy, CompactionTask, LocalSelectorStatistic};
 use crate::hummock::level_handler::LevelHandler;
@@ -450,16 +445,24 @@ impl CompactionSelector for DynamicLevelSelector {
 
 #[cfg(test)]
 pub mod tests {
-    use std::ops::Range;
+    use std::collections::HashMap;
+    use std::sync::Arc;
 
     use itertools::Itertools;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
-    use risingwave_pb::hummock::{KeyRange, Level, LevelType, OverlappingLevel, SstableInfo};
+    use risingwave_pb::hummock::hummock_version::Levels;
 
-    use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::test_utils::iterator_test_key_of_epoch;
+    use crate::hummock::compaction::selector::tests::{
+        assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
+        generate_tables, push_tables_level0_nonoverlapping,
+    };
+    use crate::hummock::compaction::selector::{
+        CompactionSelector, DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic,
+    };
+    use crate::hummock::level_handler::LevelHandler;
+    use crate::hummock::model::CompactionGroup;
 
     #[test]
     fn test_dynamic_level() {

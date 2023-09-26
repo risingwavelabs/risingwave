@@ -86,7 +86,7 @@ impl LogicalApply {
         let ctx = left.ctx();
         let join_core = generic::Join::with_full_output(left, right, join_type, on);
         let schema = join_core.schema();
-        let pk_indices = join_core.logical_pk();
+        let pk_indices = join_core.stream_key();
         let (functional_dependency, pk_indices) = match pk_indices {
             Some(pk_indices) => (
                 FunctionalDependencySet::with_key(schema.len(), &pk_indices),
