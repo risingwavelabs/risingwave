@@ -28,7 +28,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use simd_json::{BorrowedValue, TryTypeError, ValueAccess, ValueType};
 
 use super::{Access, AccessError, AccessResult};
-use crate::parser::common::json_object_smart_get_value;
+use crate::parser::common::json_object_get_case_insentive;
 use crate::parser::unified::avro::extract_decimal;
 
 #[derive(Clone, Debug)]
@@ -441,7 +441,7 @@ impl JsonParseOptions {
                     .zip_eq_fast(struct_type_info.types())
                     .map(|(field_name, field_type)| {
                         self.parse(
-                            json_object_smart_get_value(value, field_name.into())
+                            json_object_get_case_insentive(value, field_name)
                                 .unwrap_or(&BorrowedValue::Static(simd_json::StaticNode::Null)),
                             Some(field_type),
                         )
@@ -556,11 +556,11 @@ where
 {
     fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
         let mut value = &self.value;
-        for (idx, key) in path.iter().enumerate() {
+        for (idx, &key) in path.iter().enumerate() {
             if let Some(sub_value) = if self.options.ignoring_keycase {
-                json_object_smart_get_value(value, (*key).into())
+                json_object_get_case_insentive(value, key)
             } else {
-                value.get(*key)
+                value.get(key)
             } {
                 value = sub_value;
             } else {

@@ -28,7 +28,7 @@ pub fn apply_delete_on_stream_chunk_writer(
         match res {
             Ok(datum) => Ok(datum),
             Err(e) => {
-                tracing::error!(name=?column.name, data_type=?&column.data_type, err=?e, "delete column error");
+                tracing::error!(name=column.name, data_type=%column.data_type, err=%e, "delete column error");
                 if column.is_pk {
                     // It should be an error when pk column is missing in the message
                     Err(e)?

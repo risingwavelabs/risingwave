@@ -115,7 +115,7 @@ impl CsvParser {
                 *headers = fields;
                 // Here we want a row, but got nothing. So it's an error for the `parse_inner` but
                 // has no bad impact on the system.
-                return  Err(RwError::from(ProtocolError("This message indicates a header, no row will be inserted. However, internal parser state was updated.".to_string())));
+                return Err(RwError::from(ProtocolError("This message indicates a header, no row will be inserted. However, internal parser state was updated.".to_string())));
             }
             writer.insert(|desc| {
                 if let Some(i) = headers.iter().position(|name| name == &desc.name) {

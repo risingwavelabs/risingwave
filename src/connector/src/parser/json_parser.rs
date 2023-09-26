@@ -25,6 +25,7 @@ use super::avro::schema_resolver::ConfluentSchemaResolver;
 use super::schema_registry::Client;
 use super::util::{get_kafka_topic, read_schema_from_http, read_schema_from_local};
 use super::{EncodingProperties, SchemaRegistryAuth, SpecificParserConfig};
+use crate::only_parse_payload;
 use crate::parser::avro::util::avro_schema_to_column_descs;
 use crate::parser::schema_registry::handle_sr_list;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
@@ -106,17 +107,11 @@ impl JsonParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        mut payload: Option<Vec<u8>>,
+        mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        if payload.is_none() {
-            return Err(RwError::from(ErrorCode::InternalError(
-                "Empty payload with nonempty key for non-upsert".into(),
-            )));
-        }
-        let value =
-            simd_json::to_borrowed_value(&mut payload.as_mut().unwrap()[self.payload_start_idx..])
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let value = simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         let values = if let simd_json::BorrowedValue::Array(arr) = value {
             arr
         } else {
@@ -195,7 +190,7 @@ impl ByteStreamSourceParser for JsonParser {
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+        only_parse_payload!(self, payload, writer)
     }
 }
 
@@ -257,7 +252,7 @@ mod tests {
 
         for payload in get_payload() {
             let writer = builder.row_writer();
-            parser.parse_inner(Some(payload), writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
 
         let chunk = builder.finish();
@@ -362,7 +357,7 @@ mod tests {
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#.to_vec();
-            parser.parse_inner(Some(payload), writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
 
         // Parse an incorrect record.
@@ -371,14 +366,14 @@ mod tests {
             // `v2` overflowed.
             let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#.to_vec();
             // ignored the error, and fill None at v2.
-            parser.parse_inner(Some(payload), writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
 
         // Parse a correct record.
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#.to_vec();
-            parser.parse_inner(Some(payload), writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
 
         let chunk = builder.finish();
@@ -448,7 +443,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
         {
             let writer = builder.row_writer();
-            parser.parse_inner(Some(payload), writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
@@ -508,7 +503,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
         {
             let writer = builder.row_writer();
-            parser.parse_inner(Some(payload), writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
