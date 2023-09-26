@@ -179,6 +179,36 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         // Propagate the first barrier
         yield Message::Barrier(barrier);
 
+        // When stream key is different from the user defined primary key columns for sinks. The operations could be out of order
+        // stream key: a,b
+        // sink pk: a
+
+        // original:
+        // (1,1) -> (1,2)
+        // (1,2) -> (1,3)
+
+        // mv fragment 1:
+        // delete (1,1)
+
+        // mv fragment 2:
+        // insert (1,2)
+        // delete (1,2)
+
+        // mv fragment 3:
+        // insert (1,3)
+
+        // merge to sink fragment:
+        // insert (1,3)
+        // insert (1,2)
+        // delete (1,2)
+        // delete (1,1)
+        // So we do additional compaction in the sink executor per barrier.
+
+        //     1. compact all the chanes with the stream key.
+        //     2. sink all the delete events and then sink all insert evernt.
+
+        // after compacting with the stream key, the two event with the same used defined sink pk must have different stream key.
+        // So the delete event is not to delete the inserted record in our internal streaming SQL semantic.
         if stream_key_sink_pk_mismatch {
             let mut chunk_buffer = StreamChunkCompactor::new(stream_key.clone());
             let mut watermark = None;
