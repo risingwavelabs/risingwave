@@ -39,6 +39,14 @@ enum StreamJobStatus {
   CREATED = 2;
 }
 
+// How the stream job was created will determine
+// whether they are persisted.
+enum CreateType {
+  CREATE_TYPE_UNSPECIFIED = 0;
+  BACKGROUND = 1;
+  FOREGROUND = 2;
+}
+
 message StreamSourceInfo {
   // deprecated
   plan_common.RowFormatType row_format = 1;
@@ -261,6 +269,8 @@ message Table {
 
   // Used to filter created / creating tables in meta.
   StreamJobStatus stream_job_status = 31;
+
+  CreateType create_type = 32;
 
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.

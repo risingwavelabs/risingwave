@@ -19,10 +19,10 @@ use std::sync::Arc;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
+use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult, TruncateOffset};
 use tokio::sync::{oneshot, Notify};
 
-use crate::common::log_store::kv_log_store::{ReaderTruncationOffsetType, SeqIdType};
-use crate::common::log_store::{ChunkId, LogStoreResult, TruncateOffset};
+use crate::common::log_store_impl::kv_log_store::{ReaderTruncationOffsetType, SeqIdType};
 
 #[derive(Clone)]
 pub(crate) enum LogStoreBufferItem {
