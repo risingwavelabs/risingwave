@@ -36,13 +36,17 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
     targets
         // force a lower level for important logs
         .with_target("risingwave_stream", Level::DEBUG)
+        .with_target("risingwave_storage", Level::DEBUG)
         // force a higher level for noisy logs
-        .with_target("risingwave_storage", Level::INFO)
         .with_target("risingwave_sqlparser", Level::INFO)
         .with_target("pgwire", Level::INFO)
         .with_target(PGWIRE_QUERY_LOG, Level::OFF)
         // force a higher level for foyer logs
         .with_target("foyer", Level::WARN)
+        .with_target("foyer_common", Level::WARN)
+        .with_target("foyer_intrusive", Level::WARN)
+        .with_target("foyer_memory", Level::WARN)
+        .with_target("foyer_storage", Level::WARN)
         // disable events that are too verbose
         .with_target("events", Level::ERROR)
 }
