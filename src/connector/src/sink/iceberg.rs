@@ -33,13 +33,14 @@ use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_json::Value;
+use url::Url;
 
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::deserialize_bool_from_string;
 use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig};
+use crate::sink::remote::{CoordinatedRemoteSink, RemoteSinkTrait};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 
@@ -47,8 +48,14 @@ use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 pub const ICEBERG_SINK: &str = "iceberg";
 pub const REMOTE_ICEBERG_SINK: &str = "iceberg_java";
 
-pub type RemoteIcebergSink = CoordinatedRemoteSink;
-pub type RemoteIcebergConfig = RemoteConfig;
+#[derive(Debug)]
+pub struct RemoteIceberg;
+
+impl RemoteSinkTrait for RemoteIceberg {
+    const SINK_NAME: &'static str = REMOTE_ICEBERG_SINK;
+}
+
+pub type RemoteIcebergSink = CoordinatedRemoteSink<RemoteIceberg>;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -73,7 +80,7 @@ pub struct IcebergConfig {
     pub catalog_type: Option<String>,
 
     #[serde(rename = "warehouse.path")]
-    pub path: Option<String>, // Path of iceberg warehouse, only applicable in storage catalog.
+    pub path: String, // Path of iceberg warehouse, only applicable in storage catalog.
 
     #[serde(rename = "catalog.uri")]
     pub uri: Option<String>, // URI of iceberg catalog, only applicable in rest catalog.
@@ -108,63 +115,96 @@ impl IcebergConfig {
         Ok(config)
     }
 
-    fn build_iceberg_configs(&self) -> HashMap<String, String> {
+    fn build_iceberg_configs(&self) -> Result<HashMap<String, String>> {
         let mut iceberg_configs = HashMap::new();
-        iceberg_configs.insert(
-            CATALOG_TYPE.to_string(),
-            self.catalog_type
-                .as_deref()
-                .unwrap_or("storage")
-                .to_string(),
-        );
+
+        let catalog_type = self
+            .catalog_type
+            .as_deref()
+            .unwrap_or("storage")
+            .to_string();
+
+        iceberg_configs.insert(CATALOG_TYPE.to_string(), catalog_type.clone());
         iceberg_configs.insert(
             CATALOG_NAME.to_string(),
             self.database_name.clone().to_string(),
         );
-        if let Some(path) = &self.path {
-            iceberg_configs.insert(
-                format!("iceberg.catalog.{}.warehouse", self.database_name),
-                path.clone().to_string(),
-            );
-        }
 
-        if let Some(uri) = &self.uri {
-            iceberg_configs.insert(
-                format!("iceberg.catalog.{}.uri", self.database_name),
-                uri.clone().to_string(),
-            );
+        match catalog_type.as_str() {
+            "storage" => {
+                iceberg_configs.insert(
+                    format!("iceberg.catalog.{}.warehouse", self.database_name),
+                    self.path.clone(),
+                );
+            }
+            "rest" => {
+                let uri = self.uri.clone().ok_or_else(|| {
+                    SinkError::Iceberg(anyhow!("`catalog.uri` must be set in rest catalog"))
+                })?;
+                iceberg_configs.insert(format!("iceberg.catalog.{}.uri", self.database_name), uri);
+            }
+            _ => {
+                return Err(SinkError::Iceberg(anyhow!(
+                    "Unsupported catalog type: {}, only support `storage` and `rest`",
+                    catalog_type
+                )))
+            }
         }
 
         if let Some(region) = &self.region {
             iceberg_configs.insert(
-                "iceberg.catalog.table.io.region".to_string(),
+                "iceberg.table.io.region".to_string(),
                 region.clone().to_string(),
             );
         }
 
         if let Some(endpoint) = &self.endpoint {
             iceberg_configs.insert(
-                "iceberg.catalog.table.io.endpoint".to_string(),
+                "iceberg.table.io.endpoint".to_string(),
                 endpoint.clone().to_string(),
             );
         }
 
         iceberg_configs.insert(
-            "iceberg.catalog.table.io.access_key_id".to_string(),
+            "iceberg.table.io.access_key_id".to_string(),
             self.access_key.clone().to_string(),
         );
         iceberg_configs.insert(
-            "iceberg.catalog.table.io.secret_access_key".to_string(),
+            "iceberg.table.io.secret_access_key".to_string(),
             self.secret_key.clone().to_string(),
         );
 
-        iceberg_configs
+        let (bucket, root) = {
+            let url = Url::parse(&self.path).map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
+            let bucket = url
+                .host_str()
+                .ok_or_else(|| {
+                    SinkError::Iceberg(anyhow!("Invalid s3 path: {}, bucket is missing", self.path))
+                })?
+                .to_string();
+            let root = url.path().trim_start_matches('/').to_string();
+            (bucket, root)
+        };
+
+        iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
+        iceberg_configs.insert("iceberg.table.io.root".to_string(), root);
+
+        Ok(iceberg_configs)
     }
 }
 
 pub struct IcebergSink {
     config: IcebergConfig,
     param: SinkParam,
+}
+
+impl TryFrom<SinkParam> for IcebergSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let config = IcebergConfig::from_hashmap(param.properties.clone())?;
+        IcebergSink::new(config, param)
+    }
 }
 
 impl Debug for IcebergSink {
@@ -177,7 +217,7 @@ impl Debug for IcebergSink {
 
 impl IcebergSink {
     async fn create_table(&self) -> Result<Table> {
-        let catalog = load_catalog(&self.config.build_iceberg_configs())
+        let catalog = load_catalog(&self.config.build_iceberg_configs()?)
             .await
             .map_err(|e| SinkError::Iceberg(anyhow!("Unable to load iceberg catalog: {e}")))?;
 
@@ -215,12 +255,13 @@ impl IcebergSink {
     }
 }
 
-#[async_trait::async_trait]
 impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
     type LogSinker = LogSinkerOf<CoordinatedSinkWriter<IcebergWriter>>;
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    const SINK_NAME: &'static str = ICEBERG_SINK;
+
+    async fn validate(&self) -> Result<()> {
         let _ = self.create_table().await?;
         Ok(())
     }
@@ -415,7 +456,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .collect::<Result<Vec<WriteResult>>>()?;
 
         let mut txn = Transaction::new(&mut self.table);
-        txn.append_file(
+        txn.append_data_file(
             write_results
                 .into_iter()
                 .flat_map(|s| s.data_files.into_iter()),

@@ -117,6 +117,8 @@ pub struct StorageOpts {
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
     pub compactor_max_sst_size: u64,
+    /// enable FastCompactorRunner.
+    pub enable_fast_compaction: bool,
 }
 
 impl Default for StorageOpts {
@@ -213,6 +215,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_max_sst_key_count: c.storage.compactor_max_sst_key_count,
             compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
             compactor_max_sst_size: c.storage.compactor_max_sst_size,
+            enable_fast_compaction: c.storage.enable_fast_compaction,
         }
     }
 }

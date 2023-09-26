@@ -12,18 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage, feature(no_coverage))]
+mod checked;
 
-use risingwave_backup::error::BackupResult;
-
-#[cfg_attr(coverage, no_coverage)]
-fn main() -> BackupResult<()> {
-    use clap::Parser;
-    let opts = risingwave_meta::backup_restore::RestoreOpts::parse();
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new("backup_restore"));
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(risingwave_meta::backup_restore::restore(opts))
-}
+pub use checked::Checked;

@@ -24,6 +24,7 @@ env_scripts = [
 #!@duckscript
 
 # only duckscript can modify env variables in cargo-make
+# duckscript doc: https://github.com/sagiegurari/duckscript/blob/master/docs/sdk.md
 
 set_env ENABLE_TELEMETRY "false"
 
@@ -70,6 +71,26 @@ else
   set_env BUILD_HUMMOCK_TRACE_CMD ""
 end
 
+is_ci = get_env RISINGWAVE_CI
+is_not_ci = not ${is_ci}
+
+if ${is_not_ci}
+  query_log_path = get_env RW_QUERY_LOG_PATH
+  no_query_log_path = not ${query_log_path}
+
+  if ${no_query_log_path}
+    set_env RW_QUERY_LOG_PATH "${PREFIX_LOG}"
+  fi
+
+  rust_log = get_env RUST_LOG
+  no_rust_log = not ${rust_log}
+
+  if ${no_rust_log}
+    set_env RUST_LOG "pgwire_query_log=info"
+  else
+    set_env RUST_LOG "pgwire_query_log=info,${rust_log}"
+  end
+end
 ''',
 ]
 
@@ -1292,7 +1313,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.15.3", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.17.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
 command = "sqllogictest"

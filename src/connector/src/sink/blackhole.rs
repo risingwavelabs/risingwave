@@ -12,27 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
-use risingwave_rpc_client::ConnectorClient;
-
 use crate::sink::log_store::{LogReader, LogStoreReadItem, TruncateOffset};
-use crate::sink::{DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkWriterParam};
+use crate::sink::{
+    DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkError, SinkParam, SinkWriterParam,
+};
 
 pub const BLACKHOLE_SINK: &str = "blackhole";
 
 #[derive(Debug)]
 pub struct BlackHoleSink;
 
-#[async_trait]
+impl TryFrom<SinkParam> for BlackHoleSink {
+    type Error = SinkError;
+
+    fn try_from(_value: SinkParam) -> std::result::Result<Self, Self::Error> {
+        Ok(Self)
+    }
+}
+
 impl Sink for BlackHoleSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = Self;
+
+    const SINK_NAME: &'static str = BLACKHOLE_SINK;
 
     async fn new_log_sinker(&self, _writer_env: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(Self)
     }
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         Ok(())
     }
 }

@@ -14,9 +14,13 @@
 
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::SinkType;
-use risingwave_connector::sink::{SinkConfig, SinkMetrics, SinkParam, SinkWriterParam};
+use risingwave_connector::sink::{
+    SinkError, SinkMetrics, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY,
+};
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
 use risingwave_storage::dispatch_state_store;
 
@@ -56,7 +60,27 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .into_iter()
             .map(ColumnCatalog::from)
             .collect_vec();
-        let connector = SinkConfig::from_hashmap(properties.clone())?.get_connector();
+
+        let connector = {
+            let sink_type = properties.get(CONNECTOR_TYPE_KEY).ok_or_else(|| {
+                SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY))
+            })?;
+
+            use risingwave_connector::sink::Sink;
+
+            match_sink_name_str!(
+                sink_type.to_lowercase().as_str(),
+                SinkType,
+                Ok(SinkType::SINK_NAME),
+                |other| {
+                    Err(SinkError::Config(anyhow!(
+                        "unsupported sink connector {}",
+                        other
+                    )))
+                }
+            )
+        }?;
+
         let sink_param = SinkParam {
             sink_id,
             properties,

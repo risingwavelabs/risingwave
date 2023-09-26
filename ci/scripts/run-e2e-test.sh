@@ -65,7 +65,11 @@ echo "--- e2e, $mode, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cluster_start
 sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
-sqllogictest -p 4566 -d dev './e2e_test/background_ddl/**/*.slt' --junit "batch-ddl-${profile}"
+if [[ $mode != "standalone" ]]; then
+  sqllogictest -p 4566 -d dev './e2e_test/background_ddl/**/*.slt' --junit "batch-ddl-${profile}"
+else
+  echo "Skipping background_ddl test for $mode"
+fi
 sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
@@ -164,12 +168,7 @@ fi
 
 if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     echo "--- e2e, ci-meta-backup-test"
-    download-and-decompress-artifact backup-restore-"$profile" target/debug/
-    mv target/debug/backup-restore-"$profile" target/debug/backup-restore
-    chmod +x ./target/debug/backup-restore
-
     test_root="src/storage/backup/integration_tests"
-    BACKUP_TEST_BACKUP_RESTORE="target/debug/backup-restore" \
     BACKUP_TEST_MCLI=".risingwave/bin/mcli" \
     BACKUP_TEST_MCLI_CONFIG=".risingwave/config/mcli" \
     BACKUP_TEST_RW_ALL_IN_ONE="target/debug/risingwave" \

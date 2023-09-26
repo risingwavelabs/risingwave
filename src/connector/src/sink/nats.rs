@@ -19,7 +19,6 @@ use async_nats::jetstream::context::Context;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
-use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -28,8 +27,9 @@ use tokio_retry::Retry;
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriter, SinkWriterParam};
 use crate::common::NatsCommon;
+use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{Result, Sink, SinkError, SINK_TYPE_APPEND_ONLY};
+use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY};
 
 pub const NATS_SINK: &str = "nats";
 
@@ -54,6 +54,7 @@ pub struct NatsSinkWriter {
     pub config: NatsConfig,
     context: Context,
     schema: Schema,
+    json_encoder: JsonEncoder,
 }
 
 /// Basic data types for use with the nats interface
@@ -71,22 +72,27 @@ impl NatsConfig {
     }
 }
 
-impl NatsSink {
-    pub fn new(config: NatsConfig, schema: Schema, is_append_only: bool) -> Self {
-        Self {
+impl TryFrom<SinkParam> for NatsSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = NatsConfig::from_hashmap(param.properties)?;
+        Ok(Self {
             config,
             schema,
-            is_append_only,
-        }
+            is_append_only: param.sink_type.is_append_only(),
+        })
     }
 }
 
-#[async_trait::async_trait]
 impl Sink for NatsSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = LogSinkerOf<NatsSinkWriter>;
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    const SINK_NAME: &'static str = NATS_SINK;
+
+    async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Nats(anyhow!(
                 "Nats sink only support append-only mode"
@@ -124,6 +130,7 @@ impl NatsSinkWriter {
             config: config.clone(),
             context,
             schema: schema.clone(),
+            json_encoder: JsonEncoder::new(schema, None, TimestampHandlingMode::Milli),
         })
     }
 
@@ -131,7 +138,7 @@ impl NatsSinkWriter {
         Retry::spawn(
             ExponentialBackoff::from_millis(100).map(jitter).take(3),
             || async {
-                let data = chunk_to_json(chunk.clone(), &self.schema).unwrap();
+                let data = chunk_to_json(chunk.clone(), &self.json_encoder).unwrap();
                 for item in data {
                     self.context
                         .publish(self.config.common.subject.clone(), item.into())
