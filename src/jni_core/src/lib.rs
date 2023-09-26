@@ -30,6 +30,7 @@ use std::slice::from_raw_parts;
 use std::sync::{LazyLock, OnceLock};
 
 use bytes::Bytes;
+use cfg_or_panic::cfg_or_panic;
 use jni::objects::{
     AutoElements, GlobalRef, JByteArray, JClass, JMethodID, JObject, JStaticMethodID, JString,
     JValue, JValueGen, JValueOwned, ReleaseMode,
@@ -285,74 +286,60 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(_env: Env
     VirtualNode::COUNT as jint
 }
 
+#[cfg_or_panic(not(madsim))]
 #[no_mangle]
 extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNewHummock<'a>(
     env: EnvParam<'a>,
     read_plan: JByteArray<'a>,
 ) -> Pointer<'static, JavaBindingIterator> {
     execute_and_catch(env, move |env| {
-        #[cfg(madsim)]
-        {
-            unreachable!()
-        }
-
-        #[cfg(not(madsim))]
-        {
-            let read_plan = Message::decode(to_guarded_slice(&read_plan, env)?.deref())?;
-            let iter = RUNTIME.block_on(HummockJavaBindingIterator::new(read_plan))?;
-            let iter = JavaBindingIterator {
-                inner: JavaBindingIteratorInner::Hummock(iter),
-                cursor: None,
-                class_cache: Default::default(),
-            };
-            Ok(iter.into())
-        }
+        let read_plan = Message::decode(to_guarded_slice(&read_plan, env)?.deref())?;
+        let iter = RUNTIME.block_on(HummockJavaBindingIterator::new(read_plan))?;
+        let iter = JavaBindingIterator {
+            inner: JavaBindingIteratorInner::Hummock(iter),
+            cursor: None,
+            class_cache: Default::default(),
+        };
+        Ok(iter.into())
     })
 }
 
+#[cfg_or_panic(not(madsim))]
 #[no_mangle]
 extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>(
     env: EnvParam<'a>,
     mut pointer: Pointer<'a, JavaBindingIterator>,
 ) -> jboolean {
     execute_and_catch(env, move |_env| {
-        #[cfg(madsim)]
-        {
-            unreachable!()
-        }
-
-        #[cfg(not(madsim))]
-        {
-            let iter = pointer.as_mut();
-            match &mut iter.inner {
-                JavaBindingIteratorInner::Hummock(ref mut hummock_iter) => {
-                    match RUNTIME.block_on(hummock_iter.next())? {
-                        None => {
-                            iter.cursor = None;
-                            Ok(JNI_FALSE)
-                        }
-                        Some((key, row)) => {
-                            iter.cursor = Some(RowCursor {
-                                row,
-                                extra: RowExtra::Key(key),
-                            });
-                            Ok(JNI_TRUE)
-                        }
+        let iter = pointer.as_mut();
+        match &mut iter.inner {
+            JavaBindingIteratorInner::Hummock(ref mut hummock_iter) => {
+                match RUNTIME.block_on(hummock_iter.next())? {
+                    None => {
+                        iter.cursor = None;
+                        Ok(JNI_FALSE)
+                    }
+                    Some((key, row)) => {
+                        iter.cursor = Some(RowCursor {
+                            row,
+                            extra: RowExtra::Key(key),
+                        });
+                        Ok(JNI_TRUE)
                     }
                 }
-                JavaBindingIteratorInner::StreamChunk(ref mut stream_chunk_iter) => {
-                    match stream_chunk_iter.next() {
-                        None => {
-                            iter.cursor = None;
-                            Ok(JNI_FALSE)
-                        }
-                        Some((op, row)) => {
-                            iter.cursor = Some(RowCursor {
-                                row,
-                                extra: RowExtra::Op(op),
-                            });
-                            Ok(JNI_TRUE)
-                        }
+            }
+            JavaBindingIteratorInner::StreamChunk(ref mut stream_chunk_iter) => {
+                match stream_chunk_iter.next() {
+                    None => {
+                        iter.cursor = None;
+                        Ok(JNI_FALSE)
+                    }
+                    Some((op, row)) => {
+                        iter.cursor = Some(RowCursor {
+                            row,
+                            extra: RowExtra::Op(op),
+                        });
+                        Ok(JNI_TRUE)
                     }
                 }
             }

@@ -27,9 +27,9 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_rpc_client::ConnectorClient;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
+use strum_macros::{Display, EnumString};
 
 use super::encoder::{JsonEncoder, TimestampHandlingMode};
 use super::formatter::{
@@ -69,6 +69,16 @@ const fn _default_use_transaction() -> bool {
 
 const fn _default_force_append_only() -> bool {
     false
+}
+
+#[derive(Debug, Clone, PartialEq, Display, Serialize, Deserialize, EnumString)]
+#[strum(serialize_all = "snake_case")]
+enum CompressionCodec {
+    None,
+    Gzip,
+    Snappy,
+    Lz4,
+    Zstd,
 }
 
 #[serde_as]
@@ -126,6 +136,11 @@ pub struct RdKafkaPropertiesProducer {
     #[serde(rename = "properties.batch.size")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     batch_size: Option<usize>,
+
+    /// Compression codec to use for compressing message sets.
+    #[serde(rename = "properties.compression.codec")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    compression_codec: Option<CompressionCodec>,
 }
 
 impl RdKafkaPropertiesProducer {
@@ -153,6 +168,9 @@ impl RdKafkaPropertiesProducer {
         }
         if let Some(v) = self.batch_size {
             c.set("batch.size", v.to_string());
+        }
+        if let Some(v) = &self.compression_codec {
+            c.set("compression.codec", v.to_string());
         }
     }
 }
@@ -298,7 +316,7 @@ impl Sink for KafkaSink {
         ))
     }
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
@@ -651,11 +669,16 @@ mod test {
             "properties.retry.backoff.ms".to_string() => "114514".to_string(),
             "properties.batch.num.messages".to_string() => "114514".to_string(),
             "properties.batch.size".to_string() => "114514".to_string(),
+            "properties.compression.codec".to_string() => "zstd".to_string(),
         };
         let c = KafkaConfig::from_hashmap(props).unwrap();
         assert_eq!(
             c.rdkafka_properties.queue_buffering_max_ms,
             Some(114.514f64)
+        );
+        assert_eq!(
+            c.rdkafka_properties.compression_codec,
+            Some(CompressionCodec::Zstd)
         );
 
         let props: HashMap<String, String> = hashmap! {
@@ -676,6 +699,16 @@ mod test {
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "append-only".to_string(),
             "properties.queue.buffering.max.kbytes".to_string() => "-114514".to_string(), // usize cannot be negative
+        };
+        assert!(KafkaConfig::from_hashmap(props).is_err());
+
+        let props: HashMap<String, String> = hashmap! {
+            // basic
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "append-only".to_string(),
+            "properties.compression.codec".to_string() => "notvalid".to_string(), // has to be a valid CompressionCodec
         };
         assert!(KafkaConfig::from_hashmap(props).is_err());
     }
@@ -763,6 +796,7 @@ mod test {
             "properties.bootstrap.server".to_string() => "localhost:29092".to_string(),
             "type".to_string() => "append-only".to_string(),
             "topic".to_string() => "test_topic".to_string(),
+            "properties.compression.codec".to_string() => "zstd".to_string(),
         };
 
         // Create a table with two columns (| id : INT32 | v2 : VARCHAR |) here

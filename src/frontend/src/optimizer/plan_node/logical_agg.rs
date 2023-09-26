@@ -222,7 +222,7 @@ impl LogicalAgg {
         // so it obeys consistent hash strategy via [`Distribution::HashShard`].
         let stream_input =
             if *input_dist == Distribution::SomeShard && self.core.must_try_two_phase_agg() {
-                RequiredDist::shard_by_key(stream_input.schema().len(), stream_input.logical_pk())
+                RequiredDist::shard_by_key(stream_input.schema().len(), stream_input.stream_key())
                     .enforce_if_not_satisfies(stream_input, &Order::any())?
             } else {
                 stream_input
