@@ -76,6 +76,7 @@ where
     pub rated_random_rate: usize,
     pub event_listener: Vec<Arc<dyn EventListener<K = K, V = V>>>,
     pub enable_filter: bool,
+    pub allocator_bits: usize,
 }
 
 pub struct FoyerRuntimeConfig<K, V>
@@ -225,6 +226,7 @@ where
                     allocation_timeout: Duration::from_millis(10),
                     clean_region_threshold: foyer_store_config.reclaimers
                         + foyer_store_config.reclaimers / 2,
+                    allocator_bits: foyer_store_config.allocator_bits,
                 };
 
                 FoyerStore::open(c).await.map_err(FileCacheError::foyer)

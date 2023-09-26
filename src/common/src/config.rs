@@ -631,6 +631,9 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::reclaim_rate_limit_mb")]
     pub reclaim_rate_limit_mb: usize,
 
+    #[serde(default = "default::file_cache::allocator_bits")]
+    pub allocator_bits: usize,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -1122,6 +1125,10 @@ pub mod default {
         }
 
         pub fn reclaim_rate_limit_mb() -> usize {
+            0
+        }
+
+        pub fn allocator_bits() -> usize {
             0
         }
     }

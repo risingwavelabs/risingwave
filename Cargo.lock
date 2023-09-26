@@ -2871,7 +2871,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=ac26695#ac26695d5bf06fb4f2bd9aae2920382a1b37ebcd"
+source = "git+https://github.com/mrcroxx/foyer?rev=6b590c1#6b590c16d547591137b8f4a658eba90c40eac9cb"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -2882,7 +2882,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=ac26695#ac26695d5bf06fb4f2bd9aae2920382a1b37ebcd"
+source = "git+https://github.com/mrcroxx/foyer?rev=6b590c1#6b590c16d547591137b8f4a658eba90c40eac9cb"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
@@ -2896,7 +2896,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=ac26695#ac26695d5bf06fb4f2bd9aae2920382a1b37ebcd"
+source = "git+https://github.com/mrcroxx/foyer?rev=6b590c1#6b590c16d547591137b8f4a658eba90c40eac9cb"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -2913,7 +2913,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=ac26695#ac26695d5bf06fb4f2bd9aae2920382a1b37ebcd"
+source = "git+https://github.com/mrcroxx/foyer?rev=6b590c1#6b590c16d547591137b8f4a658eba90c40eac9cb"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -2943,7 +2943,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=ac26695#ac26695d5bf06fb4f2bd9aae2920382a1b37ebcd"
+source = "git+https://github.com/mrcroxx/foyer?rev=6b590c1#6b590c16d547591137b8f4a658eba90c40eac9cb"
 dependencies = [
  "crossbeam-utils",
  "either",
@@ -2954,7 +2954,6 @@ dependencies = [
  "hyper",
  "itertools 0.10.5",
  "libc",
- "lock_api",
  "memchr",
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.8",

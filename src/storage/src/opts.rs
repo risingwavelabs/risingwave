@@ -78,6 +78,7 @@ pub struct StorageOpts {
     pub data_file_cache_rated_random_rate_mb: usize,
     pub data_file_cache_flush_rate_limit_mb: usize,
     pub data_file_cache_reclaim_rate_limit_mb: usize,
+    pub data_file_cache_allocator_bits: usize,
 
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
@@ -97,6 +98,7 @@ pub struct StorageOpts {
     pub meta_file_cache_rated_random_rate_mb: usize,
     pub meta_file_cache_flush_rate_limit_mb: usize,
     pub meta_file_cache_reclaim_rate_limit_mb: usize,
+    pub meta_file_cache_allocator_bits: usize,
 
     /// The storage url for storing backups.
     pub backup_storage_url: String,
@@ -176,6 +178,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_rated_random_rate_mb: c.storage.data_file_cache.rated_random_rate_mb,
             data_file_cache_flush_rate_limit_mb: c.storage.data_file_cache.flush_rate_limit_mb,
             data_file_cache_reclaim_rate_limit_mb: c.storage.data_file_cache.reclaim_rate_limit_mb,
+            data_file_cache_allocator_bits: c.storage.data_file_cache.allocator_bits,
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
             meta_file_cache_file_capacity_mb: c.storage.meta_file_cache.file_capacity_mb,
@@ -196,6 +199,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_rated_random_rate_mb: c.storage.meta_file_cache.rated_random_rate_mb,
             meta_file_cache_flush_rate_limit_mb: c.storage.meta_file_cache.flush_rate_limit_mb,
             meta_file_cache_reclaim_rate_limit_mb: c.storage.meta_file_cache.reclaim_rate_limit_mb,
+            meta_file_cache_allocator_bits: c.storage.meta_file_cache.allocator_bits,
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,

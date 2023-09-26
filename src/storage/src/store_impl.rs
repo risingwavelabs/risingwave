@@ -548,6 +548,7 @@ impl StateStoreImpl {
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
                 event_listener: vec![],
                 enable_filter: !opts.cache_refill_data_refill_levels.is_empty(),
+                allocator_bits: opts.data_file_cache_allocator_bits,
             };
             let config = FoyerRuntimeConfig {
                 foyer_store_config,
@@ -581,6 +582,7 @@ impl StateStoreImpl {
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
                 event_listener: vec![],
                 enable_filter: false,
+                allocator_bits: opts.meta_file_cache_allocator_bits,
             };
             let config = FoyerRuntimeConfig {
                 foyer_store_config,
