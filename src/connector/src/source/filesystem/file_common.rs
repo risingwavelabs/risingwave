@@ -56,13 +56,13 @@ impl FsSplit {
     }
 }
 
-pub struct FsPage {
+pub struct FsPageItem {
     pub name: String,
     pub size: usize,
     pub timestamp: Timestamp,
 }
 
-impl FsPage {
+impl FsPageItem {
     pub fn new(name: String, size: usize, timestamp: Timestamp) -> Self {
         Self {
             name,
@@ -71,3 +71,5 @@ impl FsPage {
         }
     }
 }
+
+pub type FsPage = Vec<FsPageItem>;

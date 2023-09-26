@@ -76,7 +76,7 @@ impl ConnectorSource {
             .collect::<Result<Vec<SourceColumnDesc>>>()
     }
 
-    pub async fn source_lister(&self) -> Result<BoxTryStream<Vec<FsPage>>> {
+    pub async fn source_lister(&self) -> Result<BoxTryStream<FsPage>> {
         let config = self.config.clone();
         let lister = match config {
             ConnectorProperties::S3(prop) => S3SourceLister::new(*prop).await?,

@@ -515,7 +515,7 @@ pub trait SourceLister: Sized {
     type Properties;
 
     async fn new(properties: Self::Properties) -> Result<Self>;
-    fn paginate(self) -> BoxTryStream<Vec<FsPage>>;
+    fn paginate(self) -> BoxTryStream<FsPage>;
 }
 
 #[cfg(test)]

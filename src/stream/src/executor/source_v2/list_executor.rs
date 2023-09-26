@@ -22,9 +22,7 @@ use risingwave_common::array::Op;
 use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::filesystem::FsPage;
-use risingwave_connector::source::{
-    BoxTryStream, SourceCtrlOpts, StreamChunkWithState
-};
+use risingwave_connector::source::{BoxTryStream, SourceCtrlOpts};
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
@@ -34,7 +32,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::*;
 
-pub struct ListExecutor<S: StateStore> {
+pub struct FsListExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
     identity: String,
@@ -62,7 +60,7 @@ pub struct ListExecutor<S: StateStore> {
     connector_params: ConnectorParams,
 }
 
-impl<S: StateStore> ListExecutor<S> {
+impl<S: StateStore> FsListExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
@@ -78,7 +76,7 @@ impl<S: StateStore> ListExecutor<S> {
     ) -> Self {
         Self {
             actor_ctx,
-            identity: format!("ListExecutor {:X}", executor_id),
+            identity: format!("FsListExecutor {:X}", executor_id),
             schema,
             pk_indices,
             stream_source_core,
@@ -90,46 +88,38 @@ impl<S: StateStore> ListExecutor<S> {
         }
     }
 
-    async fn build_fs_source_lister(
+    async fn build_chunked_paginate_stream(
         &self,
         source_desc: &SourceDesc,
-    ) -> StreamExecutorResult<BoxTryStream<Vec<FsPage>>> {
-        source_desc
+    ) -> StreamExecutorResult<BoxTryStream<StreamChunk>> {
+        let stream = source_desc
             .source
             .source_lister()
             .await
-            .map_err(StreamExecutorError::connector_error)
+            .map_err(StreamExecutorError::connector_error)?;
+
+        Ok(stream.map(|item| {
+            item.map(Self::map_fs_page_to_chunk)
+        }).boxed())
     }
 
-    async fn fetch_one_page_chunk(
-        &self,
-        paginate_stream: &mut BoxTryStream<Vec<FsPage>>,
-    ) -> StreamExecutorResult<StreamChunk> {
-        match paginate_stream.next().await {
-            Some(Ok(page)) => {
-                let rows = page
-                    .into_iter()
-                    .map(|split| {
-                        (
-                            Op::Insert,
-                            OwnedRow::new(vec![
-                                Some(ScalarImpl::Utf8(split.name.into_boxed_str())),
-                                Some(ScalarImpl::Timestamp(split.timestamp)),
-                                Some(ScalarImpl::Int64(split.size as i64)),
-                            ]),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                Ok(StreamChunk::from_rows(
-                    &rows,
-                    &[DataType::Varchar, DataType::Timestamp, DataType::Int64],
-                ))
-            },
-            Some(Err(err)) => Err(StreamExecutorError::connector_error(err)),
-            None => unreachable!(), // paginate_stream never ends
-        }
+    fn map_fs_page_to_chunk(page: FsPage) -> StreamChunk {
+        let rows = page
+            .into_iter()
+            .map(|split| {(
+                Op::Insert,
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Utf8(split.name.into_boxed_str())),
+                    Some(ScalarImpl::Timestamp(split.timestamp)),
+                    Some(ScalarImpl::Int64(split.size as i64)),
+                ]),
+            )})
+            .collect::<Vec<_>>();
+        StreamChunk::from_rows(
+            &rows,
+            &[DataType::Varchar, DataType::Timestamp, DataType::Int64],
+        )
     }
-    
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
@@ -154,18 +144,15 @@ impl<S: StateStore> ListExecutor<S> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        // TODO: init state store epoch
-
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = Some(core);
 
-        // TODO: recover state
-        let mut paginate_stream = self.build_fs_source_lister(&source_desc).await?;
+        let chunked_paginate_stream = self.build_chunked_paginate_stream(&source_desc).await?;
 
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
-        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
+        let mut stream = StreamReaderWithPause::<true, _>::new(
             barrier_stream,
-            tokio_stream::pending().boxed(),
+            chunked_paginate_stream
         );
 
         if barrier.is_pause_on_startup() {
@@ -178,43 +165,34 @@ impl<S: StateStore> ListExecutor<S> {
             match msg {
                 Err(_) => (),
                 Ok(msg) => match msg {
+                    // Barrier arrives.
                     Either::Left(msg) => match &msg {
                         Message::Barrier(barrier) => {
-                            let mut is_pause_resume = false;
                             if let Some(mutation) = barrier.mutation.as_deref() {
                                 match mutation {
-                                    Mutation::Pause => {
-                                        stream.pause_stream();
-                                        is_pause_resume = true;
-                                    },
-                                    Mutation::Resume => {
-                                        stream.resume_stream();
-                                        is_pause_resume = true;
-                                    }
+                                    Mutation::Pause => stream.pause_stream(),
+                                    Mutation::Resume => stream.resume_stream(),
                                     _ => (),
                                 }
                             }
-
-                            if !is_pause_resume {
-                                // TODO: persist some state here
-                                let chunk = self.fetch_one_page_chunk(&mut paginate_stream).await?;
-                                yield Message::Chunk(chunk);
-                            }
-
-                            yield msg; // propagate the barrier
+                            
+                            // Propagate the barrier.
+                            yield msg;
                         }
                         // Only barrier can be received.
                         _ => unreachable!(),
                     },
-                    // Right arm is always pending.
-                    _ => unreachable!(),
+                    // Chunked FsPage arrives.
+                    Either::Right(chunk) => {
+                        yield Message::Chunk(chunk);
+                    }
                 },
             }
         }
     }
 }
 
-impl<S: StateStore> Executor for ListExecutor<S> {
+impl<S: StateStore> Executor for FsListExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
@@ -296,7 +274,7 @@ mod tests {
 
         let system_params_manager = LocalSystemParamsManager::for_test();
 
-        let executor = ListExecutor::new(
+        let executor = FsListExecutor::new(
             ActorContext::create(0),
             schema,
             pk_indices,

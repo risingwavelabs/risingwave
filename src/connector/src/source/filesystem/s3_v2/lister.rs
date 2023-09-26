@@ -24,7 +24,7 @@ use risingwave_common::types::Timestamp;
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::{default_conn_config, s3_client};
 use crate::source::filesystem::file_common::{FsPage, FsSplit};
-use crate::source::filesystem::S3Properties;
+use crate::source::filesystem::{S3Properties, FsPageItem};
 use crate::source::{BoxTryStream, SourceLister};
 
 /// Get the prefix from a glob
@@ -69,9 +69,9 @@ pub struct S3SourceLister {
 }
 
 impl S3SourceLister {
-    #[try_stream(boxed, ok = Vec<FsPage>, error = RwError)]
+    #[try_stream(boxed, ok = FsPage, error = RwError)]
     async fn paginate_inner(self) {
-        'round: loop { // start a new round
+        loop { // start a new round
             let mut next_continuation_token = None;
             'truncated: loop { // loop to paginate
                 let mut req = self
@@ -102,7 +102,7 @@ impl S3SourceLister {
                     .into_iter()
                     .map(|obj| {
                         let aws_ts = obj.last_modified().unwrap();
-                        FsPage::new(
+                        FsPageItem::new(
                             obj.key().unwrap().to_owned(),
                             obj.size() as usize,
                             Timestamp::from_timestamp_uncheck(aws_ts.secs(), aws_ts.subsec_nanos()),
@@ -146,7 +146,7 @@ impl SourceLister for S3SourceLister {
         })
     }
 
-    fn paginate(self) -> BoxTryStream<Vec<FsPage>> {
+    fn paginate(self) -> BoxTryStream<FsPage> {
         self.paginate_inner()
     }
 }
