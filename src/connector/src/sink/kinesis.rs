@@ -47,23 +47,28 @@ pub struct KinesisSink {
     sink_from_name: String,
 }
 
-impl KinesisSink {
-    pub fn new(config: KinesisSinkConfig, param: SinkParam) -> Self {
-        Self {
+impl TryFrom<SinkParam> for KinesisSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = KinesisSinkConfig::from_hashmap(param.properties)?;
+        Ok(Self {
             config,
-            schema: param.schema(),
+            schema,
             pk_indices: param.downstream_pk,
             is_append_only: param.sink_type.is_append_only(),
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,
-        }
+        })
     }
 }
 
-#[async_trait::async_trait]
 impl Sink for KinesisSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = KinesisSinkWriter;
+
+    const SINK_NAME: &'static str = KINESIS_SINK;
 
     async fn validate(&self) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.

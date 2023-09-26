@@ -41,15 +41,21 @@ use super::{
 };
 use crate::deserialize_bool_from_string;
 use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig};
+use crate::sink::remote::{CoordinatedRemoteSink, RemoteSinkTrait};
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
 
 /// This iceberg sink is WIP. When it ready, we will change this name to "iceberg".
 pub const ICEBERG_SINK: &str = "iceberg";
 pub const REMOTE_ICEBERG_SINK: &str = "iceberg_java";
 
-pub type RemoteIcebergSink = CoordinatedRemoteSink;
-pub type RemoteIcebergConfig = RemoteConfig;
+#[derive(Debug)]
+pub struct RemoteIceberg;
+
+impl RemoteSinkTrait for RemoteIceberg {
+    const SINK_NAME: &'static str = REMOTE_ICEBERG_SINK;
+}
+
+pub type RemoteIcebergSink = CoordinatedRemoteSink<RemoteIceberg>;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -192,6 +198,15 @@ pub struct IcebergSink {
     param: SinkParam,
 }
 
+impl TryFrom<SinkParam> for IcebergSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let config = IcebergConfig::from_hashmap(param.properties.clone())?;
+        IcebergSink::new(config, param)
+    }
+}
+
 impl Debug for IcebergSink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IcebergSink")
@@ -240,10 +255,11 @@ impl IcebergSink {
     }
 }
 
-#[async_trait::async_trait]
 impl Sink for IcebergSink {
     type Coordinator = IcebergSinkCommitter;
     type Writer = CoordinatedSinkWriter<IcebergWriter>;
+
+    const SINK_NAME: &'static str = ICEBERG_SINK;
 
     async fn validate(&self) -> Result<()> {
         let _ = self.create_table().await?;
@@ -261,7 +277,7 @@ impl Sink for IcebergSink {
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
             table,
         };
-        Ok(CoordinatedSinkWriter::new(
+        CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
                 .expect("should have meta client")
@@ -275,7 +291,7 @@ impl Sink for IcebergSink {
             })?,
             inner,
         )
-        .await?)
+        .await
     }
 
     async fn new_coordinator(

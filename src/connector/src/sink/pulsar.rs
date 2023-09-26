@@ -145,23 +145,28 @@ pub struct PulsarSink {
     sink_from_name: String,
 }
 
-impl PulsarSink {
-    pub fn new(config: PulsarConfig, param: SinkParam) -> Self {
-        Self {
+impl TryFrom<SinkParam> for PulsarSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = PulsarConfig::from_hashmap(param.properties)?;
+        Ok(Self {
             config,
-            schema: param.schema(),
+            schema,
             downstream_pk: param.downstream_pk,
             is_append_only: param.sink_type.is_append_only(),
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,
-        }
+        })
     }
 }
 
-#[async_trait]
 impl Sink for PulsarSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = PulsarSinkWriter;
+
+    const SINK_NAME: &'static str = PULSAR_SINK;
 
     async fn new_writer(&self, _writer_param: SinkWriterParam) -> Result<Self::Writer> {
         PulsarSinkWriter::new(

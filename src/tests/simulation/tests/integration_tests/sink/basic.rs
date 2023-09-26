@@ -74,32 +74,6 @@ impl Drop for TestWriter {
     }
 }
 
-struct TestSink {
-    row_counter: Arc<AtomicUsize>,
-    parallelism_counter: Arc<AtomicUsize>,
-}
-
-#[async_trait]
-impl Sink for TestSink {
-    type Coordinator = BoxCoordinator;
-    type Writer = BoxWriter<()>;
-
-    async fn validate(&self) -> risingwave_connector::sink::Result<()> {
-        Ok(())
-    }
-
-    async fn new_writer(
-        &self,
-        _writer_param: SinkWriterParam,
-    ) -> risingwave_connector::sink::Result<Self::Writer> {
-        self.parallelism_counter.fetch_add(1, Relaxed);
-        Ok(Box::new(TestWriter {
-            parallelism_counter: self.parallelism_counter.clone(),
-            row_counter: self.row_counter.clone(),
-        }))
-    }
-}
-
 fn build_stream_chunk(row_iter: impl Iterator<Item = (i32, String)>) -> StreamChunk {
     let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Varchar], 100000);
     for (id, name) in row_iter {
@@ -142,11 +116,12 @@ async fn test_sink_basic() -> Result<()> {
     let _sink_guard = registry_build_sink({
         let row_counter = row_counter.clone();
         let parallelism_counter = parallelism_counter.clone();
-        move |_param| {
-            Ok(Box::new(TestSink {
+        move |_, _| {
+            parallelism_counter.fetch_add(1, Relaxed);
+            Box::new(TestWriter {
                 row_counter: row_counter.clone(),
                 parallelism_counter: parallelism_counter.clone(),
-            }))
+            })
         }
     });
 
@@ -239,11 +214,12 @@ async fn test_sink_decouple_basic() -> Result<()> {
     let _sink_guard = registry_build_sink({
         let row_counter = row_counter.clone();
         let parallelism_counter = parallelism_counter.clone();
-        move |_param| {
-            Ok(Box::new(TestSink {
+        move |_, _| {
+            parallelism_counter.fetch_add(1, Relaxed);
+            Box::new(TestWriter {
                 row_counter: row_counter.clone(),
                 parallelism_counter: parallelism_counter.clone(),
-            }))
+            })
         }
     });
 

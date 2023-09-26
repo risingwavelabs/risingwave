@@ -30,7 +30,8 @@ use serde_with::serde_as;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::common::ClickHouseCommon;
 use crate::sink::{
-    Result, Sink, SinkError, SinkWriter, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Result, Sink, SinkError, SinkParam, SinkWriter, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT,
 };
 
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
@@ -70,21 +71,22 @@ impl ClickHouseConfig {
     }
 }
 
-impl ClickHouseSink {
-    pub fn new(
-        config: ClickHouseConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        is_append_only: bool,
-    ) -> Result<Self> {
+impl TryFrom<SinkParam> for ClickHouseSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = ClickHouseConfig::from_hashmap(param.properties)?;
         Ok(Self {
             config,
             schema,
-            pk_indices,
-            is_append_only,
+            pk_indices: param.downstream_pk,
+            is_append_only: param.sink_type.is_append_only(),
         })
     }
+}
 
+impl ClickHouseSink {
     /// Check that the column names and types of risingwave and clickhouse are identical
     fn check_column_name_and_type(&self, clickhouse_columns_desc: &[SystemColumn]) -> Result<()> {
         let rw_fields_name = build_fields_name_type_from_schema(&self.schema)?;
@@ -205,10 +207,11 @@ impl ClickHouseSink {
         Ok(())
     }
 }
-#[async_trait::async_trait]
 impl Sink for ClickHouseSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = ClickHouseSinkWriter;
+
+    const SINK_NAME: &'static str = CLICKHOUSE_SINK;
 
     async fn validate(&self) -> Result<()> {
         // For upsert clickhouse sink, the primary key must be defined.
@@ -241,13 +244,13 @@ impl Sink for ClickHouseSink {
     }
 
     async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
-        Ok(ClickHouseSinkWriter::new(
+        ClickHouseSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
         )
-        .await?)
+        .await
     }
 }
 pub struct ClickHouseSinkWriter {
