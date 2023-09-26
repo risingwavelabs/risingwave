@@ -342,7 +342,7 @@ impl Binder {
                     .columns
                     .into_iter()
                     .zip_longest(
-                        from_alias.columns.into_iter()
+                        from_alias.columns
                     )
                     .map(EitherOrBoth::into_right)
                     .collect();

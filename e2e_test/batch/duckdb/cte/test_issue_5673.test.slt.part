@@ -46,3 +46,9 @@ some_more_logic as (
 select * from some_more_logic;
 ----
 1
+
+statement ok
+drop table orders;
+
+statement ok
+drop table stg_orders;

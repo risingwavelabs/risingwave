@@ -52,3 +52,6 @@ with cte as (Select i as j from a) select * from cte where j = (with cte as (sel
 # self-refer to non-existent cte
 statement error
 with cte as (select * from cte) select * from cte
+
+statement ok
+drop table a;
