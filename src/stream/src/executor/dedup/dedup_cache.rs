@@ -36,39 +36,17 @@ impl<K: Hash + Eq + EstimateSize + Debug> DedupCache<K> {
     /// If duplicated, the cache will update the row count. If row count is 0, will return true.
     /// Also, returns the `dup_count` of the key as i64 after inserting the record.
     pub fn dedup_insert(&mut self, op: &Op, key: K) -> (bool, i64) {
-        let row_cnt = self.inner.get(&key);
-        match (row_cnt.cloned(), op) {
-            (Some(row_cnt), Op::Insert | Op::UpdateInsert) => {
-                self.inner.put(key, row_cnt + 1);
-                if row_cnt == 0 {
-                    // row_cnt 0 -> 1
-                    (true, 1)
-                } else {
-                    (false, row_cnt + 1)
-                }
-            }
-            (Some(row_cnt), Op::Delete | Op::UpdateDelete) => {
-                if row_cnt == 1 {
-                    // row_cnt 1 -> 0
-                    self.inner.put(key, row_cnt - 1);
-                    (true, row_cnt - 1)
-                } else if row_cnt == 0 {
-                    tracing::debug!("trying to delete a non-existing key from cache: {:?}", key);
-                    (false, 0)
-                } else {
-                    self.inner.put(key, row_cnt - 1);
-                    (false, row_cnt - 1)
-                }
-            }
-            (None, Op::Insert | Op::UpdateInsert) => {
-                // row_cnt 0 -> 1
-                (self.inner.put(key, 1).is_none(), 1)
-            }
-            (None, Op::Delete | Op::UpdateDelete) => {
-                tracing::debug!("trying to delete a non-existing key from cache: {:?}", key);
-                (false, 0)
-            }
+        let old_row_cnt = self.inner.get(&key).cloned().unwrap_or(0);
+        let delta = match op {
+            Op::Insert | Op::UpdateInsert => 1,
+            Op::Delete | Op::UpdateDelete => -1,
+        };
+        let new_row_cnt = old_row_cnt + delta;
+        if new_row_cnt < 0 {
+            panic!("trying to delete a non-existing key from cache: {:?}", key);
         }
+        self.inner.put(key, new_row_cnt);
+        (old_row_cnt == 0 || new_row_cnt == 0, new_row_cnt)
     }
 
     /// Insert a `key` into the cache without checking for duplication.
