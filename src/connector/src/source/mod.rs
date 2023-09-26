@@ -37,5 +37,6 @@ mod mock_external_table;
 pub use manager::{SourceColumnDesc, SourceColumnType};
 pub use mock_external_table::MockExternalTableReader;
 
+pub use crate::source::filesystem::{S3_CONNECTOR, S3_V2_CONNECTOR};
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;

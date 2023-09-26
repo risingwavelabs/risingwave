@@ -38,6 +38,7 @@ use super::{
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::stream_fs_fetch::StreamFsFetch;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
@@ -199,13 +200,6 @@ impl LogicalSource {
         })
         .into();
 
-        // todo: rewrite plan according to `for_table`
-        if self.core.for_table {
-            new_s3_plan =
-                StreamFsFetch::new(new_s3_plan, self.rewrite_to_stream_batch_source()).into()
-        } else {
-        }
-
         Ok(new_s3_plan)
     }
 
@@ -257,13 +251,17 @@ impl LogicalSource {
         }
     }
 
-    fn wrap_with_optional_generated_columns_stream_proj(&self) -> Result<PlanRef> {
+    fn wrap_with_optional_generated_columns_stream_proj(
+        &self,
+        input: Option<PlanRef>,
+    ) -> Result<PlanRef> {
         if let Some(exprs) = &self.output_exprs {
-            let source = StreamSource::new(self.rewrite_to_stream_batch_source());
-            let logical_project = generic::Project::new(exprs.to_vec(), source.into());
+            let source: PlanRef =
+                dispatch_new_s3_plan(self.rewrite_to_stream_batch_source(), input);
+            let logical_project = generic::Project::new(exprs.to_vec(), source);
             Ok(StreamProject::new(logical_project).into())
         } else {
-            let source = StreamSource::new(self.core.clone());
+            let source = dispatch_new_s3_plan(self.core.clone(), input);
             Ok(source.into())
         }
     }
@@ -510,6 +508,13 @@ impl PredicatePushdown for LogicalSource {
 
 impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
+        if self.core.catalog.is_some()
+            && ConnectorProperties::is_new_fs_connector(
+                &self.core.catalog.as_ref().unwrap().properties,
+            )
+        {
+            todo!()
+        }
         let source = self.wrap_with_optional_generated_columns_batch_proj()?;
         Ok(source)
     }
@@ -517,21 +522,21 @@ impl ToBatch for LogicalSource {
 
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        let mut plan_prefix: Option<PlanRef> = None;
         let mut plan: PlanRef;
         if self.core.catalog.is_some()
             && ConnectorProperties::is_new_fs_connector(
                 &self.core.catalog.as_ref().unwrap().properties,
             )
         {
-            plan = self.rewrite_new_s3_plan()?;
-        } else {
-            plan = if self.core.for_table {
-                StreamSource::new(self.rewrite_to_stream_batch_source()).into()
-            } else {
-                // Create MV on source.
-                self.wrap_with_optional_generated_columns_stream_proj()?
-            };
+            plan_prefix = Some(self.rewrite_new_s3_plan()?);
         }
+        plan = if self.core.for_table {
+            dispatch_new_s3_plan(self.core.clone(), plan_prefix)
+        } else {
+            // Create MV on source.
+            self.wrap_with_optional_generated_columns_stream_proj(plan_prefix)?
+        };
 
         if let Some(catalog) = self.source_catalog()
             && !catalog.watermark_descs.is_empty()
@@ -555,5 +560,14 @@ impl ToStream for LogicalSource {
             self.clone().into(),
             ColIndexMapping::identity(self.schema().len()),
         ))
+    }
+}
+
+#[inline]
+fn dispatch_new_s3_plan(source: generic::Source, input: Option<PlanRef>) -> PlanRef {
+    if let Some(input) = input {
+        StreamFsFetch::new(input, source).into()
+    } else {
+        StreamSource::new(source).into()
     }
 }

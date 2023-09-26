@@ -34,11 +34,11 @@ use risingwave_connector::source::cdc::{
     CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
-use risingwave_connector::source::filesystem::S3_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::{
     SourceEncode, SourceFormat, SourceStruct, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
-    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR,
+    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
+    S3_V2_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
@@ -890,6 +890,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Bytes, Encode::Json],
                 ),
                 S3_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Csv, Encode::Json],
+                ),
+                S3_V2_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json],
                 ),
                 MYSQL_CDC_CONNECTOR => hashmap!(
