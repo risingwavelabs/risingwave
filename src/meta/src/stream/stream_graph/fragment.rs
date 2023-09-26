@@ -22,7 +22,7 @@ use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    generate_internal_table_name_with_type, TableId, TABLE_NAME_COLUMN_NAME,
+    generate_internal_table_name_with_type, TableId, CDC_SOURCE_COLUMN_NUM, TABLE_NAME_COLUMN_NAME,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
@@ -605,7 +605,7 @@ impl CompleteStreamFragmentGraph {
                             dispatch_strategy: DispatchStrategy {
                                 r#type: DispatcherType::Hash as _, /* there may have multiple downstream table jobs, so we use `Hash` here */
                                 dist_key_indices: vec![rw_table_name_index as _], /* index to `_rw_table_name` column */
-                                output_indices: (0..output_columns.len() as _).collect_vec(), /* require all columns from the upstream source */
+                                output_indices: (0..CDC_SOURCE_COLUMN_NUM as _).collect_vec(), /* require all columns from the cdc source */
                                 downstream_table_name: full_table_name,
                             },
                         };

@@ -17,7 +17,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{Field, TableDesc};
+use risingwave_common::catalog::{ColumnCatalog, Field, TableDesc};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -28,6 +28,7 @@ use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
+use crate::handler::create_source::debezium_cdc_source_schema;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
@@ -227,8 +228,8 @@ impl StreamTableScan {
         .map(ColumnId::get_id)
         .collect_vec();
 
-        // The schema of the upstream table (both scan and upstream).
-        let upstream_schema = upstream_column_ids
+        // The schema of the snapshot read stream
+        let snapshot_schema = upstream_column_ids
             .iter()
             .map(|&id| {
                 let col = self
@@ -241,6 +242,18 @@ impl StreamTableScan {
                 Field::from(col).to_prost()
             })
             .collect_vec();
+
+        // The schema of the upstream stream
+        let upstream_schema = if cdc_upstream {
+            let mut columns = debezium_cdc_source_schema();
+            columns.push(ColumnCatalog::row_id_column());
+            columns
+                .into_iter()
+                .map(|c| Field::from(c.column_desc).to_prost())
+                .collect_vec()
+        } else {
+            snapshot_schema.clone()
+        };
 
         let output_indices = self
             .logical
@@ -290,7 +303,7 @@ impl StreamTableScan {
                     node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
                     operator_id: self.batch_plan_id.0 as u64,
                     identity: "BatchPlanNode".into(),
-                    fields: upstream_schema,
+                    fields: snapshot_schema,
                     stream_key: vec![], // not used
                     input: vec![],
                     append_only: true,

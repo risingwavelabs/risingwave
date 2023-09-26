@@ -150,6 +150,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     actor_splits: splits,
                     ..
                 } => {
+                    tracing::info!("got first barrier {:?}", mutation);
+
                     invalid_backfill = match splits.get(&self.actor_ctx.id) {
                         None => true,
                         Some(splits) => {

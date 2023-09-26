@@ -95,7 +95,7 @@ async fn extract_json_table_schema(
     }
 }
 
-fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
+pub fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
     // let debezium_columns = vec![
     //     ("before", DataType::Jsonb),
     //     ("after", DataType::Jsonb),

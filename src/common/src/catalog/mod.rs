@@ -124,6 +124,7 @@ pub fn table_id_column_name() -> String {
     TABLE_ID_COLUMN_NAME.to_string()
 }
 
+pub const CDC_SOURCE_COLUMN_NUM: u32 = 4;
 pub const TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
 pub fn table_name_column_name() -> String {
     TABLE_NAME_COLUMN_NAME.to_string()
