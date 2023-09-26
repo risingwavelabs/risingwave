@@ -28,11 +28,12 @@ use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
 use super::{
-    FormattedSink, Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam, SINK_TYPE_APPEND_ONLY,
+    Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam, SINK_TYPE_APPEND_ONLY,
     SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::PulsarCommon;
 use crate::sink::formatter::SinkFormatterImpl;
+use crate::sink::writer::{FormattedSink, LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result};
 use crate::{deserialize_duration_from_string, dispatch_sink_formatter_impl};
 
@@ -145,26 +146,31 @@ pub struct PulsarSink {
     sink_from_name: String,
 }
 
-impl PulsarSink {
-    pub fn new(config: PulsarConfig, param: SinkParam) -> Self {
-        Self {
+impl TryFrom<SinkParam> for PulsarSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = PulsarConfig::from_hashmap(param.properties)?;
+        Ok(Self {
             config,
-            schema: param.schema(),
+            schema,
             downstream_pk: param.downstream_pk,
             is_append_only: param.sink_type.is_append_only(),
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,
-        }
+        })
     }
 }
 
-#[async_trait]
 impl Sink for PulsarSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = PulsarSinkWriter;
+    type LogSinker = LogSinkerOf<PulsarSinkWriter>;
 
-    async fn new_writer(&self, _writer_param: SinkWriterParam) -> Result<Self::Writer> {
-        PulsarSinkWriter::new(
+    const SINK_NAME: &'static str = PULSAR_SINK;
+
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        Ok(PulsarSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.downstream_pk.clone(),
@@ -172,7 +178,8 @@ impl Sink for PulsarSink {
             self.db_name.clone(),
             self.sink_from_name.clone(),
         )
-        .await
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
     async fn validate(&self) -> Result<()> {

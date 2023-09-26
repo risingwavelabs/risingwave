@@ -26,13 +26,14 @@ use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
-use super::{FormattedSink, SinkParam};
+use super::SinkParam;
 use crate::common::KinesisCommon;
 use crate::dispatch_sink_formatter_impl;
 use crate::sink::formatter::SinkFormatterImpl;
+use crate::sink::writer::{FormattedSink, LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterParam,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY,
+    SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 
 pub const KINESIS_SINK: &str = "kinesis";
@@ -47,23 +48,28 @@ pub struct KinesisSink {
     sink_from_name: String,
 }
 
-impl KinesisSink {
-    pub fn new(config: KinesisSinkConfig, param: SinkParam) -> Self {
-        Self {
+impl TryFrom<SinkParam> for KinesisSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = KinesisSinkConfig::from_hashmap(param.properties)?;
+        Ok(Self {
             config,
-            schema: param.schema(),
+            schema,
             pk_indices: param.downstream_pk,
             is_append_only: param.sink_type.is_append_only(),
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,
-        }
+        })
     }
 }
 
-#[async_trait::async_trait]
 impl Sink for KinesisSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = KinesisSinkWriter;
+    type LogSinker = LogSinkerOf<KinesisSinkWriter>;
+
+    const SINK_NAME: &'static str = KINESIS_SINK;
 
     async fn validate(&self) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.
@@ -88,8 +94,8 @@ impl Sink for KinesisSink {
         Ok(())
     }
 
-    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
-        KinesisSinkWriter::new(
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        Ok(KinesisSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
@@ -97,7 +103,8 @@ impl Sink for KinesisSink {
             self.db_name.clone(),
             self.sink_from_name.clone(),
         )
-        .await
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 }
 

@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod in_mem;
-pub mod kv_log_store;
-
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::future::Future;
@@ -24,25 +21,8 @@ use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::value_encoding::error::ValueEncodingError;
-use risingwave_storage::error::StorageError;
 
-#[derive(thiserror::Error, Debug)]
-pub enum LogStoreError {
-    #[error("EndOfLogStream")]
-    EndOfLogStream,
-
-    #[error("Storage error: {0}")]
-    StorageError(#[from] StorageError),
-
-    #[error(transparent)]
-    Internal(#[from] anyhow::Error),
-
-    #[error("Value encoding error: {0}")]
-    ValueEncoding(#[from] ValueEncodingError),
-}
-
-pub type LogStoreResult<T> = Result<T, LogStoreError>;
+pub type LogStoreResult<T> = Result<T, anyhow::Error>;
 pub type ChunkId = usize;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -88,8 +68,7 @@ impl TruncateOffset {
                         "new item epoch {} not match current chunk offset epoch {}",
                         epoch,
                         offset_epoch
-                    )
-                    .into());
+                    ));
                 }
             }
             TruncateOffset::Barrier {
@@ -100,8 +79,7 @@ impl TruncateOffset {
                         "new item epoch {} not exceed barrier offset epoch {}",
                         epoch,
                         offset_epoch
-                    )
-                    .into());
+                    ));
                 }
             }
         }
@@ -145,7 +123,7 @@ pub trait LogWriter {
     ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 }
 
-pub trait LogReader {
+pub trait LogReader: Send + Sized + 'static {
     /// Initialize the log reader. Usually function as waiting for log writer to be initialized.
     fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
@@ -169,9 +147,54 @@ pub trait LogStoreFactory: 'static {
     fn build(self) -> impl Future<Output = (Self::Reader, Self::Writer)> + Send;
 }
 
+pub struct TransformChunkLogReader<F: Fn(StreamChunk) -> StreamChunk, R: LogReader> {
+    f: F,
+    inner: R,
+}
+
+impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
+    for TransformChunkLogReader<F, R>
+{
+    fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.init()
+    }
+
+    async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+        let (epoch, item) = self.inner.next_item().await?;
+        let item = match item {
+            LogStoreReadItem::StreamChunk { chunk, chunk_id } => LogStoreReadItem::StreamChunk {
+                chunk: (self.f)(chunk),
+                chunk_id,
+            },
+            other => other,
+        };
+        Ok((epoch, item))
+    }
+
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.truncate(offset)
+    }
+}
+
+#[easy_ext::ext(LogStoreTransformChunkLogReader)]
+impl<T> T
+where
+    T: LogReader,
+{
+    pub fn transform_chunk<F: Fn(StreamChunk) -> StreamChunk + Sized>(
+        self,
+        f: F,
+    ) -> TransformChunkLogReader<F, Self> {
+        TransformChunkLogReader { f, inner: self }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::common::log_store::TruncateOffset;
+    use crate::sink::log_store::TruncateOffset;
 
     #[test]
     fn test_truncate_offset_cmp() {

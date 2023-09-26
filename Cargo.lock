@@ -6889,6 +6889,7 @@ dependencies = [
  "criterion",
  "csv",
  "duration-str",
+ "easy-ext",
  "enum-as-inner",
  "futures",
  "futures-async-stream",

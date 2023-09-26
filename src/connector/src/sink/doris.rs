@@ -29,7 +29,10 @@ use super::doris_connector::{DorisField, DorisInsert, DorisInsertClient, DORIS_D
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::common::DorisCommon;
 use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
+use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
+use crate::sink::{
+    DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriter, SinkWriterParam,
+};
 
 pub const DORIS_SINK: &str = "doris";
 #[serde_as]
@@ -151,19 +154,21 @@ impl DorisSink {
     }
 }
 
-#[async_trait]
 impl Sink for DorisSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = DorisSinkWriter;
+    type LogSinker = LogSinkerOf<DorisSinkWriter>;
 
-    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
+    const SINK_NAME: &'static str = DORIS_SINK;
+
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(DorisSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
         )
-        .await?)
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
     async fn validate(&self) -> Result<()> {
@@ -193,6 +198,21 @@ pub struct DorisSinkWriter {
     is_append_only: bool,
     insert: Option<DorisInsert>,
     row_encoder: JsonEncoder,
+}
+
+impl TryFrom<SinkParam> for DorisSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = DorisConfig::from_hashmap(param.properties)?;
+        DorisSink::new(
+            config,
+            schema,
+            param.downstream_pk,
+            param.sink_type.is_append_only(),
+        )
+    }
 }
 
 impl DorisSinkWriter {

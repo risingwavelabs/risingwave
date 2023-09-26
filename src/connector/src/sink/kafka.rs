@@ -32,14 +32,15 @@ use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
 
 use super::{
-    FormattedSink, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM,
-    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
 use crate::sink::formatter::SinkFormatterImpl;
-use crate::sink::{
-    DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
+use crate::sink::writer::{
+    FormattedSink, LogSinkerOf, SinkWriterExt, SinkWriterV1, SinkWriterV1Adapter,
 };
+use crate::sink::{DummySinkCommitCoordinator, Result, SinkWriterParam};
 use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkProducerContext};
 use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
@@ -281,25 +282,30 @@ pub struct KafkaSink {
     sink_from_name: String,
 }
 
-impl KafkaSink {
-    pub fn new(config: KafkaConfig, param: SinkParam) -> Self {
-        Self {
+impl TryFrom<SinkParam> for KafkaSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = KafkaConfig::from_hashmap(param.properties)?;
+        Ok(Self {
             config,
-            schema: param.schema(),
+            schema,
             pk_indices: param.downstream_pk,
             is_append_only: param.sink_type.is_append_only(),
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,
-        }
+        })
     }
 }
 
-#[async_trait::async_trait]
 impl Sink for KafkaSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = SinkWriterV1Adapter<KafkaSinkWriter>;
+    type LogSinker = LogSinkerOf<SinkWriterV1Adapter<KafkaSinkWriter>>;
 
-    async fn new_writer(&self, _writer_param: SinkWriterParam) -> Result<Self::Writer> {
+    const SINK_NAME: &'static str = KAFKA_SINK;
+
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(SinkWriterV1Adapter::new(
             KafkaSinkWriter::new(
                 self.config.clone(),
@@ -313,7 +319,8 @@ impl Sink for KafkaSink {
                 )?,
             )
             .await?,
-        ))
+        )
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
     async fn validate(&self) -> Result<()> {

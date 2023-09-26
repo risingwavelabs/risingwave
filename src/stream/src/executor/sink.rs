@@ -13,34 +13,33 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::time::Instant;
 
+use anyhow::anyhow;
 use futures::stream::select;
 use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use prometheus::Histogram;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::{merge_chunk_row, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkType;
+use risingwave_connector::sink::log_store::{
+    LogReader, LogStoreFactory, LogStoreTransformChunkLogReader, LogWriter,
+};
 use risingwave_connector::sink::{
-    build_sink, Sink, SinkImpl, SinkParam, SinkWriter, SinkWriterParam,
+    build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
 };
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message, PkIndices};
-use crate::common::log_store::{
-    LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
-};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
 
 pub struct SinkExecutor<F: LogStoreFactory> {
     input: BoxedExecutor,
-    metrics: Arc<StreamingMetrics>,
+    _metrics: Arc<StreamingMetrics>,
     sink: SinkImpl,
     identity: String,
     pk_indices: PkIndices,
@@ -51,10 +50,6 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     log_reader: F::Reader,
     log_writer: F::Writer,
     sink_writer_param: SinkWriterParam,
-}
-
-struct SinkMetrics {
-    sink_commit_duration_metrics: Histogram,
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -91,7 +86,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .collect();
         Ok(Self {
             input,
-            metrics,
+            _metrics: metrics,
             sink,
             identity: format!("SinkExecutor {:X?}", sink_writer_param.executor_id),
             pk_indices,
@@ -106,15 +101,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     }
 
     fn execute_inner(self) -> BoxedMessageStream {
-        let sink_commit_duration_metrics = self
-            .metrics
-            .sink_commit_duration
-            .with_label_values(&[self.identity.as_str(), self.sink.get_connector()]);
-
-        let sink_metrics = SinkMetrics {
-            sink_commit_duration_metrics,
-        };
-
         let write_log_stream = Self::execute_write_log(
             self.input,
             self.pk_indices,
@@ -128,7 +114,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 sink,
                 self.log_reader,
                 self.input_columns,
-                sink_metrics,
                 self.sink_writer_param,
             );
             select(consume_log_stream.into_stream(), write_log_stream).boxed()
@@ -193,13 +178,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
     async fn execute_consume_log<S: Sink, R: LogReader>(
         sink: S,
-        mut log_reader: R,
+        log_reader: R,
         columns: Vec<ColumnCatalog>,
-        sink_metrics: SinkMetrics,
         sink_writer_param: SinkWriterParam,
     ) -> StreamExecutorResult<Message> {
-        log_reader.init().await?;
-        let mut sink_writer = sink.new_writer(sink_writer_param).await?;
+        let log_sinker = sink.new_log_sinker(sink_writer_param).await?;
 
         let visible_columns = columns
             .iter()
@@ -207,96 +190,18 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
             .collect_vec();
 
-        #[derive(Debug)]
-        enum LogConsumerState {
-            /// Mark that the log consumer is not initialized yet
-            Uninitialized,
-
-            /// Mark that a new epoch has begun.
-            EpochBegun { curr_epoch: u64 },
-
-            /// Mark that the consumer has just received a barrier
-            BarrierReceived { prev_epoch: u64 },
-        }
-
-        let mut state = LogConsumerState::Uninitialized;
-
-        loop {
-            let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
-            if let LogStoreReadItem::UpdateVnodeBitmap(_) = &item {
-                match &state {
-                    LogConsumerState::BarrierReceived { .. } => {}
-                    _ => unreachable!(
-                        "update vnode bitmap can be accepted only right after \
-                    barrier, but current state is {:?}",
-                        state
-                    ),
-                }
+        let log_reader = log_reader.transform_chunk(move |chunk| {
+            if visible_columns.len() != columns.len() {
+                // Do projection here because we may have columns that aren't visible to
+                // the downstream.
+                chunk.project(&visible_columns)
+            } else {
+                chunk
             }
-            // begin_epoch when not previously began
-            state = match state {
-                LogConsumerState::Uninitialized => {
-                    sink_writer.begin_epoch(epoch).await?;
-                    LogConsumerState::EpochBegun { curr_epoch: epoch }
-                }
-                LogConsumerState::EpochBegun { curr_epoch } => {
-                    assert!(
-                        epoch >= curr_epoch,
-                        "new epoch {} should not be below the current epoch {}",
-                        epoch,
-                        curr_epoch
-                    );
-                    LogConsumerState::EpochBegun { curr_epoch: epoch }
-                }
-                LogConsumerState::BarrierReceived { prev_epoch } => {
-                    assert!(
-                        epoch > prev_epoch,
-                        "new epoch {} should be greater than prev epoch {}",
-                        epoch,
-                        prev_epoch
-                    );
-                    sink_writer.begin_epoch(epoch).await?;
-                    LogConsumerState::EpochBegun { curr_epoch: epoch }
-                }
-            };
-            match item {
-                LogStoreReadItem::StreamChunk { chunk, .. } => {
-                    let chunk = if visible_columns.len() != columns.len() {
-                        // Do projection here because we may have columns that aren't visible to
-                        // the downstream.
-                        chunk.project(&visible_columns)
-                    } else {
-                        chunk
-                    };
-                    if let Err(e) = sink_writer.write_batch(chunk).await {
-                        sink_writer.abort().await?;
-                        return Err(e.into());
-                    }
-                }
-                LogStoreReadItem::Barrier { is_checkpoint } => {
-                    let prev_epoch = match state {
-                        LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
-                        _ => unreachable!("epoch must have begun before handling barrier"),
-                    };
-                    if is_checkpoint {
-                        let start_time = Instant::now();
-                        sink_writer.barrier(true).await?;
-                        sink_metrics
-                            .sink_commit_duration_metrics
-                            .observe(start_time.elapsed().as_millis() as f64);
-                        log_reader
-                            .truncate(TruncateOffset::Barrier { epoch: prev_epoch })
-                            .await?;
-                    } else {
-                        sink_writer.barrier(false).await?;
-                    }
-                    state = LogConsumerState::BarrierReceived { prev_epoch }
-                }
-                LogStoreReadItem::UpdateVnodeBitmap(vnode_bitmap) => {
-                    sink_writer.update_vnode_bitmap(vnode_bitmap).await?;
-                }
-            }
-        }
+        });
+
+        log_sinker.consume_log_and_sink(log_reader).await?;
+        Err(anyhow!("end of stream").into())
     }
 }
 
@@ -323,7 +228,7 @@ mod test {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
 
     use super::*;
-    use crate::common::log_store::in_mem::BoundedInMemLogStoreFactory;
+    use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
     use crate::executor::test_utils::*;
     use crate::executor::ActorContext;
 

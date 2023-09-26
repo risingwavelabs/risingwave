@@ -12,12 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use builder::*;
-pub use column_mapping::*;
-
-mod builder;
-pub mod cache;
-mod column_mapping;
-pub mod log_store_impl;
-pub mod metrics;
-pub mod table;
+pub mod in_mem;
+pub mod kv_log_store;
