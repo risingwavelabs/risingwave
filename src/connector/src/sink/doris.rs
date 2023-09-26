@@ -26,10 +26,12 @@ use serde_json::Value;
 use serde_with::serde_as;
 
 use super::doris_connector::{DorisField, DorisInsert, DorisInsertClient, DORIS_DELETE_SIGN};
-use super::utils::doris_rows_to_json;
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::common::DorisCommon;
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
+use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use crate::sink::{
+    DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriter, SinkWriterParam,
+};
 
 pub const DORIS_SINK: &str = "doris";
 #[serde_as]
@@ -151,19 +153,20 @@ impl DorisSink {
     }
 }
 
-#[async_trait]
 impl Sink for DorisSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = DorisSinkWriter;
 
+    const SINK_NAME: &'static str = DORIS_SINK;
+
     async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
-        Ok(DorisSinkWriter::new(
+        DorisSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
         )
-        .await?)
+        .await
     }
 
     async fn validate(&self) -> Result<()> {
@@ -192,7 +195,22 @@ pub struct DorisSinkWriter {
     client: DorisInsertClient,
     is_append_only: bool,
     insert: Option<DorisInsert>,
-    decimal_map: HashMap<String, (u8, u8)>,
+    row_encoder: JsonEncoder,
+}
+
+impl TryFrom<SinkParam> for DorisSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = DorisConfig::from_hashmap(param.properties)?;
+        DorisSink::new(
+            config,
+            schema,
+            param.downstream_pk,
+            param.sink_type.is_append_only(),
+        )
+    }
 }
 
 impl DorisSinkWriter {
@@ -232,12 +250,17 @@ impl DorisSinkWriter {
         let insert = Some(doris_insert_client.build().await?);
         Ok(Self {
             config,
-            schema,
+            schema: schema.clone(),
             pk_indices,
             client: doris_insert_client,
             is_append_only,
             insert,
-            decimal_map,
+            row_encoder: JsonEncoder::new_with_doris(
+                schema,
+                None,
+                TimestampHandlingMode::String,
+                decimal_map,
+            ),
         })
     }
 
@@ -246,9 +269,7 @@ impl DorisSinkWriter {
             if op != Op::Insert {
                 continue;
             }
-            let row_json_string =
-                Value::Object(doris_rows_to_json(row, &self.schema, &self.decimal_map)?)
-                    .to_string();
+            let row_json_string = Value::Object(self.row_encoder.encode(row)?).to_string();
             self.insert
                 .as_mut()
                 .ok_or_else(|| SinkError::Doris("Can't find doris sink insert".to_string()))?
@@ -262,8 +283,7 @@ impl DorisSinkWriter {
         for (op, row) in chunk.rows() {
             match op {
                 Op::Insert => {
-                    let mut row_json_value =
-                        doris_rows_to_json(row, &self.schema, &self.decimal_map)?;
+                    let mut row_json_value = self.row_encoder.encode(row)?;
                     row_json_value.insert(
                         DORIS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),
@@ -279,8 +299,7 @@ impl DorisSinkWriter {
                         .await?;
                 }
                 Op::Delete => {
-                    let mut row_json_value =
-                        doris_rows_to_json(row, &self.schema, &self.decimal_map)?;
+                    let mut row_json_value = self.row_encoder.encode(row)?;
                     row_json_value.insert(
                         DORIS_DELETE_SIGN.to_string(),
                         Value::String("1".to_string()),
@@ -297,8 +316,7 @@ impl DorisSinkWriter {
                 }
                 Op::UpdateDelete => {}
                 Op::UpdateInsert => {
-                    let mut row_json_value =
-                        doris_rows_to_json(row, &self.schema, &self.decimal_map)?;
+                    let mut row_json_value = self.row_encoder.encode(row)?;
                     row_json_value.insert(
                         DORIS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),

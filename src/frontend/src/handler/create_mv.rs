@@ -15,8 +15,7 @@
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::catalog::PbTable;
-use risingwave_pb::ddl_service::StreamJobExecutionMode;
+use risingwave_pb::catalog::{CreateType, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
@@ -164,7 +163,7 @@ pub async fn handle_create_mv(
         Ok(_) => {}
     };
 
-    let (table, graph) = {
+    let (mut table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);
 
         let has_order_by = !query.order_by.is_empty();
@@ -202,16 +201,17 @@ It only indicates the physical clustering of the data, which may improve the per
             ));
 
     let run_in_background = session.config().get_background_ddl();
-    let stream_job_execution_mode = if run_in_background {
-        StreamJobExecutionMode::Background
+    let create_type = if run_in_background {
+        CreateType::Background
     } else {
-        StreamJobExecutionMode::Foreground
+        CreateType::Foreground
     };
+    table.create_type = create_type.into();
 
     let session = session.clone();
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_materialized_view(table, graph, stream_job_execution_mode)
+        .create_materialized_view(table, graph)
         .await?;
 
     Ok(PgResponse::empty_result(
