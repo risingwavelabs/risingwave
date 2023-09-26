@@ -538,23 +538,32 @@ impl SstableStore {
             .await?;
 
         let mut tasks = vec![];
-        for block_index in 0..sst.block_count() {
-            let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
-            let bytes = data.slice(range);
-            let block = Block::decode(bytes, uncompressed_capacity)?;
-            let block = Box::new(block);
-
-            let key = SstableBlockIndex {
-                sst_id: object_id,
-                block_idx: block_index as u64,
-            };
+        const STEP: usize = 16;
+        for block_index_start in (0..sst.block_count()).step_by(STEP) {
+            let block_index_end = std::cmp::min(block_index_start + STEP, sst.block_count());
 
             let cache = self.data_file_cache.clone();
+            let data = &data;
+
             let task = async move {
-                cache
-                    .insert_force(key, block)
-                    .await
-                    .map_err(HummockError::file_cache)
+                for block_index in block_index_start..block_index_end {
+                    let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
+
+                    let bytes = data.slice(range);
+                    let block = Block::decode(bytes, uncompressed_capacity)?;
+                    let block = Box::new(block);
+
+                    let key = SstableBlockIndex {
+                        sst_id: object_id,
+                        block_idx: block_index as u64,
+                    };
+
+                    cache
+                        .insert_force(key, block)
+                        .await
+                        .map_err(HummockError::file_cache)?;
+                }
+                Ok::<_, HummockError>(())
             };
             tasks.push(task);
         }
