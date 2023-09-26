@@ -51,7 +51,7 @@ use serde_json::{json, Value};
 /// SELECT 'null'::jsonb || '[1,2]'::jsonb;
 /// ----
 /// [null, 1, 2]
-/// 
+///
 /// query T
 /// SELECT 'null'::jsonb || '1'::jsonb;
 /// ----
@@ -89,7 +89,7 @@ pub fn jsonb_cat(left: JsonbRef<'_>, right: JsonbRef<'_>) -> JsonbVal {
         // This would insert the non-array value as another element into the array
         // Eg left:{'a':1} right:[1,2] -> [{'a':1},1,2]
         (single_val, Value::Array(mut right_arr)) => {
-            right_arr.insert(0,single_val);
+            right_arr.insert(0, single_val);
             JsonbVal::from(Value::Array(right_arr))
         }
 
