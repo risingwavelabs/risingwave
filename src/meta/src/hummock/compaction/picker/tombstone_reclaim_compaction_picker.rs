@@ -151,7 +151,7 @@ pub mod tests {
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::create_overlap_strategy;
-    use crate::hummock::compaction::level_selector::tests::{generate_level, generate_table};
+    use crate::hummock::compaction::selector::tests::{generate_level, generate_table};
 
     #[test]
     fn test_basic() {
