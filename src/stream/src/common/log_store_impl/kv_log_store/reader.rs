@@ -22,18 +22,20 @@ use futures::stream::select_all;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_connector::sink::log_store::{
+    LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
+};
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
 use tokio_stream::StreamExt;
 
-use crate::common::log_store::kv_log_store::buffer::{LogStoreBufferItem, LogStoreBufferReceiver};
-use crate::common::log_store::kv_log_store::serde::{
-    new_log_store_item_stream, KvLogStoreItem, LogStoreItemStream, LogStoreRowSerde,
+use crate::common::log_store_impl::kv_log_store::buffer::{
+    LogStoreBufferItem, LogStoreBufferReceiver,
 };
-use crate::common::log_store::{
-    LogReader, LogStoreError, LogStoreReadItem, LogStoreResult, TruncateOffset,
+use crate::common::log_store_impl::kv_log_store::serde::{
+    new_log_store_item_stream, KvLogStoreItem, LogStoreItemStream, LogStoreRowSerde,
 };
 
 pub struct KvLogStoreReader<S: StateStore> {
@@ -174,7 +176,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     // Use u64::MAX here because the epoch to consume may be below the safe
                     // epoch
                     async move {
-                        Ok::<_, LogStoreError>(Box::pin(
+                        Ok::<_, anyhow::Error>(Box::pin(
                             state_store
                                 .iter(
                                     (Included(range_start), Included(range_end)),
@@ -233,16 +235,14 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                 "truncate at a later offset {:?} than the current latest offset {:?}",
                 offset,
                 self.latest_offset
-            )
-            .into());
+            ));
         }
         if offset <= self.truncate_offset {
             return Err(anyhow!(
                 "truncate offset {:?} earlier than prev truncate offset {:?}",
                 offset,
                 self.truncate_offset
-            )
-            .into());
+            ));
         }
         if offset.epoch() >= self.first_write_epoch.expect("should have init") {
             self.rx.truncate(offset);

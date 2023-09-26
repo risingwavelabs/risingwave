@@ -21,12 +21,12 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
 use risingwave_storage::store::{InitOptions, LocalStateStore};
 
-use crate::common::log_store::kv_log_store::buffer::LogStoreBufferSender;
-use crate::common::log_store::kv_log_store::serde::LogStoreRowSerde;
-use crate::common::log_store::kv_log_store::{SeqIdType, FIRST_SEQ_ID};
-use crate::common::log_store::{LogStoreResult, LogWriter};
+use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
+use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
+use crate::common::log_store_impl::kv_log_store::{SeqIdType, FIRST_SEQ_ID};
 
 pub struct KvLogStoreWriter<LS: LocalStateStore> {
     _table_id: TableId,
