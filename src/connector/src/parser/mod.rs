@@ -126,18 +126,25 @@ impl SourceStreamChunkBuilder {
     }
 }
 
-pub struct RowMeta {
-    meta: SourceMeta,
-    offset: String,
-}
-
-/// `SourceStreamChunkRowWriter` is responsible to write one row (Insert/Delete) or two rows
-/// (Update) to the [`StreamChunk`].
+/// `SourceStreamChunkRowWriter` is responsible to write one or more records to the [`StreamChunk`],
+/// where each contains either one row (Insert/Delete) or two rows (Update) that can be written atomically.
 pub struct SourceStreamChunkRowWriter<'a> {
     descs: &'a [SourceColumnDesc],
     builders: &'a mut [ArrayBuilderImpl],
     op_builder: &'a mut Vec<Op>,
-    row_meta: Option<RowMeta>,
+
+    /// An optional meta data of the original message.
+    ///
+    /// When this is set by `with_meta`, it'll be used to fill the columns of types other than [`SourceColumnType::Normal`].
+    row_meta: Option<MessageMeta>,
+}
+
+/// The meta data of the original message for a row writer.
+///
+/// Extracted from the `SourceMessage`.
+pub struct MessageMeta {
+    meta: SourceMeta,
+    offset: String,
 }
 
 trait OpAction {
@@ -234,7 +241,10 @@ impl OpAction for OpActionUpdate {
 }
 
 impl SourceStreamChunkRowWriter<'_> {
-    fn with_meta(self, row_meta: RowMeta) -> Self {
+    /// Set the meta data of the original message for this row writer.
+    ///
+    /// This should always be called except for tests.
+    fn with_meta(self, row_meta: MessageMeta) -> Self {
         Self {
             row_meta: Some(row_meta),
             ..self
@@ -340,8 +350,11 @@ pub enum TransactionControl {
     Commit { id: Box<str> },
 }
 
+/// The result of parsing a message.
 pub enum ParseResult {
+    /// Some rows are parsed and written to the [`SourceStreamChunkRowWriter`].
     Rows,
+    /// A transaction control message is parsed.
     TransactionControl(TransactionControl),
 }
 
@@ -456,7 +469,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 .parse_one_with_txn(
                     msg.key,
                     msg.payload,
-                    builder.row_writer().with_meta(RowMeta {
+                    builder.row_writer().with_meta(MessageMeta {
                         meta: msg.meta,
                         offset: msg.offset,
                     }),
