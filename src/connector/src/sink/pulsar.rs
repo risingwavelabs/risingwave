@@ -28,11 +28,12 @@ use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
 use super::{
-    FormattedSink, Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam, SINK_TYPE_APPEND_ONLY,
+    Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam, SINK_TYPE_APPEND_ONLY,
     SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::PulsarCommon;
 use crate::sink::formatter::SinkFormatterImpl;
+use crate::sink::writer::{FormattedSink, LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result};
 use crate::{deserialize_duration_from_string, dispatch_sink_formatter_impl};
 
@@ -164,12 +165,12 @@ impl TryFrom<SinkParam> for PulsarSink {
 
 impl Sink for PulsarSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = PulsarSinkWriter;
+    type LogSinker = LogSinkerOf<PulsarSinkWriter>;
 
     const SINK_NAME: &'static str = PULSAR_SINK;
 
-    async fn new_writer(&self, _writer_param: SinkWriterParam) -> Result<Self::Writer> {
-        PulsarSinkWriter::new(
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        Ok(PulsarSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.downstream_pk.clone(),
@@ -177,7 +178,8 @@ impl Sink for PulsarSink {
             self.db_name.clone(),
             self.sink_from_name.clone(),
         )
-        .await
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
     async fn validate(&self) -> Result<()> {
