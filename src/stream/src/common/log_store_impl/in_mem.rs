@@ -18,16 +18,15 @@ use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
+use risingwave_connector::sink::log_store::{
+    LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult, LogWriter, TruncateOffset,
+};
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
 use tokio::sync::oneshot;
 
-use crate::common::log_store::in_mem::LogReaderEpochProgress::{AwaitingTruncate, Consuming};
-use crate::common::log_store::{
-    LogReader, LogStoreError, LogStoreFactory, LogStoreReadItem, LogStoreResult, LogWriter,
-    TruncateOffset,
-};
+use crate::common::log_store_impl::in_mem::LogReaderEpochProgress::{AwaitingTruncate, Consuming};
 
 enum InMemLogStoreItem {
     StreamChunk(StreamChunk),
@@ -193,10 +192,9 @@ impl LogReader for BoundedInMemLogStoreReader {
                 },
                 AwaitingTruncate { .. } => Err(anyhow!(
                     "should not call next_item on checkpoint barrier for in-mem log store"
-                )
-                .into()),
+                )),
             },
-            None => Err(LogStoreError::EndOfLogStream),
+            None => Err(anyhow!("end of log stream")),
         }
     }
 
@@ -207,8 +205,7 @@ impl LogReader for BoundedInMemLogStoreReader {
                 "truncate offset {:?} but prev truncate offset is {:?}",
                 offset,
                 self.truncate_offset
-            )
-            .into());
+            ));
         }
 
         // check the truncate offset does not exceed the latest possible offset
@@ -217,8 +214,7 @@ impl LogReader for BoundedInMemLogStoreReader {
                 "truncate at {:?} but latest offset is {:?}",
                 offset,
                 self.latest_offset
-            )
-            .into());
+            ));
         }
 
         if let AwaitingTruncate {
@@ -288,11 +284,10 @@ impl LogWriter for BoundedInMemLogStoreWriter {
     }
 
     async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
-        Ok(self
-            .item_tx
+        self.item_tx
             .send(InMemLogStoreItem::UpdateVnodeBitmap(new_vnodes))
             .await
-            .map_err(|_| anyhow!("unable to send vnode bitmap"))?)
+            .map_err(|_| anyhow!("unable to send vnode bitmap"))
     }
 }
 
@@ -305,11 +300,11 @@ mod tests {
     use risingwave_common::array::Op;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
-
-    use crate::common::log_store::in_mem::BoundedInMemLogStoreFactory;
-    use crate::common::log_store::{
+    use risingwave_connector::sink::log_store::{
         LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
     };
+
+    use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
     use crate::common::StreamChunkBuilder;
 
     #[tokio::test]

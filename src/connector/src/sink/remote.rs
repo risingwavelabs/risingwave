@@ -42,12 +42,14 @@ use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 use tonic::Status;
 use tracing::{error, warn};
 
-use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use super::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::coordinate::CoordinatedSinkWriter;
+use crate::sink::encoder::TimestampHandlingMode;
+use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::SinkError::Remote;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkCommitCoordinator, SinkError, SinkParam,
-    SinkWriter, SinkWriterParam,
+    SinkWriterParam,
 };
 use crate::ConnectorParams;
 
@@ -97,12 +99,16 @@ impl<R: RemoteSinkTrait> TryFrom<SinkParam> for RemoteSink<R> {
 
 impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = RemoteSinkWriter<R>;
+    type LogSinker = LogSinkerOf<RemoteSinkWriter<R>>;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
 
-    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
-        RemoteSinkWriter::new(self.param.clone(), writer_param.connector_params).await
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        Ok(
+            RemoteSinkWriter::new(self.param.clone(), writer_param.connector_params)
+                .await?
+                .into_log_sinker(writer_param.sink_metrics),
+        )
     }
 
     async fn validate(&self) -> Result<()> {
@@ -195,7 +201,7 @@ impl<R: RemoteSinkTrait> TryFrom<SinkParam> for CoordinatedRemoteSink<R> {
 
 impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
     type Coordinator = RemoteCoordinator<R>;
-    type Writer = CoordinatedSinkWriter<CoordinatedRemoteSinkWriter<R>>;
+    type LogSinker = LogSinkerOf<CoordinatedSinkWriter<CoordinatedRemoteSinkWriter<R>>>;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
 
@@ -203,8 +209,8 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
         self.0.validate().await
     }
 
-    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
-        CoordinatedSinkWriter::new(
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        Ok(CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
                 .expect("should have meta client")
@@ -219,7 +225,8 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
             CoordinatedRemoteSinkWriter::new(self.0.param.clone(), writer_param.connector_params)
                 .await?,
         )
-        .await
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
     async fn new_coordinator(
