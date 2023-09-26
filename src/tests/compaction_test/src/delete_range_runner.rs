@@ -37,7 +37,7 @@ use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
-use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
+use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
@@ -152,6 +152,7 @@ async fn compaction_test(
         created_at_epoch: None,
         cleaned_by_watermark: false,
         stream_job_status: PbStreamJobStatus::Created.into(),
+        create_type: PbCreateType::Foreground.into(),
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -581,21 +582,26 @@ fn run_compactor_thread(
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
 ) {
+    let filter_key_extractor_manager =
+        FilterKeyExtractorManager::RpcFilterKeyExtractorManager(filter_key_extractor_manager);
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
-        filter_key_extractor_manager: FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            filter_key_extractor_manager,
-        ),
+
         memory_limiter: MemoryLimiter::unlimit(),
         task_progress_manager: Default::default(),
         await_tree_reg: None,
         running_task_count: Arc::new(AtomicU32::new(0)),
     };
-    start_compactor(compactor_context, meta_client, sstable_object_id_manager)
+    start_compactor(
+        compactor_context,
+        meta_client,
+        sstable_object_id_manager,
+        filter_key_extractor_manager,
+    )
 }
 
 #[cfg(test)]
