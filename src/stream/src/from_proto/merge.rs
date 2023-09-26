@@ -36,7 +36,6 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         let fields = node.fields.iter().map(Field::from).collect();
         let schema = Schema::new(fields);
         let actor_context = params.actor_context;
-        let cdc_upstream = node.cdc_upstream;
 
         let inputs: Vec<_> = upstreams
             .iter()

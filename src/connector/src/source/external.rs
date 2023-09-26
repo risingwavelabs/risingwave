@@ -297,11 +297,11 @@ impl ExternalTableReader for MySqlExternalTableReader {
 
 impl MySqlExternalTableReader {
     pub fn new(properties: HashMap<String, String>, rw_schema: Schema) -> ConnectorResult<Self> {
-        if let Some(field) = rw_schema.fields.last() && field.name.as_str() != OFFSET_COLUMN_NAME {
-            return Err(ConnectorError::Config(anyhow!(
-                "last column of schema must be `_rw_offset`"
-            )));
-        }
+        // if let Some(field) = rw_schema.fields.last() && field.name.as_str() != OFFSET_COLUMN_NAME {
+        //     return Err(ConnectorError::Config(anyhow!(
+        //         "last column of schema must be `_rw_offset`"
+        //     )));
+        // }
 
         let config = serde_json::from_value::<ExternalTableConfig>(
             serde_json::to_value(properties).unwrap(),

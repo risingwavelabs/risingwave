@@ -269,10 +269,7 @@ impl StreamTableScan {
             input: vec![
                 // The merge node body will be filled by the `ActorBuilder` on the meta service.
                 PbStreamNode {
-                    node_body: Some(PbNodeBody::Merge(MergeNode {
-                        cdc_upstream,
-                        ..Default::default()
-                    })),
+                    node_body: Some(PbNodeBody::Merge(Default::default())),
                     identity: "Upstream".into(),
                     fields: upstream_schema.clone(),
                     stream_key: if cdc_upstream {

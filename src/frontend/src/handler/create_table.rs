@@ -815,7 +815,7 @@ fn gen_create_table_plan_for_cdc_source(
     let logical_scan = LogicalScan::create(
         source_name,
         false,
-        false,
+        true,
         Rc::new(external_table_desc),
         vec![],
         context.clone(),

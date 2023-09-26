@@ -407,8 +407,6 @@ message MergeNode {
   DispatcherType upstream_dispatcher_type = 3;
   // The schema of input columns. TODO: remove this field.
   repeated plan_common.Field fields = 4;
-  // Whether the upstream is a CDC stream, used in chaining a Table job with a CDC source job.
-  bool cdc_upstream = 5;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`

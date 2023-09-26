@@ -99,12 +99,12 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 // TODO: pass the connector properties via barrier
                 let properties: HashMap<String, String> = hashmap!(
                     "connector" => "mysql-cdc",
-                    "host" => "localhost",
+                    "hostname" => "localhost",
                     "port" => "8306",
                     "username" => "root",
                     "password" => "123456",
                     "database.name" => "mydb",
-                    "table.name" => "products",
+                    "table.name" => "t1",
                     "server.id" => "5085"
                 )
                 .iter()

@@ -151,7 +151,6 @@ impl ActorBuilder {
                         upstream_fragment_id: upstreams.fragment_id.as_global_id(),
                         upstream_dispatcher_type: exchange.get_strategy()?.r#type,
                         fields: stream_node.get_fields().clone(),
-                        cdc_upstream: false,
                     })),
                     identity: "MergeExecutor".to_string(),
                     ..stream_node.clone()
@@ -188,7 +187,6 @@ impl ActorBuilder {
                 //         false
                 //     };
 
-                let cdc_upstream = false;
                 let chain_input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
@@ -201,7 +199,6 @@ impl ActorBuilder {
                                 DispatcherType::NoShuffle as _
                             },
                             fields: merge_node.fields.clone(),
-                            cdc_upstream,
                         })),
                         ..merge_node.clone()
                     },

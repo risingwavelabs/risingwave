@@ -279,14 +279,18 @@ fn build_fragment(
 
         NodeBody::Chain(node) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
-            if node.chain_type == ChainType::CdcBackfill as i32 {
-                state.dependent_source_ids.insert(node.table_id);
-            } else {
-                // memorize table id for later use
-                state
-                    .dependent_table_ids
-                    .insert(TableId::new(node.table_id));
-            }
+            // if node.chain_type == ChainType::CdcBackfill as i32 {
+            //     state.dependent_source_ids.insert(node.table_id);
+            // } else {
+            //     // memorize table id for later use
+            //     state
+            //         .dependent_table_ids
+            //         .insert(TableId::new(node.table_id));
+            // }
+            // memorize table id for later use
+            state
+                .dependent_table_ids
+                .insert(TableId::new(node.table_id));
             current_fragment.upstream_table_ids.push(node.table_id);
         }
 
