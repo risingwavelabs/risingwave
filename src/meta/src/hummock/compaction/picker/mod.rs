@@ -61,6 +61,7 @@ pub struct CompactionInput {
     pub select_input_size: u64,
     pub target_input_size: u64,
     pub total_file_count: u64,
+    pub vnode_partition_count: u32,
 }
 
 impl CompactionInput {
@@ -95,4 +96,19 @@ pub trait CompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput>;
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct PartitionLevelInfo {
+    pub level_id: u32,
+    pub sub_level_id: u64,
+    pub left_idx: usize,
+    pub right_idx: usize,
+    pub total_file_size: u64,
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct LevelPartition {
+    pub sub_levels: Vec<PartitionLevelInfo>,
+    pub total_file_size: u64,
 }

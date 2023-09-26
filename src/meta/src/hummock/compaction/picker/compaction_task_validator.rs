@@ -135,6 +135,13 @@ impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
             return true;
         }
 
+        if input.vnode_partition_count > 0
+            && input.select_input_size > self.config.sub_level_max_compaction_bytes
+            && input.input_levels.len() > 1
+        {
+            return true;
+        }
+
         let intra_sub_level_compact_level_count =
             self.config.level0_sub_level_compact_level_count as usize;
 

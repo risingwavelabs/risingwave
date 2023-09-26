@@ -155,7 +155,7 @@ impl CompactStatus {
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,
             split_by_state_table: group.compaction_config.split_by_state_table,
-            split_weight_by_vnode: group.compaction_config.split_weight_by_vnode,
+            split_weight_by_vnode: ret.input.vnode_partition_count,
         };
         Some(compact_task)
     }

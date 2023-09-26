@@ -52,6 +52,7 @@ impl TierCompactionPicker {
         &self,
         l0: &OverlappingLevel,
         level_handler: &LevelHandler,
+        mut vnode_partition_count: u32,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         for (idx, level) in l0.sub_levels.iter().enumerate() {
@@ -114,6 +115,9 @@ impl TierCompactionPicker {
             }
 
             select_level_inputs.reverse();
+            if compaction_bytes < self.config.sub_level_max_compaction_bytes {
+                vnode_partition_count = 0;
+            }
 
             let result = CompactionInput {
                 input_levels: select_level_inputs,
@@ -122,6 +126,7 @@ impl TierCompactionPicker {
                 select_input_size: compaction_bytes,
                 target_input_size: 0,
                 total_file_count: compact_file_count,
+                vnode_partition_count,
             };
 
             if !self.compaction_task_validator.valid_compact_task(
@@ -150,7 +155,7 @@ impl CompactionPicker for TierCompactionPicker {
             return None;
         }
 
-        self.pick_overlapping_level(l0, &level_handlers[0], stats)
+        self.pick_overlapping_level(l0, &level_handlers[0], levels.vnode_partition_count, stats)
     }
 }
 
@@ -257,7 +262,7 @@ pub mod tests {
         // sub_level_max_compaction_bytes.
         let mut picker = TierCompactionPicker::new(config);
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
-        assert!(ret.is_none())
+        assert!(ret.is_none());
     }
 
     #[test]
