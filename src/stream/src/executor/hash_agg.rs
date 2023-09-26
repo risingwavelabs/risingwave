@@ -63,8 +63,6 @@ impl<S: StateStore> EstimateSize for BoxedAggGroup<S> {
 
 type AggGroupCache<K, S> = ManagedLruCache<K, Option<BoxedAggGroup<S>>, PrecomputedBuildHasher>;
 
-const MAX_DIRTY_GROUPS_HEAP_SIZE: usize = 64 << 20; // 64MB
-
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
 ///
@@ -254,7 +252,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
-                max_dirty_groups_heap_size: MAX_DIRTY_GROUPS_HEAP_SIZE,
+                max_dirty_groups_heap_size: args.extra.max_dirty_groups_heap_size,
                 emit_on_window_close: args.extra.emit_on_window_close,
                 metrics: args.metrics,
             },

@@ -454,6 +454,7 @@ pub mod agg_executor {
             extra: HashAggExecutorExtraArgs {
                 group_key_indices,
                 chunk_size: 1024,
+                max_dirty_groups_heap_size: 64 << 20,
                 emit_on_window_close,
             },
         })
