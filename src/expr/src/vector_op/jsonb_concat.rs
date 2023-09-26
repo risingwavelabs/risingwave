@@ -70,7 +70,7 @@ pub fn jsonb_cat(left: JsonbRef<'_>, right: JsonbRef<'_>) -> JsonbVal {
         }
 
         // left and right are array-based.
-        // This would merge both arrays into one array.
+        // Would merge both arrays into one array.
         // This would have left:[1,2], right:[3,4] -> [1,2,3,4]
         (Value::Array(mut left_arr), Value::Array(right_arr)) => {
             left_arr.extend(right_arr);
