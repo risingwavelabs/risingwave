@@ -21,6 +21,11 @@ export interface MetricsSample {
 }
 
 export interface Metrics {
+  // Tags of this timeseries. Example: {"downstream_fragment_id":"15001","fragment_id":"15002"}
   metric: { [key: string]: string }
+
+  // Example: [{"timestamp":1695041872.0,"value":0.3797035002929275},
+  //  {"timestamp":1695041887.0,"value":0.5914327683152408},
+  //  {"timestamp":1695041902.0,"value":0.8272212493499999}, ... ]
   sample: MetricsSample[]
 }
