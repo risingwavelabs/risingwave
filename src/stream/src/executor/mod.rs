@@ -87,6 +87,7 @@ mod sink;
 mod sort;
 mod sort_buffer;
 pub mod source;
+pub mod source_v2;
 mod stateless_simple_agg;
 mod stream_reader;
 pub mod subtask;

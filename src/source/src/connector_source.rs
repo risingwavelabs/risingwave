@@ -25,9 +25,11 @@ use risingwave_common::error::{internal_error, Result};
 use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
+use risingwave_connector::source::filesystem::s3_v2::lister::S3SourceLister;
+use risingwave_connector::source::filesystem::FsPage;
 use risingwave_connector::source::{
-    create_split_reader, BoxSourceWithStateStream, Column, ConnectorProperties, ConnectorState,
-    SourceColumnDesc, SourceContext, SplitReader,
+    create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
+    ConnectorState, SourceColumnDesc, SourceContext, SourceLister, SplitReader,
 };
 
 #[derive(Clone, Debug)]
@@ -72,6 +74,16 @@ impl ConnectorSource {
                     .map(|col| col.clone())
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()
+    }
+
+    pub async fn source_lister(&self) -> Result<BoxTryStream<Vec<FsPage>>> {
+        let config = self.config.clone();
+        let lister = match config {
+            ConnectorProperties::S3(prop) => S3SourceLister::new(*prop).await?,
+            _ => unreachable!(),
+        };
+
+        Ok(lister.paginate())
     }
 
     pub async fn stream_reader(

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use anyhow::anyhow;
-use risingwave_common::types::JsonbVal;
+use risingwave_common::types::{JsonbVal, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::source::{SplitId, SplitMetaData};
@@ -52,6 +52,22 @@ impl FsSplit {
             name,
             offset: start,
             size,
+        }
+    }
+}
+
+pub struct FsPage {
+    pub name: String,
+    pub size: usize,
+    pub timestamp: Timestamp,
+}
+
+impl FsPage {
+    pub fn new(name: String, size: usize, timestamp: Timestamp) -> Self {
+        Self {
+            name,
+            size,
+            timestamp,
         }
     }
 }

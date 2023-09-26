@@ -33,7 +33,7 @@ use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
 
 use super::datagen::DatagenMeta;
-use super::filesystem::FsSplit;
+use super::filesystem::{FsPage, FsSplit};
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
@@ -498,6 +498,15 @@ pub trait SplitMetaData: Sized {
 /// split readers) [`SplitImpl`]. If no split is assigned to source executor, `ConnectorState` is
 /// [`None`] and the created source stream will be a pending stream.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
+
+#[async_trait]
+pub trait SourceLister: Sized {
+    type Split: SplitMetaData + Send;
+    type Properties;
+
+    async fn new(properties: Self::Properties) -> Result<Self>;
+    fn paginate(self) -> BoxTryStream<Vec<FsPage>>;
+}
 
 #[cfg(test)]
 mod tests {
