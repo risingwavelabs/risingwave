@@ -19,6 +19,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary};
 use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
+use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -41,15 +42,12 @@ impl_plan_tree_node_for_unary! { StreamFsFetch }
 
 impl StreamFsFetch {
     pub fn new(input: PlanRef, source: generic::Source) -> Self {
-        let base = PlanBase::new_stream(
-            input.ctx(),
-            input.schema().clone(),
-            input.logical_pk().to_vec(),
-            input.functional_dependency().clone(),
-            input.distribution().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &source,
+            Distribution::SomeShard,
             source.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
-            FixedBitSet::with_capacity(input.schema().len()),
+            FixedBitSet::with_capacity(source.column_catalog.len()),
         );
 
         Self {
