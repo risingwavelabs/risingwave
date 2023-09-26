@@ -25,7 +25,7 @@ impl GenericPlanNode for DynamicFilter {
         todo!("new plan node derivation")
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         todo!("new plan node derivation")
     }
 
@@ -56,7 +56,7 @@ impl GenericPlanNode for Exchange {
         todo!("new plan node derivation")
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         todo!("new plan node derivation")
     }
 
@@ -88,8 +88,8 @@ impl GenericPlanNode for DeltaJoin {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -120,8 +120,8 @@ impl GenericPlanNode for Expand {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -152,8 +152,8 @@ impl GenericPlanNode for Filter {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -184,8 +184,8 @@ impl GenericPlanNode for SimpleAgg {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -216,8 +216,8 @@ impl GenericPlanNode for GroupTopN {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -248,8 +248,8 @@ impl GenericPlanNode for HashAgg {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -280,8 +280,8 @@ impl GenericPlanNode for HashJoin {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -312,8 +312,8 @@ impl GenericPlanNode for HopWindow {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -344,8 +344,8 @@ impl GenericPlanNode for IndexScan {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -376,8 +376,8 @@ impl GenericPlanNode for StatelessSimpleAgg {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -408,7 +408,7 @@ impl GenericPlanNode for Materialize {
         todo!("new plan node derivation")
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         todo!("new plan node derivation")
     }
 
@@ -440,8 +440,8 @@ impl GenericPlanNode for ProjectSet {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -472,8 +472,8 @@ impl GenericPlanNode for Project {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -506,7 +506,7 @@ impl GenericPlanNode for Sink {
         todo!("new plan node derivation")
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         todo!("new plan node derivation")
     }
 
@@ -538,8 +538,8 @@ impl GenericPlanNode for Source {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -570,8 +570,8 @@ impl GenericPlanNode for TableScan {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -602,8 +602,8 @@ impl GenericPlanNode for TopN {
         self.core.schema()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        self.core.logical_pk()
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.core.stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {

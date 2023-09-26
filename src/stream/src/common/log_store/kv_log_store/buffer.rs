@@ -22,7 +22,7 @@ use risingwave_common::buffer::Bitmap;
 use tokio::sync::{oneshot, Notify};
 
 use crate::common::log_store::kv_log_store::{ReaderTruncationOffsetType, SeqIdType};
-use crate::common::log_store::LogStoreResult;
+use crate::common::log_store::{ChunkId, LogStoreResult, TruncateOffset};
 
 #[derive(Clone)]
 pub(crate) enum LogStoreBufferItem {
@@ -31,12 +31,14 @@ pub(crate) enum LogStoreBufferItem {
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
         flushed: bool,
+        chunk_id: ChunkId,
     },
 
     Flushed {
         vnode_bitmap: Bitmap,
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
+        chunk_id: ChunkId,
     },
 
     Barrier {
@@ -53,10 +55,11 @@ struct LogStoreBufferInner {
     /// Items already read by log reader by not truncated. Newer item at the front
     consumed_queue: VecDeque<(u64, LogStoreBufferItem)>,
     stream_chunk_count: usize,
-    consumed_stream_chunk_count: usize,
     max_stream_chunk_count: usize,
 
     updated_truncation: Option<ReaderTruncationOffsetType>,
+
+    next_chunk_id: ChunkId,
 }
 
 impl LogStoreBufferInner {
@@ -68,50 +71,38 @@ impl LogStoreBufferInner {
         if let LogStoreBufferItem::StreamChunk { .. } = item {
             unreachable!("StreamChunk should call try_add_item")
         }
-        assert!(
-            self.try_add_item(epoch, item).is_none(),
-            "call on item other than StreamChunk should always succeed"
-        );
+        self.unconsumed_queue.push_front((epoch, item));
     }
 
-    /// Try adding a `LogStoreBufferItem` to the buffer. If the stream chunk count exceeds the
-    /// maximum count, it will return the original stream chunk if we are adding a stream chunk.
-    fn try_add_item(&mut self, epoch: u64, item: LogStoreBufferItem) -> Option<StreamChunk> {
-        match item {
-            LogStoreBufferItem::StreamChunk {
-                chunk,
-                start_seq_id,
-                end_seq_id,
-                flushed,
-            } => {
-                if !self.can_add_stream_chunk() {
-                    Some(chunk)
-                } else {
-                    self.stream_chunk_count += 1;
-                    self.unconsumed_queue.push_front((
-                        epoch,
-                        LogStoreBufferItem::StreamChunk {
-                            chunk,
-                            start_seq_id,
-                            end_seq_id,
-                            flushed,
-                        },
-                    ));
-                    None
-                }
-            }
-            item => {
-                self.unconsumed_queue.push_front((epoch, item));
-                None
-            }
+    pub(crate) fn try_add_stream_chunk(
+        &mut self,
+        epoch: u64,
+        chunk: StreamChunk,
+        start_seq_id: SeqIdType,
+        end_seq_id: SeqIdType,
+    ) -> Option<StreamChunk> {
+        if !self.can_add_stream_chunk() {
+            Some(chunk)
+        } else {
+            let chunk_id = self.next_chunk_id;
+            self.next_chunk_id += 1;
+            self.stream_chunk_count += 1;
+            self.unconsumed_queue.push_front((
+                epoch,
+                LogStoreBufferItem::StreamChunk {
+                    chunk,
+                    start_seq_id,
+                    end_seq_id,
+                    flushed: false,
+                    chunk_id,
+                },
+            ));
+            None
         }
     }
 
     fn pop_item(&mut self) -> Option<(u64, LogStoreBufferItem)> {
         if let Some((epoch, item)) = self.unconsumed_queue.pop_back() {
-            if let LogStoreBufferItem::StreamChunk { .. } = &item {
-                self.consumed_stream_chunk_count += 1;
-            }
             self.consumed_queue.push_front((epoch, item.clone()));
             Some((epoch, item))
         } else {
@@ -148,12 +139,15 @@ impl LogStoreBufferInner {
             *prev_end_seq_id = end_seq_id;
             *vnode_bitmap |= new_vnode_bitmap;
         } else {
+            let chunk_id = self.next_chunk_id;
+            self.next_chunk_id += 1;
             self.add_item(
                 epoch,
                 LogStoreBufferItem::Flushed {
                     start_seq_id,
                     end_seq_id,
                     vnode_bitmap: new_vnode_bitmap,
+                    chunk_id,
                 },
             );
         }
@@ -221,15 +215,10 @@ impl LogStoreBufferSender {
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
     ) -> Option<StreamChunk> {
-        let ret = self.buffer.inner().try_add_item(
-            epoch,
-            LogStoreBufferItem::StreamChunk {
-                chunk,
-                start_seq_id,
-                end_seq_id,
-                flushed: false,
-            },
-        );
+        let ret = self
+            .buffer
+            .inner()
+            .try_add_stream_chunk(epoch, chunk, start_seq_id, end_seq_id);
         if ret.is_none() {
             // notify when successfully add
             self.update_notify.notify_waiters();
@@ -275,6 +264,7 @@ impl LogStoreBufferSender {
                 start_seq_id,
                 end_seq_id,
                 flushed,
+                ..
             } = item
             {
                 if *flushed {
@@ -321,20 +311,67 @@ impl LogStoreBufferReceiver {
         }
     }
 
-    pub(crate) fn truncate(&mut self) {
+    pub(crate) fn truncate(&mut self, offset: TruncateOffset) {
         let mut inner = self.buffer.inner();
-        if let Some((epoch, item)) = inner.consumed_queue.front() {
+        let mut latest_offset: Option<ReaderTruncationOffsetType> = None;
+        while let Some((epoch, item)) = inner.consumed_queue.back() {
+            let epoch = *epoch;
             match item {
-                LogStoreBufferItem::Barrier { .. } => {
-                    inner.updated_truncation = Some(*epoch);
+                LogStoreBufferItem::StreamChunk {
+                    chunk_id,
+                    flushed,
+                    end_seq_id,
+                    ..
+                } => {
+                    let chunk_offset = TruncateOffset::Chunk {
+                        epoch,
+                        chunk_id: *chunk_id,
+                    };
+                    let flushed = *flushed;
+                    let end_seq_id = *end_seq_id;
+                    if chunk_offset <= offset {
+                        inner.stream_chunk_count -= 1;
+                        inner.consumed_queue.pop_back();
+                        if flushed {
+                            latest_offset = Some((epoch, Some(end_seq_id)));
+                        }
+                    } else {
+                        break;
+                    }
                 }
-                _ => {
-                    unreachable!("should only call truncate right after getting a barrier");
+                LogStoreBufferItem::Flushed {
+                    chunk_id,
+                    end_seq_id,
+                    ..
+                } => {
+                    let end_seq_id = *end_seq_id;
+                    let chunk_offset = TruncateOffset::Chunk {
+                        epoch,
+                        chunk_id: *chunk_id,
+                    };
+                    if chunk_offset <= offset {
+                        inner.consumed_queue.pop_back();
+                        latest_offset = Some((epoch, Some(end_seq_id)));
+                    } else {
+                        break;
+                    }
+                }
+                LogStoreBufferItem::Barrier { .. } => {
+                    let chunk_offset = TruncateOffset::Barrier { epoch };
+                    if chunk_offset <= offset {
+                        inner.consumed_queue.pop_back();
+                        latest_offset = Some((epoch, None));
+                    } else {
+                        break;
+                    }
+                }
+                LogStoreBufferItem::UpdateVnodes(_) => {
+                    inner.consumed_queue.pop_back();
                 }
             }
-            inner.consumed_queue.clear();
-            inner.stream_chunk_count -= inner.consumed_stream_chunk_count;
-            inner.consumed_stream_chunk_count = 0;
+        }
+        if let Some(offset) = latest_offset {
+            inner.updated_truncation = Some(offset);
         }
     }
 }
@@ -346,9 +383,9 @@ pub(crate) fn new_log_store_buffer(
         unconsumed_queue: VecDeque::new(),
         consumed_queue: VecDeque::new(),
         stream_chunk_count: 0,
-        consumed_stream_chunk_count: 0,
         max_stream_chunk_count,
         updated_truncation: None,
+        next_chunk_id: 0,
     });
     let update_notify = Arc::new(Notify::new());
     let (init_epoch_tx, init_epoch_rx) = oneshot::channel();

@@ -189,6 +189,9 @@ impl StreamChunk {
     }
 
     pub fn to_protobuf(&self) -> PbStreamChunk {
+        if !self.is_compacted() {
+            return self.clone().compact().to_protobuf();
+        }
         PbStreamChunk {
             cardinality: self.cardinality() as u32,
             ops: self.ops.iter().map(|op| op.to_protobuf() as i32).collect(),
@@ -481,14 +484,16 @@ impl StreamChunkMut {
     /// get the mut reference of the stream chunk.
     pub fn to_rows_mut(&mut self) -> impl Iterator<Item = (RowRef<'_>, OpRowMutRef<'_>)> {
         unsafe {
-            (0..self.vis.len()).map(|i| {
-                let p = self as *const StreamChunkMut;
-                let p = p as *mut StreamChunkMut;
-                (
-                    RowRef::with_columns(self.columns(), i),
-                    OpRowMutRef { c: &mut *p, i },
-                )
-            })
+            (0..self.vis.len())
+                .filter(|i| self.vis.is_set(*i))
+                .map(|i| {
+                    let p = self as *const StreamChunkMut;
+                    let p = p as *mut StreamChunkMut;
+                    (
+                        RowRef::with_columns(self.columns(), i),
+                        OpRowMutRef { c: &mut *p, i },
+                    )
+                })
         }
     }
 }
