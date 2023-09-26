@@ -559,7 +559,7 @@ impl SstableStore {
                     };
 
                     cache
-                        .insert_force(key, block)
+                        .insert(key, block)
                         .await
                         .map_err(HummockError::file_cache)?;
                 }
