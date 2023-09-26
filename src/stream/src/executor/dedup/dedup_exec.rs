@@ -36,7 +36,7 @@ use crate::task::AtomicU64Ref;
 
 /// [`DedupExecutor`] drops any message that has duplicate pk columns with previous
 /// messages. It accepts both append-only and non-append-only input.
-/// It will keep a dup_count as a state and the row is visible to the downstream
+/// It will keep a `dup_count` as a state and the row is visible to the downstream
 /// when the count increases from 0 or decreases to 0.
 pub struct DedupExecutor<S: StateStore> {
     input: Option<BoxedExecutor>,
