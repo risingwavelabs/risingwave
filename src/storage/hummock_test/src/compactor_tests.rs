@@ -35,7 +35,9 @@ pub(crate) mod tests {
     use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
     use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
+    use risingwave_meta::hummock::compaction::selector::{
+        default_compaction_selector, ManualCompactionOption,
+    };
     use risingwave_meta::hummock::test_utils::{
         register_table_ids_to_compaction_group, setup_compute_env, setup_compute_env_with_config,
         unregister_table_ids_from_compaction_group,
@@ -270,7 +272,7 @@ pub(crate) mod tests {
         while let Some(mut compact_task) = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                &mut default_level_selector(),
+                &mut default_compaction_selector(),
             )
             .await
             .unwrap()
@@ -436,7 +438,7 @@ pub(crate) mod tests {
         while let Some(compact_task) = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                &mut default_level_selector(),
+                &mut default_compaction_selector(),
             )
             .await
             .unwrap()
@@ -634,7 +636,7 @@ pub(crate) mod tests {
         let compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                &mut default_level_selector(),
+                &mut default_compaction_selector(),
             )
             .await
             .unwrap();
@@ -819,7 +821,7 @@ pub(crate) mod tests {
         let compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                &mut default_level_selector(),
+                &mut default_compaction_selector(),
             )
             .await
             .unwrap();
@@ -1015,7 +1017,7 @@ pub(crate) mod tests {
         let compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                &mut default_level_selector(),
+                &mut default_compaction_selector(),
             )
             .await
             .unwrap();
@@ -1207,7 +1209,7 @@ pub(crate) mod tests {
         let compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                &mut default_level_selector(),
+                &mut default_compaction_selector(),
             )
             .await
             .unwrap();
