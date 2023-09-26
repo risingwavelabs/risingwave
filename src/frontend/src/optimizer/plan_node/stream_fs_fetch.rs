@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
-use super::{PlanBase, PlanRef};
+use super::{PlanBase, PlanRef, PlanTreeNodeUnary};
 use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -28,7 +28,16 @@ pub struct StreamFsFetch {
     source: generic::Source,
 }
 
-impl_plan_tree_node_for_leaf!(StreamFsFetch);
+impl PlanTreeNodeUnary for StreamFsFetch {
+    fn input(&self) -> PlanRef {
+        self.input.clone()
+    }
+
+    fn clone_with_input(&self, input: PlanRef) -> Self {
+        Self::new(input, self.source.clone())
+    }
+}
+impl_plan_tree_node_for_unary! { StreamFsFetch }
 
 impl StreamFsFetch {
     pub fn new(input: PlanRef, source: generic::Source) -> Self {
