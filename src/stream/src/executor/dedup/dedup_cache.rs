@@ -32,10 +32,10 @@ impl<K: Hash + Eq + EstimateSize + Debug> DedupCache<K> {
         Self { inner: cache }
     }
 
-    /// insert a `key` into the cache and return whether the key is duplicated.
-    /// If duplicated, the cache will update the row count. If row count is 0, will return true.
+    /// insert a `key` into the cache and return whether the key is visible to the downstream.
+    /// If not visible, the cache will update the row count. If row count is 0, will return true.
     /// Also, returns the `dup_count` of the key as i64 after inserting the record.
-    pub fn dedup_insert(&mut self, op: &Op, key: K) -> (bool, i64) {
+    pub fn apply_dedup(&mut self, op: &Op, key: K) -> (bool, i64) {
         let old_row_cnt = self.inner.get(&key).cloned().unwrap_or(0);
         let delta = match op {
             Op::Insert | Op::UpdateInsert => 1,
@@ -91,11 +91,11 @@ mod tests {
 
         cache.insert(10, 1);
         assert!(cache.contains(&10));
-        assert!(!cache.dedup_insert(&Op::Insert, 10).0);
+        assert!(!cache.apply_dedup(&Op::Insert, 10).0);
 
-        assert!(cache.dedup_insert(&Op::Insert, 20).0);
+        assert!(cache.apply_dedup(&Op::Insert, 20).0);
         assert!(cache.contains(&20));
-        assert!(!cache.dedup_insert(&Op::Insert, 20).0);
+        assert!(!cache.apply_dedup(&Op::Insert, 20).0);
 
         cache.clear();
         assert!(!cache.contains(&10));
