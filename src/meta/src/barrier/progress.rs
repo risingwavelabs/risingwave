@@ -35,7 +35,7 @@ type ConsumedRows = u64;
 enum ChainState {
     Init,
     ConsumingUpstream(Epoch, ConsumedRows),
-    Done,
+    Done(ConsumedRows),
 }
 
 /// Progress of all actors containing chain nodes while creating mview.
@@ -93,18 +93,19 @@ impl Progress {
         match self.states.remove(&actor).unwrap() {
             ChainState::Init => {}
             ChainState::ConsumingUpstream(_, old_consumed_rows) => {
-                if !matches!(new_state, ChainState::Done) {
+                if !matches!(new_state, ChainState::Done(_)) {
                     self.consumed_rows -= old_consumed_rows;
                 }
             }
-            ChainState::Done => panic!("should not report done multiple times"),
+            ChainState::Done(_) => panic!("should not report done multiple times"),
         };
         match &new_state {
             ChainState::Init => {}
             ChainState::ConsumingUpstream(_, new_consumed_rows) => {
                 self.consumed_rows += new_consumed_rows;
             }
-            ChainState::Done => {
+            ChainState::Done(new_consumed_rows) => {
+                self.consumed_rows += new_consumed_rows;
                 self.done_count += 1;
             }
         };
@@ -295,7 +296,7 @@ impl CreateMviewProgressTracker {
         };
 
         let new_state = if progress.done {
-            ChainState::Done
+            ChainState::Done(progress.consumed_rows)
         } else {
             ChainState::ConsumingUpstream(progress.consumed_epoch.into(), progress.consumed_rows)
         };

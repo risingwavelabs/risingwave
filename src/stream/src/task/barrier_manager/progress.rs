@@ -23,7 +23,7 @@ type ConsumedRows = u64;
 #[derive(Debug, Clone, Copy)]
 pub(super) enum ChainState {
     ConsumingUpstream(ConsumedEpoch, ConsumedRows),
-    Done,
+    Done(ConsumedRows),
 }
 
 impl LocalBarrierManager {
@@ -137,7 +137,7 @@ impl CreateMviewProgress {
                 );
                 assert!(last_consumed_rows <= current_consumed_rows);
             }
-            Some(ChainState::Done) => unreachable!(),
+            Some(ChainState::Done(_)) => unreachable!(),
             None => {}
         };
         self.update_inner(
@@ -148,11 +148,11 @@ impl CreateMviewProgress {
 
     /// Finish the progress. If the progress is already finished, then perform no-op.
     /// `current_epoch` should be provided to locate the barrier under concurrent checkpoint.
-    pub fn finish(&mut self, current_epoch: u64) {
-        if let Some(ChainState::Done) = self.state {
+    pub fn finish(&mut self, current_epoch: u64, current_consumed_rows: ConsumedRows) {
+        if let Some(ChainState::Done(_)) = self.state {
             return;
         }
-        self.update_inner(current_epoch, ChainState::Done);
+        self.update_inner(current_epoch, ChainState::Done(current_consumed_rows));
     }
 }
 
