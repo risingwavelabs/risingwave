@@ -64,10 +64,10 @@ impl Expression for CaseExpression {
         let when_len = self.when_clauses.len();
         let mut result_array = Vec::with_capacity(when_len + 1);
         for (when_idx, WhenClause { when, then }) in self.when_clauses.iter().enumerate() {
-            let calc_then_vis = when.eval_checked(&input).await?.as_bool().to_bitmap();
+            let calc_then_vis = when.eval(&input).await?.as_bool().to_bitmap();
             let input_vis = input.visibility().clone();
             input.set_visibility(calc_then_vis.clone());
-            let then_res = then.eval_checked(&input).await?;
+            let then_res = then.eval(&input).await?;
             calc_then_vis
                 .iter_ones()
                 .for_each(|pos| selection[pos] = Some(when_idx));
@@ -75,7 +75,7 @@ impl Expression for CaseExpression {
             result_array.push(then_res);
         }
         if let Some(ref else_expr) = self.else_clause {
-            let else_res = else_expr.eval_checked(&input).await?;
+            let else_res = else_expr.eval(&input).await?;
             input
                 .visibility()
                 .iter_ones()

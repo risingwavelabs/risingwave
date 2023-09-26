@@ -88,8 +88,8 @@ for_all_filter_key_extractor_variants! { impl_filter_key_extractor }
 pub struct FullKeyFilterKeyExtractor;
 
 impl FilterKeyExtractor for FullKeyFilterKeyExtractor {
-    fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        full_key
+    fn extract<'a>(&self, user_key: &'a [u8]) -> &'a [u8] {
+        user_key
     }
 }
 

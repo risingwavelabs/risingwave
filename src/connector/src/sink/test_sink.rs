@@ -16,7 +16,6 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::anyhow;
 use parking_lot::Mutex;
-use risingwave_rpc_client::ConnectorClient;
 
 use crate::sink::boxed::{BoxCoordinator, BoxWriter};
 use crate::sink::{Sink, SinkError, SinkParam, SinkWriterParam};
@@ -49,7 +48,7 @@ impl Sink for TestSink {
 
     const SINK_NAME: &'static str = "test";
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> crate::sink::Result<()> {
+    async fn validate(&self) -> crate::sink::Result<()> {
         Ok(())
     }
 

@@ -16,6 +16,8 @@ pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
+pub mod doris;
+pub mod doris_connector;
 pub mod encoder;
 pub mod formatter;
 pub mod iceberg;
@@ -78,6 +80,7 @@ macro_rules! for_all_sinks {
                 { DeltaLake, $crate::sink::DeltaLakeSink },
                 { ElasticSearch, $crate::sink::ElasticSearchSink },
                 { Cassandra, $crate::sink::CassandraSink },
+                { Doris, $crate::sink::doris::DorisSink },
                 { Test, $crate::sink::TestSink }
             }
             $(,$arg)*
@@ -211,7 +214,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     type Writer: SinkWriter<CommitMetadata = ()>;
     type Coordinator: SinkCommitCoordinator;
 
-    async fn validate(&self, client: Option<ConnectorClient>) -> Result<()>;
+    async fn validate(&self) -> Result<()>;
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
     #[expect(clippy::unused_async)]
     async fn new_coordinator(
@@ -394,7 +397,7 @@ impl Sink for BlackHoleSink {
         Ok(Self)
     }
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         Ok(())
     }
 }
@@ -501,8 +504,14 @@ pub enum SinkError {
     ClickHouse(String),
     #[error("Nats error: {0}")]
     Nats(anyhow::Error),
+    #[error("Doris http error: {0}")]
+    Http(anyhow::Error),
+    #[error("Doris error: {0}")]
+    Doris(String),
     #[error("Pulsar error: {0}")]
     Pulsar(anyhow::Error),
+    #[error("Internal error: {0}")]
+    Internal(anyhow::Error),
 }
 
 impl From<RpcError> for SinkError {

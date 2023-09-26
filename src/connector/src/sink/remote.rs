@@ -14,20 +14,26 @@
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::ops::Deref;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
+use jni::objects::{JByteArray, JValue, JValueOwned};
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
+use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::{
     JsonPayload, Payload, StreamChunkPayload,
 };
 use risingwave_pb::connector_service::sink_writer_stream_response::CommitResponse;
-use risingwave_pb::connector_service::{SinkMetadata, SinkPayloadFormat};
+use risingwave_pb::connector_service::{
+    SinkMetadata, SinkPayloadFormat, ValidateSinkRequest, ValidateSinkResponse,
+};
 #[cfg(test)]
 use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
 use risingwave_rpc_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
@@ -100,7 +106,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
         RemoteSinkWriter::new(self.param.clone(), writer_param.connector_params).await
     }
 
-    async fn validate(&self, client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         // FIXME: support struct and array in stream sink
         self.param.columns.iter().map(|col| {
             if matches!(
@@ -132,17 +138,48 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
             }
         }).try_collect()?;
 
-        let client = client.ok_or_else(|| {
-            SinkError::Remote(anyhow_error!(
-                "connector node endpoint not specified or unable to connect to connector node"
-            ))
-        })?;
+        let mut env = JVM
+            .as_ref()
+            .map_err(|err| SinkError::Internal(err.into()))?
+            .attach_current_thread()
+            .map_err(|err| SinkError::Internal(err.into()))?;
+        let validate_sink_request = ValidateSinkRequest {
+            sink_param: Some(self.param.to_proto()),
+        };
+        let validate_sink_request_bytes = env
+            .byte_array_from_slice(&Message::encode_to_vec(&validate_sink_request))
+            .map_err(|err| SinkError::Internal(err.into()))?;
 
-        // We validate a remote sink's accessibility as well as the pk.
-        client
-            .validate_sink_properties(self.param.to_proto())
-            .await
-            .map_err(SinkError::from)
+        let response = env
+            .call_static_method(
+                "com/risingwave/connector/JniSinkValidationHandler",
+                "validate",
+                "([B)[B",
+                &[JValue::Object(&validate_sink_request_bytes)],
+            )
+            .map_err(|err| SinkError::Internal(err.into()))?;
+
+        let validate_sink_response_bytes = match response {
+            JValueOwned::Object(o) => unsafe { JByteArray::from_raw(o.into_raw()) },
+            _ => unreachable!(),
+        };
+
+        let validate_sink_response: ValidateSinkResponse = Message::decode(
+            risingwave_jni_core::to_guarded_slice(&validate_sink_response_bytes, &mut env)
+                .map_err(|err| SinkError::Internal(err.into()))?
+                .deref(),
+        )
+        .map_err(|err| SinkError::Internal(err.into()))?;
+
+        validate_sink_response.error.map_or_else(
+            || Ok(()), // If there is no error message, return Ok here.
+            |err| {
+                Err(SinkError::Remote(anyhow!(format!(
+                    "sink cannot pass validation: {}",
+                    err.error_message
+                ))))
+            },
+        )
     }
 }
 
@@ -163,8 +200,8 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
 
     const SINK_NAME: &'static str = R::SINK_NAME;
 
-    async fn validate(&self, client: Option<ConnectorClient>) -> Result<()> {
-        self.0.validate(client).await
+    async fn validate(&self) -> Result<()> {
+        self.0.validate().await
     }
 
     async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
@@ -339,7 +376,7 @@ where
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let payload = match self.payload_format {
             SinkPayloadFormat::Json => {
-                let mut row_ops = vec![];
+                let mut row_ops = Vec::with_capacity(chunk.cardinality());
                 let enc = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::String);
                 for (op, row_ref) in chunk.rows() {
                     let map = enc.encode(row_ref)?;

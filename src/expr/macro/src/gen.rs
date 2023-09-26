@@ -226,7 +226,7 @@ impl FunctionAttr {
             quote! {
                 let mut columns = Vec::with_capacity(self.children.len() - #num_args);
                 for child in &self.children[#num_args..] {
-                    columns.push(child.eval_checked(input).await?);
+                    columns.push(child.eval(input).await?);
                 }
                 let variadic_input = DataChunk::new(columns, input.visibility().clone());
             }
@@ -438,7 +438,7 @@ impl FunctionAttr {
                     }
                     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
                         #(
-                            let #array_refs = self.children[#children_indices].eval_checked(input).await?;
+                            let #array_refs = self.children[#children_indices].eval(input).await?;
                             let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
                         #eval_variadic
@@ -839,15 +839,26 @@ impl FunctionAttr {
                 .map(|i| quote! { self.return_type.as_struct().types().nth(#i).unwrap().clone() })
                 .collect()
         };
+        #[allow(clippy::disallowed_methods)]
+        let optioned_outputs = user_fn
+            .core_return_type
+            .split(',')
+            .map(|t| t.contains("Option"))
+            // example: "(Option<&str>, i32)" => [true, false]
+            .zip(&outputs)
+            .map(|(optional, o)| match optional {
+                false => quote! { Some(#o.as_scalar_ref()) },
+                true => quote! { #o.map(|o| o.as_scalar_ref()) },
+            })
+            .collect_vec();
         let build_value_array = if return_types.len() == 1 {
             quote! { let [value_array] = value_arrays; }
         } else {
             quote! {
-                let bitmap = value_arrays[0].null_bitmap().clone();
                 let value_array = StructArray::new(
                     self.return_type.as_struct().clone(),
                     value_arrays.to_vec(),
-                    bitmap,
+                    Bitmap::ones(len),
                 ).into_ref();
             }
         };
@@ -925,7 +936,7 @@ impl FunctionAttr {
                     #[try_stream(boxed, ok = DataChunk, error = ExprError)]
                     async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
                         #(
-                        let #array_refs = self.#child.eval_checked(input).await?;
+                        let #array_refs = self.#child.eval(input).await?;
                         let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
 
@@ -938,11 +949,12 @@ impl FunctionAttr {
                                 for output in #iter {
                                     index_builder.append(Some(i as i32));
                                     match #output {
-                                        Some((#(#outputs),*)) => { #(#builders.append(Some(#outputs.as_scalar_ref()));)* }
+                                        Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* }
                                         None => { #(#builders.append_null();)* }
                                     }
 
                                     if index_builder.len() == self.chunk_size {
+                                        let len = index_builder.len();
                                         let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
                                         let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
                                         #build_value_array

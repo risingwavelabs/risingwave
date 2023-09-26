@@ -55,6 +55,7 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
             event_time_col_idx,
             params.actor_context,
             table,
+            params.executor_id,
         )
         .boxed())
     }

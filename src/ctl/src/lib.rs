@@ -19,6 +19,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
 use crate::cmd_impl::hummock::{
@@ -419,6 +420,11 @@ enum MetaCommands {
     },
     /// backup meta by taking a meta snapshot
     BackupMeta,
+    /// restore meta by recovering from a meta snapshot
+    RestoreMeta {
+        #[command(flatten)]
+        opts: RestoreOpts,
+    },
     /// delete meta snapshots
     DeleteMetaSnapshots { snapshot_ids: Vec<u64> },
 
@@ -623,6 +629,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
+        Commands::Meta(MetaCommands::RestoreMeta { opts }) => {
+            risingwave_meta::backup_restore::restore(opts).await?
+        }
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
         }

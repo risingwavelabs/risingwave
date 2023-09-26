@@ -22,7 +22,6 @@ use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::Client as KinesisClient;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -74,7 +73,7 @@ impl Sink for KinesisSink {
 
     const SINK_NAME: &'static str = KINESIS_SINK;
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
@@ -214,7 +213,6 @@ impl KinesisSinkWriter {
         );
         let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
         let f = UpsertFormatter::new(key_encoder, val_encoder);
-
         self.write_chunk(chunk, f).await
     }
 
@@ -226,7 +224,6 @@ impl KinesisSinkWriter {
         );
         let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
         let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
-
         self.write_chunk(chunk, f).await
     }
 
