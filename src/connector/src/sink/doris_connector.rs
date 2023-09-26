@@ -171,7 +171,7 @@ impl DorisInsertClient {
             .map_err(|err| SinkError::Http(err.into()))?;
         let feature = client.request(request);
 
-        let handle: JoinHandle<Result<DorisInsertResultResponse>> = tokio::spawn(async move {
+        let handle: JoinHandle<Result<InsertResultResponse>> = tokio::spawn(async move {
             let response = feature.await.map_err(|err| SinkError::Http(err.into()))?;
             let status = response.status();
             let raw_string = String::from_utf8(
@@ -185,6 +185,7 @@ impl DorisInsertClient {
             if status == StatusCode::OK && !raw_string.is_empty() {
                 let response: DorisInsertResultResponse =
                     serde_json::from_str(&raw_string).map_err(|err| SinkError::Http(err.into()))?;
+                let response = InsertResultResponse::Doris(response);
                 Ok(response)
             } else {
                 Err(SinkError::Http(anyhow::anyhow!(
@@ -200,18 +201,55 @@ impl DorisInsertClient {
 }
 
 pub struct DorisInsert {
-    sender: Option<Sender>,
-    join_handle: Option<JoinHandle<Result<DorisInsertResultResponse>>>,
-    buffer: BytesMut,
+    insert:Inserter,
     is_first_record: bool,
 }
 impl DorisInsert {
-    pub fn new(sender: Sender, join_handle: JoinHandle<Result<DorisInsertResultResponse>>) -> Self {
+    pub fn new(sender: Sender, join_handle: JoinHandle<Result<InsertResultResponse>>) -> Self {
+        Self { insert: Inserter::new(sender, join_handle), is_first_record: true }
+    }
+
+    pub async fn write(&mut self, data: Bytes) -> Result<()> {
+        let mut data_build = BytesMut::new();
+        if self.is_first_record {
+            self.is_first_record = false;
+        } else {
+            data_build.put_slice("\n".as_bytes().into());
+        }
+        data_build.put_slice(&data);
+        self.insert.write(data_build.into()).await?;
+        Ok(())
+    }
+
+    pub async fn finish(self) -> Result<DorisInsertResultResponse> {
+        let res = match self.insert.finish().await?{
+            InsertResultResponse::Doris(doris_res) => doris_res,
+            InsertResultResponse::Starrocks(_) => return Err(SinkError::Http(anyhow::anyhow!(
+                        "Response is not doris"))),
+        };
+
+        if !DORIS_SUCCESS_STATUS.contains(&res.status.as_str()) {
+            return Err(SinkError::Http(anyhow::anyhow!(
+                "Insert error: {:?}, error url: {:?}",
+                res.message,
+                res.err_url
+            )));
+        };
+        Ok(res)
+    }
+}
+
+struct Inserter{
+    sender: Option<Sender>,
+    join_handle: Option<JoinHandle<Result<InsertResultResponse>>>,
+    buffer: BytesMut,
+}
+impl Inserter{
+    pub fn new(sender: Sender, join_handle: JoinHandle<Result<InsertResultResponse>>) -> Self {
         Self {
             sender: Some(sender),
             join_handle: Some(join_handle),
-            buffer: BytesMut::with_capacity(BUFFER_SIZE),
-            is_first_record: true,
+            buffer: BytesMut::with_capacity(BUFFER_SIZE)
         }
     }
 
@@ -252,11 +290,6 @@ impl DorisInsert {
     }
 
     pub async fn write(&mut self, data: Bytes) -> Result<()> {
-        if self.is_first_record {
-            self.is_first_record = false;
-        } else {
-            self.buffer.put_slice("\n".as_bytes());
-        }
         self.buffer.put_slice(&data);
         if self.buffer.len() >= MIN_CHUNK_SIZE {
             self.send_chunk().await?;
@@ -264,7 +297,7 @@ impl DorisInsert {
         Ok(())
     }
 
-    async fn wait_handle(&mut self) -> Result<DorisInsertResultResponse> {
+    async fn wait_handle(&mut self) -> Result<InsertResultResponse> {
         let res =
             match tokio::time::timeout(WAIT_HANDDLE_TIMEOUT, self.join_handle.as_mut().unwrap())
                 .await
@@ -272,17 +305,10 @@ impl DorisInsert {
                 Ok(res) => res.map_err(|err| SinkError::Http(err.into()))??,
                 Err(err) => return Err(SinkError::Http(err.into())),
             };
-        if !DORIS_SUCCESS_STATUS.contains(&res.status.as_str()) {
-            return Err(SinkError::Http(anyhow::anyhow!(
-                "Insert error: {:?}, error url: {:?}",
-                res.message,
-                res.err_url
-            )));
-        };
         Ok(res)
     }
 
-    pub async fn finish(mut self) -> Result<DorisInsertResultResponse> {
+    pub async fn finish(mut self) -> Result<InsertResultResponse> {
         if !self.buffer.is_empty() {
             self.send_chunk().await?;
         }
@@ -384,6 +410,10 @@ impl DorisField {
     }
 }
 
+pub enum InsertResultResponse{
+    Doris(DorisInsertResultResponse),
+    Starrocks(StarrocksInsertResultResponse),
+}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DorisInsertResultResponse {
     #[serde(rename = "TxnId")]
@@ -420,4 +450,8 @@ pub struct DorisInsertResultResponse {
     commit_and_publish_time_ms: i32,
     #[serde(rename = "ErrorURL")]
     err_url: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StarrocksInsertResultResponse {
 }
