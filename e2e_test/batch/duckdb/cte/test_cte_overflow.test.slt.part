@@ -20,4 +20,7 @@ with a as (select * from va) select * from a
 1729
 
 statement ok
+drop view va;
+
+statement ok
 drop table a;
