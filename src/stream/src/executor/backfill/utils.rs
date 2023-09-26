@@ -170,10 +170,10 @@ pub(crate) fn mark_chunk_ref_by_vnode(
         new_visibility.append(v);
     }
     let (columns, _) = data.into_parts();
-    Ok(StreamChunk::new(
+    Ok(StreamChunk::with_visibility(
         ops,
         columns,
-        Some(new_visibility.finish()),
+        new_visibility.finish(),
     ))
 }
 
@@ -201,7 +201,7 @@ fn mark_chunk_inner(
         new_visibility.append(v);
     }
     let (columns, _) = data.into_parts();
-    StreamChunk::new(ops, columns, Some(new_visibility.finish()))
+    StreamChunk::with_visibility(ops, columns, new_visibility.finish())
 }
 
 fn mark_cdc_chunk_inner(
@@ -246,10 +246,10 @@ fn mark_cdc_chunk_inner(
     }
 
     let (columns, _) = data.into_parts();
-    Ok(StreamChunk::new(
+    Ok(StreamChunk::with_visibility(
         ops,
         columns,
-        Some(new_visibility.finish()),
+        new_visibility.finish(),
     ))
 }
 
@@ -257,7 +257,7 @@ fn mark_cdc_chunk_inner(
 pub(crate) fn mapping_chunk(chunk: StreamChunk, output_indices: &[usize]) -> StreamChunk {
     let (ops, columns, visibility) = chunk.into_inner();
     let mapped_columns = output_indices.iter().map(|&i| columns[i].clone()).collect();
-    StreamChunk::new(ops, mapped_columns, visibility.into_visibility())
+    StreamChunk::with_visibility(ops, mapped_columns, visibility)
 }
 
 fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {
@@ -308,9 +308,56 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
     Ok(result)
 }
 
+/// The row here does not include `vnode`,
+/// it should have been excluded by setting `value_indices`.
+/// Row schema: | `pk_indices` ... | `backfill_finished` | `row_count`
+pub(crate) fn get_backfill_finished(row: OwnedRow, state_len: usize) -> Option<bool> {
+    let datum = if row.len() == state_len - 2 {
+        // Handle backwards compatibility case where
+        // we did not have row count (-1 for this).
+        // -1 to exclude `vnode` as well.
+        row.last()
+    } else {
+        row.datum_at(row.len() - 2)
+    };
+    datum.map(|d| d.into_bool())
+}
+
+/// The row here does not include `vnode`,
+/// it should have been excluded by setting `value_indices`.
+/// Row schema: | `pk_indices` ... | `backfill_finished` | `row_count`
+pub(crate) fn get_row_count(row: OwnedRow, state_len: usize) -> u64 {
+    if row.len() == state_len - 2 {
+        // Handle backwards compatibility case where
+        // we did not have row count (-1 for this).
+        // -1 to exclude `vnode` as well.
+        return 0;
+    }
+    match row.last() {
+        None => 0,
+        Some(d) => d.into_int64() as u64,
+    }
+}
+
+pub(crate) async fn get_row_count_state<S: StateStore, const IS_REPLICATED: bool>(
+    state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
+    state_len: usize,
+) -> StreamExecutorResult<u64> {
+    let mut vnodes = state_table.vnodes().iter_vnodes_scalar();
+    let vnode = vnodes.next().unwrap();
+    let key: &[Datum] = &[Some(vnode.into())];
+    let row = state_table.get_row(key).await?;
+    let row_count = match row {
+        None => 0,
+        Some(row) => get_row_count(row, state_len),
+    };
+    Ok(row_count)
+}
+
 /// All vnodes should be persisted with status finished.
 pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED: bool>(
     state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
+    state_len: usize,
 ) -> StreamExecutorResult<bool> {
     debug_assert!(!state_table.vnode_bitmap().is_empty());
     let vnodes = state_table.vnodes().iter_vnodes_scalar();
@@ -320,9 +367,9 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
         let row = state_table.get_row(key).await?;
 
         let vnode_is_finished = if let Some(row) = row
-            && let Some(vnode_is_finished) = row.last()
+            && let Some(vnode_is_finished) = get_backfill_finished(row, state_len)
         {
-            vnode_is_finished.into_bool()
+            vnode_is_finished
         } else {
             false
         };
@@ -335,6 +382,9 @@ pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED:
 }
 
 /// Flush the data
+// This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+// TODO: remove `allow` here after the issued is closed.
+#[expect(clippy::needless_pass_by_ref_mut)]
 pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     epoch: EpochPair,
@@ -378,21 +428,26 @@ pub(crate) fn build_temporary_state_with_vnode(
     is_finished: bool,
     current_pos: &OwnedRow,
 ) {
-    build_temporary_state(row_state, is_finished, current_pos);
+    row_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
+    row_state[current_pos.len() + 1] = Some(is_finished.into());
     row_state[0] = Some(vnode.to_scalar().into());
 }
 
 /// We want to avoid allocating a row for every vnode.
 /// Instead we can just modify a single row, and dispatch it to state table to write.
-/// This builds the `current_pos` segment of the row.
-/// Vnode needs to be filled in as well.
+/// This builds the following segments of the row:
+/// 1. `current_pos`
+/// 2. `backfill_finished`
+/// 3. `row_count`
 pub(crate) fn build_temporary_state(
     row_state: &mut [Datum],
     is_finished: bool,
     current_pos: &OwnedRow,
+    row_count: u64,
 ) {
     row_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
     row_state[current_pos.len() + 1] = Some(is_finished.into());
+    row_state[current_pos.len() + 2] = Some((row_count as i64).into());
 }
 
 /// Update backfill pos by vnode.
@@ -502,7 +557,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     epoch: EpochPair,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     is_finished: bool,
-    backfill_state: &mut BackfillState,
+    backfill_state: &BackfillState,
     committed_progress: &mut HashMap<VirtualNode, Vec<Datum>>,
     temporary_state: &mut [Datum],
 ) -> StreamExecutorResult<()> {
@@ -557,12 +612,13 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     is_finished: bool,
     current_pos: &Option<OwnedRow>,
+    row_count: u64,
     old_state: &mut Option<Vec<Datum>>,
     current_state: &mut [Datum],
 ) -> StreamExecutorResult<()> {
     if let Some(current_pos_inner) = current_pos {
         // state w/o vnodes.
-        build_temporary_state(current_state, is_finished, current_pos_inner);
+        build_temporary_state(current_state, is_finished, current_pos_inner, row_count);
         flush_data(table, epoch, old_state, current_state).await?;
         *old_state = Some(current_state.into());
     } else {

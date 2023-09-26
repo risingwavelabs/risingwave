@@ -20,14 +20,14 @@ profile:
     # config-path: src/config/example.toml
     steps:
       # If you want to use the local s3 storage, enable the following line
-      - use: minio
+      # - use: minio
 
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
       # - use: aws-s3
       #   bucket: test-bucket
 
       # If you want to create CDC source table, uncomment the following line
-      - use: connector-node
+      # - use: connector-node
 
       # if you want to enable etcd backend, uncomment the following lines.
       # - use: etcd
@@ -43,7 +43,7 @@ profile:
       - use: frontend
 
       # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
-      - use: compactor
+      # - use: compactor
 
       # If you want to create source from Kafka, uncomment the following lines
       # Note that kafka depends on zookeeper, so zookeeper must be started beforehand.
@@ -796,6 +796,16 @@ profile:
       - use: compactor
 
   ci-clickhouse-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
+  ci-pulsar-test:
     config-path: src/config/ci.toml
     steps:
       - use: minio

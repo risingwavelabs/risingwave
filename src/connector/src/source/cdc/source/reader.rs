@@ -13,21 +13,26 @@
 // limitations under the License.
 
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures::pin_mut;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
+use jni::objects::JValue;
+use prost::Message;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::connector_service::GetEventStreamResponse;
+use risingwave_jni_core::jvm_runtime::JVM;
+use risingwave_jni_core::GetEventStreamJniSender;
+use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
+use tokio::sync::mpsc;
 
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::{CdcProperties, CdcSourceType, CdcSourceTypeTrait, DebeziumCdcSplit};
-use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
-    SplitReader,
+    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
+    SplitId, SplitMetaData, SplitReader,
 };
 
 pub struct CdcSplitReader<T: CdcSourceTypeTrait> {
@@ -44,23 +49,23 @@ pub struct CdcSplitReader<T: CdcSourceTypeTrait> {
     source_ctx: SourceContextRef,
 }
 
+const DEFAULT_CHANNEL_SIZE: usize = 16;
+
 #[async_trait]
-impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T>
-where
-    DebeziumCdcSplit<T>: TryFrom<SplitImpl, Error = anyhow::Error>,
-{
+impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
     type Properties = CdcProperties<T>;
+    type Split = DebeziumCdcSplit<T>;
 
     #[allow(clippy::unused_async)]
     async fn new(
         conn_props: CdcProperties<T>,
-        splits: Vec<SplitImpl>,
+        splits: Vec<DebeziumCdcSplit<T>>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         assert_eq!(splits.len(), 1);
-        let split = DebeziumCdcSplit::<T>::try_from(splits.into_iter().next().unwrap())?;
+        let split = splits.into_iter().next().unwrap();
         let split_id = split.id();
         match T::source_type() {
             CdcSourceType::Mysql | CdcSourceType::Postgres => Ok(Self {
@@ -93,16 +98,9 @@ where
     }
 }
 
-impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T>
-where
-    Self: SplitReader,
-{
+impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
     #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
-        let cdc_client = self.source_ctx.connector_client.clone().ok_or_else(|| {
-            anyhow!("connector node endpoint not specified or unable to connect to connector node")
-        })?;
-
         // rewrite the hostname and port for the split
         let mut properties = self.conn_props.props.clone();
 
@@ -121,38 +119,62 @@ where
             properties.insert("table.name".into(), table_name);
         }
 
-        let cdc_stream = cdc_client
-            .start_source_stream(
-                self.source_id,
-                self.conn_props.get_source_type_pb(),
-                self.start_offset,
-                properties,
-                self.snapshot_done,
-            )
-            .await
-            .inspect_err(|err| tracing::error!("connector node start stream error: {}", err))?;
-        pin_mut!(cdc_stream);
-        #[for_await]
-        for event_res in cdc_stream {
-            match event_res {
-                Ok(GetEventStreamResponse { events, .. }) => {
-                    if events.is_empty() {
-                        continue;
-                    }
-                    let mut msgs = Vec::with_capacity(events.len());
-                    for event in events {
-                        msgs.push(SourceMessage::from(event));
-                    }
-                    yield msgs;
+        let (tx, mut rx) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
+
+        LazyLock::force(&JVM).as_ref()?;
+
+        let get_event_stream_request = GetEventStreamRequest {
+            source_id: self.source_id,
+            source_type: self.conn_props.get_source_type_pb() as _,
+            start_offset: self.start_offset.unwrap_or_default(),
+            properties,
+            snapshot_done: self.snapshot_done,
+        };
+
+        let source_id = get_event_stream_request.source_id.to_string();
+        let source_type = get_event_stream_request.source_type.to_string();
+
+        std::thread::spawn(move || {
+            let mut env = JVM
+                .as_ref()
+                .unwrap()
+                .attach_current_thread_as_daemon()
+                .unwrap();
+
+            let get_event_stream_request_bytes = env
+                .byte_array_from_slice(&Message::encode_to_vec(&get_event_stream_request))
+                .unwrap();
+            let result = env.call_static_method(
+                "com/risingwave/connector/source/core/JniDbzSourceHandler",
+                "runJniDbzSourceThread",
+                "([BJ)V",
+                &[
+                    JValue::Object(&get_event_stream_request_bytes),
+                    JValue::from(&tx as *const GetEventStreamJniSender as i64),
+                ],
+            );
+
+            match result {
+                Ok(_) => {
+                    tracing::info!("end of jni call runJniDbzSourceThread");
                 }
                 Err(e) => {
-                    return Err(anyhow!(
-                        "Cdc service error: code {}, msg {}",
-                        e.code(),
-                        e.message()
-                    ))
+                    tracing::error!("jni call error: {:?}", e);
                 }
             }
+        });
+
+        while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {
+            tracing::debug!("receive events {:?}", events.len());
+            self.source_ctx
+                .metrics
+                .connector_source_rows_received
+                .with_label_values(&[&source_type, &source_id])
+                .inc_by(events.len() as u64);
+            let msgs = events.into_iter().map(SourceMessage::from).collect_vec();
+            yield msgs;
         }
+
+        Err(anyhow!("all senders are dropped"))?;
     }
 }

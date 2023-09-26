@@ -22,7 +22,6 @@ use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarRefImpl, Serial};
-use risingwave_rpc_client::ConnectorClient;
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::Serialize;
 use serde_derive::Deserialize;
@@ -211,7 +210,7 @@ impl Sink for ClickHouseSink {
     type Coordinator = DummySinkCommitCoordinator;
     type Writer = ClickHouseSinkWriter;
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         // For upsert clickhouse sink, the primary key must be defined.
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
@@ -336,6 +335,10 @@ impl ClickHouseSinkWriter {
         )?;
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
+                tracing::warn!(
+                    "append only click house sink receive an {:?} which will be ignored.",
+                    op
+                );
                 continue;
             }
             let mut clickhouse_filed_vec = vec![];
@@ -642,7 +645,7 @@ impl Serialize for ClickHouseField {
             ClickHouseField::Bool(v) => serializer.serialize_bool(*v),
             ClickHouseField::List(v) => {
                 let mut s = serializer.serialize_seq(Some(v.len()))?;
-                for i in v.iter() {
+                for i in v {
                     s.serialize_element(i)?;
                 }
                 s.end()

@@ -141,7 +141,7 @@ impl Value for Box<Sstable> {
 
     fn read(mut buf: &[u8]) -> Self {
         let id = buf.get_u64();
-        let meta = SstableMeta::decode(&mut buf).unwrap();
+        let meta = SstableMeta::decode(buf).unwrap();
         Box::new(Sstable::new(id, meta))
     }
 }
@@ -260,6 +260,21 @@ where
             FileCache::FoyerRuntime { runtime, store, .. } => {
                 let store = store.clone();
                 runtime.spawn(async move { store.insert_if_not_exists(key, value).await });
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self, value))]
+    pub async fn insert_force(&self, key: K, value: V) -> Result<bool> {
+        match self {
+            FileCache::None => Ok(false),
+            FileCache::FoyerRuntime { runtime, store, .. } => {
+                let store = store.clone();
+                runtime
+                    .spawn(async move { store.insert_force(key, value).await })
+                    .await
+                    .unwrap()
+                    .map_err(FileCacheError::foyer)
             }
         }
     }

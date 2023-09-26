@@ -29,6 +29,7 @@ use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{extract_storage_memory_config, load_config, NoOverride, RwConfig};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -36,7 +37,7 @@ use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
-use risingwave_pb::catalog::PbTable;
+use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
@@ -150,6 +151,7 @@ async fn compaction_test(
         cardinality: None,
         created_at_epoch: None,
         cleaned_by_watermark: false,
+        stream_job_status: PbStreamJobStatus::Created.into(),
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -419,7 +421,7 @@ impl NormalState {
     async fn get_impl(&self, key: &[u8], ignore_range_tombstone: bool) -> Option<Bytes> {
         self.storage
             .get(
-                Bytes::copy_from_slice(key),
+                TableKey(Bytes::copy_from_slice(key)),
                 ReadOptions {
                     prefix_hint: None,
                     ignore_range_tombstone,
@@ -444,8 +446,8 @@ impl NormalState {
             .storage
             .iter(
                 (
-                    Bound::Included(Bytes::copy_from_slice(left)),
-                    Bound::Excluded(Bytes::copy_from_slice(right)),
+                    Bound::Included(TableKey(Bytes::copy_from_slice(left))),
+                    Bound::Excluded(TableKey(Bytes::copy_from_slice(right))),
                 ),
                 ReadOptions {
                     prefix_hint: None,
@@ -476,8 +478,8 @@ impl CheckState for NormalState {
             self.storage
                 .iter(
                     (
-                        Bound::Included(Bytes::copy_from_slice(left)),
-                        Bound::Excluded(Bytes::copy_from_slice(right)),
+                        Bound::Included(Bytes::copy_from_slice(left)).map(TableKey),
+                        Bound::Excluded(Bytes::copy_from_slice(right)).map(TableKey),
                     ),
                     ReadOptions {
                         prefix_hint: None,
@@ -495,7 +497,7 @@ impl CheckState for NormalState {
         let mut delete_item = Vec::new();
         while let Some(item) = iter.next().await {
             let (full_key, value) = item.unwrap();
-            delete_item.push((full_key.user_key.table_key.0, value));
+            delete_item.push((full_key.user_key.table_key, value));
         }
         drop(iter);
         for (key, value) in delete_item {
@@ -505,7 +507,11 @@ impl CheckState for NormalState {
 
     fn insert(&mut self, key: &[u8], val: &[u8]) {
         self.storage
-            .insert(Bytes::from(key.to_vec()), Bytes::copy_from_slice(val), None)
+            .insert(
+                TableKey(Bytes::from(key.to_vec())),
+                Bytes::copy_from_slice(val),
+                None,
+            )
             .unwrap();
     }
 
@@ -575,21 +581,26 @@ fn run_compactor_thread(
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
 ) {
+    let filter_key_extractor_manager =
+        FilterKeyExtractorManager::RpcFilterKeyExtractorManager(filter_key_extractor_manager);
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store,
         compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
-        filter_key_extractor_manager: FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            filter_key_extractor_manager,
-        ),
+
         memory_limiter: MemoryLimiter::unlimit(),
         task_progress_manager: Default::default(),
         await_tree_reg: None,
         running_task_count: Arc::new(AtomicU32::new(0)),
     };
-    start_compactor(compactor_context, meta_client, sstable_object_id_manager)
+    start_compactor(
+        compactor_context,
+        meta_client,
+        sstable_object_id_manager,
+        filter_key_extractor_manager,
+    )
 }
 
 #[cfg(test)]

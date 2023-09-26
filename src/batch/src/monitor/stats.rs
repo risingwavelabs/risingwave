@@ -63,7 +63,7 @@ pub static GLOBAL_BATCH_TASK_METRICS: LazyLock<BatchTaskMetrics> =
 impl BatchTaskMetrics {
     /// The created [`BatchTaskMetrics`] is already registered to the `registry`.
     fn new(registry: &Registry) -> Self {
-        let task_labels = vec!["query_id", "stage_id", "task_id"];
+        let task_labels = ["query_id", "stage_id", "task_id"];
         let mut descs = Vec::with_capacity(8);
 
         let task_first_poll_delay = GaugeVec::new(opts!(
@@ -168,7 +168,9 @@ impl BatchTaskMetrics {
             macro_rules! remove {
                 ($({ $metric:ident, $type:ty},)*) => {
                     $(
-                        self.$metric.remove_label_values(&labels).expect("It should not have duplicate task label.");
+                        if let Err(err) = self.$metric.remove_label_values(&labels) {
+                            warn!("Failed to remove label values: {:?}", err);
+                        }
                     )*
                 };
             }
@@ -409,11 +411,8 @@ impl BatchMetricsWithTaskLabelsInner {
 
 impl Drop for BatchMetricsWithTaskLabelsInner {
     fn drop(&mut self) {
-        self.task_metrics.delete_task.lock().push(self.task_id());
-        self.executor_metrics
-            .delete_task
-            .lock()
-            .push(self.task_id());
+        self.task_metrics.add_delete_task(self.task_id());
+        self.executor_metrics.add_delete_task(self.task_id());
     }
 }
 

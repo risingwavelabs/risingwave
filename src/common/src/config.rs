@@ -366,12 +366,12 @@ pub struct ServerConfig {
     #[serde(default = "default::server::telemetry_enabled")]
     pub telemetry_enabled: bool,
 
+    /// Enable heap profile dump when memory usage is high.
+    #[serde(default)]
+    pub heap_profiling: HeapProfilingConfig,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
-
-    /// Enable heap profile dump when memory usage is high.
-    #[serde(default = "default::server::auto_dump_heap_profile")]
-    pub auto_dump_heap_profile: AutoDumpHeapProfileConfig,
 }
 
 /// The section `[batch]` in `risingwave.toml`.
@@ -563,6 +563,8 @@ pub struct StorageConfig {
     pub compact_iter_recreate_timeout_ms: u64,
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
+    #[serde(default = "default::storage::enable_fast_compaction")]
+    pub enable_fast_compaction: bool,
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -656,18 +658,29 @@ impl AsyncStackTraceOption {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
-pub struct AutoDumpHeapProfileConfig {
-    #[serde(default = "default::auto_dump_heap_profile::dir")]
-    pub dir: String,
-    #[serde(default = "default::auto_dump_heap_profile::threshold")]
-    pub threshold: f32,
+#[derive(Debug, Default, Clone, Copy, ValueEnum)]
+pub enum CompactorMode {
+    #[default]
+    #[clap(alias = "dedicated")]
+    Dedicated,
+
+    #[clap(alias = "shared")]
+    Shared,
 }
 
-impl AutoDumpHeapProfileConfig {
-    pub fn enabled(&self) -> bool {
-        !self.dir.is_empty()
-    }
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct HeapProfilingConfig {
+    /// Enable to auto dump heap profile when memory usage is high
+    #[serde(default = "default::heap_profiling::enable_auto")]
+    pub enable_auto: bool,
+
+    /// The proportion (number between 0 and 1) of memory usage to trigger heap profile dump
+    #[serde(default = "default::heap_profiling::threshold_auto")]
+    pub threshold_auto: f32,
+
+    /// The directory to dump heap profile. If empty, the prefix in `MALLOC_CONF` will be used
+    #[serde(default = "default::heap_profiling::dir")]
+    pub dir: String,
 }
 
 serde_with::with_prefix!(streaming_prefix "stream_");
@@ -735,9 +748,9 @@ pub struct BatchDeveloperConfig {
     #[serde(default = "default::developer::batch_chunk_size")]
     pub chunk_size: usize,
 }
-
-/// The section `[system]` in `risingwave.toml`. This section is only for testing purpose and should
-/// not be documented.
+/// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
+/// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
+/// documented.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct SystemConfig {
     /// The interval of periodic barrier.
@@ -778,9 +791,6 @@ pub struct SystemConfig {
     #[serde(default = "default::system::backup_storage_directory")]
     pub backup_storage_directory: Option<String>,
 
-    #[serde(default = "default::system::telemetry_enabled")]
-    pub telemetry_enabled: Option<bool>,
-
     /// Max number of concurrent creating streaming jobs.
     #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
     pub max_concurrent_creating_streaming_jobs: Option<u32>,
@@ -791,6 +801,7 @@ pub struct SystemConfig {
 }
 
 impl SystemConfig {
+    #![allow(deprecated)]
     pub fn into_init_system_params(self) -> SystemParams {
         SystemParams {
             barrier_interval_ms: self.barrier_interval_ms,
@@ -803,9 +814,9 @@ impl SystemConfig {
             data_directory: self.data_directory,
             backup_storage_url: self.backup_storage_url,
             backup_storage_directory: self.backup_storage_directory,
-            telemetry_enabled: self.telemetry_enabled,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
             pause_on_next_bootstrap: self.pause_on_next_bootstrap,
+            telemetry_enabled: None, // deprecated
         }
     }
 }
@@ -908,7 +919,7 @@ pub mod default {
     }
 
     pub mod server {
-        use crate::config::{AutoDumpHeapProfileConfig, MetricLevel};
+        use crate::config::MetricLevel;
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
@@ -924,10 +935,6 @@ pub mod default {
 
         pub fn telemetry_enabled() -> bool {
             true
-        }
-
-        pub fn auto_dump_heap_profile() -> AutoDumpHeapProfileConfig {
-            Default::default()
         }
     }
 
@@ -1036,6 +1043,10 @@ pub mod default {
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
+
+        pub fn enable_fast_compaction() -> bool {
+            true
+        }
     }
 
     pub mod streaming {
@@ -1125,17 +1136,21 @@ pub mod default {
         }
 
         pub fn concurrency() -> usize {
-            100
+            10
         }
     }
 
-    pub mod auto_dump_heap_profile {
-        pub fn dir() -> String {
-            "".to_string()
+    pub mod heap_profiling {
+        pub fn enable_auto() -> bool {
+            true
         }
 
-        pub fn threshold() -> f32 {
+        pub fn threshold_auto() -> f32 {
             0.9
+        }
+
+        pub fn dir() -> String {
+            "./".to_string()
         }
     }
 
@@ -1203,11 +1218,12 @@ pub mod default {
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
-        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 1000;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
+        const DEFAULT_EMERGENCY_PICKER: bool = true;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1252,6 +1268,10 @@ pub mod default {
         }
         pub fn tombstone_reclaim_ratio() -> u32 {
             DEFAULT_TOMBSTONE_RATIO_PERCENT
+        }
+
+        pub fn enable_emergency_picker() -> bool {
+            DEFAULT_EMERGENCY_PICKER
         }
     }
 
@@ -1378,6 +1398,8 @@ pub struct CompactionConfig {
     pub level0_max_compact_file_number: u64,
     #[serde(default = "default::compaction_config::tombstone_reclaim_ratio")]
     pub tombstone_reclaim_ratio: u32,
+    #[serde(default = "default::compaction_config::enable_emergency_picker")]
+    pub enable_emergency_picker: bool,
 }
 
 #[cfg(test)]

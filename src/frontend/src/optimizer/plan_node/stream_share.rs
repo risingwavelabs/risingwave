@@ -96,7 +96,7 @@ impl StreamShare {
                     identity: self.distill_to_string(),
                     node_body: Some(node_body),
                     operator_id: self.id().0 as _,
-                    stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
+                    stream_key: self.stream_key().iter().map(|x| *x as u32).collect(),
                     fields: self.schema().to_prost(),
                     append_only: self.append_only(),
                 };

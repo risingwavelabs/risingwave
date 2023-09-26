@@ -53,3 +53,6 @@ enable_sqlsmith_unit_test = []
 [[test]]
 name = "test_runner"
 harness = false
+
+[lints]
+workspace = true

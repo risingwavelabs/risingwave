@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rustdoc::private_intra_doc_links)]
 //! Defines all kinds of node in the plan tree, each node represent a relational expression.
 //!
 //! We use a immutable style tree structure, every Node are immutable and cannot be modified after
@@ -331,7 +330,7 @@ impl PlanRef {
                     .map(|mut c| Condition {
                         conjunctions: c
                             .conjunctions
-                            .drain_filter(|e| e.count_nows() == 0 && e.is_pure())
+                            .extract_if(|e| e.count_nows() == 0 && e.is_pure())
                             .collect(),
                     })
                     .reduce(|a, b| a.or(b))
@@ -436,8 +435,8 @@ impl GenericPlanRef for PlanRef {
         &self.plan_base().schema
     }
 
-    fn logical_pk(&self) -> &[usize] {
-        &self.plan_base().logical_pk
+    fn stream_key(&self) -> &[usize] {
+        &self.plan_base().stream_key
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -515,8 +514,8 @@ impl dyn PlanNode {
         &self.plan_base().schema
     }
 
-    pub fn logical_pk(&self) -> &[usize] {
-        &self.plan_base().logical_pk
+    pub fn stream_key(&self) -> &[usize] {
+        &self.plan_base().stream_key
     }
 
     pub fn order(&self) -> &Order {
@@ -567,7 +566,7 @@ impl dyn PlanNode {
             identity: self.explain_myself_to_string(),
             node_body: node,
             operator_id: self.id().0 as _,
-            stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
+            stream_key: self.stream_key().iter().map(|x| *x as u32).collect(),
             fields: self.schema().to_prost(),
             append_only: self.append_only(),
         }
