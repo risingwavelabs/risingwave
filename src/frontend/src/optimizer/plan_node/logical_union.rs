@@ -181,10 +181,8 @@ impl ToStream for LogicalUnion {
                     .collect_vec();
                 new_input
                     .stream_key()
-                    .expect(&format!(
-                        "should always have a stream key in the stream plan but not, sub plan: {}",
-                        new_input.explain_to_string()
-                    ))
+                    .unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
+                    new_input.explain_to_string()))
                     .iter()
                     .all(|x| original_schema_new_pos.contains(x))
             });
@@ -233,7 +231,7 @@ impl ToStream for LogicalUnion {
                 .iter()
                 .flat_map(|(new_input, _)| {
                     new_input
-                        .stream_key().expect(&format!(
+                        .stream_key().unwrap_or_else(|| panic!(
                             "should always have a stream key in the stream plan but not, sub plan: {}",
                             new_input.explain_to_string()
                         ))
@@ -250,10 +248,12 @@ impl ToStream for LogicalUnion {
                 .map(|(new_input, _)| {
                     new_input
                         .stream_key()
-                        .expect(&format!(
+                        .unwrap_or_else(|| {
+                            panic!(
                     "should always have a stream key in the stream plan but not, sub plan: {}",
                     new_input.explain_to_string()
-                ))
+                )
+                        })
                         .len()
                 })
                 .collect_vec();
@@ -281,10 +281,12 @@ impl ToStream for LogicalUnion {
                     let mut input_pks = input_pk_nulls.clone();
                     for (j, pk_idx) in new_input
                         .stream_key()
-                        .expect(&format!(
+                        .unwrap_or_else(|| {
+                            panic!(
                         "should always have a stream key in the stream plan but not, sub plan: {}",
                         new_input.explain_to_string()
-                    ))
+                    )
+                        })
                         .iter()
                         .enumerate()
                     {
