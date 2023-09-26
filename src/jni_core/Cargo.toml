@@ -11,9 +11,11 @@ normal = ["workspace-hack"]
 
 [dependencies]
 bytes = "1"
+cfg-or-panic = "0.2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.11"
 jni = "0.21.1"
+paste = "1"
 prost = "0.11"
 risingwave_common = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
