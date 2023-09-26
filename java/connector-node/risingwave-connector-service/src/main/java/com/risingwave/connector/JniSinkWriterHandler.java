@@ -16,65 +16,33 @@ package com.risingwave.connector;
 
 import com.risingwave.java.binding.Binding;
 import com.risingwave.proto.ConnectorServiceProto;
-import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class JniSinkWriterHandler
-        implements StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> {
+public class JniSinkWriterHandler {
     private static final Logger LOG = LoggerFactory.getLogger(JniSinkWriterHandler.class);
-
-    private long requestRxPtr;
-
-    private long responseTxPtr;
-
-    private boolean success;
-
-    public JniSinkWriterHandler(long requestRxPtr, long responseTxPtr) {
-        this.requestRxPtr = requestRxPtr;
-        this.responseTxPtr = responseTxPtr;
-    }
 
     public static void runJniSinkWriterThread(long requestRxPtr, long responseTxPtr) {
         // For jni.rs
         java.lang.Thread.currentThread()
                 .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
-
-        JniSinkWriterHandler handler = new JniSinkWriterHandler(requestRxPtr, responseTxPtr);
-
-        SinkWriterStreamObserver observer = new SinkWriterStreamObserver(handler);
-
+        JniSinkResponseObserver responseObserver = new JniSinkResponseObserver(responseTxPtr);
+        SinkWriterStreamObserver sinkWriterStreamObserver =
+                new SinkWriterStreamObserver(responseObserver);
         try {
             byte[] requestBytes;
-            while ((requestBytes = Binding.recvSinkWriterRequestFromChannel(handler.requestRxPtr))
+            while ((requestBytes = Binding.recvSinkWriterRequestFromChannel(requestRxPtr))
                     != null) {
                 var request = ConnectorServiceProto.SinkWriterStreamRequest.parseFrom(requestBytes);
-
-                observer.onNext(request);
-                if (!handler.success) {
+                sinkWriterStreamObserver.onNext(request);
+                if (!responseObserver.isSuccess()) {
                     throw new RuntimeException("fail to sendSinkWriterResponseToChannel");
                 }
             }
-            observer.onCompleted();
+            sinkWriterStreamObserver.onCompleted();
         } catch (Throwable t) {
-            observer.onError(t);
+            sinkWriterStreamObserver.onError(t);
         }
         LOG.info("end of runJniSinkWriterThread");
-    }
-
-    @Override
-    public void onNext(ConnectorServiceProto.SinkWriterStreamResponse response) {
-        this.success =
-                Binding.sendSinkWriterResponseToChannel(this.responseTxPtr, response.toByteArray());
-    }
-
-    @Override
-    public void onError(Throwable throwable) {
-        LOG.error("JniSinkWriterHandler onError: ", throwable);
-    }
-
-    @Override
-    public void onCompleted() {
-        LOG.info("JniSinkWriterHandler onCompleted");
     }
 }
