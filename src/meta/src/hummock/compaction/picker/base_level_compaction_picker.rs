@@ -73,6 +73,7 @@ impl CompactionPicker for LevelCompactionPicker {
         if let Some(ret) = self.pick_multi_level_to_base(
             l0,
             levels.get_level(self.target_level),
+            levels.vnode_partition_count,
             level_handlers,
             stats,
         ) {
@@ -128,6 +129,7 @@ impl LevelCompactionPicker {
         &self,
         l0: &OverlappingLevel,
         target_level: &Level,
+        vnode_partition_count: u32,
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
@@ -217,6 +219,7 @@ impl LevelCompactionPicker {
                 select_input_size: input.total_file_size,
                 target_input_size: target_file_size,
                 total_file_count: (input.total_file_count + target_file_count) as u64,
+                vnode_partition_count,
                 ..Default::default()
             };
 
@@ -428,6 +431,7 @@ pub mod tests {
             total_file_size: 0,
             sub_level_id: 0,
             uncompressed_file_size: 0,
+            ..Default::default()
         }];
         let mut levels = Levels {
             levels,
@@ -492,6 +496,7 @@ pub mod tests {
                 total_file_size: 900,
                 sub_level_id: 0,
                 uncompressed_file_size: 900,
+                ..Default::default()
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
             ..Default::default()

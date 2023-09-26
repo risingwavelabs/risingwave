@@ -15,7 +15,6 @@
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::ops::Bound;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;

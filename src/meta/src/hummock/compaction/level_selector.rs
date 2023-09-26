@@ -683,6 +683,7 @@ pub mod tests {
             uncompressed_file_size: sst.uncompressed_file_size,
             sub_level_id: sst.get_sst_id(),
             table_infos: vec![sst],
+            ..Default::default()
         });
     }
 
@@ -713,6 +714,7 @@ pub mod tests {
             sub_level_id,
             table_infos,
             uncompressed_file_size,
+            ..Default::default()
         });
     }
 
@@ -798,6 +800,7 @@ pub mod tests {
             total_file_size,
             sub_level_id: 0,
             uncompressed_file_size,
+            ..Default::default()
         }
     }
 
@@ -820,6 +823,7 @@ pub mod tests {
                     uncompressed_file_size: table.uncompressed_file_size,
                     sub_level_id: idx as u64,
                     table_infos: vec![table],
+                    ..Default::default()
                 })
                 .collect_vec(),
             total_file_size,
@@ -844,6 +848,7 @@ pub mod tests {
                         .sum::<u64>(),
                     sub_level_id: idx as u64,
                     table_infos: table,
+                    ..Default::default()
                 })
                 .collect_vec(),
             total_file_size: 0,
@@ -878,6 +883,7 @@ pub mod tests {
                         .iter()
                         .map(|sst| sst.uncompressed_file_size)
                         .sum::<u64>(),
+                    ..Default::default()
                 })
                 .collect_vec(),
             total_file_size: 0,
