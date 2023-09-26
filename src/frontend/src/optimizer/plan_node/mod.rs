@@ -568,12 +568,7 @@ impl dyn PlanNode {
             operator_id: self.id().0 as _,
             stream_key: self
                 .stream_key()
-                .unwrap_or_else(|| {
-                    panic!(
-                        "should always have a stream key in the stream plan but not, sub plan: {}",
-                        self.explain_myself_to_string()
-                    )
-                })
+                .unwrap_or_default()
                 .iter()
                 .map(|x| *x as u32)
                 .collect(),
