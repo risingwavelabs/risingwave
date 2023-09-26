@@ -20,8 +20,9 @@ use crate::model_v2::{database, object, schema};
 use crate::MetaError;
 
 #[allow(dead_code)]
-mod catalog;
+pub mod catalog;
 pub mod system_param;
+pub mod utils;
 
 // todo: refine the error transform.
 impl From<sea_orm::DbErr> for MetaError {
