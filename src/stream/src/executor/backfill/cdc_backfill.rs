@@ -587,7 +587,7 @@ async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
         let mut msg = msg?;
         if let Message::Chunk(chunk) = &mut msg {
             let mut parsed_chunk = parse_debezium_chunk(&mut parser, chunk, schema).await?;
-            *chunk = parsed_chunk;
+            let _ = std::mem::replace(chunk, parsed_chunk);
         }
         yield msg;
     }

@@ -216,4 +216,8 @@ impl StreamingJob {
             None
         }
     }
+
+    pub fn is_table(&self) -> bool {
+        matches!(self, Self::Table(_, _))
+    }
 }

@@ -447,6 +447,12 @@ impl LocalStreamManagerCore {
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
     ) -> StreamResult<DispatchExecutor> {
+        tracing::info!(
+            ?actor_id,
+            ?dispatchers,
+            "create_dispatcher in DispatcherExec"
+        );
+
         let dispatcher_impls = dispatchers
             .iter()
             .map(|dispatcher| DispatcherImpl::new(&self.context, actor_id, dispatcher))
@@ -638,6 +644,7 @@ impl LocalStreamManagerCore {
                 .may_trace_hummock()
                 .await?;
 
+            // TODO: 理论上source fragment也会创建一个dispatch_exec，只不过里面是空的
             let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
             let actor = Actor::new(
                 dispatcher,

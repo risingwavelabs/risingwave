@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -459,6 +460,7 @@ impl DdlController {
                 _ => {}
             }
 
+            // TODO: check this func
             self.stream_manager
                 .create_streaming_job(table_fragments, ctx)
                 .await?;
@@ -601,20 +603,13 @@ impl DdlController {
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
 
-        // TODO: extend the upstream_mview_fragments to upstream source fragment
         let upstream_mview_fragments = self
             .fragment_manager
             .get_upstream_mview_fragments(fragment_graph.dependent_table_ids())
             .await?;
 
-        let upstream_source_fragments = self
-            .fragment_manager
-            .get_upstream_source_fragments(fragment_graph.dependent_table_ids())
-            .await?;
-
-        let upstream_mview_actors = upstream_mview_fragments
+        let mut upstream_mview_actors: HashMap<_, _> = upstream_mview_fragments
             .iter()
-            .chain(upstream_source_fragments.iter())
             .map(|(&table_id, fragment)| {
                 (
                     table_id,
@@ -623,11 +618,28 @@ impl DdlController {
             })
             .collect();
 
-        let complete_graph = CompleteStreamFragmentGraph::with_upstreams_new(
-            fragment_graph,
-            upstream_mview_fragments,
-            upstream_source_fragments,
-        )?;
+        let complete_graph = if stream_job.is_table() {
+            let upstream_source_fragments = self
+                .fragment_manager
+                .get_upstream_source_fragments(fragment_graph.dependent_table_ids())
+                .await?;
+
+            upstream_source_fragments
+                .iter()
+                .for_each(|(&table_id, fragment)| {
+                    upstream_mview_actors
+                        .entry(table_id)
+                        .or_insert_with(Vec::new)
+                        .extend(fragment.actors.iter().map(|a| a.actor_id));
+                });
+            CompleteStreamFragmentGraph::with_upstreams_new(
+                fragment_graph,
+                upstream_mview_fragments,
+                upstream_source_fragments,
+            )?
+        } else {
+            CompleteStreamFragmentGraph::with_upstreams(fragment_graph, upstream_mview_fragments)?
+        };
 
         // 2. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
