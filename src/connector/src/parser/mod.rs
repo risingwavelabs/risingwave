@@ -317,6 +317,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// # Arguments
     ///
     /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
+    ///   Callers only need to handle columns with the type [`SourceColumnType::Normal`].
     pub fn insert(&mut self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<()> {
         self.do_action::<OpActionInsert>(f)
     }
@@ -326,6 +327,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// # Arguments
     ///
     /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
+    ///   Callers only need to handle columns with the type [`SourceColumnType::Normal`].
     pub fn delete(&mut self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<()> {
         self.do_action::<OpActionDelete>(f)
     }
@@ -335,7 +337,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// # Arguments
     ///
     /// * `f`: A failable closure that produced two [`Datum`]s as old and new value by corresponding
-    ///   [`SourceColumnDesc`].
+    ///   [`SourceColumnDesc`]. Callers only need to handle columns with the type [`SourceColumnType::Normal`].
     pub fn update(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> Result<(Datum, Datum)>,
