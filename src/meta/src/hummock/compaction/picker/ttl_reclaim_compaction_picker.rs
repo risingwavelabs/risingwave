@@ -227,11 +227,11 @@ mod test {
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::compaction::level_selector::tests::{
+    use crate::hummock::compaction::selector::tests::{
         assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
         generate_table_with_ids_and_epochs,
     };
-    use crate::hummock::compaction::level_selector::{LevelSelector, TtlCompactionSelector};
+    use crate::hummock::compaction::selector::{CompactionSelector, TtlCompactionSelector};
     use crate::hummock::compaction::LocalSelectorStatistic;
     use crate::hummock::model::CompactionGroup;
 

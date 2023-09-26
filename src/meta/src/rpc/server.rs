@@ -64,7 +64,8 @@ use crate::manager::{
     SystemParamsManager,
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
-use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
+use crate::rpc::election::etcd::EtcdElectionClient;
+use crate::rpc::election::ElectionClient;
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
 };

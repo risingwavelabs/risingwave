@@ -12,23 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use base64::engine::general_purpose;
 use base64::Engine as _;
 use chrono::{Datelike, Timelike};
+use indexmap::IndexMap;
 use risingwave_common::array::{ArrayError, ArrayResult};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
+use risingwave_common::types::{DataType, DatumRef, Decimal, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{json, Map, Value};
 
-use super::{Result, RowEncoder, SerTo, TimestampHandlingMode};
+use super::{CustomJsonType, Result, RowEncoder, SerTo, TimestampHandlingMode};
 use crate::sink::SinkError;
-
 pub struct JsonEncoder<'a> {
     schema: &'a Schema,
     col_indices: Option<&'a [usize]>,
     timestamp_handling_mode: TimestampHandlingMode,
+    custom_json_type: CustomJsonType,
 }
 
 impl<'a> JsonEncoder<'a> {
@@ -41,6 +44,21 @@ impl<'a> JsonEncoder<'a> {
             schema,
             col_indices,
             timestamp_handling_mode,
+            custom_json_type: CustomJsonType::None,
+        }
+    }
+
+    pub fn new_with_doris(
+        schema: &'a Schema,
+        col_indices: Option<&'a [usize]>,
+        timestamp_handling_mode: TimestampHandlingMode,
+        map: HashMap<String, (u8, u8)>,
+    ) -> Self {
+        Self {
+            schema,
+            col_indices,
+            timestamp_handling_mode,
+            custom_json_type: CustomJsonType::Doris(map),
         }
     }
 }
@@ -65,9 +83,13 @@ impl<'a> RowEncoder for JsonEncoder<'a> {
         for idx in col_indices {
             let field = &self.schema[idx];
             let key = field.name.clone();
-            let value =
-                datum_to_json_object(field, row.datum_at(idx), self.timestamp_handling_mode)
-                    .map_err(|e| SinkError::JsonParse(e.to_string()))?;
+            let value = datum_to_json_object(
+                field,
+                row.datum_at(idx),
+                self.timestamp_handling_mode,
+                &self.custom_json_type,
+            )
+            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
             mappings.insert(key, value);
         }
         Ok(mappings)
@@ -90,6 +112,7 @@ fn datum_to_json_object(
     field: &Field,
     datum: DatumRef<'_>,
     timestamp_handling_mode: TimestampHandlingMode,
+    custom_json_type: &CustomJsonType,
 ) -> ArrayResult<Value> {
     let scalar_ref = match datum {
         None => return Ok(Value::Null),
@@ -122,9 +145,26 @@ fn datum_to_json_object(
         (DataType::Varchar, ScalarRefImpl::Utf8(v)) => {
             json!(v)
         }
-        (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
-            json!(v.to_text())
-        }
+        (DataType::Decimal, ScalarRefImpl::Decimal(mut v)) => match custom_json_type {
+            CustomJsonType::Doris(map) => {
+                if !matches!(v, Decimal::Normalized(_)) {
+                    return Err(ArrayError::internal(
+                        "doris can't support decimal Inf, -Inf, Nan".to_string(),
+                    ));
+                }
+                let (p, s) = map.get(&field.name).unwrap();
+                v.rescale(*s as u32);
+                let v_string = v.to_text();
+                if v_string.len() > *p as usize {
+                    return Err(ArrayError::internal(
+                        format!("rw Decimal's precision is large than doris max decimal len is {:?}, doris max is {:?}",v_string.len(),p)));
+                }
+                json!(v_string)
+            }
+            CustomJsonType::None => {
+                json!(v.to_text())
+            }
+        },
         (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => {
             // risingwave's timestamp with timezone is stored in UTC and does not maintain the
             // timezone info and the time is in microsecond.
@@ -136,9 +176,13 @@ fn datum_to_json_object(
             // todo: just ignore the nanos part to avoid leap second complex
             json!(v.0.num_seconds_from_midnight() as i64 * 1000)
         }
-        (DataType::Date, ScalarRefImpl::Date(v)) => {
-            json!(v.0.num_days_from_ce())
-        }
+        (DataType::Date, ScalarRefImpl::Date(v)) => match custom_json_type {
+            CustomJsonType::None => json!(v.0.num_days_from_ce()),
+            CustomJsonType::Doris(_) => {
+                let a = v.0.format("%Y-%m-%d").to_string();
+                json!(a)
+            }
+        },
         (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => match timestamp_handling_mode {
             TimestampHandlingMode::Milli => json!(v.0.timestamp_millis()),
             TimestampHandlingMode::String => json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
@@ -158,23 +202,54 @@ fn datum_to_json_object(
             let mut vec = Vec::with_capacity(elems.len());
             let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
             for sub_datum_ref in elems {
-                let value =
-                    datum_to_json_object(&inner_field, sub_datum_ref, timestamp_handling_mode)?;
+                let value = datum_to_json_object(
+                    &inner_field,
+                    sub_datum_ref,
+                    timestamp_handling_mode,
+                    custom_json_type,
+                )?;
                 vec.push(value);
             }
             json!(vec)
         }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
-            let mut map = Map::with_capacity(st.len());
-            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
-                st.iter()
-                    .map(|(name, dt)| Field::with_name(dt.clone(), name)),
-            ) {
-                let value =
-                    datum_to_json_object(&sub_field, sub_datum_ref, timestamp_handling_mode)?;
-                map.insert(sub_field.name.clone(), value);
+            match custom_json_type {
+                CustomJsonType::Doris(_) => {
+                    // We need to ensure that the order of elements in the json matches the insertion order.
+                    let mut map = IndexMap::with_capacity(st.len());
+                    for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
+                        st.iter()
+                            .map(|(name, dt)| Field::with_name(dt.clone(), name)),
+                    ) {
+                        let value = datum_to_json_object(
+                            &sub_field,
+                            sub_datum_ref,
+                            timestamp_handling_mode,
+                            custom_json_type,
+                        )?;
+                        map.insert(sub_field.name.clone(), value);
+                    }
+                    Value::String(serde_json::to_string(&map).map_err(|err| {
+                        ArrayError::internal(format!("Json to string err{:?}", err))
+                    })?)
+                }
+                CustomJsonType::None => {
+                    let mut map = Map::with_capacity(st.len());
+                    for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
+                        st.iter()
+                            .map(|(name, dt)| Field::with_name(dt.clone(), name)),
+                    ) {
+                        let value = datum_to_json_object(
+                            &sub_field,
+                            sub_datum_ref,
+                            timestamp_handling_mode,
+                            custom_json_type,
+                        )?;
+                        map.insert(sub_field.name.clone(), value);
+                    }
+                    json!(map)
+                }
             }
-            json!(map)
         }
         (data_type, scalar_ref) => {
             return Err(ArrayError::internal(
@@ -189,7 +264,10 @@ fn datum_to_json_object(
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::types::{DataType, Interval, ScalarImpl, Time, Timestamp};
+    use risingwave_common::types::{
+        DataType, Date, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue, Time,
+        Timestamp,
+    };
 
     use super::*;
     #[test]
@@ -200,6 +278,7 @@ mod tests {
             sub_fields: Default::default(),
             type_name: Default::default(),
         };
+
         let boolean_value = datum_to_json_object(
             &Field {
                 data_type: DataType::Boolean,
@@ -207,6 +286,7 @@ mod tests {
             },
             Some(ScalarImpl::Bool(false).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(boolean_value, json!(false));
@@ -218,6 +298,7 @@ mod tests {
             },
             Some(ScalarImpl::Int16(16).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(int16_value, json!(16));
@@ -229,6 +310,7 @@ mod tests {
             },
             Some(ScalarImpl::Int64(std::i64::MAX).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(
@@ -245,6 +327,7 @@ mod tests {
             },
             Some(ScalarImpl::Timestamptz(tstz_inner).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(tstz_value, "2018-01-26 18:30:09.453000");
@@ -259,6 +342,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::Milli,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(ts_value, json!(1000 * 1000));
@@ -273,6 +357,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(ts_value, json!("1970-01-01 00:16:40.000000".to_string()));
@@ -288,6 +373,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(time_value, json!(1000 * 1000));
@@ -295,15 +381,65 @@ mod tests {
         let interval_value = datum_to_json_object(
             &Field {
                 data_type: DataType::Interval,
-                ..mock_field
+                ..mock_field.clone()
             },
             Some(
                 ScalarImpl::Interval(Interval::from_month_day_usec(13, 2, 1000000))
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
+            &CustomJsonType::None,
         )
         .unwrap();
         assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));
+
+        let mut map = HashMap::default();
+        map.insert("aaa".to_string(), (10_u8, 5_u8));
+        let decimal = datum_to_json_object(
+            &Field {
+                data_type: DataType::Decimal,
+                name: "aaa".to_string(),
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Decimal(Decimal::try_from(1.1111111).unwrap()).as_scalar_ref_impl()),
+            TimestampHandlingMode::String,
+            &CustomJsonType::Doris(map),
+        )
+        .unwrap();
+        assert_eq!(decimal, json!("1.11111"));
+
+        let date_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Date,
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Date(Date::from_ymd_uncheck(2010, 10, 10)).as_scalar_ref_impl()),
+            TimestampHandlingMode::String,
+            &CustomJsonType::Doris(HashMap::default()),
+        )
+        .unwrap();
+        assert_eq!(date_value, json!("2010-10-10"));
+
+        let value = StructValue::new(vec![
+            Some(3_i32.to_scalar_value()),
+            Some(2_i32.to_scalar_value()),
+            Some(1_i32.to_scalar_value()),
+        ]);
+
+        let interval_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Struct(StructType::new(vec![
+                    ("v3", DataType::Int32),
+                    ("v2", DataType::Int32),
+                    ("v1", DataType::Int32),
+                ])),
+                ..mock_field.clone()
+            },
+            Some(ScalarRefImpl::Struct(StructRef::ValueRef { val: &value })),
+            TimestampHandlingMode::String,
+            &CustomJsonType::Doris(HashMap::default()),
+        )
+        .unwrap();
+        assert_eq!(interval_value, json!("{\"v3\":3,\"v2\":2,\"v1\":1}"));
     }
 }

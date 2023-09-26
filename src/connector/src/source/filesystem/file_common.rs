@@ -38,6 +38,12 @@ impl SplitMetaData for FsSplit {
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
     }
+
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        let offset = start_offset.parse().unwrap();
+        self.offset = offset;
+        Ok(())
+    }
 }
 
 impl FsSplit {
@@ -47,11 +53,5 @@ impl FsSplit {
             offset: start,
             size,
         }
-    }
-
-    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
-        let offset = start_offset.parse().unwrap();
-        self.offset = offset;
-        Ok(())
     }
 }

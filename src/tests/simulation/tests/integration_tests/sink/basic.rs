@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::io::Write;
+use std::iter::once;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
@@ -20,15 +21,23 @@ use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use futures::stream::select_all;
+use futures::StreamExt;
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::sink::boxed::{BoxCoordinator, BoxWriter};
 use risingwave_connector::sink::test_sink::registry_build_sink;
 use risingwave_connector::sink::{Sink, SinkWriter, SinkWriterParam};
+use risingwave_connector::source::test_source::{registry_test_source, BoxSource, TestSourceSplit};
+use risingwave_connector::source::StreamChunkWithState;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::time::sleep;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 struct TestWriter {
     row_counter: Arc<AtomicUsize>,
@@ -75,10 +84,7 @@ impl Sink for TestSink {
     type Coordinator = BoxCoordinator;
     type Writer = BoxWriter<()>;
 
-    async fn validate(
-        &self,
-        _client: Option<risingwave_rpc_client::ConnectorClient>,
-    ) -> risingwave_connector::sink::Result<()> {
+    async fn validate(&self) -> risingwave_connector::sink::Result<()> {
         Ok(())
     }
 
@@ -92,6 +98,21 @@ impl Sink for TestSink {
             row_counter: self.row_counter.clone(),
         }))
     }
+}
+
+fn build_stream_chunk(row_iter: impl Iterator<Item = (i32, String)>) -> StreamChunk {
+    let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Varchar], 100000);
+    for (id, name) in row_iter {
+        assert!(builder
+            .append_one_row([
+                Some(ScalarImpl::Int32(id)),
+                Some(ScalarImpl::Utf8(name.into())),
+            ])
+            .is_none());
+    }
+    let chunk = builder.consume_all().unwrap();
+    let ops = (0..chunk.cardinality()).map(|_| Op::Insert).collect_vec();
+    StreamChunk::from_parts(ops, chunk)
 }
 
 #[tokio::test]
@@ -129,30 +150,55 @@ async fn test_sink_basic() -> Result<()> {
         }
     });
 
+    let source_parallelism = 12;
+    let mut txs = Vec::new();
+    let mut rxs = Vec::new();
+    for _ in 0..source_parallelism {
+        let (tx, rx): (_, UnboundedReceiver<StreamChunk>) = unbounded_channel();
+        txs.push(tx);
+        rxs.push(Some(rx));
+    }
+
+    let _source_guard = registry_test_source(BoxSource::new(
+        move |_, _| {
+            Ok((0..source_parallelism)
+                .map(|i: usize| TestSourceSplit {
+                    id: format!("{}", i).as_str().into(),
+                    properties: Default::default(),
+                    offset: "".to_string(),
+                })
+                .collect_vec())
+        },
+        move |_, splits, _, _, _| {
+            select_all(splits.into_iter().map(|split| {
+                let id: usize = split.id.parse().unwrap();
+                let rx = rxs[id].take().unwrap();
+                UnboundedReceiverStream::new(rx).map(|chunk| Ok(StreamChunkWithState::from(chunk)))
+            }))
+            .boxed()
+        },
+    ));
+
     let mut session = cluster.start_session();
 
     session.run("set streaming_parallelism = 6").await?;
     session.run("set sink_decouple = false").await?;
     session
-        .run("create table test_table (id int, name varchar)")
+        .run("create table test_table (id int primary key, name varchar) with (connector = 'test') FORMAT PLAIN ENCODE JSON")
         .await?;
     session
         .run("create sink test_sink from test_table with (connector = 'test')")
         .await?;
     let mut count = 0;
-    let mut id_list = (0..100000).collect_vec();
+    let mut id_list: Vec<usize> = (0..100000).collect_vec();
     id_list.shuffle(&mut rand::thread_rng());
     let flush_freq = 50;
-    for id in &id_list[0..1000] {
-        session
-            .run(format!(
-                "insert into test_table values ({}, 'name-{}')",
-                id, id
-            ))
-            .await?;
+    for id in &id_list[0..10000] {
+        let chunk = build_stream_chunk(once((*id as i32, format!("name-{}", id))));
+        txs[id % source_parallelism].send(chunk).unwrap();
         count += 1;
         if count % flush_freq == 0 {
-            session.run("flush").await?;
+            sleep(Duration::from_millis(10)).await;
         }
     }
 
@@ -201,12 +247,41 @@ async fn test_sink_decouple_basic() -> Result<()> {
         }
     });
 
+    let source_parallelism = 12;
+    let mut txs = Vec::new();
+    let mut rxs = Vec::new();
+    for _ in 0..source_parallelism {
+        let (tx, rx): (_, UnboundedReceiver<StreamChunk>) = unbounded_channel();
+        txs.push(tx);
+        rxs.push(Some(rx));
+    }
+
+    let _source_guard = registry_test_source(BoxSource::new(
+        move |_, _| {
+            Ok((0..source_parallelism)
+                .map(|i: usize| TestSourceSplit {
+                    id: format!("{}", i).as_str().into(),
+                    properties: Default::default(),
+                    offset: "".to_string(),
+                })
+                .collect_vec())
+        },
+        move |_, splits, _, _, _| {
+            select_all(splits.into_iter().map(|split| {
+                let id: usize = split.id.parse().unwrap();
+                let rx = rxs[id].take().unwrap();
+                UnboundedReceiverStream::new(rx).map(|chunk| Ok(StreamChunkWithState::from(chunk)))
+            }))
+            .boxed()
+        },
+    ));
+
     let mut session = cluster.start_session();
 
     session.run("set streaming_parallelism = 6").await?;
     session.run("set sink_decouple = true").await?;
     session
-        .run("create table test_table (id int, name varchar)")
+        .run("create table test_table (id int primary key, name varchar) with (connector = 'test') FORMAT PLAIN ENCODE JSON")
         .await?;
     session
         .run("create sink test_sink from test_table with (connector = 'test')")
@@ -217,16 +292,12 @@ async fn test_sink_decouple_basic() -> Result<()> {
     let mut id_list = (0..100000).collect_vec();
     id_list.shuffle(&mut rand::thread_rng());
     let flush_freq = 50;
-    for id in &id_list[0..1000] {
-        session
-            .run(format!(
-                "insert into test_table values ({}, 'name-{}')",
-                id, id
-            ))
-            .await?;
+    for id in &id_list[0..10000] {
+        let chunk = build_stream_chunk(once((*id as i32, format!("name-{}", id))));
+        txs[id % source_parallelism].send(chunk).unwrap();
         count += 1;
         if count % flush_freq == 0 {
-            session.run("flush").await?;
+            sleep(Duration::from_millis(10)).await;
         }
     }
 

@@ -175,14 +175,16 @@ where
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.limit);
         let mut res_rows = Vec::with_capacity(self.limit);
-        let chunk = chunk.compact();
         let keys = K::build(&self.group_by, chunk.data_chunk())?;
 
         let data_types = self.schema().data_types();
         let row_deserializer = RowDeserializer::new(data_types.clone());
         let table_id_str = self.managed_state.state_table.table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
-        for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq_debug(keys.iter()) {
+        for (r, group_cache_key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
+            let Some((op, row_ref)) = r else {
+                continue;
+            };
             // The pk without group by
             let pk_row = row_ref.project(&self.storage_key_indices[self.group_by.len()..]);
             let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);

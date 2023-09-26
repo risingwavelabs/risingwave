@@ -107,7 +107,7 @@ impl RowIdGenExecutor {
                     let (ops, mut columns, bitmap) = chunk.into_inner();
                     columns[self.row_id_index] =
                         self.gen_row_id_column_by_op(&columns[self.row_id_index], &ops);
-                    yield Message::Chunk(StreamChunk::new(ops, columns, bitmap.into_visibility()));
+                    yield Message::Chunk(StreamChunk::with_visibility(ops, columns, bitmap));
                 }
                 Message::Barrier(barrier) => {
                     // Update row id generator if vnode mapping changes.
