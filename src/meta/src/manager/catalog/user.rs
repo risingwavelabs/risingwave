@@ -172,7 +172,7 @@ mod tests {
             .create_user(&make_test_user(test_sub_user_id, test_sub_user))
             .await?;
         assert!(catalog_manager
-            .create_user(&make_test_user(DEFAULT_SUPER_USER_ID, DEFAULT_SUPER_USER))
+            .create_user(&make_test_user(DEFAULT_SUPER_USER_ID, &DEFAULT_SUPER_USER))
             .await
             .is_err());
 

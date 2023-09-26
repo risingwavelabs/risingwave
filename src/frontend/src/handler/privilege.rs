@@ -227,7 +227,7 @@ mod tests {
 
         let schema = catalog_reader
             .read_guard()
-            .get_schema_by_name(DEFAULT_DATABASE_NAME, "schema")
+            .get_schema_by_name(&DEFAULT_DATABASE_NAME, "schema")
             .unwrap()
             .clone();
         let check_items = vec![ObjectCheckItem::new(

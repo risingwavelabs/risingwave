@@ -88,10 +88,10 @@ mod tests {
         let catalog_reader = session.env().catalog_reader().read_guard();
         let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
-        let source = catalog_reader.get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t");
+        let source = catalog_reader.get_source_by_name(&DEFAULT_DATABASE_NAME, schema_path, "t");
         assert!(source.is_err());
 
-        let table = catalog_reader.get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t");
+        let table = catalog_reader.get_table_by_name(&DEFAULT_DATABASE_NAME, schema_path, "t");
         assert!(table.is_err());
     }
 }

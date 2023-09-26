@@ -166,7 +166,7 @@ pub mod tests {
         let get_source = || {
             let catalog_reader = session.env().catalog_reader().read_guard();
             catalog_reader
-                .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "s")
+                .get_source_by_name(&DEFAULT_DATABASE_NAME, schema_path, "s")
                 .unwrap()
                 .0
                 .clone()

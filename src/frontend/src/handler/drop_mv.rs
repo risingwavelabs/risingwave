@@ -102,7 +102,7 @@ mod tests {
         let catalog_reader = session.env().catalog_reader().read_guard();
         let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
-        let table = catalog_reader.get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "mv");
+        let table = catalog_reader.get_table_by_name(&DEFAULT_DATABASE_NAME, schema_path, "mv");
         assert!(table.is_err());
     }
 }

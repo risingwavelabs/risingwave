@@ -297,7 +297,7 @@ mod tests {
         let get_table = || {
             let catalog_reader = session.env().catalog_reader().read_guard();
             catalog_reader
-                .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
+                .get_table_by_name(&DEFAULT_DATABASE_NAME, schema_path, "t")
                 .unwrap()
                 .0
                 .clone()

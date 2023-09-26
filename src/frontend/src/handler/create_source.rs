@@ -1191,7 +1191,7 @@ pub mod tests {
 
         // Check source exists.
         let (source, _) = catalog_reader
-            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
+            .get_source_by_name(&DEFAULT_DATABASE_NAME, schema_path, "t")
             .unwrap();
         assert_eq!(source.name, "t");
 

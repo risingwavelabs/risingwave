@@ -90,7 +90,7 @@ mod tests {
 
         let schema = catalog_reader
             .read_guard()
-            .get_schema_by_name(DEFAULT_DATABASE_NAME, "schema")
+            .get_schema_by_name(&DEFAULT_DATABASE_NAME, "schema")
             .ok()
             .cloned();
         assert!(schema.is_some());

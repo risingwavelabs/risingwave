@@ -267,13 +267,13 @@ pub mod tests {
 
         // Check source exists.
         let (source, _) = catalog_reader
-            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t1")
+            .get_source_by_name(&DEFAULT_DATABASE_NAME, schema_path, "t1")
             .unwrap();
         assert_eq!(source.name, "t1");
 
         // Check table exists.
         let (table, _) = catalog_reader
-            .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "mv1")
+            .get_table_by_name(&DEFAULT_DATABASE_NAME, schema_path, "mv1")
             .unwrap();
         assert_eq!(table.name(), "mv1");
 
