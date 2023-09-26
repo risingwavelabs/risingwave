@@ -137,11 +137,12 @@ impl<S: StateStore> DedupExecutor<S> {
                     let cnt = cnt_builder.finish();
 
                     let (ops, mut columns, _) = chunk.into_inner();
-                    let chunk = StreamChunk::new(ops.clone(), columns.clone(), Some(vis.clone()));
+                    let chunk =
+                        StreamChunk::with_visibility(ops.clone(), columns.clone(), vis.clone());
 
                     // Construct the new chunk and write the data to state table.
                     columns.push(Arc::new(cnt.into()));
-                    let state_chunk = StreamChunk::new(ops, columns, None);
+                    let state_chunk = StreamChunk::new(ops, columns);
                     self.state_table.write_chunk(state_chunk);
 
                     yield Message::Chunk(chunk);
@@ -264,14 +265,14 @@ mod tests {
         // preset state table
         // (1, "a") -> 2
         // (2, "b") -> 4
-        let chunk = StreamChunk::new(
+        let chunk = StreamChunk::with_visibility(
             vec![Op::Insert, Op::Insert],
             vec![
                 Arc::new(I64Array::from_iter(vec![1, 2]).into()),
                 Arc::new(Utf8Array::from_iter(vec!["a", "b"]).into()),
                 Arc::new(I64Array::from_iter(vec![2, 4]).into()), // dup_count
             ],
-            Some(Bitmap::from_iter(vec![true, true])),
+            Bitmap::from_iter(vec![true, true]),
         );
         state_table.init_epoch(EpochPair::new_test_epoch(1));
         state_table.write_chunk(chunk);
@@ -302,13 +303,13 @@ mod tests {
         dedup_executor.next().await.unwrap().unwrap();
 
         let chunk1: StreamChunk = {
-            StreamChunk::new(
+            StreamChunk::with_visibility(
                 vec![Op::Delete, Op::Delete],
                 vec![
                     Arc::new(I64Array::from_iter(vec![1, 2]).into()),
                     Arc::new(Utf8Array::from_iter(vec!["a", "b"]).into()),
                 ],
-                Some(Bitmap::from_iter(vec![true, true])),
+                Bitmap::from_iter(vec![true, true]),
             )
         };
         tx.push_chunk(chunk1.clone());
