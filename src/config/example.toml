@@ -35,7 +35,7 @@ periodic_split_compact_group_interval_sec = 180
 move_table_size_limit = 10737418240
 split_group_size_limit = 68719476736
 do_not_config_object_storage_lifecycle = false
-partition_vnode_count = 64
+partition_vnode_count = 16
 table_write_throughput_threshold = 16777216
 min_table_split_write_throughput = 4194304
 compaction_task_max_heartbeat_interval_secs = 60
@@ -109,7 +109,6 @@ compactor_max_sst_key_count = 2097152
 compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
 enable_fast_compaction = true
-
 
 [storage.data_file_cache]
 dir = ""

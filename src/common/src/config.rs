@@ -902,7 +902,7 @@ pub mod default {
         }
 
         pub fn partition_vnode_count() -> u32 {
-            64
+            16
         }
 
         pub fn table_write_throughput_threshold() -> u64 {

@@ -108,8 +108,8 @@ impl IntraCompactionPicker {
                 continue;
             }
 
-            let max_compaction_bytes = std::cmp::min(
-                self.config.max_compaction_bytes,
+            let max_compaction_bytes = std::cmp::max(
+                self.config.max_bytes_for_level_base,
                 self.config.sub_level_max_compaction_bytes
                     * (self.config.level0_sub_level_compact_level_count as u64),
             );
@@ -269,6 +269,12 @@ impl IntraCompactionPicker {
             }
 
             if l0.sub_levels[idx + 1].level_type == LevelType::Overlapping as i32 {
+                continue;
+            }
+
+            if l0.sub_levels[idx + 1].vnode_partition_count
+                != l0.sub_levels[idx].vnode_partition_count
+            {
                 continue;
             }
 
