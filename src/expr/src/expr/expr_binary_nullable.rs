@@ -42,7 +42,7 @@ impl Expression for BinaryShortCircuitExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let left = self.expr_ia1.eval_checked(input).await?;
+        let left = self.expr_ia1.eval(input).await?;
         let left = left.as_bool();
 
         let res_vis = match self.expr_type {
@@ -58,7 +58,7 @@ impl Expression for BinaryShortCircuitExpression {
         let mut input1 = input.clone();
         input1.set_visibility(new_vis);
 
-        let right = self.expr_ia2.eval_checked(&input1).await?;
+        let right = self.expr_ia2.eval(&input1).await?;
         let right = right.as_bool();
         assert_eq!(left.len(), right.len());
 

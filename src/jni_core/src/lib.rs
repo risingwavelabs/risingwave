@@ -20,6 +20,7 @@
 
 pub mod hummock_iterator;
 pub mod jvm_runtime;
+mod macros;
 pub mod stream_chunk_iterator;
 
 use std::backtrace::Backtrace;
@@ -28,6 +29,7 @@ use std::ops::{Deref, DerefMut};
 use std::slice::from_raw_parts;
 use std::sync::{Arc, LazyLock, OnceLock};
 
+use cfg_or_panic::cfg_or_panic;
 use hummock_iterator::{HummockJavaBindingIterator, KeyedRow};
 use jni::objects::{
     AutoElements, GlobalRef, JByteArray, JClass, JMethodID, JObject, JStaticMethodID, JString,
@@ -51,6 +53,7 @@ use thiserror::Error;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
 
+pub use crate::jvm_runtime::register_native_method_for_jvm;
 use crate::stream_chunk_iterator::{StreamChunkIterator, StreamChunkRow};
 pub type GetEventStreamJniSender = Sender<GetEventStreamResponse>;
 
@@ -296,7 +299,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(
     VirtualNode::COUNT as jint
 }
 
-#[cfg(not(madsim))]
+#[cfg_or_panic(not(madsim))]
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNew<'a>(
     env: EnvParam<'a>,
@@ -309,7 +312,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorN
     })
 }
 
-#[cfg(not(madsim))]
+#[cfg_or_panic(not(madsim))]
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNext<'a>(
     env: EnvParam<'a>,

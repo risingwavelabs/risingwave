@@ -15,7 +15,7 @@ script = '''
 #!/usr/bin/env bash
 set -ex
 cd java
-mvn install --no-transfer-progress --pl java-binding-integration-test --am -DskipTests=true  -Dmaven.javadoc.skip
+mvn install --no-transfer-progress --pl java-binding-integration-test --am -DskipTests=true -Dmaven.javadoc.skip
 mvn dependency:copy-dependencies --no-transfer-progress --pl java-binding-integration-test
 '''
 

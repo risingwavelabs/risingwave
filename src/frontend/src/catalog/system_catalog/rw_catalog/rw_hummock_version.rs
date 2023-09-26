@@ -48,13 +48,29 @@ pub const RW_HUMMOCK_CHECKPOINT_VERSION: BuiltinTable = BuiltinTable {
 impl SysCatalogReaderImpl {
     pub async fn read_hummock_current_version(&self) -> Result<Vec<OwnedRow>> {
         let version = self.meta_client.get_hummock_current_version().await?;
-        Ok(version_to_rows(&version))
+        Ok(version_to_rows(&remove_key_range_from_version(version)))
     }
 
     pub async fn read_hummock_checkpoint_version(&self) -> Result<Vec<OwnedRow>> {
         let version = self.meta_client.get_hummock_checkpoint_version().await?;
-        Ok(version_to_rows(&version))
+        Ok(version_to_rows(&remove_key_range_from_version(version)))
     }
+}
+
+fn remove_key_range_from_version(mut version: HummockVersion) -> HummockVersion {
+    // Because key range is too verbose for manual analysis, just don't expose it.
+    for cg in version.levels.values_mut() {
+        for level in cg
+            .levels
+            .iter_mut()
+            .chain(cg.l0.as_mut().unwrap().sub_levels.iter_mut())
+        {
+            for sst in &mut level.table_infos {
+                sst.key_range.take();
+            }
+        }
+    }
+    version
 }
 
 fn version_to_rows(version: &HummockVersion) -> Vec<OwnedRow> {
@@ -66,7 +82,6 @@ fn version_to_rows(version: &HummockVersion) -> Vec<OwnedRow> {
                 Some(ScalarImpl::Int64(version.id as _)),
                 Some(ScalarImpl::Int64(version.max_committed_epoch as _)),
                 Some(ScalarImpl::Int64(version.safe_epoch as _)),
-                // FIXME #8612: The byte array key_range is encoded to a string by serde_json. We need disable this behavior as it makes it harder to understand the key range.
                 Some(ScalarImpl::Jsonb(json!(cg).into())),
             ])
         })
