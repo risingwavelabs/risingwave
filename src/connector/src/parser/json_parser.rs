@@ -31,9 +31,7 @@ use crate::parser::schema_registry::handle_sr_list;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_accessor_on_stream_chunk_writer;
 use crate::parser::unified::AccessImpl;
-use crate::parser::{
-    AccessBuilder, ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard,
-};
+use crate::parser::{AccessBuilder, ByteStreamSourceParser, SourceStreamChunkRowWriter};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -109,7 +107,7 @@ impl JsonParser {
         &self,
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         let value = simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         let values = if let simd_json::BorrowedValue::Array(arr) = value {
@@ -189,7 +187,7 @@ impl ByteStreamSourceParser for JsonParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         only_parse_payload!(self, payload, writer)
     }
 }

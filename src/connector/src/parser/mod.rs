@@ -22,7 +22,6 @@ use csv_parser::CsvParser;
 pub use debezium::*;
 use futures::{Future, TryFutureExt};
 use futures_async_stream::try_stream;
-use itertools::Either;
 pub use json_parser::*;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
@@ -141,12 +140,6 @@ pub struct SourceStreamChunkRowWriter<'a> {
     row_meta: Option<RowMeta>,
 }
 
-/// `WriteGuard` can't be constructed directly in other mods due to a private field, so it can be
-/// used to ensure that all methods on [`SourceStreamChunkRowWriter`] are called at least once in
-/// the `SourceParser::parse` implementation.
-#[derive(Debug)]
-pub struct WriteGuard(());
-
 trait OpAction {
     type Output;
 
@@ -253,7 +246,7 @@ impl SourceStreamChunkRowWriter<'_> {
     fn do_action<A: OpAction>(
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Result<A::Output>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         let mut f = |desc: &SourceColumnDesc| {
             if let Some(row_meta) = &self.row_meta {
                 let datum = match desc.column_type {
@@ -297,7 +290,7 @@ impl SourceStreamChunkRowWriter<'_> {
         match result {
             Ok(_) => {
                 A::finish(self);
-                Ok(WriteGuard(()))
+                Ok(())
             }
             Err(e) => {
                 tracing::warn!("failed to parse source data: {}", e);
@@ -313,12 +306,8 @@ impl SourceStreamChunkRowWriter<'_> {
     ///
     /// # Arguments
     ///
-    /// * `self`: Ownership is consumed so only one record can be written.
     /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
-    pub fn insert(
-        &mut self,
-        f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
-    ) -> Result<WriteGuard> {
+    pub fn insert(&mut self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<()> {
         self.do_action::<OpActionInsert>(f)
     }
 
@@ -326,12 +315,8 @@ impl SourceStreamChunkRowWriter<'_> {
     ///
     /// # Arguments
     ///
-    /// * `self`: Ownership is consumed so only one record can be written.
     /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
-    pub fn delete(
-        &mut self,
-        f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
-    ) -> Result<WriteGuard> {
+    pub fn delete(&mut self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<()> {
         self.do_action::<OpActionDelete>(f)
     }
 
@@ -339,13 +324,12 @@ impl SourceStreamChunkRowWriter<'_> {
     ///
     /// # Arguments
     ///
-    /// * `self`: Ownership is consumed so only one record can be written.
     /// * `f`: A failable closure that produced two [`Datum`]s as old and new value by corresponding
     ///   [`SourceColumnDesc`].
     pub fn update(
         &mut self,
         f: impl FnMut(&SourceColumnDesc) -> Result<(Datum, Datum)>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         self.do_action::<OpActionUpdate>(f)
     }
 }
@@ -354,6 +338,11 @@ impl SourceStreamChunkRowWriter<'_> {
 pub enum TransactionControl {
     Begin { id: Box<str> },
     Commit { id: Box<str> },
+}
+
+pub enum ParseResult {
+    Rows,
+    TransactionControl(TransactionControl),
 }
 
 /// `ByteStreamSourceParser` is a new message parser, the parser should consume
@@ -371,7 +360,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> impl Future<Output = Result<WriteGuard>> + Send + 'a;
+    ) -> impl Future<Output = Result<()>> + Send + 'a;
 
     /// Parse one record from the given `payload`, either write it to the `writer` or interpret it
     /// as a transaction control message.
@@ -383,8 +372,9 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> impl Future<Output = Result<Either<WriteGuard, TransactionControl>>> + Send + 'a {
-        self.parse_one(key, payload, writer).map_ok(Either::Left)
+    ) -> impl Future<Output = Result<ParseResult>> + Send + 'a {
+        self.parse_one(key, payload, writer)
+            .map_ok(|_| ParseResult::Rows)
     }
 
     /// Parse a data stream of one source split into a stream of [`StreamChunk`].
@@ -473,17 +463,17 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 )
                 .await
             {
-                Ok(Either::Left(WriteGuard(_))) => {
-                    // new_op_num - old_op_num is the number of rows added to the builder
-                    let new_op_num = builder.op_num();
+                Ok(ParseResult::Rows) => {
+                    // The number of rows added to the builder.
+                    let num = builder.op_num() - old_op_num;
 
                     // Aggregate the number of rows in the current transaction.
                     if let Some(Transaction { len, .. }) = &mut current_transaction {
-                        *len += new_op_num - old_op_num;
+                        *len += num;
                     }
                 }
 
-                Ok(Either::Right(txn_ctl)) => {
+                Ok(ParseResult::TransactionControl(txn_ctl)) => {
                     match txn_ctl {
                         TransactionControl::Begin { id } => {
                             if let Some(Transaction { id: current_id, .. }) = &current_transaction {

@@ -23,7 +23,7 @@ use crate::only_parse_payload;
 use crate::parser::unified::debezium::{DebeziumChangeEvent, MongoProjeciton};
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -82,7 +82,7 @@ impl DebeziumMongoJsonParser {
         &self,
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
@@ -117,7 +117,7 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         only_parse_payload!(self, payload, writer)
     }
 }

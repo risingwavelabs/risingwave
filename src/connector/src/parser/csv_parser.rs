@@ -22,7 +22,7 @@ use risingwave_common::types::{Datum, Decimal, ScalarImpl, Timestamptz};
 
 use super::{ByteStreamSourceParser, CsvProperties};
 use crate::only_parse_payload;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::SourceStreamChunkRowWriter;
 use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
 
 macro_rules! to_rust_type {
@@ -108,7 +108,7 @@ impl CsvParser {
         &mut self,
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         let mut fields = self.read_row(&payload)?;
         if let Some(headers) = &mut self.headers {
             if headers.is_empty() {
@@ -158,7 +158,7 @@ impl ByteStreamSourceParser for CsvParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         only_parse_payload!(self, payload, writer)
     }
 }
