@@ -66,7 +66,7 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cluster_start
 sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
 if [[ $mode != "standalone" ]]; then
-  sqllogictest -p 4566 -d dev './e2e_test/background_ddl/**/*.slt' --junit "batch-ddl-${profile}"
+  sqllogictest -p 4566 -d dev './e2e_test/background_ddl/*.slt' --junit "batch-ddl-${profile}"
 else
   echo "Skipping background_ddl test for $mode"
 fi

@@ -1,0 +1,11 @@
+statement ok
+CREATE TABLE t(v1 int);
+
+statement ok
+INSERT INTO t SELECT * FROM generate_series(1, 500000);
+
+statement ok
+SET BACKGROUND_DDL=true;
+
+statement ok
+CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
