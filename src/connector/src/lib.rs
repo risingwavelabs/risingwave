@@ -31,7 +31,6 @@
 #![feature(associated_type_defaults)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(iter_from_generator)]
-#![feature(associated_type_bounds)]
 
 use std::time::Duration;
 

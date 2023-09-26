@@ -711,10 +711,10 @@ mod test {
             SinkFormatterImpl::AppendOnlyJson(AppendOnlyFormatter::new(
                 JsonEncoder::new(
                     schema.clone(),
-                    Some(pk_indices.clone()),
+                    Some(pk_indices),
                     TimestampHandlingMode::Milli,
                 ),
-                JsonEncoder::new(schema, Some(pk_indices), TimestampHandlingMode::Milli),
+                JsonEncoder::new(schema, None, TimestampHandlingMode::Milli),
             )),
         )
         .await
