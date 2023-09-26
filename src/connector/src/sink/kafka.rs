@@ -15,7 +15,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::try_join_all;
@@ -29,16 +29,14 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
+use strum_macros::{Display, EnumString};
 
-use super::encoder::{JsonEncoder, TimestampHandlingMode};
-use super::formatter::{
-    AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, UpsertFormatter,
-};
 use super::{
     FormattedSink, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM,
     SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
+use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
 };
@@ -46,6 +44,7 @@ use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkPro
 use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
+    dispatch_sink_formatter_impl,
 };
 
 pub const KAFKA_SINK: &str = "kafka";
@@ -68,6 +67,16 @@ const fn _default_use_transaction() -> bool {
 
 const fn _default_force_append_only() -> bool {
     false
+}
+
+#[derive(Debug, Clone, PartialEq, Display, Serialize, Deserialize, EnumString)]
+#[strum(serialize_all = "snake_case")]
+enum CompressionCodec {
+    None,
+    Gzip,
+    Snappy,
+    Lz4,
+    Zstd,
 }
 
 #[serde_as]
@@ -125,6 +134,11 @@ pub struct RdKafkaPropertiesProducer {
     #[serde(rename = "properties.batch.size")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     batch_size: Option<usize>,
+
+    /// Compression codec to use for compressing message sets.
+    #[serde(rename = "properties.compression.codec")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    compression_codec: Option<CompressionCodec>,
 }
 
 impl RdKafkaPropertiesProducer {
@@ -152,6 +166,9 @@ impl RdKafkaPropertiesProducer {
         }
         if let Some(v) = self.batch_size {
             c.set("batch.size", v.to_string());
+        }
+        if let Some(v) = &self.compression_codec {
+            c.set("compression.codec", v.to_string());
         }
     }
 }
@@ -287,16 +304,18 @@ impl Sink for KafkaSink {
 
     const SINK_NAME: &'static str = KAFKA_SINK;
 
-    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
+    async fn new_writer(&self, _writer_param: SinkWriterParam) -> Result<Self::Writer> {
         Ok(SinkWriterV1Adapter::new(
             KafkaSinkWriter::new(
                 self.config.clone(),
-                self.schema.clone(),
-                self.pk_indices.clone(),
-                self.is_append_only,
-                self.db_name.clone(),
-                self.sink_from_name.clone(),
-                format!("sink-{:?}", writer_param.executor_id),
+                SinkFormatterImpl::new(
+                    &self.config.r#type,
+                    self.schema.clone(),
+                    self.pk_indices.clone(),
+                    self.is_append_only,
+                    self.db_name.clone(),
+                    self.sink_from_name.clone(),
+                )?,
             )
             .await?,
         ))
@@ -324,41 +343,25 @@ impl Sink for KafkaSink {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
-enum KafkaSinkState {
-    Init,
-    // State running with epoch.
-    Running(u64),
-}
-
 /// The delivery buffer queue size
 /// When the `DeliveryFuture` the current `future_delivery_buffer`
 /// is buffering is greater than this size, then enforcing commit once
 const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 65536;
 
+struct KafkaPayloadWriter {
+    inner: FutureProducer<PrivateLinkProducerContext>,
+    future_delivery_buffer: VecDeque<DeliveryFuture>,
+    config: KafkaConfig,
+}
+
 pub struct KafkaSinkWriter {
     pub config: KafkaConfig,
-    pub inner: FutureProducer<PrivateLinkProducerContext>,
-    identifier: String,
-    state: KafkaSinkState,
-    schema: Schema,
-    pk_indices: Vec<usize>,
-    is_append_only: bool,
-    future_delivery_buffer: VecDeque<DeliveryFuture>,
-    db_name: String,
-    sink_from_name: String,
+    payload_writer: KafkaPayloadWriter,
+    formatter: SinkFormatterImpl,
 }
 
 impl KafkaSinkWriter {
-    pub async fn new(
-        mut config: KafkaConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        is_append_only: bool,
-        db_name: String,
-        sink_from_name: String,
-        identifier: String,
-    ) -> Result<Self> {
+    pub async fn new(mut config: KafkaConfig, formatter: SinkFormatterImpl) -> Result<Self> {
         let inner: FutureProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
 
@@ -386,18 +389,17 @@ impl KafkaSinkWriter {
 
         Ok(KafkaSinkWriter {
             config: config.clone(),
-            inner,
-            identifier,
-            state: KafkaSinkState::Init,
-            schema,
-            pk_indices,
-            is_append_only,
-            future_delivery_buffer: VecDeque::new(),
-            db_name,
-            sink_from_name,
+            payload_writer: KafkaPayloadWriter {
+                inner,
+                future_delivery_buffer: VecDeque::new(),
+                config,
+            },
+            formatter,
         })
     }
+}
 
+impl KafkaPayloadWriter {
     /// The actual `send_result` function, will be called when the `KafkaSinkWriter` needs to sink
     /// messages
     async fn send_result<'a, K, P>(
@@ -523,57 +525,9 @@ impl KafkaSinkWriter {
 
         Ok(())
     }
-
-    async fn debezium_update(&mut self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
-        // TODO: Remove the clones here, only to satisfy borrow checker at present
-        let schema = self.schema.clone();
-        let pk_indices = self.pk_indices.clone();
-        let db_name = self.db_name.clone();
-        let sink_from_name = self.sink_from_name.clone();
-
-        // Initialize the dbz_stream
-        let f = DebeziumJsonFormatter::new(
-            &schema,
-            &pk_indices,
-            &db_name,
-            &sink_from_name,
-            DebeziumAdapterOpts::default(),
-            ts_ms,
-        );
-
-        self.write_chunk(chunk, f).await
-    }
-
-    async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
-        // TODO: Remove the clones here, only to satisfy borrow checker at present
-        let schema = self.schema.clone();
-        let pk_indices = self.pk_indices.clone();
-        let key_encoder =
-            JsonEncoder::new(&schema, Some(&pk_indices), TimestampHandlingMode::Milli);
-        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
-
-        // Initialize the upsert_stream
-        let f = UpsertFormatter::new(key_encoder, val_encoder);
-
-        self.write_chunk(chunk, f).await
-    }
-
-    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        // TODO: Remove the clones here, only to satisfy borrow checker at present
-        let schema = self.schema.clone();
-        let pk_indices = self.pk_indices.clone();
-        let key_encoder =
-            JsonEncoder::new(&schema, Some(&pk_indices), TimestampHandlingMode::Milli);
-        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
-
-        // Initialize the append_only_stream
-        let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
-
-        self.write_chunk(chunk, f).await
-    }
 }
 
-impl FormattedSink for KafkaSinkWriter {
+impl FormattedSink for KafkaPayloadWriter {
     type K = Vec<u8>;
     type V = Vec<u8>;
 
@@ -585,25 +539,9 @@ impl FormattedSink for KafkaSinkWriter {
 #[async_trait::async_trait]
 impl SinkWriterV1 for KafkaSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.is_append_only {
-            // Append-only
-            self.append_only(chunk).await
-        } else {
-            // Debezium
-            if self.config.r#type == SINK_TYPE_DEBEZIUM {
-                self.debezium_update(
-                    chunk,
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as u64,
-                )
-                .await
-            } else {
-                // Upsert
-                self.upsert(chunk).await
-            }
-        }
+        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+            self.payload_writer.write_chunk(chunk, formatter).await
+        })
     }
 
     /// ---------------------------------------------------------------------------------------
@@ -618,7 +556,7 @@ impl SinkWriterV1 for KafkaSinkWriter {
 
     async fn commit(&mut self) -> Result<()> {
         // Group delivery (await the `FutureRecord`) here
-        self.commit_inner().await?;
+        self.payload_writer.commit_inner().await?;
         Ok(())
     }
 
@@ -634,6 +572,8 @@ mod test {
     use risingwave_common::types::DataType;
 
     use super::*;
+    use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
+    use crate::sink::formatter::AppendOnlyFormatter;
 
     #[test]
     fn parse_rdkafka_props() {
@@ -655,11 +595,16 @@ mod test {
             "properties.retry.backoff.ms".to_string() => "114514".to_string(),
             "properties.batch.num.messages".to_string() => "114514".to_string(),
             "properties.batch.size".to_string() => "114514".to_string(),
+            "properties.compression.codec".to_string() => "zstd".to_string(),
         };
         let c = KafkaConfig::from_hashmap(props).unwrap();
         assert_eq!(
             c.rdkafka_properties.queue_buffering_max_ms,
             Some(114.514f64)
+        );
+        assert_eq!(
+            c.rdkafka_properties.compression_codec,
+            Some(CompressionCodec::Zstd)
         );
 
         let props: HashMap<String, String> = hashmap! {
@@ -680,6 +625,16 @@ mod test {
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "append-only".to_string(),
             "properties.queue.buffering.max.kbytes".to_string() => "-114514".to_string(), // usize cannot be negative
+        };
+        assert!(KafkaConfig::from_hashmap(props).is_err());
+
+        let props: HashMap<String, String> = hashmap! {
+            // basic
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "append-only".to_string(),
+            "properties.compression.codec".to_string() => "notvalid".to_string(), // has to be a valid CompressionCodec
         };
         assert!(KafkaConfig::from_hashmap(props).is_err());
     }
@@ -767,6 +722,7 @@ mod test {
             "properties.bootstrap.server".to_string() => "localhost:29092".to_string(),
             "type".to_string() => "append-only".to_string(),
             "topic".to_string() => "test_topic".to_string(),
+            "properties.compression.codec".to_string() => "zstd".to_string(),
         };
 
         // Create a table with two columns (| id : INT32 | v2 : VARCHAR |) here
@@ -792,12 +748,14 @@ mod test {
         // Create the actual sink writer to Kafka
         let mut sink = KafkaSinkWriter::new(
             kafka_config.clone(),
-            schema,
-            pk_indices,
-            true,
-            "test_sink_1".to_string(),
-            "test_db".into(),
-            "test_table".into(),
+            SinkFormatterImpl::AppendOnlyJson(AppendOnlyFormatter::new(
+                JsonEncoder::new(
+                    schema.clone(),
+                    Some(pk_indices),
+                    TimestampHandlingMode::Milli,
+                ),
+                JsonEncoder::new(schema, None, TimestampHandlingMode::Milli),
+            )),
         )
         .await
         .unwrap();
@@ -808,6 +766,7 @@ mod test {
             println!("epoch: {}", i);
             for j in 0..100 {
                 match sink
+                    .payload_writer
                     .send_result(
                         FutureRecord::to(kafka_config.common.topic.as_str())
                             .payload(format!("value-{}", j).as_bytes())

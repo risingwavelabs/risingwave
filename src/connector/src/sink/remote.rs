@@ -22,7 +22,6 @@ use itertools::Itertools;
 use jni::objects::{JByteArray, JValue, JValueOwned};
 use prost::Message;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
 use risingwave_jni_core::jvm_runtime::JVM;
@@ -239,14 +238,13 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
 pub type RemoteSinkWriter<R> = RemoteSinkWriterInner<(), R>;
 pub type CoordinatedRemoteSinkWriter<R> = RemoteSinkWriterInner<Option<SinkMetadata>, R>;
 
-#[derive(Debug)]
 pub struct RemoteSinkWriterInner<SM, R: RemoteSinkTrait> {
     properties: HashMap<String, String>,
     epoch: Option<u64>,
     batch_id: u64,
-    schema: Schema,
     payload_format: SinkPayloadFormat,
     stream_handle: SinkWriterStreamHandle,
+    json_encoder: JsonEncoder,
     _phantom: PhantomData<(SM, R)>,
 }
 
@@ -279,9 +277,9 @@ impl<SM, R: RemoteSinkTrait> RemoteSinkWriterInner<SM, R> {
             properties: param.properties,
             epoch: None,
             batch_id: 0,
-            schema,
             stream_handle,
             payload_format: connector_params.sink_payload_format,
+            json_encoder: JsonEncoder::new(schema, None, TimestampHandlingMode::String),
             _phantom: PhantomData,
         })
     }
@@ -291,7 +289,7 @@ impl<SM, R: RemoteSinkTrait> RemoteSinkWriterInner<SM, R> {
         response_receiver: UnboundedReceiver<std::result::Result<SinkWriterStreamResponse, Status>>,
         request_sender: Sender<SinkWriterStreamRequest>,
     ) -> RemoteSinkWriter<R> {
-        use risingwave_common::catalog::Field;
+        use risingwave_common::catalog::{Field, Schema};
         let properties = HashMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);
 
         let schema = Schema::new(vec![
@@ -321,7 +319,7 @@ impl<SM, R: RemoteSinkTrait> RemoteSinkWriterInner<SM, R> {
             properties,
             epoch: None,
             batch_id: 0,
-            schema,
+            json_encoder: JsonEncoder::new(schema, None, TimestampHandlingMode::String),
             stream_handle,
             payload_format: SinkPayloadFormat::Json,
             _phantom: PhantomData,
@@ -377,9 +375,8 @@ where
         let payload = match self.payload_format {
             SinkPayloadFormat::Json => {
                 let mut row_ops = Vec::with_capacity(chunk.cardinality());
-                let enc = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::String);
                 for (op, row_ref) in chunk.rows() {
-                    let map = enc.encode(row_ref)?;
+                    let map = self.json_encoder.encode(row_ref)?;
                     let row_op = RowOp {
                         op_type: op.to_protobuf() as i32,
                         line: serde_json::to_string(&map)

@@ -473,7 +473,7 @@ where
                         &mut temporary_state,
                     ).await?;
 
-                    self.progress.finish(barrier.epoch.curr);
+                    self.progress.finish(barrier.epoch.curr, total_snapshot_processed_rows);
                     yield msg;
                     break;
                 }

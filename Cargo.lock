@@ -6934,6 +6934,8 @@ dependencies = [
  "serde_json",
  "serde_with 3.3.0",
  "simd-json",
+ "strum 0.25.0",
+ "strum_macros 0.25.2",
  "tempfile",
  "thiserror",
  "time",
@@ -7192,6 +7194,7 @@ dependencies = [
 name = "risingwave_java_binding"
 version = "0.1.0"
 dependencies = [
+ "jni",
  "prost",
  "risingwave_common",
  "risingwave_expr",
@@ -7206,10 +7209,12 @@ name = "risingwave_jni_core"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "cfg-or-panic",
  "futures",
  "itertools 0.11.0",
  "jni",
  "madsim-tokio",
+ "paste",
  "prost",
  "risingwave_common",
  "risingwave_expr",
@@ -7468,6 +7473,7 @@ dependencies = [
  "tempfile",
  "tikv-jemallocator",
  "tokio-postgres",
+ "tokio-stream",
  "tracing",
  "tracing-subscriber",
 ]

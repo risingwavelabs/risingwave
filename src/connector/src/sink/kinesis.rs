@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use aws_sdk_kinesis::error::DisplayErrorContext;
@@ -27,12 +26,10 @@ use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
-use super::formatter::{
-    AppendOnlyFormatter, DebeziumAdapterOpts, DebeziumJsonFormatter, UpsertFormatter,
-};
 use super::{FormattedSink, SinkParam};
 use crate::common::KinesisCommon;
-use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
+use crate::dispatch_sink_formatter_impl;
+use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterParam,
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -139,15 +136,15 @@ impl KinesisSinkConfig {
     }
 }
 
-#[derive(Debug)]
 pub struct KinesisSinkWriter {
     pub config: KinesisSinkConfig,
-    schema: Schema,
-    pk_indices: Vec<usize>,
+    formatter: SinkFormatterImpl,
+    payload_writer: KinesisSinkPayloadWriter,
+}
+
+struct KinesisSinkPayloadWriter {
     client: KinesisClient,
-    is_append_only: bool,
-    db_name: String,
-    sink_from_name: String,
+    config: KinesisSinkConfig,
 }
 
 impl KinesisSinkWriter {
@@ -159,22 +156,27 @@ impl KinesisSinkWriter {
         db_name: String,
         sink_from_name: String,
     ) -> Result<Self> {
+        let formatter = SinkFormatterImpl::new(
+            &config.r#type,
+            schema,
+            pk_indices,
+            is_append_only,
+            db_name,
+            sink_from_name,
+        )?;
         let client = config
             .common
             .build_client()
             .await
             .map_err(SinkError::Kinesis)?;
         Ok(Self {
-            config,
-            schema,
-            pk_indices,
-            client,
-            is_append_only,
-            db_name,
-            sink_from_name,
+            config: config.clone(),
+            formatter,
+            payload_writer: KinesisSinkPayloadWriter { client, config },
         })
     }
-
+}
+impl KinesisSinkPayloadWriter {
     async fn put_record(&self, key: &str, payload: Vec<u8>) -> Result<PutRecordOutput> {
         let payload = Blob::new(payload);
         // todo: switch to put_records() for batching
@@ -204,44 +206,9 @@ impl KinesisSinkWriter {
             ))
         })
     }
-
-    async fn upsert(mut self: &Self, chunk: StreamChunk) -> Result<()> {
-        let key_encoder = JsonEncoder::new(
-            &self.schema,
-            Some(&self.pk_indices),
-            TimestampHandlingMode::Milli,
-        );
-        let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
-        let f = UpsertFormatter::new(key_encoder, val_encoder);
-        self.write_chunk(chunk, f).await
-    }
-
-    async fn append_only(mut self: &Self, chunk: StreamChunk) -> Result<()> {
-        let key_encoder = JsonEncoder::new(
-            &self.schema,
-            Some(&self.pk_indices),
-            TimestampHandlingMode::Milli,
-        );
-        let val_encoder = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
-        let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
-        self.write_chunk(chunk, f).await
-    }
-
-    async fn debezium_update(mut self: &Self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
-        let f = DebeziumJsonFormatter::new(
-            &self.schema,
-            &self.pk_indices,
-            &self.db_name,
-            &self.sink_from_name,
-            DebeziumAdapterOpts::default(),
-            ts_ms,
-        );
-
-        self.write_chunk(chunk, f).await
-    }
 }
 
-impl FormattedSink for &KinesisSinkWriter {
+impl FormattedSink for KinesisSinkPayloadWriter {
     type K = String;
     type V = Vec<u8>;
 
@@ -255,22 +222,9 @@ impl FormattedSink for &KinesisSinkWriter {
 #[async_trait::async_trait]
 impl SinkWriter for KinesisSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.is_append_only {
-            self.append_only(chunk).await
-        } else if self.config.r#type == SINK_TYPE_DEBEZIUM {
-            self.debezium_update(
-                chunk,
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64,
-            )
-            .await
-        } else if self.config.r#type == SINK_TYPE_UPSERT {
-            self.upsert(chunk).await
-        } else {
-            unreachable!()
-        }
+        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+            self.payload_writer.write_chunk(chunk, formatter).await
+        })
     }
 
     async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
