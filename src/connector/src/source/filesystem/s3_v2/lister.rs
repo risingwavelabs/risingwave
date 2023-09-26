@@ -71,9 +71,9 @@ pub struct S3SourceLister {
 impl S3SourceLister {
     #[try_stream(boxed, ok = Vec<FsPage>, error = RwError)]
     async fn paginate_inner(self) {
-        loop { // start a new round
+        'round: loop { // start a new round
             let mut next_continuation_token = None;
-            loop { // loop to paginate
+            'truncated: loop { // loop to paginate
                 let mut req = self
                     .client
                     .list_objects_v2()
@@ -113,7 +113,7 @@ impl S3SourceLister {
                 if res.is_truncated() {
                     next_continuation_token = Some(res.next_continuation_token.unwrap())
                 } else {
-                    break;
+                    break 'truncated;
                 }
             }
         }
