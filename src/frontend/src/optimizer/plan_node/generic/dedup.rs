@@ -50,7 +50,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Dedup<PlanRef> {
         self.input.schema().clone()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         Some(self.dedup_cols.clone())
     }
 
