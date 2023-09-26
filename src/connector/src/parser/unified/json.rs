@@ -18,11 +18,9 @@ use base64::Engine;
 use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::cast::{
-    i64_to_timestamp, i64_to_timestamptz, str_to_bytea, str_to_date, str_to_time, str_to_timestamp,
-};
+use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
 use risingwave_common::types::{
-    DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamptz,
+    DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use simd_json::{BorrowedValue, TryTypeError, ValueAccess, ValueType};
@@ -358,7 +356,10 @@ impl JsonParseOptions {
             ) => Date::with_days_since_unix_epoch(value.try_as_i32()?)
                 .map_err(|_| create_error())?
                 .into(),
-            (Some(DataType::Date), ValueType::String) => str_to_date(value.as_str().unwrap())
+            (Some(DataType::Date), ValueType::String) => value
+                .as_str()
+                .unwrap()
+                .parse::<Date>()
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Varchar -----
@@ -388,7 +389,10 @@ impl JsonParseOptions {
                 value.to_string().into()
             }
             // ---- Time -----
-            (Some(DataType::Time), ValueType::String) => str_to_time(value.as_str().unwrap())
+            (Some(DataType::Time), ValueType::String) => value
+                .as_str()
+                .unwrap()
+                .parse::<Time>()
                 .map_err(|_| create_error())?
                 .into(),
             (
@@ -404,11 +408,12 @@ impl JsonParseOptions {
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Timestamp -----
-            (Some(DataType::Timestamp), ValueType::String) => {
-                str_to_timestamp(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into()
-            }
+            (Some(DataType::Timestamp), ValueType::String) => value
+                .as_str()
+                .unwrap()
+                .parse::<Timestamp>()
+                .map_err(|_| create_error())?
+                .into(),
             (
                 Some(DataType::Timestamp),
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,

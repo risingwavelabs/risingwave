@@ -986,7 +986,7 @@ mod find_affected_ranges_tests {
 
     use itertools::Itertools;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_expr::agg::{AggArgs, AggKind};
+    use risingwave_expr::aggregate::{AggArgs, AggKind};
     use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
     use super::*;

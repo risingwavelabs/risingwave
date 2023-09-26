@@ -15,10 +15,9 @@
 use std::str::FromStr;
 
 use anyhow::anyhow;
-use risingwave_common::cast::{str_to_date, str_to_timestamp};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{Datum, Decimal, ScalarImpl, Timestamptz};
+use risingwave_common::types::{Date, Datum, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
 
 use super::{ByteStreamSourceParser, CsvProperties};
 use crate::only_parse_payload;
@@ -89,9 +88,9 @@ impl CsvParser {
                 .map_err(|_| anyhow!("parse decimal from string err {}", v))?
                 .into(),
             DataType::Varchar => v.into(),
-            DataType::Date => str_to_date(v.as_str())?.into(),
-            DataType::Time => str_to_date(v.as_str())?.into(),
-            DataType::Timestamp => str_to_timestamp(v.as_str())?.into(),
+            DataType::Date => ScalarImpl::Date(to_rust_type!(v, Date)),
+            DataType::Time => ScalarImpl::Time(to_rust_type!(v, Time)),
+            DataType::Timestamp => ScalarImpl::Timestamp(to_rust_type!(v, Timestamp)),
             DataType::Timestamptz => ScalarImpl::Timestamptz(to_rust_type!(v, Timestamptz)),
             _ => {
                 return Err(RwError::from(InternalError(format!(
