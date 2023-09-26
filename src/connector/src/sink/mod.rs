@@ -322,15 +322,6 @@ macro_rules! def_sink_impl {
 
 def_sink_impl!();
 
-// impl SinkConfig {
-//     pub fn get_connector(&self) -> &'static str {
-//         fn get_name<S: Sink>(_: &S) -> &'static str {
-//             S::SINK_NAME
-//         }
-//         dispatch_sink!(self, sink, get_name(sink))
-//     }
-// }
-
 pub type Result<T> = std::result::Result<T, SinkError>;
 
 #[derive(Error, Debug)]
