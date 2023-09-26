@@ -123,10 +123,11 @@
     create table t (a int);
     select count(*) from t limit 1;
   batch_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchLimit { limit: 1, offset: 0 }
-      └─BatchSimpleAgg { aggs: [count] }
-        └─BatchScan { table: t, columns: [], distribution: Single }
+    BatchLimit { limit: 1, offset: 0 }
+    └─BatchSimpleAgg { aggs: [sum0(count)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchSimpleAgg { aggs: [count] }
+          └─BatchScan { table: t, columns: [], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamTopN { order: [sum0(count) ASC], limit: 1, offset: 0 }
