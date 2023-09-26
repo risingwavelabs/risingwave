@@ -650,10 +650,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut this, &mut vars, chunk).await?;
 
-                    if this.max_dirty_groups_heap_size > 0
-                        && vars.dirty_groups.estimated_heap_size()
-                            >= this.max_dirty_groups_heap_size
-                    {
+                    if vars.dirty_groups.estimated_heap_size() >= this.max_dirty_groups_heap_size {
                         // flush dirty groups if heap size is too large, to better prevent from OOM
                         #[for_await]
                         for chunk in Self::flush_data(&mut this, &mut vars) {
