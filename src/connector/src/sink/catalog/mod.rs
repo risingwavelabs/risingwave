@@ -14,7 +14,7 @@
 
 pub mod desc;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
@@ -94,6 +94,29 @@ impl SinkType {
             PbSinkType::Unspecified => unreachable!(),
         }
     }
+}
+
+/// May replace [`SinkType`].
+///
+/// TODO: consolidate with [`crate::source::SourceStruct`] and [`crate::parser::SpecificParserConfig`].
+pub struct SinkFormatDesc {
+    pub format: SinkFormat,
+    pub encode: SinkEncode,
+    pub options: BTreeMap<String, String>,
+}
+
+/// TODO: consolidate with [`crate::source::SourceFormat`] and [`crate::parser::ProtocolProperties`].
+pub enum SinkFormat {
+    AppendOnly,
+    Upsert,
+    Debezium,
+}
+
+/// TODO: consolidate with [`crate::source::SourceEncode`] and [`crate::parser::EncodingProperties`].
+pub enum SinkEncode {
+    Json,
+    Protobuf,
+    Avro,
 }
 
 /// the catalog of the sink. There are two kind of schema here. The full schema is all columns
