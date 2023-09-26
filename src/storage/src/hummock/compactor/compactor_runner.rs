@@ -26,19 +26,21 @@ use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
-use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
+use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
+use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
 use tokio::sync::oneshot::Receiver;
 
 use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
-use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
 };
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
-use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
+use crate::hummock::compactor::{
+    fast_compactor_runner, CompactOutput, CompactionFilter, Compactor, CompactorContext,
+};
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::sstable::CompactionDeleteRangesBuilder;
@@ -242,6 +244,7 @@ pub async fn compact(
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
     object_id_getter: Box<dyn GetObjectId>,
+    filter_key_extractor_manager: FilterKeyExtractorManager,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     let context = compactor_context.clone();
     let group_label = compact_task.compaction_group_id.to_string();
@@ -305,6 +308,7 @@ pub async fn compact(
         .collect_vec();
     compact_table_ids.sort();
     compact_table_ids.dedup();
+    let single_table = compact_table_ids.len() == 1;
 
     let existing_table_ids: HashSet<u32> =
         HashSet::from_iter(compact_task.existing_table_ids.clone());
@@ -313,8 +317,7 @@ pub async fn compact(
             .into_iter()
             .filter(|table_id| existing_table_ids.contains(table_id)),
     );
-    let multi_filter_key_extractor = match compactor_context
-        .filter_key_extractor_manager
+    let multi_filter_key_extractor = match filter_key_extractor_manager
         .acquire(compact_table_ids.clone())
         .await
     {
@@ -340,7 +343,15 @@ pub async fn compact(
     }
 
     let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
-
+    let has_tombstone = compact_task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .any(|sst| sst.range_tombstone_count > 0);
+    let has_ttl = compact_task
+        .table_options
+        .iter()
+        .any(|(_, table_option)| table_option.retention_seconds > 0);
     let mut task_status = TaskStatus::Success;
     // skip sst related to non-existent able_id to reduce io
     let sstable_infos = compact_task
@@ -359,20 +370,31 @@ pub async fn compact(
         .iter()
         .map(|table_info| table_info.file_size)
         .sum::<u64>();
-    match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
-        Ok(splits) => {
-            if !splits.is_empty() {
-                compact_task.splits = splits;
+    let all_ssts_are_blocked_filter = sstable_infos
+        .iter()
+        .all(|table_info| table_info.bloom_filter_kind() == BloomFilterType::Blocked);
+    let optimize_by_copy_block = context.storage_opts.enable_fast_compaction
+        && all_ssts_are_blocked_filter
+        && !has_tombstone
+        && !has_ttl
+        && single_table
+        && compact_task.target_level > 0
+        && compact_task.input_ssts.len() == 2
+        && compact_task.task_type() == TaskType::Dynamic;
+    if !optimize_by_copy_block {
+        match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
+            Ok(splits) => {
+                if !splits.is_empty() {
+                    compact_task.splits = splits;
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to generate_splits {:#?}", e);
+                task_status = TaskStatus::ExecuteFailed;
+                return compact_done(compact_task, context.clone(), vec![], task_status);
             }
         }
-
-        Err(e) => {
-            tracing::warn!("Failed to generate_splits {:#?}", e);
-            task_status = TaskStatus::ExecuteFailed;
-            return compact_done(compact_task, context.clone(), vec![], task_status);
-        }
     }
-
     let compact_task_statistics = statistics_compact_task(&compact_task);
     // Number of splits (key ranges) is equal to number of compaction tasks
     let parallelism = compact_task.splits.len();
@@ -411,7 +433,7 @@ pub async fn compact(
     ) * compact_task.splits.len() as u64;
 
     tracing::info!(
-            "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+            "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}",
                 compact_task.compaction_group_id,
                 compact_task.task_id,
                 compact_task_statistics,
@@ -419,7 +441,8 @@ pub async fn compact(
                 compact_task.compression_algorithm,
                 compact_task.existing_table_ids,
                 parallelism,
-                task_memory_capacity_with_parallelism
+                task_memory_capacity_with_parallelism,
+                optimize_by_copy_block
             );
 
     // If the task does not have enough memory, it should cancel the task and let the meta
@@ -440,6 +463,40 @@ pub async fn compact(
     }
 
     context.compactor_metrics.compact_task_pending_num.inc();
+    if optimize_by_copy_block {
+        let runner = fast_compactor_runner::CompactorRunner::new(
+            context.clone(),
+            compact_task.clone(),
+            multi_filter_key_extractor.clone(),
+            object_id_getter.clone(),
+            task_progress_guard.progress.clone(),
+        );
+        match runner.run().await {
+            Ok(ssts) => {
+                output_ssts.push((0, ssts, CompactionStatistics::default()));
+            }
+            Err(e) => {
+                task_status = TaskStatus::ExecuteFailed;
+                tracing::warn!(
+                    "Compaction task {} failed with error: {:#?}",
+                    compact_task.task_id,
+                    e
+                );
+            }
+        }
+
+        context.compactor_metrics.compact_task_pending_num.dec();
+        // After a compaction is done, mutate the compaction task.
+        let (compact_task, table_stats) =
+            compact_done(compact_task, context.clone(), output_ssts, task_status);
+        let cost_time = timer.stop_and_record() * 1000.0;
+        tracing::info!(
+            "Finished compaction task in {:?}ms: {}",
+            cost_time,
+            compact_task_to_string(&compact_task)
+        );
+        return (compact_task, table_stats);
+    }
     for (split_index, _) in compact_task.splits.iter().enumerate() {
         let filter = multi_filter.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
@@ -811,6 +868,7 @@ where
 
     Ok(compaction_statistics)
 }
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;

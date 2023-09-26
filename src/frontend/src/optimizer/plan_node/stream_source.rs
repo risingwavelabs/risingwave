@@ -32,7 +32,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSource {
     pub base: PlanBase,
-    logical: generic::Source,
+    pub(crate) logical: generic::Source,
 }
 
 impl StreamSource {

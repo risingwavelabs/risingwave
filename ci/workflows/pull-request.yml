@@ -201,6 +201,21 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "end-to-end pulsar sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-pulsar-sink-tests"
+    command: "ci/scripts/e2e-pulsar-sink-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "end-to-end clickhouse sink test"
     if: build.pull_request.labels includes "ci/run-e2e-clickhouse-sink-tests"
     command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-dev"
@@ -459,7 +474,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    timeout_in_minutes: 10
 
   - label: "e2e standalone binary test"
     command: "ci/scripts/e2e-test.sh -p ci-dev -m standalone"

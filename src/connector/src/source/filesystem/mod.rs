@@ -19,3 +19,4 @@ pub mod nd_streaming;
 pub use file_common::{FsPage, FsSplit};
 mod s3;
 pub mod s3_v2;
+pub const S3_V2_CONNECTOR: &str = "s3_v2";

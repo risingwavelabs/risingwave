@@ -34,11 +34,11 @@ use risingwave_connector::source::cdc::{
     CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
-use risingwave_connector::source::filesystem::S3_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::{
     SourceEncode, SourceFormat, SourceStruct, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
-    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR,
+    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
+    S3_V2_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
@@ -60,7 +60,7 @@ use crate::handler::create_table::{
 use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
-use crate::utils::resolve_connection_in_with_option;
+use crate::utils::resolve_privatelink_in_with_option;
 use crate::{bind_data_type, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -892,6 +892,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 S3_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json],
                 ),
+                S3_V2_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Csv, Encode::Json],
+                ),
                 MYSQL_CDC_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
@@ -1125,10 +1128,10 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
-    // resolve privatelink connection for Kafka source
     let mut with_options = WithOptions::new(with_properties);
+    // resolve privatelink connection for Kafka source
     let connection_id =
-        resolve_connection_in_with_option(&mut with_options, &schema_name, &session)?;
+        resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
     let definition = handler_args.normalized_sql;
 
     let source = PbSource {

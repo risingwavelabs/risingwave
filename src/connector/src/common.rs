@@ -37,6 +37,7 @@ use url::Url;
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
+use crate::sink::doris_connector::DorisGet;
 use crate::sink::SinkError;
 use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
@@ -436,6 +437,32 @@ impl ClickHouseCommon {
             .with_password(&self.password)
             .with_database(&self.database);
         Ok(client)
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct DorisCommon {
+    #[serde(rename = "doris.url")]
+    pub url: String,
+    #[serde(rename = "doris.user")]
+    pub user: String,
+    #[serde(rename = "doris.password")]
+    pub password: String,
+    #[serde(rename = "doris.database")]
+    pub database: String,
+    #[serde(rename = "doris.table")]
+    pub table: String,
+}
+
+impl DorisCommon {
+    pub(crate) fn build_get_client(&self) -> DorisGet {
+        DorisGet::new(
+            self.url.clone(),
+            self.table.clone(),
+            self.database.clone(),
+            self.user.clone(),
+            self.password.clone(),
+        )
     }
 }
 

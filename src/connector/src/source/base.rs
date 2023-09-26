@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -40,6 +40,7 @@ use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
+use crate::source::filesystem::S3_V2_CONNECTOR;
 use crate::source::monitor::EnumeratorMetrics;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
@@ -48,6 +49,7 @@ use crate::{
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
+const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 pub trait TryFromHashmap: Sized {
     fn try_from_hashmap(props: HashMap<String, String>) -> Result<Self>;
@@ -297,8 +299,16 @@ pub trait SplitReader: Sized + Send {
 for_all_sources!(impl_connector_properties);
 
 impl ConnectorProperties {
+    pub fn is_new_fs_connector(props: &BTreeMap<String, String>) -> bool {
+        props
+            .get(UPSTREAM_SOURCE_KEY)
+            .map(|s| s.eq_ignore_ascii_case(S3_V2_CONNECTOR))
+            .unwrap_or(false)
+    }
+}
+
+impl ConnectorProperties {
     pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
-        const UPSTREAM_SOURCE_KEY: &str = "connector";
         let connector = props
             .remove(UPSTREAM_SOURCE_KEY)
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;

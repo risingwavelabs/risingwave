@@ -82,8 +82,8 @@ impl Expression for SomeAllExpression {
     }
 
     async fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
-        let arr_left = self.left_expr.eval_checked(data_chunk).await?;
-        let arr_right = self.right_expr.eval_checked(data_chunk).await?;
+        let arr_left = self.left_expr.eval(data_chunk).await?;
+        let arr_right = self.right_expr.eval(data_chunk).await?;
         let mut num_array = Vec::with_capacity(data_chunk.capacity());
 
         let arr_right_inner = arr_right.as_list();

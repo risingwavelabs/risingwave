@@ -45,9 +45,9 @@ echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc.sql
 
 # import data to postgres
-export PGPASSWORD='postgres';
-createdb -h db -U postgres cdc_test
-psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc.sql
+export PGHOST=db PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
+createdb
+psql < ./e2e_test/source/cdc/postgres_cdc.sql
 
 node_port=50051
 node_timeout=10
@@ -80,6 +80,9 @@ cargo make ci-start ci-1cn-1fe-with-recovery
 echo "waiting for connector node to start"
 wait_for_connector_node_start
 
+echo "--- inline cdc test"
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc_inline/**/*.slt'
+
 echo "--- mysql & postgres cdc validate test"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.postgres.slt'
@@ -97,7 +100,7 @@ echo "cluster killed "
 
 # insert new rows
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
-psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc_insert.sql
+psql < ./e2e_test/source/cdc/postgres_cdc_insert.sql
 echo "inserted new rows into mysql and postgres"
 
 # start cluster w/o clean-data

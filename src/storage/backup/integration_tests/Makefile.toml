@@ -8,7 +8,6 @@ script = """
 set -e
 BUILD_BIN="$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}"
 test_root="src/storage/backup/integration_tests"
-BACKUP_TEST_BACKUP_RESTORE="${BUILD_BIN}/backup-restore" \
 BACKUP_TEST_MCLI="${PREFIX_BIN}/mcli" \
 BACKUP_TEST_MCLI_CONFIG="${PREFIX_CONFIG}/mcli" \
 BACKUP_TEST_RW_ALL_IN_ONE="${BUILD_BIN}/risingwave" \

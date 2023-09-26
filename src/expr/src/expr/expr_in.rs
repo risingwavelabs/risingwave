@@ -74,7 +74,7 @@ impl Expression for InExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let input_array = self.left.eval_checked(input).await?;
+        let input_array = self.left.eval(input).await?;
         let mut output_array = BoolArrayBuilder::new(input_array.len());
         for (data, vis) in input_array.iter().zip_eq_fast(input.visibility().iter()) {
             if vis {

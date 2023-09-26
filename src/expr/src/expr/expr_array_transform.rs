@@ -35,7 +35,7 @@ impl Expression for ArrayTransformExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let lambda_input = self.array.eval_checked(input).await?;
+        let lambda_input = self.array.eval(input).await?;
         let lambda_input = Arc::unwrap_or_clone(lambda_input).into_list();
         let new_list = lambda_input
             .map_inner(|flatten_input| async move {
