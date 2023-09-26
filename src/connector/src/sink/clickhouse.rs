@@ -191,10 +191,10 @@ impl Sink for ClickHouseSink {
         // check reachability
         let client = self.config.common.build_client()?;
 
-        let (clickhouse_column, is_collapsing_engine) =
+        let (clickhouse_column, sign_name) =
             query_column_engin_from_ck(client, &self.config).await?;
 
-        if !self.is_append_only && !is_collapsing_engine {
+        if !self.is_append_only && sign_name.is_none() {
             return Err(SinkError::ClickHouse(format!(
                 "If you want to use upsert, please modify your engine is {} or {} in ClickHouse",
                 VERSIONED_COLLAPSING_MERGE_TREE, COLLAPSING_MERGE_TREE
@@ -244,7 +244,7 @@ impl ClickHouseSinkWriter {
     ) -> Result<Self> {
         let client = config.common.build_client()?;
 
-        let (clickhouse_column, is_collapsing_engine) =
+        let (clickhouse_column, sign_name) =
             query_column_engin_from_ck(client.clone(), &config).await?;
 
         let column_correct_vec: Result<Vec<ClickHouseSchemaFeature>> = clickhouse_column
@@ -256,8 +256,8 @@ impl ClickHouseSinkWriter {
             .map(|(a, _)| a.clone())
             .collect_vec();
 
-        if is_collapsing_engine {
-            clickhouse_fields_name.push(config.common.sign.clone().unwrap());
+        if let Some(sign) = sign_name.clone() {
+            clickhouse_fields_name.push(sign);
         }
         Ok(Self {
             config,
@@ -267,7 +267,7 @@ impl ClickHouseSinkWriter {
             is_append_only,
             column_correct_vec: column_correct_vec?,
             clickhouse_fields_name,
-            is_collapsing_engine,
+            is_collapsing_engine: sign_name.is_some(),
         })
     }
 
@@ -427,12 +427,13 @@ struct SystemColumn {
 struct SystemEngine {
     name: String,
     engine: String,
+    create_table_query: String,
 }
 
 async fn query_column_engin_from_ck(
     client: ClickHouseClient,
     config: &ClickHouseConfig,
-) -> Result<(Vec<SystemColumn>, bool)> {
+) -> Result<(Vec<SystemColumn>, Option<String>)> {
     let query_engine = QUERY_ENGIN;
     let query_column = QUERY_COLUMN;
 
@@ -456,16 +457,43 @@ async fn query_column_engin_from_ck(
         )));
     }
 
-    let clickhouse_engine = &clickhouse_engine.get(0).unwrap().engine;
+    let SystemEngine {
+        name: _,
+        engine,
+        create_table_query,
+    } = &clickhouse_engine.get(0).unwrap();
+    tracing::info!("Clickhouse engine is {:?}", engine);
 
-    tracing::info!("Clickhouse engine is {:?}", clickhouse_engine);
+    let mut sign_name = None;
+    if engine.eq(VERSIONED_COLLAPSING_MERGE_TREE) {
+        sign_name = Some(
+            create_table_query
+                .split("VersionedCollapsingMergeTree(")
+                .last()
+                .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                .split(',')
+                .next()
+                .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                .to_string(),
+        );
+    }
+    if engine.eq(COLLAPSING_MERGE_TREE) {
+        sign_name = Some(
+            create_table_query
+                .split("CollapsingMergeTree(")
+                .last()
+                .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                .split(')')
+                .next()
+                .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                .to_string(),
+        );
+    }
 
-    let engine_can_upsert = clickhouse_engine.eq(VERSIONED_COLLAPSING_MERGE_TREE)
-        || clickhouse_engine.eq(COLLAPSING_MERGE_TREE);
-    if let Some(sign) = config.common.sign.clone() && engine_can_upsert{
+    if let Some(sign) = &sign_name {
         clickhouse_column.retain(|a| sign.ne(&a.name))
     }
-    Ok((clickhouse_column, engine_can_upsert))
+    Ok((clickhouse_column, sign_name))
 }
 
 /// Serialize this structure to simulate the `struct` call clickhouse interface
