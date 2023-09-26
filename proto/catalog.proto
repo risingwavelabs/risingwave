@@ -129,7 +129,7 @@ message Sink {
   repeated int32 distribution_key = 8;
   // User-defined primary key indices for the upsert sink.
   repeated int32 downstream_pk = 9;
-  SinkType sink_type = 10 [deprecated = true];
+  SinkType sink_type = 10; // to be deprecated
   uint32 owner = 11;
   map<string, string> properties = 12;
   string definition = 13;

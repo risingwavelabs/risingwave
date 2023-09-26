@@ -17,12 +17,13 @@ use std::rc::Rc;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
-use risingwave_common::error::Result;
-use risingwave_connector::sink::catalog::SinkCatalog;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
+use risingwave_connector::sink::SINK_TYPE_OPTION;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, EmitMode, ObjectName, Query, Select, SelectItem, SetExpr,
-    TableFactor, TableWithJoins,
+    SinkSchema, TableFactor, TableWithJoins,
 };
 
 use super::create_mv::get_column_names;
@@ -36,7 +37,7 @@ use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_privatelink_in_with_option;
-use crate::Planner;
+use crate::{Planner, WithOptions};
 
 pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     let table_factor = TableFactor::Table {
@@ -115,6 +116,20 @@ pub fn gen_sink_plan(
         context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
     }
 
+    let format_desc = match stmt.sink_schema {
+        // Case A: new syntax `format ... encode ...`
+        Some(f) => Some(bind_sink_format_desc(f)?),
+        None => match with_options.get(SINK_TYPE_OPTION) {
+            // Case B: old syntax `type = '...'`
+            Some(t) => Some(
+                SinkFormatDesc::from_legacy_type(t)
+                    .ok_or_else(|| ErrorCode::BindError(format!("sink type unsupported: {t}")))?,
+            ),
+            // Case C: no format + encode required
+            None => None,
+        },
+    };
+
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
         plan_root.set_out_names(col_names)?;
@@ -127,6 +142,7 @@ pub fn gen_sink_plan(
         emit_on_window_close,
         db_name.to_owned(),
         sink_from_table_name,
+        format_desc,
     )?;
     let sink_desc = sink_plan.sink_desc().clone();
     let sink_plan: PlanRef = sink_plan.into();
@@ -193,6 +209,47 @@ pub async fn handle_create_sink(
     catalog_writer.create_sink(sink.to_proto(), graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
+}
+
+/// Transforms the (format, encode, options) from sqlparser AST into an internal struct `SinkFormatDesc`.
+/// This is an analogy to (part of) [`crate::handler::create_source::try_bind_columns_from_source`]
+/// which transforms sqlparser AST `SourceSchemaV2` into `StreamSourceInfo`.
+fn bind_sink_format_desc(value: SinkSchema) -> Result<SinkFormatDesc> {
+    use risingwave_connector::sink::catalog::{SinkEncode, SinkFormat};
+    use risingwave_sqlparser::ast::{Encode as E, Format as F};
+
+    let format = match value.format {
+        F::Plain => SinkFormat::AppendOnly,
+        F::Upsert => SinkFormat::Upsert,
+        F::Debezium => SinkFormat::Debezium,
+        f @ (F::Native | F::DebeziumMongo | F::Maxwell | F::Canal) => {
+            return Err(ErrorCode::BindError(format!("sink format unsupported: {f}")).into())
+        }
+    };
+    let encode = match value.row_encode {
+        E::Json => SinkEncode::Json,
+        E::Protobuf => SinkEncode::Protobuf,
+        E::Avro => SinkEncode::Avro,
+        e @ (E::Native | E::Csv | E::Bytes) => {
+            return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into())
+        }
+    };
+    let options = WithOptions::try_from(value.row_options.as_slice())?.into_inner();
+
+    Ok(SinkFormatDesc {
+        format,
+        encode,
+        options,
+    })
+}
+
+/// For `planner_test` crate so that it does not depend directly on `connector` crate just for `SinkFormatDesc`.
+impl From<&WithOptions> for Option<SinkFormatDesc> {
+    fn from(value: &WithOptions) -> Self {
+        value
+            .get(SINK_TYPE_OPTION)
+            .and_then(|t| SinkFormatDesc::from_legacy_type(t))
+    }
 }
 
 #[cfg(test)]

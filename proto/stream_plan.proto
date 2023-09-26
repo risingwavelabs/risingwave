@@ -174,7 +174,7 @@ message SinkDesc {
   repeated uint32 downstream_pk = 6;
   repeated uint32 distribution_key = 7;
   map<string, string> properties = 8;
-  catalog.SinkType sink_type = 9 [deprecated = true];
+  catalog.SinkType sink_type = 9; // to be deprecated
   repeated plan_common.ColumnCatalog column_catalogs = 10;
   string db_name = 11;
   // If the sink is from table or mv, this is name of the table/mv. Otherwise

@@ -25,7 +25,7 @@ use risingwave_common::constants::log_store::{
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
-use risingwave_connector::sink::catalog::{SinkId, SinkType};
+use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::{
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
     SINK_USER_FORCE_APPEND_ONLY_OPTION,
@@ -78,6 +78,7 @@ impl StreamSink {
         out_names: Vec<String>,
         definition: String,
         properties: WithOptions,
+        format_desc: Option<SinkFormatDesc>,
     ) -> Result<Self> {
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
         let (input, sink) = Self::derive_sink_desc(
@@ -90,6 +91,7 @@ impl StreamSink {
             columns,
             definition,
             properties,
+            format_desc,
         )?;
 
         Ok(Self::new(input, sink))
@@ -105,6 +107,7 @@ impl StreamSink {
         columns: Vec<ColumnCatalog>,
         definition: String,
         properties: WithOptions,
+        format_desc: Option<SinkFormatDesc>,
     ) -> Result<(PlanRef, SinkDesc)> {
         let sink_type = Self::derive_sink_type(input.append_only(), &properties)?;
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
@@ -157,6 +160,7 @@ impl StreamSink {
             distribution_key,
             properties: properties.into_inner(),
             sink_type,
+            format_desc,
         };
         Ok((input, sink_desc))
     }
