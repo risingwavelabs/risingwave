@@ -245,7 +245,6 @@ impl Sink for CoordinatedRemoteSink {
 pub type RemoteSinkWriter = RemoteSinkWriterInner<()>;
 pub type CoordinatedRemoteSinkWriter = RemoteSinkWriterInner<Option<SinkMetadata>>;
 
-#[derive(Debug)]
 pub struct RemoteSinkWriterInner<SM> {
     pub connector_type: String,
     properties: HashMap<String, String>,
@@ -254,6 +253,7 @@ pub struct RemoteSinkWriterInner<SM> {
     schema: Schema,
     payload_format: SinkPayloadFormat,
     stream_handle: SinkWriterStreamHandle,
+    json_encoder: JsonEncoder,
     _phantom: PhantomData<SM>,
 }
 
@@ -291,6 +291,7 @@ impl<SM> RemoteSinkWriterInner<SM> {
             schema: param.schema(),
             stream_handle,
             payload_format: connector_params.sink_payload_format,
+            json_encoder: JsonEncoder::new(param.schema(), None, TimestampHandlingMode::String),
             _phantom: PhantomData,
         })
     }
@@ -331,6 +332,7 @@ impl<SM> RemoteSinkWriterInner<SM> {
             properties,
             epoch: None,
             batch_id: 0,
+            json_encoder: JsonEncoder::new(schema.clone(), None, TimestampHandlingMode::String),
             schema,
             stream_handle,
             payload_format: SinkPayloadFormat::Json,
@@ -387,9 +389,8 @@ where
         let payload = match self.payload_format {
             SinkPayloadFormat::Json => {
                 let mut row_ops = Vec::with_capacity(chunk.cardinality());
-                let enc = JsonEncoder::new(&self.schema, None, TimestampHandlingMode::String);
                 for (op, row_ref) in chunk.rows() {
-                    let map = enc.encode(row_ref)?;
+                    let map = self.json_encoder.encode(row_ref)?;
                     let row_op = RowOp {
                         op_type: op.to_protobuf() as i32,
                         line: serde_json::to_string(&map)

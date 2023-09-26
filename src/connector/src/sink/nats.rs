@@ -27,6 +27,7 @@ use tokio_retry::Retry;
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriter, SinkWriterParam};
 use crate::common::NatsCommon;
+use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 use crate::sink::{Result, Sink, SinkError, SINK_TYPE_APPEND_ONLY};
 
 pub const NATS_SINK: &str = "nats";
@@ -52,6 +53,7 @@ pub struct NatsSinkWriter {
     pub config: NatsConfig,
     context: Context,
     schema: Schema,
+    json_encoder: JsonEncoder,
 }
 
 /// Basic data types for use with the nats interface
@@ -118,6 +120,7 @@ impl NatsSinkWriter {
             config: config.clone(),
             context,
             schema: schema.clone(),
+            json_encoder: JsonEncoder::new(schema, None, TimestampHandlingMode::Milli),
         })
     }
 
@@ -125,7 +128,7 @@ impl NatsSinkWriter {
         Retry::spawn(
             ExponentialBackoff::from_millis(100).map(jitter).take(3),
             || async {
-                let data = chunk_to_json(chunk.clone(), &self.schema).unwrap();
+                let data = chunk_to_json(chunk.clone(), &self.json_encoder).unwrap();
                 for item in data {
                     self.context
                         .publish(self.config.common.subject.clone(), item.into())
