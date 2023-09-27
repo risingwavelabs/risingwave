@@ -17,12 +17,12 @@
 //  name        data type   variant     array type          owned type      ref type    primitive
 const TYPE_MATRIX: &str = "
     boolean     Boolean     Bool        BoolArray           bool            bool            _
-    int16       Int16       Int16       I16Array            i16             i16             y
-    int32       Int32       Int32       I32Array            i32             i32             y
-    int64       Int64       Int64       I64Array            i64             i64             y
+    int2        Int16       Int16       I16Array            i16             i16             y
+    int4        Int32       Int32       I32Array            i32             i32             y
+    int8        Int64       Int64       I64Array            i64             i64             y
     int256      Int256      Int256      Int256Array         Int256          Int256Ref<'_>   _
-    float32     Float32     Float32     F32Array            F32             F32             y
-    float64     Float64     Float64     F64Array            F64             F64             y
+    float4      Float32     Float32     F32Array            F32             F32             y
+    float8      Float64     Float64     F64Array            F64             F64             y
     decimal     Decimal     Decimal     DecimalArray        Decimal         Decimal         y
     serial      Serial      Serial      SerialArray         Serial          Serial          y
     date        Date        Date        DateArray           Date            Date            y
@@ -84,8 +84,8 @@ fn lookup_matrix(mut ty: &str, idx: usize) -> &str {
         ty = "struct";
     } else if ty == "void" {
         // XXX: we don't support void type yet.
-        //      replace it with int32 for now.
-        ty = "int32";
+        //      replace it with int for now.
+        ty = "int4";
     }
     let s = TYPE_MATRIX.trim().lines().find_map(|line| {
         let mut parts = line.split_whitespace();
@@ -106,9 +106,8 @@ pub fn expand_type_wildcard(ty: &str) -> Vec<&str> {
             .lines()
             .map(|l| l.split_whitespace().next().unwrap())
             .collect(),
-        "*int" => vec!["int16", "int32", "int64"],
-        "*numeric" => vec!["decimal"],
-        "*float" => vec!["float32", "float64"],
+        "*int" => vec!["int2", "int4", "int8"],
+        "*float" => vec!["float4", "float8"],
         _ => vec![ty],
     }
 }
@@ -124,32 +123,32 @@ pub fn min_compatible_type(types: &[impl AsRef<str>]) -> &str {
     match (types[0].as_ref(), types[1].as_ref()) {
         (a, b) if a == b => a,
 
-        ("int16", "int16") => "int16",
-        ("int16", "int32") => "int32",
-        ("int16", "int64") => "int64",
+        ("int2", "int2") => "int2",
+        ("int2", "int4") => "int4",
+        ("int2", "int8") => "int8",
 
-        ("int32", "int16") => "int32",
-        ("int32", "int32") => "int32",
-        ("int32", "int64") => "int64",
+        ("int4", "int2") => "int4",
+        ("int4", "int4") => "int4",
+        ("int4", "int8") => "int8",
 
-        ("int64", "int16") => "int64",
-        ("int64", "int32") => "int64",
-        ("int64", "int64") => "int64",
+        ("int8", "int2") => "int8",
+        ("int8", "int4") => "int8",
+        ("int8", "int8") => "int8",
 
-        ("int16", "int256") => "int256",
-        ("int32", "int256") => "int256",
-        ("int64", "int256") => "int256",
-        ("int256", "int16") => "int256",
-        ("int256", "int32") => "int256",
-        ("int256", "int64") => "int256",
-        ("int256", "float64") => "float64",
-        ("float64", "int256") => "float64",
+        ("int2", "int256") => "int256",
+        ("int4", "int256") => "int256",
+        ("int8", "int256") => "int256",
+        ("int256", "int2") => "int256",
+        ("int256", "int4") => "int256",
+        ("int256", "int8") => "int256",
+        ("int256", "float8") => "float8",
+        ("float8", "int256") => "float8",
 
-        ("float32", "float32") => "float32",
-        ("float32", "float64") => "float64",
+        ("float4", "float4") => "float4",
+        ("float4", "float8") => "float8",
 
-        ("float64", "float32") => "float64",
-        ("float64", "float64") => "float64",
+        ("float8", "float4") => "float8",
+        ("float8", "float8") => "float8",
 
         ("decimal", "decimal") => "decimal",
 

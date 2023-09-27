@@ -138,7 +138,6 @@ mod tests {
     use std::str::FromStr;
 
     use risingwave_common::array::Op;
-    use risingwave_common::cast::str_to_timestamp;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Decimal, JsonbVal, ScalarImpl, ToOwnedDatum};
     use serde_json::Value;
@@ -185,7 +184,7 @@ mod tests {
         assert_eq!(
             row.datum_at(2).to_owned_datum(),
             Some(ScalarImpl::Timestamp(
-                str_to_timestamp("2023-02-15 13:01:36").unwrap()
+                "2023-02-15 13:01:36".parse().unwrap()
             ))
         );
         assert_eq!(
@@ -197,7 +196,7 @@ mod tests {
         assert_eq!(
             row.datum_at(4).to_owned_datum(),
             Some(ScalarImpl::Timestamp(
-                str_to_timestamp("2022-10-13 12:12:54").unwrap()
+                "2022-10-13 12:12:54".parse().unwrap()
             ))
         );
         assert_eq!(
@@ -266,7 +265,7 @@ mod tests {
             assert_eq!(
                 row.datum_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2018-01-01 00:00:01").unwrap()
+                    "2018-01-01 00:00:01".parse().unwrap()
                 )))
             );
             assert_eq!(
