@@ -16,6 +16,7 @@ use std::backtrace::Backtrace;
 
 use risingwave_common::array::ArrayError;
 use risingwave_connector::error::ConnectorError;
+use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_storage::error::StorageError;
@@ -57,6 +58,9 @@ enum ErrorKind {
 
     #[error("Executor error: {0:?}")]
     Executor(#[source] StreamExecutorError),
+
+    #[error("Sink error: {0:?}")]
+    Sink(#[source] SinkError),
 
     #[error(transparent)]
     Internal(anyhow::Error),
@@ -112,6 +116,12 @@ impl From<ArrayError> for StreamError {
 impl From<StreamExecutorError> for StreamError {
     fn from(error: StreamExecutorError) -> Self {
         ErrorKind::Executor(error).into()
+    }
+}
+
+impl From<SinkError> for StreamError {
+    fn from(value: SinkError) -> Self {
+        ErrorKind::Sink(value).into()
     }
 }
 

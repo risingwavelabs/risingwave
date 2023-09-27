@@ -112,14 +112,14 @@ impl ManagedBarrierState {
                 .into_iter()
                 .map(|(actor, state)| CreateMviewProgress {
                     chain_actor_id: actor,
-                    done: matches!(state, ChainState::Done),
+                    done: matches!(state, ChainState::Done(_)),
                     consumed_epoch: match state {
                         ChainState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
-                        ChainState::Done => epoch,
+                        ChainState::Done(_) => epoch,
                     },
                     consumed_rows: match state {
                         ChainState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
-                        ChainState::Done => 0,
+                        ChainState::Done(consumed_rows) => consumed_rows,
                     },
                 })
                 .collect();

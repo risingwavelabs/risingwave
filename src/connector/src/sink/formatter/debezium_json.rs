@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use risingwave_common::array::Op;
 use risingwave_common::catalog::{Field, Schema};
 use serde_json::{json, Map, Value};
@@ -39,36 +41,43 @@ fn concat_debezium_name_field(db_name: &str, sink_from_name: &str, value: &str) 
     DEBEZIUM_NAME_FIELD_PREFIX.to_owned() + "." + db_name + "." + sink_from_name + "." + value
 }
 
-pub struct DebeziumJsonFormatter<'a> {
-    schema: &'a Schema,
-    pk_indices: &'a [usize],
-    db_name: &'a str,
-    sink_from_name: &'a str,
+pub struct DebeziumJsonFormatter {
+    schema: Schema,
+    pk_indices: Vec<usize>,
+    db_name: String,
+    sink_from_name: String,
     opts: DebeziumAdapterOpts,
-    ts_ms: u64,
+    key_encoder: JsonEncoder,
+    val_encoder: JsonEncoder,
 }
 
-impl<'a> DebeziumJsonFormatter<'a> {
+impl DebeziumJsonFormatter {
     pub fn new(
-        schema: &'a Schema,
-        pk_indices: &'a [usize],
-        db_name: &'a str,
-        sink_from_name: &'a str,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        db_name: String,
+        sink_from_name: String,
         opts: DebeziumAdapterOpts,
-        ts_ms: u64,
     ) -> Self {
+        let key_encoder = JsonEncoder::new(
+            schema.clone(),
+            Some(pk_indices.clone()),
+            TimestampHandlingMode::Milli,
+        );
+        let val_encoder = JsonEncoder::new(schema.clone(), None, TimestampHandlingMode::Milli);
         Self {
             schema,
             pk_indices,
             db_name,
             sink_from_name,
             opts,
-            ts_ms,
+            key_encoder,
+            val_encoder,
         }
     }
 }
 
-impl<'a> SinkFormatter for DebeziumJsonFormatter<'a> {
+impl SinkFormatter for DebeziumJsonFormatter {
     type K = Value;
     type V = Value;
 
@@ -83,18 +92,19 @@ impl<'a> SinkFormatter for DebeziumJsonFormatter<'a> {
                 db_name,
                 sink_from_name,
                 opts,
-                ts_ms,
+                key_encoder,
+                val_encoder,
             } = self;
+            let ts_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
             let source_field = json!({
                 "db": db_name,
                 "table": sink_from_name,
             });
 
             let mut update_cache: Option<Map<String, Value>> = None;
-
-            let key_encoder =
-                JsonEncoder::new(schema, Some(pk_indices), TimestampHandlingMode::Milli);
-            let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
 
             for (op, row) in chunk.rows() {
                 let event_key_object: Option<Value> = Some(json!({
@@ -338,7 +348,8 @@ mod tests {
             },
         ]);
 
-        let json_chunk = chunk_to_json(chunk, &schema).unwrap();
+        let encoder = JsonEncoder::new(schema.clone(), None, TimestampHandlingMode::Milli);
+        let json_chunk = chunk_to_json(chunk, &encoder).unwrap();
         let schema_json = schema_to_json(&schema, "test_db", "test_table");
         assert_eq!(schema_json, serde_json::from_str::<Value>("{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"source\",\"fields\":[{\"field\":\"db\",\"optional\":false,\"type\":\"string\"},{\"field\":\"table\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Source\",\"optional\":false,\"type\":\"struct\"},{\"field\":\"op\",\"optional\":false,\"type\":\"string\"},{\"field\":\"ts_ms\",\"optional\":false,\"type\":\"int64\"}],\"name\":\"RisingWave.test_db.test_table.Envelope\",\"optional\":false,\"type\":\"struct\"}").unwrap());
         assert_eq!(

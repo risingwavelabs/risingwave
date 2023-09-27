@@ -17,18 +17,18 @@ use risingwave_common::types::Datum;
 
 use super::{Access, AccessError, ChangeEvent};
 use crate::parser::unified::ChangeEventOperation;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::SourceStreamChunkRowWriter;
 
 pub fn apply_delete_on_stream_chunk_writer(
     row_op: impl ChangeEvent,
     writer: &mut SourceStreamChunkRowWriter<'_>,
-) -> std::result::Result<WriteGuard, RwError> {
+) -> std::result::Result<(), RwError> {
     writer.delete(|column| {
         let res = row_op.access_field(&column.name, &column.data_type);
         match res {
             Ok(datum) => Ok(datum),
             Err(e) => {
-                tracing::error!(name=?column.name, data_type=?&column.data_type, err=?e, "delete column error");
+                tracing::error!(name=column.name, data_type=%column.data_type, err=%e, "delete column error");
                 if column.is_pk {
                     // It should be an error when pk column is missing in the message
                     Err(e)?
@@ -43,7 +43,7 @@ pub fn apply_delete_on_stream_chunk_writer(
 pub fn apply_upsert_on_stream_chunk_writer(
     row_op: impl ChangeEvent,
     writer: &mut SourceStreamChunkRowWriter<'_>,
-) -> std::result::Result<WriteGuard, RwError> {
+) -> std::result::Result<(), RwError> {
     writer.insert(|column| {
         let res = match row_op.access_field(&column.name, &column.data_type) {
             Ok(o) => Ok(o),
@@ -69,7 +69,7 @@ pub fn apply_row_operation_on_stream_chunk_writer_with_op(
     row_op: impl ChangeEvent,
     writer: &mut SourceStreamChunkRowWriter<'_>,
     op: ChangeEventOperation,
-) -> std::result::Result<WriteGuard, RwError> {
+) -> std::result::Result<(), RwError> {
     match op {
         ChangeEventOperation::Upsert => apply_upsert_on_stream_chunk_writer(row_op, writer),
         ChangeEventOperation::Delete => apply_delete_on_stream_chunk_writer(row_op, writer),
@@ -79,7 +79,7 @@ pub fn apply_row_operation_on_stream_chunk_writer_with_op(
 pub fn apply_row_operation_on_stream_chunk_writer(
     row_op: impl ChangeEvent,
     writer: &mut SourceStreamChunkRowWriter<'_>,
-) -> std::result::Result<WriteGuard, RwError> {
+) -> std::result::Result<(), RwError> {
     let op = row_op.op()?;
     apply_row_operation_on_stream_chunk_writer_with_op(row_op, writer, op)
 }
@@ -87,7 +87,7 @@ pub fn apply_row_operation_on_stream_chunk_writer(
 pub fn apply_row_accessor_on_stream_chunk_writer(
     accessor: impl Access,
     writer: &mut SourceStreamChunkRowWriter<'_>,
-) -> Result<WriteGuard, RwError> {
+) -> Result<(), RwError> {
     writer.insert(|column| {
         let res: Result<Datum, RwError> = match accessor
             .access(&[&column.name], Some(&column.data_type))

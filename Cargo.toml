@@ -10,13 +10,15 @@ members = [
   "src/compute",
   "src/connector",
   "src/ctl",
-  "src/expr",
+  "src/expr/core",
+  "src/expr/impl",
   "src/expr/macro",
   "src/frontend",
   "src/frontend/planner_test",
   "src/java_binding",
   "src/jni_core",
   "src/meta",
+  "src/meta/src/model_v2/migration",
   "src/object_store",
   "src/prost",
   "src/prost/helpers",
@@ -125,7 +127,8 @@ risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
-risingwave_expr = { path = "./src/expr" }
+risingwave_expr = { path = "./src/expr/core" }
+risingwave_expr_impl = { path = "./src/expr/impl" }
 risingwave_frontend = { path = "./src/frontend" }
 risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
 risingwave_hummock_test = { path = "./src/storage/hummock_test" }

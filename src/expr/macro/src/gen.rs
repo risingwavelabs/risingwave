@@ -80,7 +80,7 @@ impl FunctionAttr {
         };
         let deprecated = self.deprecated;
         Ok(quote! {
-            #[risingwave_expr::ctor]
+            #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { risingwave_expr::sig::func::_register(#descriptor_type {
@@ -413,10 +413,10 @@ impl FunctionAttr {
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::row::OwnedRow;
                 use risingwave_common::util::iter_util::ZipEqFast;
-                use itertools::multizip;
 
                 use risingwave_expr::expr::{Context, BoxedExpression};
                 use risingwave_expr::Result;
+                use risingwave_expr::codegen::*;
 
                 #check_children
                 let prebuilt_arg = #prebuild_const;
@@ -431,7 +431,7 @@ impl FunctionAttr {
                     children: Vec<BoxedExpression>,
                     prebuilt_arg: #prebuilt_arg_type,
                 }
-                #[async_trait::async_trait]
+                #[async_trait]
                 impl risingwave_expr::expr::Expression for #struct_name {
                     fn return_type(&self) -> DataType {
                         self.context.return_type.clone()
@@ -502,11 +502,11 @@ impl FunctionAttr {
             self.generate_agg_build_fn(user_fn)?
         };
         Ok(quote! {
-            #[risingwave_expr::ctor]
+            #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { risingwave_expr::sig::agg::_register(#descriptor_type {
-                    func: risingwave_expr::agg::AggKind::#pb_type,
+                    func: risingwave_expr::aggregate::AggKind::#pb_type,
                     inputs_type: &[#(#args),*],
                     state_type: #state_type,
                     ret_type: #ret,
@@ -676,7 +676,8 @@ impl FunctionAttr {
                 use risingwave_common::estimate_size::EstimateSize;
 
                 use risingwave_expr::Result;
-                use risingwave_expr::agg::AggregateState;
+                use risingwave_expr::aggregate::AggregateState;
+                use risingwave_expr::codegen::async_trait;
 
                 #[derive(Clone)]
                 struct Agg {
@@ -684,8 +685,8 @@ impl FunctionAttr {
                     #function_field
                 }
 
-                #[async_trait::async_trait]
-                impl risingwave_expr::agg::AggregateFunction for Agg {
+                #[async_trait]
+                impl risingwave_expr::aggregate::AggregateFunction for Agg {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }
@@ -783,7 +784,7 @@ impl FunctionAttr {
             quote! { |_| Ok(#ty) }
         };
         Ok(quote! {
-            #[risingwave_expr::ctor]
+            #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { risingwave_expr::sig::table_function::_register(#descriptor_type {
@@ -902,7 +903,9 @@ impl FunctionAttr {
                 use risingwave_common::types::*;
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::util::iter_util::ZipEqFast;
-                use itertools::multizip;
+                use risingwave_expr::expr::BoxedExpression;
+                use risingwave_expr::{Result, ExprError};
+                use risingwave_expr::codegen::*;
 
                 risingwave_expr::ensure!(children.len() == #num_args);
                 let mut iter = children.into_iter();
@@ -923,7 +926,7 @@ impl FunctionAttr {
                     #(#child: BoxedExpression,)*
                     prebuilt_arg: #prebuilt_arg_type,
                 }
-                #[async_trait::async_trait]
+                #[async_trait]
                 impl risingwave_expr::table_function::TableFunction for #struct_name {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
@@ -1005,7 +1008,7 @@ fn data_type(ty: &str) -> TokenStream2 {
 /// Extract multiple output types.
 ///
 /// ```ignore
-/// output_types("int32") -> ["int32"]
+/// output_types("int4") -> ["int4"]
 /// output_types("struct<key varchar, value jsonb>") -> ["varchar", "jsonb"]
 /// ```
 fn output_types(ty: &str) -> Vec<&str> {

@@ -140,7 +140,7 @@ impl StreamMaterialize {
                 TableType::MaterializedView => {
                     assert_matches!(user_distributed_by, RequiredDist::Any);
                     // ensure the same pk will not shuffle to different node
-                    RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
+                    RequiredDist::shard_by_key(input.schema().len(), input.stream_key())
                 }
                 TableType::Index => {
                     assert_matches!(
@@ -292,7 +292,7 @@ impl PlanTreeNodeUnary for StreamMaterialize {
                 assert_eq!(a.type_name, b.type_name);
                 assert_eq!(a.sub_fields, b.sub_fields);
             });
-        assert_eq!(new.plan_base().logical_pk, self.plan_base().logical_pk);
+        assert_eq!(new.plan_base().stream_key, self.plan_base().stream_key);
         new
     }
 }
