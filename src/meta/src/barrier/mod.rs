@@ -697,6 +697,7 @@ impl GlobalBarrierManager {
 
         let command_ctx = Arc::new(CommandContext::new(
             self.fragment_manager.clone(),
+            self.catalog_manager.clone(),
             self.env.stream_client_pool_ref(),
             info,
             prev_epoch.clone(),
@@ -994,14 +995,13 @@ impl GlobalBarrierManager {
                 };
                 if let Err(e) = res.as_ref() {
                     tracing::error!("Failed to finish stream job: {e:?}");
-                    catalog_manager
-                        .cancel_create_table_procedure(&table, fragment_manager)
-                        .await
-                        .unwrap();
+                    // catalog_manager
+                    //     .cancel_create_table_procedure(&table, fragment_manager)
+                    //     .await
+                    //     .unwrap();
                 }
                 // FIXME: Should copy the functionality from DDLController,
                 // and call cancel_stream_job here if any part of this failed.
-                res.unwrap();
             });
         }
         Ok(())

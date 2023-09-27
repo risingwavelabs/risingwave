@@ -36,7 +36,7 @@ use uuid::Uuid;
 use super::info::BarrierActorInfo;
 use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
-use crate::manager::{FragmentManagerRef, WorkerId};
+use crate::manager::{CatalogManagerRef, FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
 use crate::MetaResult;
@@ -217,6 +217,7 @@ impl Command {
 /// [`Command`].
 pub struct CommandContext {
     fragment_manager: FragmentManagerRef,
+    catalog_manager: CatalogManagerRef,
 
     client_pool: StreamClientPoolRef,
 
@@ -247,6 +248,7 @@ impl CommandContext {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         fragment_manager: FragmentManagerRef,
+        catalog_manager: CatalogManagerRef,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
         prev_epoch: TracedEpoch,
@@ -259,6 +261,7 @@ impl CommandContext {
     ) -> Self {
         Self {
             fragment_manager,
+            catalog_manager,
             client_pool,
             info: Arc::new(info),
             prev_epoch,
@@ -663,6 +666,12 @@ impl CommandContext {
             Command::CancelStreamingJob(table_fragments) => {
                 let node_actors = table_fragments.worker_actor_ids();
                 self.clean_up(node_actors).await?;
+                self.catalog_manager
+                    .cancel_create_table_procedure_with_id(
+                        table_fragments.table_id().table_id,
+                        self.fragment_manager.clone(),
+                    )
+                    .await?;
                 // Drop fragment info in meta store.
                 self.fragment_manager
                     .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(

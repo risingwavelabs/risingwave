@@ -193,6 +193,7 @@ impl GlobalBarrierManager {
                     // Inject the `Initial` barrier to initialize all executors.
                     let command_ctx = Arc::new(CommandContext::new(
                         self.fragment_manager.clone(),
+                        self.catalog_manager.clone(),
                         self.env.stream_client_pool_ref(),
                         info,
                         prev_epoch.clone(),

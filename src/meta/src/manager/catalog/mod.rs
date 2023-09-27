@@ -842,12 +842,40 @@ impl CatalogManager {
         Ok(version)
     }
 
+    pub async fn cancel_create_table_procedure_with_id(
+        &self,
+        table_id: TableId,
+        fragment_manager: FragmentManagerRef,
+    ) -> MetaResult<()> {
+        {
+            let core = &mut *self.core.lock().await;
+            let database_core = &mut core.database;
+            let tables = &mut database_core.tables;
+            if let Some(table) = tables.get(&table_id).cloned() {
+                self.cancel_create_table_procedure_inner(core, &table, fragment_manager)
+                    .await?;
+                return Ok(());
+            }
+        }
+        bail!("Table ID: {table_id} missing when attempting to cancel job")
+    }
+
     pub async fn cancel_create_table_procedure(
         &self,
         table: &Table,
         fragment_manager: FragmentManagerRef,
     ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
+        self.cancel_create_table_procedure_inner(core, table, fragment_manager)
+            .await
+    }
+
+    pub async fn cancel_create_table_procedure_inner(
+        &self,
+        core: &mut CatalogManagerCore,
+        table: &Table,
+        fragment_manager: FragmentManagerRef,
+    ) -> MetaResult<()> {
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         Self::check_table_creating(&database_core.tables, &table);

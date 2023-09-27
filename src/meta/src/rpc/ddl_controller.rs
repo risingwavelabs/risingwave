@@ -735,9 +735,10 @@ impl DdlController {
         match stream_job {
             StreamingJob::MaterializedView(table) => {
                 creating_internal_table_ids.push(table.id);
-                self.catalog_manager
-                    .cancel_create_table_procedure(table, self.fragment_manager.clone())
-                    .await?;
+                // barrier manager will do the cleanup.
+                // self.catalog_manager
+                //     .cancel_create_table_procedure(table, self.fragment_manager.clone())
+                //     .await?;
             }
             StreamingJob::Sink(sink) => {
                 self.catalog_manager
@@ -751,9 +752,13 @@ impl DdlController {
                         .cancel_create_table_procedure_with_source(source, table)
                         .await;
                 } else {
-                    self.catalog_manager
-                        .cancel_create_table_procedure(table, self.fragment_manager.clone())
-                        .await?;
+                    // FIXME: Perhaps we still need to do some cleanup here???
+                    // Or we need to revert the cancel table, and only drop
+                    // the tables from meta store in barrier manager,
+                    // and do other cleanups here?
+                    // self.catalog_manager
+                    //     .cancel_create_table_procedure(table, self.fragment_manager.clone())
+                    //     .await?;
                 }
             }
             StreamingJob::Index(index, table) => {

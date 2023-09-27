@@ -112,22 +112,25 @@ impl CreatingStreamingJobInfo {
         jobs.remove(&job_id);
     }
 
-    async fn cancel_jobs(&self, job_ids: Vec<TableId>) -> HashMap<TableId, oneshot::Receiver<()>> {
+    async fn cancel_jobs(&self, job_ids: Vec<TableId>) -> (HashMap<TableId, oneshot::Receiver<()>>, Vec<TableId>) {
         let mut jobs = self.streaming_jobs.lock().await;
         let mut receivers = HashMap::new();
+        let mut recovered_job_ids = vec![];
         for job_id in job_ids {
             if let Some(job) = jobs.get_mut(&job_id)
                 && let Some(shutdown_tx) = job.shutdown_tx.take()
             {
                 let (tx, rx) = oneshot::channel();
-                if shutdown_tx.send(CreatingState::Canceling{finish_tx: tx}).await.is_ok() {
+                if shutdown_tx.send(CreatingState::Canceling { finish_tx: tx }).await.is_ok() {
                     receivers.insert(job_id, rx);
                 } else {
                     tracing::warn!("failed to send canceling state");
                 }
+            } else {
+                recovered_job_ids.push(job_id);
             }
         }
-        receivers
+        (receivers, recovered_job_ids)
     }
 }
 
@@ -559,7 +562,7 @@ impl GlobalStreamManager {
         }
 
         let _reschedule_job_lock = self.reschedule_lock.read().await;
-        let receivers = self.creating_job_info.cancel_jobs(table_ids).await;
+        let (receivers, recovered_job_ids) = self.creating_job_info.cancel_jobs(table_ids).await;
 
         let futures = receivers.into_iter().map(|(id, receiver)| async move {
             if receiver.await.is_ok() {
@@ -570,7 +573,19 @@ impl GlobalStreamManager {
                 None
             }
         });
-        join_all(futures).await.into_iter().flatten().collect_vec()
+        let mut cancelled_ids = join_all(futures).await.into_iter().flatten().collect_vec();
+        let fragments = self
+            .fragment_manager
+            .select_table_fragments_by_ids(&recovered_job_ids)
+            .await
+            .expect("recovered table should have fragment");
+        for fragment in fragments {
+            self.barrier_scheduler
+                .run_command(Command::CancelStreamingJob(fragment))
+                .await.expect("should be able to cancel recovered stream job");
+        }
+        cancelled_ids.extend(recovered_job_ids);
+        cancelled_ids
     }
 }
 
