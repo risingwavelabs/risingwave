@@ -348,7 +348,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
         for agg_call in &this.agg_calls {
             let agg_call_filter_res =
-                agg_call_filter_res(&this.actor_ctx, &this.info.identity, agg_call, &chunk).await?;
+                agg_call_filter_res(&this.info.identity, agg_call, &chunk).await?;
             call_visibilities.push(agg_call_filter_res);
         }
 

@@ -23,7 +23,6 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::aggregate::{AggCall, AggKind};
 use risingwave_storage::StateStore;
 
-use super::ActorContextRef;
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::Executor;
@@ -60,7 +59,6 @@ pub fn generate_agg_schema(
 }
 
 pub async fn agg_call_filter_res(
-    _ctx: &ActorContextRef,
     _identity: &str,
     agg_call: &AggCall,
     chunk: &DataChunk,
