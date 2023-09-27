@@ -65,7 +65,7 @@ test_background_ddl_recovery() {
   OLD_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
 
   # Restart
-  cargo make ci-kill
+  cargo make kill
   cargo make dev ci-1cn-1fe-with-recovery
 
   # Test after recovery
@@ -89,7 +89,7 @@ test_background_ddl_recovery() {
 
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/recovery/drop.slt"
 
-  cargo make ci-kill
+  cargo make kill
 }
 
 # Test foreground ddl should not recover
@@ -104,7 +104,7 @@ test_foreground_ddl_no_recover() {
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/validate.slt"
 
   # Restart
-  cargo make ci-kill
+  cargo make kill
   cargo make dev ci-1cn-1fe-with-recovery
 
   # Leave sometime for recovery
@@ -115,13 +115,13 @@ test_foreground_ddl_no_recover() {
 
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/drop.slt"
 
-  cargo make ci-kill
+  cargo make kill
 }
 
 main() {
   set -euo pipefail
   # test_snapshot_and_upstream_read
-  # test_background_ddl_recovery
+  test_background_ddl_recovery
   test_foreground_ddl_no_recover
 }
 

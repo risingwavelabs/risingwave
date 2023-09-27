@@ -978,6 +978,7 @@ impl GlobalBarrierManager {
         drop(tracker);
         for (table, internal_tables, finished) in receivers {
             let catalog_manager = self.catalog_manager.clone();
+            let fragment_manager = self.fragment_manager.clone();
             tokio::spawn(async move {
                 let res: MetaResult<()> = try {
                     finished
@@ -988,11 +989,15 @@ impl GlobalBarrierManager {
                     // and mark catalog as created and commit to meta.
                     // both of these are done by catalog manager.
                     catalog_manager
-                        .finish_create_table_procedure(internal_tables, table)
+                        .finish_create_table_procedure(internal_tables, table.clone())
                         .await?;
                 };
                 if let Err(e) = res.as_ref() {
                     tracing::error!("Failed to finish stream job: {e:?}");
+                    catalog_manager
+                        .cancel_create_table_procedure(&table, fragment_manager)
+                        .await
+                        .unwrap();
                 }
                 // FIXME: Should copy the functionality from DDLController,
                 // and call cancel_stream_job here if any part of this failed.
