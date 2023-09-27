@@ -14,13 +14,10 @@
 
 use std::borrow::BorrowMut;
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use etcd_client::{ConnectOptions, Error, GetOptions, LeaderKey, ResignOptions};
 use risingwave_common::bail;
-use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use tokio::sync::watch::Receiver;
 use tokio::sync::{oneshot, watch};
 use tokio::time;
@@ -34,7 +31,6 @@ pub struct EtcdElectionClient {
     id: String,
     is_leader_sender: watch::Sender<bool>,
     client: WrappedEtcdClient,
-    runtime: Arc<BackgroundShutdownRuntime>,
 }
 
 #[async_trait::async_trait]
@@ -115,7 +111,7 @@ impl ElectionClient for EtcdElectionClient {
 
         let lease_client = self.client.clone();
 
-        let handle = self.runtime.spawn(async move {
+        let handle = tokio::task::spawn(async move {
             let (mut keeper, mut resp_stream) = match lease_client.keep_alive(lease_id).await {
                 Ok(resp) => resp,
                 Err(e) => {
@@ -333,19 +329,10 @@ impl EtcdElectionClient {
 
         let client = WrappedEtcdClient::connect(endpoints, options, auth_enabled).await?;
 
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .thread_name("risingwave-election-client")
-            .enable_all()
-            .build()
-            .map_err(|e| anyhow!(e))?;
-
-        let runtime: Arc<BackgroundShutdownRuntime> = Arc::new(runtime.into());
-
         Ok(Self {
             id,
             is_leader_sender: sender,
             client,
-            runtime,
         })
     }
 }

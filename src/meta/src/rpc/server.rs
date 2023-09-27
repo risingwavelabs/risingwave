@@ -226,22 +226,14 @@ pub fn rpc_serve_with_store(
     let leader_lost_handle = if let Some(election_client) = election_client.clone() {
         let stop_rx = svc_shutdown_tx.subscribe();
 
-        let runtime_ref = election_client.runtime_ref();
-
-        let future = async move {
+        let handle = tokio::spawn(async move {
             while let Err(e) = election_client
                 .run_once(lease_interval_secs as i64, stop_rx.clone())
                 .await
             {
                 tracing::error!("election error happened, {}", e.to_string());
             }
-        };
-
-        let handle = if let Some(runtime) = runtime_ref {
-            runtime.spawn(future)
-        } else {
-            tokio::spawn(future)
-        };
+        });
 
         Some(handle)
     } else {
