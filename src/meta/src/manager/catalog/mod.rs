@@ -840,7 +840,6 @@ impl CatalogManager {
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
     ) -> MetaResult<()> {
-        println!("Calling cancel for: {table_id}");
         let core = &mut self.core.lock().await;
         let table = {
             let database_core = &mut core.database;
@@ -882,7 +881,6 @@ impl CatalogManager {
         table_id: TableId,
         fragment: &TableFragments,
     ) -> MetaResult<()> {
-        println!("Calling cancel for: {table_id}");
         let core = &mut self.core.lock().await;
         let table = {
             let database_core = &mut core.database;
