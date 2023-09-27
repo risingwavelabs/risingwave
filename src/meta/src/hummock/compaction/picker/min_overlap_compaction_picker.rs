@@ -379,10 +379,10 @@ pub mod tests {
     pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
 
     use super::*;
-    use crate::hummock::compaction::level_selector::tests::{
+    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
+    use crate::hummock::compaction::selector::tests::{
         generate_l0_nonoverlapping_sublevels, generate_table,
     };
-    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
 
     #[test]
     fn test_compact_l1() {

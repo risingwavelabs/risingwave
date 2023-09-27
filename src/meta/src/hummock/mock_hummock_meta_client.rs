@@ -38,8 +38,8 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use crate::hummock::compaction::{
-    default_level_selector, LevelSelector, SpaceReclaimCompactionSelector,
+use crate::hummock::compaction::selector::{
+    default_compaction_selector, CompactionSelector, SpaceReclaimCompactionSelector,
 };
 use crate::hummock::HummockManager;
 
@@ -81,7 +81,7 @@ impl MockHummockMetaClient {
         self.hummock_manager
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                &mut default_level_selector(),
+                &mut default_compaction_selector(),
             )
             .await
             .unwrap_or(None)
@@ -244,8 +244,8 @@ impl HummockMetaClient for MockHummockMetaClient {
 
                 let (group, task_type) = group_and_type.unwrap();
 
-                let mut selector: Box<dyn LevelSelector> = match task_type {
-                    compact_task::TaskType::Dynamic => default_level_selector(),
+                let mut selector: Box<dyn CompactionSelector> = match task_type {
+                    compact_task::TaskType::Dynamic => default_compaction_selector(),
                     compact_task::TaskType::SpaceReclaim => {
                         Box::<SpaceReclaimCompactionSelector>::default()
                     }

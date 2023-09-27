@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Op, Vis};
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::types::Interval;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
@@ -142,7 +142,7 @@ impl HopWindowExecutor {
                     let chunk = chunk.compact();
                     let (data_chunk, ops) = chunk.into_parts();
                     // SAFETY: Already compacted.
-                    assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
+                    assert!(data_chunk.is_compacted());
                     let len = data_chunk.cardinality();
 
                     // Collect each window's data into a chunk.
@@ -290,7 +290,7 @@ mod tests {
            U+ 6 2 ^10:42:00
             - 7 1 ^10:51:00
             + 8 3 ^11:02:00"
-                .replace('^', "2022-2-2T"),
+                .replace('^', "2022-02-02T"),
         );
         let input =
             MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
@@ -354,7 +354,7 @@ mod tests {
                 - 7 1 ^10:51:00 ^10:45:00 ^11:15:00
                 + 8 3 ^11:02:00 ^10:45:00 ^11:15:00
                 + 8 3 ^11:02:00 ^11:00:00 ^11:30:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
     }
@@ -387,7 +387,7 @@ mod tests {
                 - ^11:15:00 1 7 ^10:51:00
                 + ^11:15:00 3 8 ^11:02:00
                 + ^11:30:00 3 8 ^11:02:00"
-                    .replace('^', "2022-2-2T"),
+                    .replace('^', "2022-02-02T"),
             )
         );
     }

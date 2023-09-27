@@ -17,6 +17,8 @@
 
 //! Data-driven tests.
 
+risingwave_expr_impl::enable!();
+
 mod resolve_id;
 
 use std::collections::{BTreeMap, HashMap, HashSet};

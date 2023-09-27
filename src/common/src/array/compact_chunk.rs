@@ -25,7 +25,7 @@ use crate::array::{Op, RowRef, StreamChunk};
 use crate::row::{Project, RowExt};
 use crate::util::hash_util::Crc32FastBuilder;
 
-/// Compact the stream chunks with just modify the `Ops` and `Vis` of the chunk. Currently, two
+/// Compact the stream chunks with just modify the `Ops` and visibility of the chunk. Currently, two
 /// transformation will be applied
 /// - remove intermediate operation of the same key. The operations of the same stream key will only
 ///   have three kind of patterns Insert, Delete or Update.
@@ -121,9 +121,6 @@ impl StreamChunkCompactor {
         let mut op_row_map: OpRowMap<'_, '_> = new_prehashed_map_with_capacity(estimate_size);
         for (hash_values, c) in &mut chunks {
             for (row, mut op_row) in c.to_rows_mut() {
-                if !op_row.vis() {
-                    continue;
-                }
                 op_row.set_op(op_row.op().normalize_update());
                 let hash = hash_values[row.index()];
                 let stream_key = row.project(&key_indices);

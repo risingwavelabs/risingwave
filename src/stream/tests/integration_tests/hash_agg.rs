@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
 
 use crate::prelude::*;

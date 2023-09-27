@@ -422,13 +422,28 @@ pub struct StreamingConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub enum MetricLevel {
     #[default]
     Disabled = 0,
     Critical = 1,
     Info = 2,
     Debug = 3,
+}
+
+impl clap::ValueEnum for MetricLevel {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Disabled, Self::Critical, Self::Info, Self::Debug]
+    }
+
+    fn to_possible_value<'a>(&self) -> ::std::option::Option<clap::builder::PossibleValue> {
+        match self {
+            Self::Disabled => Some(clap::builder::PossibleValue::new("disabled").alias("0")),
+            Self::Critical => Some(clap::builder::PossibleValue::new("critical")),
+            Self::Info => Some(clap::builder::PossibleValue::new("info").alias("1")),
+            Self::Debug => Some(clap::builder::PossibleValue::new("debug")),
+        }
+    }
 }
 
 impl PartialEq<Self> for MetricLevel {
@@ -563,6 +578,8 @@ pub struct StorageConfig {
     pub compact_iter_recreate_timeout_ms: u64,
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
+    #[serde(default = "default::storage::enable_fast_compaction")]
+    pub enable_fast_compaction: bool,
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -654,6 +671,16 @@ impl AsyncStackTraceOption {
             Self::ReleaseVerbose => Some(!cfg!(debug_assertions)),
         }
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, ValueEnum)]
+pub enum CompactorMode {
+    #[default]
+    #[clap(alias = "dedicated")]
+    Dedicated,
+
+    #[clap(alias = "shared")]
+    Shared,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
@@ -1030,6 +1057,10 @@ pub mod default {
 
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
+        }
+
+        pub fn enable_fast_compaction() -> bool {
+            true
         }
     }
 

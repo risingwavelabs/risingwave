@@ -31,7 +31,7 @@ use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 #[cfg(test)]
-use crate::hummock::compaction::default_level_selector;
+use crate::hummock::compaction::selector::default_compaction_selector;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{
     ClusterManager, ClusterManagerRef, FragmentManager, MetaSrvEnv, META_NODE_ID,
@@ -92,7 +92,7 @@ pub async fn add_test_tables(
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
-    let mut selector = default_level_selector();
+    let mut selector = default_compaction_selector();
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)
         .await
@@ -114,10 +114,15 @@ pub async fn add_test_tables(
             .unwrap();
         assert_eq!(compactor.context_id(), context_id);
     }
-    compact_task.sorted_output_ssts = test_tables_2.clone();
-    compact_task.set_task_status(TaskStatus::Success);
+
     let ret = hummock_manager
-        .report_compact_task(&mut compact_task, None)
+        .report_compact_task_for_test(
+            compact_task.task_id,
+            Some(compact_task),
+            TaskStatus::Success,
+            test_tables_2.clone(),
+            None,
+        )
         .await
         .unwrap();
     assert!(ret);

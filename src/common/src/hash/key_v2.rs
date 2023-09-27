@@ -321,7 +321,7 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
             dispatch_array_variants!(array, array, {
                 for ((scalar, visible), serializer) in array
                     .iter()
-                    .zip_eq_fast(data_chunk.vis().iter())
+                    .zip_eq_fast(data_chunk.visibility().iter())
                     .zip_eq_fast(&mut serializers)
                 {
                     if visible {
@@ -386,7 +386,7 @@ impl DataChunk {
         }
 
         let mut sizes = self
-            .vis()
+            .visibility()
             .iter()
             .map(|visible| if visible { exact_size } else { 0 })
             .collect_vec();
@@ -395,7 +395,7 @@ impl DataChunk {
             dispatch_array_variants!(&*self.columns()[i], col, {
                 for ((datum, visible), size) in col
                     .iter()
-                    .zip_eq_fast(self.vis().iter())
+                    .zip_eq_fast(self.visibility().iter())
                     .zip_eq_fast(&mut sizes)
                 {
                     if visible && let Some(scalar) = datum {
