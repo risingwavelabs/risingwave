@@ -151,7 +151,7 @@ test_foreground_ddl_cancel() {
   cancel_stream_jobs
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/validate_after_cancel.slt"
 
-  run_sql "CREATE MATERIALIZED VIEW m1 as select * FROM t;"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/create_mv_after_cancel.slt"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/drop.slt"
 
   cargo make kill
@@ -187,9 +187,9 @@ main() {
   set -euo pipefail
   # test_snapshot_and_upstream_read
   # test_background_ddl_recovery
-  test_background_ddl_cancel
+  # test_background_ddl_cancel
   # test_foreground_ddl_no_recover
-  # test_foreground_ddl_cancel
+  test_foreground_ddl_cancel
 }
 
 main

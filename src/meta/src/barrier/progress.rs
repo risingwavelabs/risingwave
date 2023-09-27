@@ -340,8 +340,6 @@ impl CreateMviewProgressTracker {
             return Some(command);
         }
 
-        let ddl_epoch = command.context.curr_epoch.value();
-
         let (creating_mv_id, upstream_mv_count, upstream_total_key_count, definition) =
             if let Command::CreateStreamingJob {
                 table_fragments,
