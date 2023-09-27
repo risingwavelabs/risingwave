@@ -195,7 +195,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         // after compacting with the stream key, the two event with the same used defined sink pk must have different stream key.
         // So the delete event is not to delete the inserted record in our internal streaming SQL semantic.
-        if stream_key_sink_pk_mismatch {
+        if stream_key_sink_pk_mismatch && sink_type != SinkType::AppendOnly {
             let mut chunk_buffer = StreamChunkCompactor::new(stream_key.clone());
             let mut watermark = None;
             #[for_await]
@@ -214,7 +214,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         )
                         .into_compacted_chunks()
                         {
-                            delete_chunks.push(force_delete_only(c.clone()));
+                            if sink_type != SinkType::ForceAppendOnly {
+                                // Force append-only by dropping UPDATE/DELETE messages. We do this when the
+                                // user forces the sink to be append-only while it is actually not based on
+                                // the frontend derivation result.
+                                delete_chunks.push(force_delete_only(c.clone()));
+                            }
                             insert_chunks.push(force_append_only(c));
                         }
 
