@@ -200,6 +200,6 @@ mod tests {
     #[test]
     fn test_window_start_overflow() {
         get_window_start(i64::MIN, Interval::from_millis(20)).unwrap_err();
-        interval_to_micro_second(Interval::from_millis(i64::MAX)).unwrap_err();
+        interval_to_micro_second(Interval::from_month_day_usec(1, 1, i64::MAX)).unwrap_err();
     }
 }
