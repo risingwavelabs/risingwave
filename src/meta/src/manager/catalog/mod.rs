@@ -768,6 +768,8 @@ impl CatalogManager {
                     || t.create_type == CreateType::Unspecified as i32
             })
             .collect_vec();
+
+        println!("cleaning tables: {:#?}", &tables);
         let mut table_ids = vec![];
         let mv_table_ids = tables.iter().map(|t| t.id).collect_vec();
         for table_id in &mv_table_ids {
@@ -781,12 +783,19 @@ impl CatalogManager {
 
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
+        for table in &tables {
+            for relation_id in &table.dependent_relations {
+                database_core.decrease_ref_count(*relation_id);
+            }
+        }
+
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
         for table_id in table_ids {
             let table = tables.remove(table_id);
             assert!(table.is_some())
         }
+        commit_meta!(self, tables)?;
         Ok(())
     }
 
@@ -845,16 +854,7 @@ impl CatalogManager {
             database_core.decrease_ref_count(dependent_relation_id);
         }
         user_core.decrease_ref(table.owner);
-        // TODO: cancel should also follow the mechanism here to purge the creating tables.
-
-        self.drop_relation_inner(
-            core,
-            RelationIdEnum::Table(table.id),
-            fragment_manager,
-            DropMode::Restrict,
-        )
-        .await
-        .expect("Drop a newly creating relation should never fail");
+        self.clean_dirty_tables(fragment_manager).await.unwrap();
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.
@@ -865,17 +865,6 @@ impl CatalogManager {
         drop_mode: DropMode,
     ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
         let core = &mut *self.core.lock().await;
-        self.drop_relation_inner(core, relation, fragment_manager, drop_mode)
-            .await
-    }
-
-    pub async fn drop_relation_inner(
-        &self,
-        core: &mut CatalogManagerCore,
-        relation: RelationIdEnum,
-        fragment_manager: FragmentManagerRef,
-        drop_mode: DropMode,
-    ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
