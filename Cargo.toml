@@ -18,6 +18,7 @@ members = [
   "src/java_binding",
   "src/jni_core",
   "src/meta",
+  "src/meta/src/model_v2/migration",
   "src/object_store",
   "src/prost",
   "src/prost/helpers",

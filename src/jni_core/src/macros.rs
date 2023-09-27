@@ -167,6 +167,10 @@ macro_rules! for_all_plain_native_methods {
                 static native long streamChunkIteratorFromPretty(String str);
 
                 public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
+
+                public static native byte[] recvSinkWriterRequestFromChannel(long channelPtr);
+
+                public static native boolean sendSinkWriterResponseToChannel(long channelPtr, byte[] msg);
             }
             $(,$args)*
         }

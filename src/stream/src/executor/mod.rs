@@ -32,7 +32,6 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::BoxedExpression;
-use risingwave_expr::ExprError;
 use risingwave_pb::data::{PbDatum, PbEpoch};
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, PbMutation};
@@ -650,7 +649,6 @@ impl Watermark {
         self,
         expr: &BoxedExpression,
         new_col_idx: usize,
-        on_err: impl Fn(ExprError),
     ) -> Option<Self> {
         let Self { col_idx, val, .. } = self;
         let row = {
@@ -658,7 +656,7 @@ impl Watermark {
             row[col_idx] = Some(val);
             OwnedRow::new(row)
         };
-        let val = expr.eval_row_infallible(&row, on_err).await?;
+        let val = expr.eval_row_infallible(&row).await?;
         Some(Self::new(new_col_idx, expr.return_type(), val))
     }
 
