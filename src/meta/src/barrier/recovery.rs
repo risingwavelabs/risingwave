@@ -217,7 +217,7 @@ impl GlobalBarrierManager {
                         tokio::sync::mpsc::unbounded_channel();
                     self.inject_barrier(command_ctx.clone(), &barrier_complete_tx)
                         .await;
-                    let _res = match barrier_complete_rx.recv().await.unwrap().result {
+                    let res = match barrier_complete_rx.recv().await.unwrap().result {
                         Ok(response) => {
                             if let Err(err) = command_ctx.post_collect().await {
                                 warn!(err = ?err, "post_collect failed");
@@ -231,6 +231,7 @@ impl GlobalBarrierManager {
                             Err(err)
                         }
                     };
+                    let (new_epoch, _) = res?;
 
                     self.recover_mview_progress().await?;
 
