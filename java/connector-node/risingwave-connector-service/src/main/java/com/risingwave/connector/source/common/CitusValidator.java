@@ -28,6 +28,7 @@ public class CitusValidator extends PostgresValidator {
     protected void alterPublicationIfNeeded() throws SQLException {
         // do nothing for citus worker node,
         // since we created a FOR ALL TABLES publication when creating the connector,
-        // which will replicates changes for all tables in the database, including tables created in the future.
+        // which will replicates changes for all tables in the database, including tables created in
+        // the future.
     }
 }
