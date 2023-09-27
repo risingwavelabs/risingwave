@@ -68,7 +68,9 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
     }
 
     async fn write_chunk(&mut self, chunk: StreamChunk) -> LogStoreResult<()> {
-        assert!(chunk.cardinality() > 0);
+        if chunk.cardinality() == 0 {
+            return Ok(());
+        }
         let epoch = self.state_store.epoch();
         let start_seq_id = self.seq_id;
         self.seq_id += chunk.cardinality() as SeqIdType;

@@ -90,6 +90,10 @@ impl LogicalHopWindow {
         self.core.into_parts()
     }
 
+    pub fn output_indices_are_trivial(&self) -> bool {
+        self.output_indices() == &(0..self.core.internal_column_num()).collect_vec()
+    }
+
     /// used for binder and planner. The function will add a filter operator to ignore records with
     /// NULL time value. <https://github.com/risingwavelabs/risingwave/issues/8130>
     pub fn create(
