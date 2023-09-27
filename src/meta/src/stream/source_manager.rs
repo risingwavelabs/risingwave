@@ -23,8 +23,8 @@ use std::time::Duration;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_connector::dispatch_source_prop;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,

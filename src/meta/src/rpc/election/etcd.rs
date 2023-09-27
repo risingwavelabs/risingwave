@@ -21,8 +21,6 @@ use anyhow::anyhow;
 use etcd_client::{ConnectOptions, Error, GetOptions, LeaderKey, ResignOptions};
 use risingwave_common::bail;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
-use serde::Serialize;
-use tokio::runtime::Runtime;
 use tokio::sync::watch::Receiver;
 use tokio::sync::{oneshot, watch};
 use tokio::time;
