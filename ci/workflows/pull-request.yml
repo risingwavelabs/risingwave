@@ -474,7 +474,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 25
 
   - label: "e2e standalone binary test"
     command: "ci/scripts/e2e-test.sh -p ci-dev -m standalone"
