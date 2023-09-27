@@ -24,7 +24,7 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
-use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
+use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
@@ -402,6 +402,7 @@ impl TableCatalog {
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
             cleaned_by_watermark: self.cleaned_by_watermark,
             stream_job_status: PbStreamJobStatus::Creating.into(),
+            create_type: PbCreateType::Foreground.into(),
         }
     }
 
@@ -607,6 +608,7 @@ mod tests {
             created_at_epoch: None,
             cleaned_by_watermark: false,
             stream_job_status: PbStreamJobStatus::Creating.into(),
+            create_type: PbCreateType::Foreground.into(),
         }
         .into();
 

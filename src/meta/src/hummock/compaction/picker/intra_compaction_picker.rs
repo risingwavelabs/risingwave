@@ -260,7 +260,7 @@ pub mod tests {
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::compaction::level_selector::tests::{
+    use crate::hummock::compaction::selector::tests::{
         generate_l0_nonoverlapping_multi_sublevels, generate_l0_nonoverlapping_sublevels,
         generate_l0_overlapping_sublevels, generate_level, generate_table,
         push_table_level0_overlapping, push_tables_level0_nonoverlapping,

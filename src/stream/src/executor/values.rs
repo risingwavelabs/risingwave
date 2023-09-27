@@ -123,7 +123,7 @@ impl ValuesExecutor {
 
         while let Some(barrier) = barrier_receiver.recv().await {
             if emit {
-                progress.finish(barrier.epoch.curr);
+                progress.finish(barrier.epoch.curr, 0);
             }
             yield Message::Barrier(barrier);
         }
