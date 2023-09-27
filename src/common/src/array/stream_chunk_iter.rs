@@ -84,17 +84,26 @@ impl<'a> Iterator for StreamChunkRefIter<'a> {
             Op::Insert => Some(Record::Insert { new_row: row }),
             Op::Delete => Some(Record::Delete { old_row: row }),
             Op::UpdateDelete => {
-                let insert_row = self.inner.next().expect("expect a row after U-");
+                let next_row = self
+                    .inner
+                    .next()
+                    .unwrap_or_else(|| panic!("expect a row after U-, U- row: {:?}", row));
                 // SAFETY: index is checked since `insert_row` is `Some`.
-                let op = unsafe { *self.chunk.ops().get_unchecked(insert_row.index()) };
-                debug_assert_eq!(op, Op::UpdateInsert, "expect a U+ after U-");
+                let op = unsafe { *self.chunk.ops().get_unchecked(next_row.index()) };
+                debug_assert_eq!(
+                    op,
+                    Op::UpdateInsert,
+                    "expect a U+ after U-, U- row: {:?}, row after U-: {:?}",
+                    row,
+                    next_row
+                );
 
                 Some(Record::Update {
                     old_row: row,
-                    new_row: insert_row,
+                    new_row: next_row,
                 })
             }
-            Op::UpdateInsert => panic!("expect a U- before U+"),
+            Op::UpdateInsert => panic!("expect a U- before U+, U+ row: {:?}", row),
         }
     }
 
