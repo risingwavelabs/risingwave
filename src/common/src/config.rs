@@ -1417,6 +1417,31 @@ pub struct CompactionConfig {
     pub enable_emergency_picker: bool,
 }
 
+impl From<CompactionConfig> for risingwave_pb::hummock::CompactionConfig {
+    fn from(value: CompactionConfig) -> Self {
+        Self {
+            max_bytes_for_level_base: value.max_bytes_for_level_base,
+            max_bytes_for_level_multiplier: value.max_bytes_for_level_multiplier,
+            max_compaction_bytes: value.max_compaction_bytes,
+            sub_level_max_compaction_bytes: value.sub_level_max_compaction_bytes,
+            level0_tier_compact_file_number: value.level0_tier_compact_file_number,
+            target_file_size_base: value.target_file_size_base,
+            compaction_filter_mask: value.compaction_filter_mask,
+            max_sub_compaction: value.max_sub_compaction,
+            level0_stop_write_threshold_sub_level_number: value
+                .level0_stop_write_threshold_sub_level_number,
+            level0_sub_level_compact_level_count: value.level0_sub_level_compact_level_count,
+            level0_overlapping_sub_level_compact_level_count: value
+                .level0_overlapping_sub_level_compact_level_count,
+            max_space_reclaim_bytes: value.max_space_reclaim_bytes,
+            level0_max_compact_file_number: value.level0_max_compact_file_number,
+            tombstone_reclaim_ratio: value.tombstone_reclaim_ratio,
+            enable_emergency_picker: value.enable_emergency_picker,
+            ..Default::default()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
