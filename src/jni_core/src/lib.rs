@@ -892,15 +892,6 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterRe
     msg: JByteArray<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
-        // If msg is null means just check whether channel is closed.
-        if msg.is_null() {
-            if channel.as_ref().is_closed() {
-                return Ok(JNI_FALSE);
-            } else {
-                return Ok(JNI_TRUE);
-            }
-        }
-
         let sink_writer_stream_response: SinkWriterStreamResponse =
             Message::decode(to_guarded_slice(&msg, env)?.deref())?;
 
