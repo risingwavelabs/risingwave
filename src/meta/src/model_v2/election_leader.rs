@@ -12,26 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod catalog;
-mod cluster;
-mod env;
-mod id;
-mod idle;
-mod notification;
-pub(crate) mod sink_coordination;
-mod streaming_job;
-mod system_param;
+use sea_orm::entity::prelude::*;
 
-pub(crate) use catalog::*;
-pub use cluster::WorkerKey;
-pub(crate) use cluster::*;
-pub use env::MetaSrvEnv;
-pub(crate) use env::*;
-pub(crate) use id::*;
-pub(crate) use idle::*;
-pub(crate) use notification::*;
-pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef};
-pub(crate) use streaming_job::*;
-pub(crate) use system_param::*;
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[sea_orm(table_name = "election_leader")]
+pub struct Model {
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub service: String,
+    pub id: String,
+    pub last_heartbeat: DateTime,
+}
 
-pub use super::model_v2::prelude;
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {}
+
+impl ActiveModelBehavior for ActiveModel {}
