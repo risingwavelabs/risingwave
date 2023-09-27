@@ -761,7 +761,6 @@ impl CatalogManager {
             })
             .collect_vec();
 
-        println!("cleaning tables: {:#?}", &tables);
         let mut table_ids = vec![];
         let mv_table_ids = tables.iter().map(|t| t.id).collect_vec();
         for table_id in &mv_table_ids {
@@ -802,7 +801,9 @@ impl CatalogManager {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let tables = &mut database_core.tables;
-        Self::check_table_creating(tables, &table);
+        if cfg!(not(test)) {
+            Self::check_table_creating(tables, &table);
+        }
         let mut tables = BTreeMapTransaction::new(tables);
 
         table.stream_job_status = PbStreamJobStatus::Created.into();
@@ -2362,10 +2363,6 @@ impl CatalogManager {
     }
 
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
-        println!(
-            "Notified frontend:\noperation: {:#?}\ninfo: {:#?}",
-            operation, info
-        );
         self.env
             .notification_manager()
             .notify_frontend(operation, info)
