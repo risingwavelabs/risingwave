@@ -51,6 +51,19 @@ impl InputRefExpression {
         InputRefExpression { return_type, idx }
     }
 
+    /// Create an [`InputRefExpression`] from a protobuf expression.
+    ///
+    /// Panics if the protobuf expression is not an input reference.
+    pub fn from_prost(prost: &ExprNode) -> Self {
+        let ret_type = DataType::from(prost.get_return_type().unwrap());
+        let input_col_idx = prost.get_rex_node().unwrap().as_input_ref().unwrap();
+
+        Self {
+            return_type: ret_type,
+            idx: *input_col_idx as _,
+        }
+    }
+
     pub fn index(&self) -> usize {
         self.idx
     }
@@ -65,13 +78,7 @@ impl Build for InputRefExpression {
         prost: &ExprNode,
         _build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
     ) -> Result<Self> {
-        let ret_type = DataType::from(prost.get_return_type().unwrap());
-        let input_col_idx = prost.get_rex_node().unwrap().as_input_ref().unwrap();
-
-        Ok(Self {
-            return_type: ret_type,
-            idx: *input_col_idx as _,
-        })
+        Ok(Self::from_prost(prost))
     }
 }
 

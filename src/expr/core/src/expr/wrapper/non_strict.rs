@@ -33,6 +33,9 @@ pub trait EvalErrorReport: Clone + Send + Sync {
 }
 
 /// A dummy implementation that panics when called.
+///
+/// Used as the type parameter for the expression builder when non-strict evaluation is not
+/// required.
 impl EvalErrorReport for ! {
     fn report(&self, _error: ExprError) {
         unreachable!()
