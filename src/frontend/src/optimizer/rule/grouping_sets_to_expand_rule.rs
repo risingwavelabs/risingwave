@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};

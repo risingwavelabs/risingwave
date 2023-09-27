@@ -36,7 +36,6 @@ pub mod stream_record;
 pub mod struct_array;
 mod utf8_array;
 mod value_reader;
-mod vis;
 
 use std::convert::From;
 use std::hash::{Hash, Hasher};
@@ -63,7 +62,6 @@ use risingwave_pb::data::PbArray;
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
-pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
 pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};

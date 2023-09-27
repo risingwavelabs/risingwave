@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::agg::{AggregateFunction, AggregateState, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{AggregateFunction, AggregateState, BoxedAggregateFunction};
 use risingwave_expr::expr::Expression;
 use risingwave_expr::Result;
 
@@ -62,7 +62,7 @@ impl AggregateFunction for Filter {
             .as_bool()
             .to_bitmap();
         let mut input1 = input.clone();
-        input1.set_vis(input.vis() & &bitmap);
+        input1.set_visibility(input.visibility() & &bitmap);
         self.inner.update_range(state, &input1, range).await
     }
 
@@ -74,7 +74,7 @@ impl AggregateFunction for Filter {
 #[cfg(test)]
 mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_expr::agg::{build_append_only, AggCall};
+    use risingwave_expr::aggregate::{build_append_only, AggCall};
     use risingwave_expr::expr::{build_from_pretty, Expression, LiteralExpression};
 
     use super::*;

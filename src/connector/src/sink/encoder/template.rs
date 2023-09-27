@@ -16,17 +16,54 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::ToText;
 
-use super::{Result, RowEncoder};
+use super::{JsonEncoder, Result, RowEncoder};
+use crate::sink::SinkError;
 
-/// Encode a row according to a specified string template `user_id:{user_id}`
-pub struct TemplateEncoder<'a> {
-    schema: &'a Schema,
-    col_indices: Option<&'a [usize]>,
-    template: &'a str,
+pub enum RedisFormatEncoder {
+    Json(JsonEncoder),
+    Template(TemplateEncoder),
+}
+impl RowEncoder for RedisFormatEncoder {
+    type Output = String;
+
+    fn encode_cols(
+        &self,
+        row: impl risingwave_common::row::Row,
+        col_indices: impl Iterator<Item = usize>,
+    ) -> Result<Self::Output> {
+        match self {
+            RedisFormatEncoder::Json(json) => {
+                Ok(serde_json::to_string(&json.encode_cols(row, col_indices)?)
+                    .map_err(|err| SinkError::JsonParse(err.to_string()))?)
+            }
+            RedisFormatEncoder::Template(template) => template.encode_cols(row, col_indices),
+        }
+    }
+
+    fn schema(&self) -> &Schema {
+        match self {
+            RedisFormatEncoder::Json(json) => json.schema(),
+            RedisFormatEncoder::Template(template) => template.schema(),
+        }
+    }
+
+    fn col_indices(&self) -> Option<&[usize]> {
+        match self {
+            RedisFormatEncoder::Json(json) => json.col_indices(),
+            RedisFormatEncoder::Template(template) => template.col_indices(),
+        }
+    }
 }
 
-impl<'a> TemplateEncoder<'a> {
-    pub fn new(schema: &'a Schema, col_indices: Option<&'a [usize]>, template: &'a str) -> Self {
+/// Encode a row according to a specified string template `user_id:{user_id}`
+pub struct TemplateEncoder {
+    schema: Schema,
+    col_indices: Option<Vec<usize>>,
+    template: String,
+}
+
+impl TemplateEncoder {
+    pub fn new(schema: Schema, col_indices: Option<Vec<usize>>, template: String) -> Self {
         Self {
             schema,
             col_indices,
@@ -35,15 +72,15 @@ impl<'a> TemplateEncoder<'a> {
     }
 }
 
-impl<'a> RowEncoder for TemplateEncoder<'a> {
+impl RowEncoder for TemplateEncoder {
     type Output = String;
 
     fn schema(&self) -> &Schema {
-        self.schema
+        &self.schema
     }
 
     fn col_indices(&self) -> Option<&[usize]> {
-        self.col_indices
+        self.col_indices.as_ref().map(Vec::as_ref)
     }
 
     fn encode_cols(

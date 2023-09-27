@@ -12,31 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod blackhole;
 pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
+pub mod doris;
+pub mod doris_connector;
 pub mod encoder;
 pub mod formatter;
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
+pub mod log_store;
 pub mod nats;
+pub mod pulsar;
 pub mod redis;
 pub mod remote;
-#[cfg(any(test, madsim))]
 pub mod test_sink;
 pub mod utils;
+pub mod writer;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::future::Future;
 
 use ::clickhouse::error::Error as ClickHouseError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use enum_as_inner::EnumAsInner;
-use risingwave_common::array::StreamChunk;
+use prometheus::{Histogram, HistogramOpts};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
@@ -48,24 +52,74 @@ use thiserror::Error;
 pub use tracing;
 
 use self::catalog::SinkType;
-use self::clickhouse::{ClickHouseConfig, ClickHouseSink};
-use self::encoder::SerTo;
-use self::formatter::SinkFormatter;
-use self::iceberg::{IcebergSink, ICEBERG_SINK, REMOTE_ICEBERG_SINK};
-use crate::sink::boxed::BoxSink;
 use crate::sink::catalog::{SinkCatalog, SinkId};
-use crate::sink::clickhouse::CLICKHOUSE_SINK;
-use crate::sink::iceberg::{IcebergConfig, RemoteIcebergConfig, RemoteIcebergSink};
-use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
-use crate::sink::kinesis::{KinesisSink, KinesisSinkConfig, KINESIS_SINK};
-use crate::sink::nats::{NatsConfig, NatsSink, NATS_SINK};
-use crate::sink::redis::{RedisConfig, RedisSink, REDIS_SINK};
-use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig, RemoteSink};
-#[cfg(any(test, madsim))]
-use crate::sink::test_sink::{build_test_sink, TEST_SINK_NAME};
+use crate::sink::log_store::LogReader;
+use crate::sink::writer::SinkWriter;
 use crate::ConnectorParams;
 
-pub const DOWNSTREAM_SINK_KEY: &str = "connector";
+#[macro_export]
+macro_rules! for_all_sinks {
+    ($macro:path $(, $arg:tt)*) => {
+        $macro! {
+            {
+                { Redis, $crate::sink::redis::RedisSink },
+                { Kafka, $crate::sink::kafka::KafkaSink },
+                { Pulsar, $crate::sink::pulsar::PulsarSink },
+                { BlackHole, $crate::sink::blackhole::BlackHoleSink },
+                { Kinesis, $crate::sink::kinesis::KinesisSink },
+                { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
+                { Iceberg, $crate::sink::iceberg::IcebergSink },
+                { Nats, $crate::sink::nats::NatsSink },
+                { RemoteIceberg, $crate::sink::iceberg::RemoteIcebergSink },
+                { Jdbc, $crate::sink::remote::JdbcSink },
+                { DeltaLake, $crate::sink::remote::DeltaLakeSink },
+                { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
+                { Cassandra, $crate::sink::remote::CassandraSink },
+                { Doris, $crate::sink::doris::DorisSink },
+                { Test, $crate::sink::test_sink::TestSink }
+            }
+            $(,$arg)*
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! dispatch_sink {
+    ({$({$variant_name:ident, $sink_type:ty}),*}, $impl:tt, $sink:tt, $body:tt) => {{
+        use $crate::sink::SinkImpl;
+
+        match $impl {
+            $(
+                SinkImpl::$variant_name($sink) => $body,
+            )*
+        }
+    }};
+    ($impl:expr, $sink:ident, $body:expr) => {{
+        $crate::for_all_sinks! {$crate::dispatch_sink, {$impl}, $sink, {$body}}
+    }};
+}
+
+#[macro_export]
+macro_rules! match_sink_name_str {
+    ({$({$variant_name:ident, $sink_type:ty}),*}, $name_str:tt, $type_name:ident, $body:tt, $on_other_closure:tt) => {
+        match $name_str {
+            $(
+                <$sink_type>::SINK_NAME => {
+                    type $type_name = $sink_type;
+                    {
+                        $body
+                    }
+                },
+            )*
+            other => ($on_other_closure)(other),
+        }
+    };
+    ($name_str:expr, $type_name:ident, $body:expr, $on_other_closure:expr) => {{
+        $crate::for_all_sinks! {$crate::match_sink_name_str, {$name_str}, $type_name, {$body}, {$on_other_closure}}
+    }};
+}
+
+pub const CONNECTOR_TYPE_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
 pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
@@ -142,21 +196,39 @@ impl From<SinkCatalog> for SinkParam {
     }
 }
 
+#[derive(Clone)]
+pub struct SinkMetrics {
+    pub sink_commit_duration_metrics: Histogram,
+}
+
+impl Default for SinkMetrics {
+    fn default() -> Self {
+        SinkMetrics {
+            sink_commit_duration_metrics: Histogram::with_opts(HistogramOpts::new(
+                "unused", "unused",
+            ))
+            .unwrap(),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<MetaClient>,
+    pub sink_metrics: SinkMetrics,
 }
 
-#[async_trait]
-pub trait Sink {
-    type Writer: SinkWriter<CommitMetadata = ()>;
+pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
+    const SINK_NAME: &'static str;
+    type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
-    async fn validate(&self, client: Option<ConnectorClient>) -> Result<()>;
-    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer>;
+    async fn validate(&self) -> Result<()>;
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
+    #[expect(clippy::unused_async)]
     async fn new_coordinator(
         &self,
         _connector_client: Option<ConnectorClient>,
@@ -165,129 +237,11 @@ pub trait Sink {
     }
 }
 
-#[async_trait]
-pub trait SinkWriter: Send + 'static {
-    type CommitMetadata: Send = ();
-    /// Begin a new epoch
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
-
-    /// Write a stream chunk to sink
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
-
-    /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
-    /// writer should commit the current epoch.
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata>;
-
-    /// Clean up
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    /// Update the vnode bitmap of current sink writer
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
-        Ok(())
-    }
-}
-
-#[async_trait]
-// An old version of SinkWriter for backward compatibility
-pub trait SinkWriterV1: Send + 'static {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
-
-    // the following interface is for transactions, if not supported, return Ok(())
-    // start a transaction with epoch number. Note that epoch number should be increasing.
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
-
-    // commits the current transaction and marks all messages in the transaction success.
-    async fn commit(&mut self) -> Result<()>;
-
-    // aborts the current transaction because some error happens. we should rollback to the last
-    // commit point.
-    async fn abort(&mut self) -> Result<()>;
-}
-
-/// A free-form sink that may output in multiple formats and encodings. Examples include kafka,
-/// kinesis, nats and redis.
-///
-/// The implementor specifies required key & value type (likely string or bytes), as well as how to
-/// write a single pair. The provided `write_chunk` method would handle the interaction with a
-/// `SinkFormatter`.
-///
-/// Currently kafka takes `&mut self` while kinesis takes `&self`. So we use `&mut self` in trait
-/// but implement it for `&Kinesis`. This allows us to hold `&mut &Kinesis` and `&Kinesis`
-/// simultaneously, preventing the schema clone issue propagating from kafka to kinesis.
-pub trait FormattedSink {
-    type K;
-    type V;
-    async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()>;
-
-    async fn write_chunk<F: SinkFormatter>(
-        &mut self,
-        chunk: StreamChunk,
-        formatter: F,
-    ) -> Result<()>
-    where
-        F::K: SerTo<Self::K>,
-        F::V: SerTo<Self::V>,
-    {
-        for r in formatter.format_chunk(&chunk) {
-            let (event_key_object, event_object) = r?;
-
-            self.write_one(
-                event_key_object.map(SerTo::ser_to).transpose()?,
-                event_object.map(SerTo::ser_to).transpose()?,
-            )
-            .await?;
-        }
-
-        Ok(())
-    }
-}
-
-pub struct SinkWriterV1Adapter<W: SinkWriterV1> {
-    is_empty: bool,
-    epoch: u64,
-    inner: W,
-}
-
-impl<W: SinkWriterV1> SinkWriterV1Adapter<W> {
-    pub(crate) fn new(inner: W) -> Self {
-        Self {
-            inner,
-            is_empty: true,
-            epoch: u64::MIN,
-        }
-    }
-}
-
-#[async_trait]
-impl<W: SinkWriterV1> SinkWriter for SinkWriterV1Adapter<W> {
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.epoch = epoch;
-        Ok(())
-    }
-
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.is_empty {
-            self.is_empty = false;
-            self.inner.begin_epoch(self.epoch).await?;
-        }
-        self.inner.write_batch(chunk).await
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        if is_checkpoint {
-            if !self.is_empty {
-                self.inner.commit().await?
-            }
-            self.is_empty = true;
-        }
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        self.inner.abort().await
-    }
+pub trait LogSinker: Send + 'static {
+    fn consume_log_and_sink(
+        self,
+        log_reader: impl LogReader,
+    ) -> impl Future<Output = Result<()>> + Send + 'static;
 }
 
 #[async_trait]
@@ -314,179 +268,60 @@ impl SinkCommitCoordinator for DummySinkCommitCoordinator {
     }
 }
 
-#[derive(Clone, Debug, EnumAsInner)]
-pub enum SinkConfig {
-    Redis(RedisConfig),
-    Kafka(Box<KafkaConfig>),
-    Remote(RemoteConfig),
-    Kinesis(Box<KinesisSinkConfig>),
-    Iceberg(IcebergConfig),
-    RemoteIceberg(RemoteIcebergConfig),
-    BlackHole,
-    ClickHouse(Box<ClickHouseConfig>),
-    Nats(NatsConfig),
-    #[cfg(any(test, madsim))]
-    Test,
-}
-
-pub const BLACKHOLE_SINK: &str = "blackhole";
-
-#[derive(Debug)]
-pub struct BlackHoleSink;
-
-#[async_trait]
-impl Sink for BlackHoleSink {
-    type Coordinator = DummySinkCommitCoordinator;
-    type Writer = Self;
-
-    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
-        Ok(Self)
-    }
-
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl SinkWriter for BlackHoleSink {
-    async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
-        Ok(())
-    }
-
-    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
-        Ok(())
-    }
-
-    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        Ok(())
-    }
-}
-
-impl SinkConfig {
-    pub fn from_hashmap(mut properties: HashMap<String, String>) -> Result<Self> {
-        const CONNECTOR_TYPE_KEY: &str = "connector";
+impl SinkImpl {
+    pub fn new(mut param: SinkParam) -> Result<Self> {
         const CONNECTION_NAME_KEY: &str = "connection.name";
         const PRIVATE_LINK_TARGET_KEY: &str = "privatelink.targets";
 
         // remove privatelink related properties if any
-        properties.remove(PRIVATE_LINK_TARGET_KEY);
-        properties.remove(CONNECTION_NAME_KEY);
+        param.properties.remove(PRIVATE_LINK_TARGET_KEY);
+        param.properties.remove(CONNECTION_NAME_KEY);
 
-        let sink_type = properties
+        let sink_type = param
+            .properties
             .get(CONNECTOR_TYPE_KEY)
             .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;
-        match sink_type.to_lowercase().as_str() {
-            KAFKA_SINK => Ok(SinkConfig::Kafka(Box::new(KafkaConfig::from_hashmap(
-                properties,
-            )?))),
-            KINESIS_SINK => Ok(SinkConfig::Kinesis(Box::new(
-                KinesisSinkConfig::from_hashmap(properties)?,
-            ))),
-            CLICKHOUSE_SINK => Ok(SinkConfig::ClickHouse(Box::new(
-                ClickHouseConfig::from_hashmap(properties)?,
-            ))),
-            BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
-            REMOTE_ICEBERG_SINK => Ok(SinkConfig::RemoteIceberg(
-                RemoteIcebergConfig::from_hashmap(properties)?,
-            )),
-            REDIS_SINK => Ok(SinkConfig::Redis(RedisConfig::from_hashmap(properties)?)),
-            ICEBERG_SINK => Ok(SinkConfig::Iceberg(IcebergConfig::from_hashmap(
-                properties,
-            )?)),
-            NATS_SINK => Ok(SinkConfig::Nats(NatsConfig::from_hashmap(properties)?)),
-            // Only in test or deterministic test, test sink is enabled.
-            #[cfg(any(test, madsim))]
-            TEST_SINK_NAME => Ok(SinkConfig::Test),
-            _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
-        }
+        match_sink_name_str!(
+            sink_type.to_lowercase().as_str(),
+            SinkType,
+            Ok(SinkType::try_from(param)?.into()),
+            |other| {
+                Err(SinkError::Config(anyhow!(
+                    "unsupported sink connector {}",
+                    other
+                )))
+            }
+        )
     }
 }
 
 pub fn build_sink(param: SinkParam) -> Result<SinkImpl> {
-    let config = SinkConfig::from_hashmap(param.properties.clone())?;
-    SinkImpl::new(config, param)
+    SinkImpl::new(param)
 }
 
-#[derive(Debug)]
-pub enum SinkImpl {
-    Redis(RedisSink),
-    Kafka(KafkaSink),
-    Remote(RemoteSink),
-    BlackHole(BlackHoleSink),
-    Kinesis(KinesisSink),
-    ClickHouse(ClickHouseSink),
-    Iceberg(IcebergSink),
-    Nats(NatsSink),
-    RemoteIceberg(RemoteIcebergSink),
-    TestSink(BoxSink),
-}
-
-impl SinkImpl {
-    pub fn get_connector(&self) -> &'static str {
-        match self {
-            SinkImpl::Kafka(_) => "kafka",
-            SinkImpl::Redis(_) => "redis",
-            SinkImpl::Remote(_) => "remote",
-            SinkImpl::BlackHole(_) => "blackhole",
-            SinkImpl::Kinesis(_) => "kinesis",
-            SinkImpl::ClickHouse(_) => "clickhouse",
-            SinkImpl::Iceberg(_) => "iceberg",
-            SinkImpl::Nats(_) => "nats",
-            SinkImpl::RemoteIceberg(_) => "iceberg",
-            SinkImpl::TestSink(_) => "test",
+macro_rules! def_sink_impl {
+    () => {
+        $crate::for_all_sinks! { def_sink_impl }
+    };
+    ({ $({ $variant_name:ident, $sink_type:ty }),* }) => {
+        #[derive(Debug)]
+        pub enum SinkImpl {
+            $(
+                $variant_name($sink_type),
+            )*
         }
-    }
-}
 
-#[macro_export]
-macro_rules! dispatch_sink {
-    ($impl:expr, $sink:ident, $body:tt) => {{
-        use $crate::sink::SinkImpl;
-
-        match $impl {
-            SinkImpl::Redis($sink) => $body,
-            SinkImpl::Kafka($sink) => $body,
-            SinkImpl::Remote($sink) => $body,
-            SinkImpl::BlackHole($sink) => $body,
-            SinkImpl::Kinesis($sink) => $body,
-            SinkImpl::ClickHouse($sink) => $body,
-            SinkImpl::Iceberg($sink) => $body,
-            SinkImpl::Nats($sink) => $body,
-            SinkImpl::RemoteIceberg($sink) => $body,
-            SinkImpl::TestSink($sink) => $body,
-        }
-    }};
-}
-
-impl SinkImpl {
-    pub fn new(cfg: SinkConfig, param: SinkParam) -> Result<Self> {
-        Ok(match cfg {
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, param)?),
-            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(*cfg, param)),
-            SinkConfig::Kinesis(cfg) => SinkImpl::Kinesis(KinesisSink::new(*cfg, param)),
-            SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(cfg, param)),
-            SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),
-            SinkConfig::ClickHouse(cfg) => SinkImpl::ClickHouse(ClickHouseSink::new(
-                *cfg,
-                param.schema(),
-                param.downstream_pk,
-                param.sink_type.is_append_only(),
-            )?),
-            SinkConfig::Iceberg(cfg) => SinkImpl::Iceberg(IcebergSink::new(cfg, param)?),
-            SinkConfig::Nats(cfg) => SinkImpl::Nats(NatsSink::new(
-                cfg,
-                param.schema(),
-                param.sink_type.is_append_only(),
-            )),
-            SinkConfig::RemoteIceberg(cfg) => {
-                SinkImpl::RemoteIceberg(CoordinatedRemoteSink(RemoteSink::new(cfg, param)))
+        $(
+            impl From<$sink_type> for SinkImpl {
+                fn from(sink: $sink_type) -> SinkImpl {
+                    SinkImpl::$variant_name(sink)
+                }
             }
-            #[cfg(any(test, madsim))]
-            SinkConfig::Test => SinkImpl::TestSink(build_test_sink(param)?),
-        })
-    }
+        )*
+    };
 }
+
+def_sink_impl!();
 
 pub type Result<T> = std::result::Result<T, SinkError>;
 
@@ -512,6 +347,14 @@ pub enum SinkError {
     Redis(String),
     #[error("Nats error: {0}")]
     Nats(anyhow::Error),
+    #[error("Doris http error: {0}")]
+    Http(anyhow::Error),
+    #[error("Doris error: {0}")]
+    Doris(String),
+    #[error("Pulsar error: {0}")]
+    Pulsar(anyhow::Error),
+    #[error("Internal error: {0}")]
+    Internal(anyhow::Error),
 }
 
 impl From<RpcError> for SinkError {

@@ -138,7 +138,7 @@ impl StreamSink {
                     }
                     _ => {
                         assert_matches!(user_distributed_by, RequiredDist::Any);
-                        RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
+                        RequiredDist::shard_by_key(input.schema().len(), input.stream_key())
                     }
                 }
             }

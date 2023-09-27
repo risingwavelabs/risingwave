@@ -36,10 +36,10 @@ use crate::hummock::compactor::{merge_imms_in_memory, CompactionExecutor};
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::store::version::StagingSstableInfo;
 use crate::hummock::utils::MemoryTracker;
-use crate::hummock::{HummockError, HummockResult};
+use crate::hummock::{HummockError, HummockResult, ImmutableMemtable};
+use crate::mem_table::ImmId;
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 
@@ -1044,9 +1044,9 @@ mod tests {
     };
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-    use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
+    use crate::mem_table::{ImmId, ImmutableMemtable};
     use crate::monitor::HummockStateStoreMetrics;
     use crate::opts::StorageOpts;
     use crate::storage_value::StorageValue;
@@ -1081,7 +1081,7 @@ mod tests {
         limiter: Option<&MemoryLimiter>,
     ) -> ImmutableMemtable {
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(vec![(
-            Bytes::from(dummy_table_key()),
+            TableKey(Bytes::from(dummy_table_key())),
             StorageValue::new_delete(),
         )]);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);

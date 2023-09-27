@@ -231,6 +231,22 @@ JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIter
 JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToChannel
   (JNIEnv *, jclass, jlong, jbyteArray);
 
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    recvSinkWriterRequestFromChannel
+ * Signature: (J)[B
+ */
+JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_recvSinkWriterRequestFromChannel
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    sendSinkWriterResponseToChannel
+ * Signature: (J[B)Z
+ */
+JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_sendSinkWriterResponseToChannel
+  (JNIEnv *, jclass, jlong, jbyteArray);
+
 #ifdef __cplusplus
 }
 #endif

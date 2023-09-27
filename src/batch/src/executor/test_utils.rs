@@ -219,8 +219,8 @@ pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) 
 }
 
 fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) {
-    assert!(left.visibility().is_none());
-    assert!(right.visibility().is_none());
+    assert!(left.is_compacted());
+    assert!(right.is_compacted());
 
     assert_eq!(
         left.cardinality(),

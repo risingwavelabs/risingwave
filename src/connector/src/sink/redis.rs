@@ -20,17 +20,15 @@ use redis::{Connection, Pipeline};
 use regex::Regex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 
-use super::encoder::template::TemplateEncoder;
-use super::encoder::{JsonEncoder, TimestampHandlingMode};
-use super::formatter::{AppendOnlyFormatter, UpsertFormatter};
-use super::{
-    FormattedSink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
-};
+use super::formatter::SinkFormatterImpl;
+use super::writer::FormattedSink;
+use super::{SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::common::RedisCommon;
+use crate::dispatch_sink_formatter_impl;
+use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const REDIS_SINK: &str = "redis";
@@ -69,22 +67,6 @@ pub struct RedisSink {
     pk_indices: Vec<usize>,
 }
 
-impl RedisSink {
-    pub fn new(config: RedisConfig, param: SinkParam) -> Result<Self> {
-        if param.downstream_pk.is_empty() {
-            return Err(SinkError::Config(anyhow!(
-                "Redis Sink Primary Key must be specified."
-            )));
-        }
-        Ok(Self {
-            config,
-            schema: param.schema(),
-            is_append_only: param.sink_type.is_append_only(),
-            pk_indices: param.downstream_pk,
-        })
-    }
-}
-
 fn check_string_format(format: &str, set: &HashSet<String>) -> Result<()> {
     let re = Regex::new(r"\{([^}]*)\}").unwrap();
     if !re.is_match(format) {
@@ -101,20 +83,42 @@ fn check_string_format(format: &str, set: &HashSet<String>) -> Result<()> {
 }
 
 #[async_trait]
+impl TryFrom<SinkParam> for RedisSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        if param.downstream_pk.is_empty() {
+            return Err(SinkError::Config(anyhow!(
+                "Redis Sink Primary Key must be specified."
+            )));
+        }
+        let config = RedisConfig::from_hashmap(param.properties.clone())?;
+        Ok(Self {
+            config,
+            schema: param.schema(),
+            is_append_only: param.sink_type.is_append_only(),
+            pk_indices: param.downstream_pk,
+        })
+    }
+}
+
 impl Sink for RedisSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = RedisSinkWriter;
+    type LogSinker = LogSinkerOf<RedisSinkWriter>;
 
-    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
+    const SINK_NAME: &'static str = "redis";
+
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(RedisSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
-        )?)
+        )?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         let client = self.config.common.build_client()?;
         client.get_connection()?;
         let all_set: HashSet<String> = self
@@ -151,30 +155,57 @@ impl Sink for RedisSink {
     }
 }
 
-impl FormattedSink for Pipeline {
-    type K = String;
-    type V = String;
-
-    async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
-        let k = k.unwrap();
-        match v {
-            Some(v) => self.set(k, v),
-            None => self.del(k),
-        };
-        Ok(())
-    }
-}
 pub struct RedisSinkWriter {
-    // connection to redis, one per executor
-    conn: Option<Connection>,
-    // the command pipeline for write-commit
-    pipe: Pipeline,
-    kv_format: (Option<String>, Option<String>),
     epoch: u64,
     schema: Schema,
     is_append_only: bool,
     pk_indices: Vec<usize>,
+    formatter: SinkFormatterImpl,
+    payload_writer: RedisSinkPayloadWriter,
 }
+
+struct RedisSinkPayloadWriter {
+    // connection to redis, one per executor
+    conn: Option<Connection>,
+    // the command pipeline for write-commit
+    pipe: Pipeline,
+}
+impl RedisSinkPayloadWriter {
+    pub fn new(config: RedisConfig) -> Result<Self> {
+        let client = config.common.build_client()?;
+        let conn = Some(client.get_connection()?);
+        let pipe = redis::pipe();
+        Ok(Self { conn, pipe })
+    }
+
+    #[cfg(test)]
+    pub fn mock() -> Self {
+        let conn = None;
+        let pipe = redis::pipe();
+        Self { conn, pipe }
+    }
+
+    pub fn commit(&mut self) -> Result<()> {
+        self.pipe.query(&mut self.conn.as_mut().unwrap())?;
+        self.pipe.clear();
+        Ok(())
+    }
+}
+
+impl FormattedSink for RedisSinkPayloadWriter {
+    type K = String;
+    type V = Vec<u8>;
+
+    async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
+        let k = k.unwrap();
+        match v {
+            Some(v) => self.pipe.set(k, v),
+            None => self.pipe.del(k),
+        };
+        Ok(())
+    }
+}
+
 impl RedisSinkWriter {
     pub fn new(
         config: RedisConfig,
@@ -182,18 +213,22 @@ impl RedisSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let client = config.common.build_client()?;
-        let conn = Some(client.get_connection()?);
-        let pipe = redis::pipe();
+        let payload_writer = RedisSinkPayloadWriter::new(config.clone())?;
+        let formatter = SinkFormatterImpl::new_with_redis(
+            schema.clone(),
+            pk_indices.clone(),
+            is_append_only,
+            config.common.key_format,
+            config.common.value_format,
+        )?;
 
         Ok(Self {
             schema,
             pk_indices,
             is_append_only,
-            conn,
-            pipe,
             epoch: 0,
-            kv_format: (config.common.key_format, config.common.value_format),
+            formatter,
+            payload_writer,
         })
     }
 
@@ -202,108 +237,33 @@ impl RedisSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
-        kv_format: (Option<String>, Option<String>),
+        key_format: Option<String>,
+        value_format: Option<String>,
     ) -> Result<Self> {
-        let conn = None;
-        let pipe = redis::pipe();
+        let formatter = SinkFormatterImpl::new_with_redis(
+            schema.clone(),
+            pk_indices.clone(),
+            is_append_only,
+            key_format,
+            value_format,
+        )?;
         Ok(Self {
             schema,
             pk_indices,
             is_append_only,
-            conn,
-            pipe,
             epoch: 0,
-            kv_format,
+            formatter,
+            payload_writer: RedisSinkPayloadWriter::mock(),
         })
-    }
-
-    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        match &self.kv_format {
-            (Some(k), Some(v)) => {
-                let key_encoder = TemplateEncoder::new(&self.schema, Some(&self.pk_indices), k);
-                let val_encoder = TemplateEncoder::new(&self.schema, None, v);
-                let a = AppendOnlyFormatter::new(key_encoder, val_encoder);
-                self.pipe.write_chunk(chunk, a).await
-            }
-            (None, None) => {
-                let key_encoder = JsonEncoder::new(
-                    &self.schema,
-                    Some(&self.pk_indices),
-                    TimestampHandlingMode::Milli,
-                );
-                let val_encoder =
-                    JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
-                let a = AppendOnlyFormatter::new(key_encoder, val_encoder);
-                self.pipe.write_chunk(chunk, a).await
-            }
-            (None, Some(v)) => {
-                let key_encoder = JsonEncoder::new(
-                    &self.schema,
-                    Some(&self.pk_indices),
-                    TimestampHandlingMode::Milli,
-                );
-                let val_encoder = TemplateEncoder::new(&self.schema, None, v);
-                let a = AppendOnlyFormatter::new(key_encoder, val_encoder);
-                self.pipe.write_chunk(chunk, a).await
-            }
-            (Some(k), None) => {
-                let key_encoder = TemplateEncoder::new(&self.schema, Some(&self.pk_indices), k);
-                let val_encoder =
-                    JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
-                let a = AppendOnlyFormatter::new(key_encoder, val_encoder);
-                self.pipe.write_chunk(chunk, a).await
-            }
-        }
-    }
-
-    async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
-        match &self.kv_format {
-            (Some(k), Some(v)) => {
-                let key_encoder = TemplateEncoder::new(&self.schema, Some(&self.pk_indices), k);
-                let val_encoder = TemplateEncoder::new(&self.schema, None, v);
-                let a = UpsertFormatter::new(key_encoder, val_encoder);
-                self.pipe.write_chunk(chunk, a).await
-            }
-            (None, None) => {
-                let key_encoder = JsonEncoder::new(
-                    &self.schema,
-                    Some(&self.pk_indices),
-                    TimestampHandlingMode::Milli,
-                );
-                let val_encoder =
-                    JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
-                let a = UpsertFormatter::new(key_encoder, val_encoder);
-                self.pipe.write_chunk(chunk, a).await
-            }
-            (None, Some(v)) => {
-                let key_encoder = JsonEncoder::new(
-                    &self.schema,
-                    Some(&self.pk_indices),
-                    TimestampHandlingMode::Milli,
-                );
-                let val_encoder = TemplateEncoder::new(&self.schema, None, v);
-                let a = UpsertFormatter::new(key_encoder, val_encoder);
-                self.pipe.write_chunk(chunk, a).await
-            }
-            (Some(k), None) => {
-                let key_encoder = TemplateEncoder::new(&self.schema, Some(&self.pk_indices), k);
-                let val_encoder =
-                    JsonEncoder::new(&self.schema, None, TimestampHandlingMode::Milli);
-                let a = UpsertFormatter::new(key_encoder, val_encoder);
-                self.pipe.write_chunk(chunk, a).await
-            }
-        }
     }
 }
 
 #[async_trait]
 impl SinkWriter for RedisSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.is_append_only {
-            self.append_only(chunk).await
-        } else {
-            self.upsert(chunk).await
-        }
+        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+            self.payload_writer.write_chunk(chunk, formatter).await
+        })
     }
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
@@ -311,15 +271,9 @@ impl SinkWriter for RedisSinkWriter {
         Ok(())
     }
 
-    async fn abort(&mut self) -> Result<()> {
-        self.pipe.clear();
-        Ok(())
-    }
-
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
         if is_checkpoint {
-            self.pipe.query(&mut self.conn.as_mut().unwrap())?;
-            self.pipe.clear();
+            self.payload_writer.commit()?;
         }
         Ok(())
     }
@@ -353,7 +307,7 @@ mod test {
         ]);
 
         let mut redis_sink_writer =
-            RedisSinkWriter::mock(schema, vec![0], true, (None, None)).unwrap();
+            RedisSinkWriter::mock(schema, vec![0], true, None, None).unwrap();
 
         let chunk_a = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
@@ -361,7 +315,6 @@ mod test {
                 I32Array::from_iter(vec![1, 2, 3]).into_ref(),
                 Utf8Array::from_iter(vec!["Alice", "Bob", "Clare"]).into_ref(),
             ],
-            None,
         );
 
         redis_sink_writer
@@ -376,6 +329,7 @@ mod test {
         ];
 
         redis_sink_writer
+            .payload_writer
             .pipe
             .cmd_iter()
             .enumerate()
@@ -408,10 +362,8 @@ mod test {
             schema,
             vec![0],
             true,
-            (
-                Some("key-{id}".to_string()),
-                Some("values:{id:{id},name:{name}}".to_string()),
-            ),
+            Some("key-{id}".to_string()),
+            Some("values:{id:{id},name:{name}}".to_string()),
         )
         .unwrap();
 
@@ -421,7 +373,6 @@ mod test {
                 I32Array::from_iter(vec![1, 2, 3]).into_ref(),
                 Utf8Array::from_iter(vec!["Alice", "Bob", "Clare"]).into_ref(),
             ],
-            None,
         );
 
         redis_sink_writer
@@ -444,6 +395,7 @@ mod test {
         ];
 
         redis_sink_writer
+            .payload_writer
             .pipe
             .cmd_iter()
             .enumerate()

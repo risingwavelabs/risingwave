@@ -24,7 +24,7 @@ use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status, Streaming};
 
-use crate::hummock::compaction::ManualCompactionOption;
+use crate::hummock::compaction::selector::ManualCompactionOption;
 use crate::hummock::{HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
@@ -524,6 +524,13 @@ impl HummockManagerService for HummockServiceImpl {
         }
 
         Ok(Response::new(RwReceiverStream::new(rx)))
+    }
+
+    async fn report_compaction_task(
+        &self,
+        _request: Request<ReportCompactionTaskRequest>,
+    ) -> Result<Response<ReportCompactionTaskResponse>, Status> {
+        unreachable!()
     }
 
     async fn list_branched_object(

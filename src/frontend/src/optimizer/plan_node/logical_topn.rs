@@ -177,7 +177,7 @@ impl LogicalTopN {
         );
 
         // TODO(st1page): solve it
-        let global_top_n = StreamTopN::with_stream_key(global_top_n, self.logical_pk().to_vec());
+        let global_top_n = StreamTopN::with_stream_key(global_top_n, self.stream_key().to_vec());
 
         // use another projection to remove the column we added before.
         exprs.pop();

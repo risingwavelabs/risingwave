@@ -209,10 +209,11 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
         right_stream_key_indices: &[usize],
     ) -> StreamExecutorResult<()> {
         for chunk in chunks {
-            // Compact chunk, otherwise the following keys and chunk rows might fail to zip.
-            let chunk = chunk.compact();
             let keys = K::build(join_keys, chunk.data_chunk())?;
-            for ((op, row), key) in chunk.rows().zip_eq_debug(keys.into_iter()) {
+            for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
+                let Some((op, row)) = r else {
+                    continue;
+                };
                 if self.cache.contains(&key) {
                     // Update cache
                     let mut entry = self.cache.get_mut(&key).unwrap();
@@ -427,8 +428,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                     yield Message::Watermark(watermark.with_idx(output_watermark_col_idx));
                 }
                 InternalMessage::Chunk(chunk) => {
-                    // Compact chunk, otherwise the following keys and chunk rows might fail to zip.
-                    let chunk = chunk.compact();
                     let mut builder = JoinStreamChunkBuilder::new(
                         self.chunk_size,
                         self.schema.data_types(),
@@ -437,7 +436,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                     );
                     let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
                     let keys = K::build(&self.left_join_keys, chunk.data_chunk())?;
-                    for ((op, left_row), key) in chunk.rows().zip_eq_debug(keys.into_iter()) {
+                    for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
+                        let Some((op, left_row)) = r else {
+                            continue;
+                        };
                         if key.null_bitmap().is_subset(&null_matched)
                             && let join_entry = self.right_table.lookup(&key, epoch).await?
                             && !join_entry.is_empty() {
@@ -445,9 +447,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                 // check join condition
                                 let ok = if let Some(ref mut cond) = self.condition {
                                     let concat_row = left_row.chain(&right_row).into_owned_row();
-                                    cond.eval_row_infallible(&concat_row, |err| {
-                                        self.ctx.on_compute_error(err, self.identity.as_str())
-                                    })
+                                    cond.eval_row_infallible(&concat_row)
                                         .await
                                         .map(|s| *s.as_bool())
                                         .unwrap_or(false)

@@ -10,6 +10,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+jni = "0.21.1"
 prost = "0.11"
 risingwave_common = { workspace = true }
 risingwave_jni_core = { workspace = true }
