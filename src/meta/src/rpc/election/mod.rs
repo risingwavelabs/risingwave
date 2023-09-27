@@ -14,6 +14,9 @@
 pub mod etcd;
 pub mod sql;
 
+use std::sync::Arc;
+
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use serde::Serialize;
 use tokio::sync::watch::Receiver;
 
@@ -35,4 +38,8 @@ pub trait ElectionClient: Send + Sync + 'static {
     async fn leader(&self) -> MetaResult<Option<ElectionMember>>;
     async fn get_members(&self) -> MetaResult<Vec<ElectionMember>>;
     async fn is_leader(&self) -> bool;
+
+    fn runtime_ref(&self) -> Option<Arc<BackgroundShutdownRuntime>> {
+        None
+    }
 }

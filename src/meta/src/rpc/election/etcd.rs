@@ -20,6 +20,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use etcd_client::{ConnectOptions, Error, GetOptions, LeaderKey, ResignOptions};
 use risingwave_common::bail;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use serde::Serialize;
 use tokio::runtime::Runtime;
 use tokio::sync::watch::Receiver;
@@ -27,36 +28,15 @@ use tokio::sync::{oneshot, watch};
 use tokio::time;
 use tokio_stream::StreamExt;
 
+use crate::rpc::election::META_ELECTION_KEY;
 use crate::storage::WrappedEtcdClient;
-use crate::MetaResult;
-
-const META_ELECTION_KEY: &str = "__meta_election_";
-
-#[derive(Debug, Serialize)]
-pub struct ElectionMember {
-    pub id: String,
-    pub is_leader: bool,
-}
-
-#[async_trait::async_trait]
-pub trait ElectionClient: Send + Sync + 'static {
-    fn id(&self) -> MetaResult<String>;
-    async fn run_once(&self, ttl: i64, stop: Receiver<()>) -> MetaResult<()>;
-    fn subscribe(&self) -> Receiver<bool>;
-    async fn leader(&self) -> MetaResult<Option<ElectionMember>>;
-    async fn get_members(&self) -> MetaResult<Vec<ElectionMember>>;
-    async fn is_leader(&self) -> bool;
-
-    fn runtime_ref(&self) -> Option<Arc<Runtime>> {
-        None
-    }
-}
+use crate::{ElectionClient, ElectionMember, MetaResult};
 
 pub struct EtcdElectionClient {
     id: String,
     is_leader_sender: watch::Sender<bool>,
     client: WrappedEtcdClient,
-    runtime: Arc<Runtime>,
+    runtime: Arc<BackgroundShutdownRuntime>,
 }
 
 #[async_trait::async_trait]
@@ -355,18 +335,19 @@ impl EtcdElectionClient {
 
         let client = WrappedEtcdClient::connect(endpoints, options, auth_enabled).await?;
 
-        let runtime = Runtime::new().map_err(|e| {
-            anyhow!(
-                "create runtime for election client failed {}",
-                e.to_string()
-            )
-        })?;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .thread_name("risingwave-election-client")
+            .enable_all()
+            .build()
+            .map_err(|e| anyhow!(e))?;
+
+        let runtime: Arc<BackgroundShutdownRuntime> = Arc::new(runtime.into());
 
         Ok(Self {
             id,
             is_leader_sender: sender,
             client,
-            runtime: Arc::new(runtime),
+            runtime,
         })
     }
 }
