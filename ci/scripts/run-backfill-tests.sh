@@ -39,7 +39,7 @@ flush() {
 cancel_stream_jobs() {
   ID=$(run_sql "select ddl_id from rw_catalog.rw_ddl_progress;" | tail -3 | head -1 | grep -E -o "[0-9]*")
   echo "CANCELLING STREAM_JOB: $ID"
-  run_sql "CANCEL JOBS $ID;"
+  run_sql "CANCEL JOBS $ID;" </dev/null
 }
 
 # Test snapshot and upstream read.
