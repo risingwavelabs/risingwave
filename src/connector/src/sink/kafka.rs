@@ -458,13 +458,13 @@ impl KafkaPayloadWriter {
                 Err((e, rec)) => {
                     tracing::warn!(
                         "producing message (key {:?}) to topic {} failed, err {:?}.",
-                        record.key.map(|k| k.to_bytes()),
-                        record.topic,
-                        err
+                        rec.key.map(|k| k.to_bytes()),
+                        rec.topic,
+                        e
                     );
                     record = rec;
                     match e {
-                        err @ KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
+                        KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
                             tracing::warn!(
                                 "Producer queue full. Delivery future buffer size={}. Await and retry #{}",
                                 self.future_delivery_buffer.len(),
