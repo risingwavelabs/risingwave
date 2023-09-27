@@ -1313,9 +1313,12 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.17.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.17.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+env = { SLT_HOST = "${RW_FRONTEND_LISTEN_ADDRESS}", SLT_PORT = "${RW_FRONTEND_PORT}", SLT_DB = "dev" }
 command = "sqllogictest"
 args = ["${@}"]
 description = "🌟 Run SQLLogicTest"
@@ -1418,3 +1421,15 @@ cargo run -p risingwave_common --bin example-config >> src/config/example.toml
 category = "RiseDev - Backwards Compatibility Test"
 description = "Run backwards compatibility test"
 script = "./backwards-compat-tests/scripts/run_local.sh"
+
+# For debugging.
+# To show the env for a specific task, use `run_task = "show-env"` for that task.
+[tasks.show-env]
+private = true
+description = "Show cargo-make runtime environment variables"
+script = """
+#!@duckscript
+# https://github.com/sagiegurari/cargo-make/issues/889
+vars = dump_variables
+echo ${vars}
+"""
