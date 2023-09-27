@@ -62,6 +62,8 @@ test_snapshot_and_upstream_read() {
 
   run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
 
+  cargo make kill
+
   echo "Backfill tests complete"
 }
 
