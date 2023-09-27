@@ -260,6 +260,46 @@ fn extract_any_info(dyn_msg: &DynamicMessage) -> (String, Value) {
     (type_url, payload)
 }
 
+fn parse_fields(fields: &[Datum]) -> Vec<String> {
+    let mut ret_vec: Vec<String> = Vec::new();
+
+    for i in 0..fields.len() {
+        match fields[i].clone() {
+            Some(ScalarImpl::Int16(v)) => {
+                ret_vec.push(v.to_string());
+            }
+            Some(ScalarImpl::Int32(v)) => {
+                ret_vec.push(v.to_string());
+            }
+            Some(ScalarImpl::Int64(v)) => {
+                ret_vec.push(v.to_string());
+            }
+            Some(ScalarImpl::Bool(v)) => {
+                ret_vec.push(v.to_string());
+            }
+            Some(ScalarImpl::Bytea(v)) => {
+                ret_vec.push(String::from_utf8(v.to_vec()).unwrap());
+            }
+            Some(ScalarImpl::Float32(v)) => {
+                ret_vec.push(v.to_string());
+            }
+            Some(ScalarImpl::Float64(v)) => {
+                ret_vec.push(v.to_string());
+            }
+            Some(ScalarImpl::Utf8(v)) => {
+                ret_vec.push(v.to_string());
+            }
+            Some(ScalarImpl::Struct(v)) => {
+                let v = parse_fields(v.fields()).join(", ");
+                ret_vec.push(v);
+            }
+            _ => panic!("Not yet support ScalarImpl type"),
+        }
+    }
+
+    ret_vec
+}
+
 pub fn from_protobuf_value(
     field_desc: &FieldDescriptor,
     value: &Value,
@@ -291,14 +331,14 @@ pub fn from_protobuf_value(
             ScalarImpl::Utf8(enum_symbol.name().into())
         }
         Value::Message(dyn_msg) => {
-            let flag;
+            let any_flag;
             if let Some(&DataType::Jsonb) = type_expected {
-                flag = true;
+                any_flag = true;
             } else {
-                flag = false;
+                any_flag = false;
             }
 
-            if dyn_msg.has_field_by_name("type_url") && dyn_msg.has_field_by_name("value") && flag {
+            if dyn_msg.has_field_by_name("type_url") && dyn_msg.has_field_by_name("value") && any_flag {
                 // The message is of type `Any`
                 let (type_url, payload) = extract_any_info(dyn_msg);
 
@@ -339,38 +379,7 @@ pub fn from_protobuf_value(
                     panic!("Expect ScalarImpl::Struct");
                 };
 
-                let fields = v.fields();
-
-                match fields[0].clone() {
-                    Some(ScalarImpl::Int16(v)) => {
-                        ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!({"value": v})))
-                    }
-                    Some(ScalarImpl::Int32(v)) => {
-                        ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!({"value": v})))
-                    }
-                    Some(ScalarImpl::Int64(v)) => {
-                        ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!({"value": v})))
-                    }
-                    Some(ScalarImpl::Serial(v)) => {
-                        ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!({"value": v})))
-                    }
-                    Some(ScalarImpl::Bool(v)) => {
-                        ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!({"value": v})))
-                    }
-                    Some(ScalarImpl::Bytea(v)) => {
-                        ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!({"value": v})))
-                    }
-                    Some(ScalarImpl::Float32(v)) => {
-                        ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!({"value": v})))
-                    }
-                    Some(ScalarImpl::Float64(v)) => {
-                        ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!({"value": v})))
-                    }
-                    Some(ScalarImpl::Utf8(v)) => {
-                        ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!({"value": v})))
-                    }
-                    _ => panic!("Expected serializable ScalarImpl type"),
-                }
+                ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!({"value": parse_fields(v.fields())})))
             } else {
                 let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
                 // fields is a btree map in descriptor

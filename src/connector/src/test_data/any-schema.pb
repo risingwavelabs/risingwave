@@ -5,13 +5,23 @@
 type_url (	RtypeUrl
 value (RvalueBv
 com.google.protobufBAnyProtoPZ,google.golang.org/protobuf/types/known/anypb¢GPBªGoogle.Protobuf.WellKnownTypesbproto3
-É
-any-schema.prototestgoogle/protobuf/any.proto"C
+é
+any-schema.prototestgoogle/protobuf/any.proto"L
 TestAny
-id (Rid(
-name (2.google.protobuf.AnyRname"#
+id (Rid1
+	any_value (2.google.protobuf.AnyRanyValue"#
 StringValue
 value (	Rvalue""
 
 Int32Value
-value (Rvaluebproto3
+value (Rvalue"@
+StringInt32Value
+first (	Rfirst
+second (Rsecond"Ž
+StringStringInt32Value
+first (	Rfirst.
+second (2.test.StringInt32ValueRsecond.
+third (2.test.Float32StringValueRthird"B
+Float32StringValue
+first (Rfirst
+second (	Rsecondbproto3
