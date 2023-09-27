@@ -34,6 +34,3 @@ download_and_prepare_rw "$profile" common
 
 echo "--- Run backfill tests"
 ./ci/scripts/run-backfill-tests.sh
-
-echo "--- Kill cluster"
-cargo make kill

@@ -141,7 +141,7 @@ test_background_ddl_cancel() {
 
 # Test foreground ddl should not recover
 test_foreground_ddl_cancel() {
-  echo "--- e2e, ci-3streaming-2serving-3fe, test background ddl"
+  echo "--- e2e, ci-1cn-1fe-with-recovery, test_foreground_ddl_cancel"
   cargo make ci-start ci-1cn-1fe-with-recovery
 
   # Test before recovery
@@ -161,7 +161,7 @@ test_foreground_ddl_cancel() {
 }
 # Test foreground ddl should not recover
 test_foreground_ddl_no_recover() {
-  echo "--- e2e, ci-3streaming-2serving-3fe, test background ddl"
+  echo "--- e2e, ci-3streaming-2serving-3fe, test_foreground_ddl_no_recover"
   cargo make ci-start ci-1cn-1fe-with-recovery
 
   # Test before recovery
