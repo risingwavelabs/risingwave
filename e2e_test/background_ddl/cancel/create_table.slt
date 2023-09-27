@@ -3,3 +3,6 @@ CREATE TABLE t(v1 int);
 
 statement ok
 INSERT INTO t SELECT * FROM generate_series(1, 500000);
+
+statement ok
+FLUSH;
