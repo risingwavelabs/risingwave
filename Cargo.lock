@@ -7009,6 +7009,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "async-trait",
+ "auto_impl",
  "await-tree",
  "cfg-or-panic",
  "chrono",
@@ -7360,6 +7361,7 @@ dependencies = [
  "prost",
  "prost-helpers",
  "serde",
+ "strum 0.25.0",
  "walkdir",
  "workspace-hack",
 ]
@@ -10384,6 +10386,7 @@ dependencies = [
  "sqlx-mysql",
  "sqlx-postgres",
  "sqlx-sqlite",
+ "strum 0.25.0",
  "subtle",
  "syn 1.0.109",
  "syn 2.0.37",

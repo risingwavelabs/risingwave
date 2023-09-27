@@ -21,8 +21,9 @@ use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
-use crate::expr::{build_from_prost, BoxedExpression, Expression};
-use crate::{ExprError, Result};
+use super::Build;
+use crate::expr::{BoxedExpression, Expression};
+use crate::Result;
 
 #[derive(Debug)]
 pub struct WhenClause {
@@ -107,10 +108,11 @@ impl Expression for CaseExpression {
     }
 }
 
-impl<'a> TryFrom<&'a ExprNode> for CaseExpression {
-    type Error = ExprError;
-
-    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+impl Build for CaseExpression {
+    fn build(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<Self> {
         ensure!(prost.get_function_type().unwrap() == PbType::Case);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
@@ -121,7 +123,7 @@ impl<'a> TryFrom<&'a ExprNode> for CaseExpression {
         // children: (when, then)+, (else_clause)?
         let len = children.len();
         let else_clause = if len % 2 == 1 {
-            let else_clause = build_from_prost(&children[len - 1])?;
+            let else_clause = build_child(&children[len - 1])?;
             if else_clause.return_type() != ret_type {
                 bail!("Type mismatched between else and case.");
             }
@@ -133,8 +135,8 @@ impl<'a> TryFrom<&'a ExprNode> for CaseExpression {
         for i in 0..len / 2 {
             let when_index = i * 2;
             let then_index = i * 2 + 1;
-            let when_expr = build_from_prost(&children[when_index])?;
-            let then_expr = build_from_prost(&children[then_index])?;
+            let when_expr = build_child(&children[when_index])?;
+            let then_expr = build_child(&children[then_index])?;
             if when_expr.return_type() != DataType::Boolean {
                 bail!("Type mismatched between when clause and condition");
             }

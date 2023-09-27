@@ -28,7 +28,7 @@ use super::*;
 use crate::error::StreamResult;
 
 pub struct StatelessSimpleAggExecutor {
-    ctx: ActorContextRef,
+    _ctx: ActorContextRef,
     pub(super) input: Box<dyn Executor>,
     pub(super) info: ExecutorInfo,
     pub(super) aggs: Vec<BoxedAggregateFunction>,
@@ -55,15 +55,13 @@ impl Executor for StatelessSimpleAggExecutor {
 
 impl StatelessSimpleAggExecutor {
     async fn apply_chunk(
-        ctx: &ActorContextRef,
-        identity: &str,
         agg_calls: &[AggCall],
         aggs: &[BoxedAggregateFunction],
         states: &mut [AggregateState],
         chunk: &StreamChunk,
     ) -> StreamExecutorResult<()> {
         for ((agg, call), state) in aggs.iter().zip_eq_fast(agg_calls).zip_eq_fast(states) {
-            let vis = agg_call_filter_res(ctx, identity, call, chunk).await?;
+            let vis = agg_call_filter_res(call, chunk).await?;
             let chunk = chunk.project_with_vis(call.args.val_indices(), vis);
             agg.update(state, &chunk).await?;
         }
@@ -73,7 +71,7 @@ impl StatelessSimpleAggExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let StatelessSimpleAggExecutor {
-            ctx,
+            _ctx,
             input,
             info,
             aggs,
@@ -89,8 +87,7 @@ impl StatelessSimpleAggExecutor {
             match msg {
                 Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &aggs, &mut states, &chunk)
-                        .await?;
+                    Self::apply_chunk(&agg_calls, &aggs, &mut states, &chunk).await?;
                     is_dirty = true;
                 }
                 m @ Message::Barrier(_) => {
@@ -141,7 +138,7 @@ impl StatelessSimpleAggExecutor {
         let aggs = agg_calls.iter().map(build_retractable).try_collect()?;
 
         Ok(StatelessSimpleAggExecutor {
-            ctx,
+            _ctx: ctx,
             input,
             info,
             aggs,

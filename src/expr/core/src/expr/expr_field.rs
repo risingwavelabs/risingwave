@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::TryFrom;
-
 use anyhow::anyhow;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
@@ -22,8 +20,9 @@ use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
-use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
-use crate::{bail, ensure, ExprError, Result};
+use super::Build;
+use crate::expr::{BoxedExpression, Expression};
+use crate::{bail, ensure, Result};
 
 /// `FieldExpression` access a field from a struct.
 #[derive(Debug)]
@@ -70,10 +69,11 @@ impl FieldExpression {
     }
 }
 
-impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
-    type Error = ExprError;
-
-    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+impl Build for FieldExpression {
+    fn build(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<Self> {
         ensure!(prost.get_function_type().unwrap() == Type::Field);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
@@ -85,7 +85,7 @@ impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
         // Field `func_call_node` have 2 child nodes, the first is Field `FuncCall` or
         // `InputRef`, the second is i32 `Literal`.
         let [first, second]: [_; 2] = children.try_into().unwrap();
-        let input = expr_build_from_prost(&first)?;
+        let input = build_child(&first)?;
         let RexNode::Constant(value) = second.get_rex_node().unwrap() else {
             bail!("Expected Constant as 1st argument");
         };
@@ -108,13 +108,13 @@ mod tests {
 
     use crate::expr::expr_field::FieldExpression;
     use crate::expr::test_utils::{make_field_function, make_i32_literal, make_input_ref};
-    use crate::expr::Expression;
+    use crate::expr::{Build, Expression};
 
     #[tokio::test]
     async fn test_field_expr() {
         let input_node = make_input_ref(0, TypeName::Struct);
         let literal_node = make_i32_literal(0);
-        let field_expr = FieldExpression::try_from(&make_field_function(
+        let field_expr = FieldExpression::build_for_test(&make_field_function(
             vec![input_node, literal_node],
             TypeName::Int32,
         ))
@@ -143,7 +143,7 @@ mod tests {
             vec![make_input_ref(0, TypeName::Struct), make_i32_literal(0)],
             TypeName::Int32,
         );
-        let field_expr = FieldExpression::try_from(&make_field_function(
+        let field_expr = FieldExpression::build_for_test(&make_field_function(
             vec![field_node, make_i32_literal(1)],
             TypeName::Int32,
         ))

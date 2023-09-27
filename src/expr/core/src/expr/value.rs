@@ -26,6 +26,12 @@ pub enum ValueImpl {
     Scalar { value: Datum, capacity: usize },
 }
 
+impl From<ArrayRef> for ValueImpl {
+    fn from(value: ArrayRef) -> Self {
+        Self::Array(value)
+    }
+}
+
 impl ValueImpl {
     /// Number of scalars in this value.
     #[inline]
