@@ -187,9 +187,17 @@ impl<T: EstimateSize> IntoIterator for VecWithKvSize<T> {
     }
 }
 
+/// The size of the collection.
+///
+/// We use an atomic value here to enable operating the size without a mutable reference.
+/// See [`collections::AtomicMutGuard`] for more details.
+///
+/// In the most cases, we have the mutable reference of this struct, so we can directly
+/// operate the underlying value.
 #[derive(Default)]
 pub struct KvSize(AtomicUsize);
 
+/// Clone the [`KvSize`] will duplicate the underlying value.
 impl Clone for KvSize {
     fn clone(&self) -> Self {
         Self(self.size().into())
@@ -227,15 +235,16 @@ impl KvSize {
     }
 
     pub fn add_size(&mut self, size: usize) {
-        let this = self.0.get_mut();
+        let this = self.0.get_mut(); // get the underlying value since we have a mutable reference
         *this = this.saturating_add(size);
     }
 
     pub fn sub_size(&mut self, size: usize) {
-        let this = self.0.get_mut();
+        let this = self.0.get_mut(); // get the underlying value since we have a mutable reference
         *this = this.saturating_sub(size);
     }
 
+    /// Update the size of the collection by `to - from` atomically, i.e., without a mutable reference.
     pub fn update_size_atomic(&self, from: usize, to: usize) {
         let _ = (self.0).fetch_update(Ordering::Relaxed, Ordering::Relaxed, |this| {
             Some(this.saturating_add(to).saturating_sub(from))

@@ -27,10 +27,13 @@ pub use hashmap::EstimatedHashMap as HashMap;
 mod private {
     use super::*;
 
+    /// A trait that dispatches the size update method regarding the mutability of the reference
+    /// to the [`KvSize`].
     pub trait GenericKvSize {
         fn update_size(&mut self, from: usize, to: usize);
     }
 
+    /// For mutable references, the size can be directly updated.
     impl GenericKvSize for &'_ mut KvSize {
         fn update_size(&mut self, from: usize, to: usize) {
             self.add_size(to);
@@ -38,6 +41,7 @@ mod private {
         }
     }
 
+    /// For immutable references, the size is updated atomically.
     impl GenericKvSize for &'_ KvSize {
         fn update_size(&mut self, from: usize, to: usize) {
             self.update_size_atomic(from, to)
@@ -45,6 +49,8 @@ mod private {
     }
 }
 
+/// A guard holding a mutable reference to a value in a collection. When dropped, the size of the
+/// collection will be updated.
 pub struct MutGuard<'a, V, S = &'a mut KvSize>
 where
     V: EstimateSize,
@@ -57,6 +63,8 @@ where
     total_size: S,
 }
 
+/// Similar to [`MutGuard`], but the size is updated atomically. Useful for creating shared
+/// references to the entries in a collection.
 pub type AtomicMutGuard<'a, V> = MutGuard<'a, V, &'a KvSize>;
 
 impl<'a, V, S> MutGuard<'a, V, S>
