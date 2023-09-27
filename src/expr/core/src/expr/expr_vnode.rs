@@ -51,7 +51,7 @@ impl Build for VnodeExpression {
         let dist_key_input_refs = func_call_node
             .get_children()
             .iter()
-            .map(|e| InputRefExpression::from_prost(e))
+            .map(InputRefExpression::from_prost)
             .map(|input| input.index())
             .collect();
 
