@@ -465,6 +465,7 @@ impl<L> tonic::transport::server::Router<L> {
                 connection_type: connection_type.into(),
             },
         );
+        tracing::info!("Real start listening!!!");
         self.serve_with_incoming_shutdown(incoming, signal)
             .await
             .unwrap()
