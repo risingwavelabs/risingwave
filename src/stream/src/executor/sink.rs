@@ -524,7 +524,7 @@ mod test {
                 .map(|col| col.column_desc.clone())
                 .collect(),
             downstream_pk: vec![0],
-            sink_type: SinkType::ForceAppendOnly,
+            sink_type: SinkType::Upsert,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
