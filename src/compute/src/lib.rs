@@ -200,7 +200,6 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         validate_opts(&opts);
 
         let listen_addr = opts.listen_addr.parse().unwrap();
-        tracing::info!("Server will listen at {}", listen_addr);
 
         let advertise_addr = opts
             .advertise_addr

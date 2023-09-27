@@ -109,7 +109,6 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             tracing::info!("Proxy rpc endpoint: {}", opts.proxy_rpc_endpoint.clone());
 
             let listen_addr = opts.listen_addr.parse().unwrap();
-            tracing::info!("Server will listen at {}", listen_addr);
 
             let (join_handle, _shutdown_sender) = shared_compactor_serve(listen_addr, opts).await;
 
@@ -122,7 +121,6 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             tracing::info!("meta address: {}", opts.meta_address.clone());
 
             let listen_addr = opts.listen_addr.parse().unwrap();
-            tracing::info!("Server will listen at {}", listen_addr);
 
             let advertise_addr = opts
                 .advertise_addr
