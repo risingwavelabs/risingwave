@@ -958,7 +958,6 @@ impl GlobalBarrierManager {
             .fragment_manager
             .get_upstream_relation_counts(&creating_table_ids)
             .await;
-        println!("upstream_mv_counts: {:#?}", &upstream_mv_counts);
         let definitions: HashMap<_, _> = creating_tables
             .into_iter()
             .map(|t| (TableId { table_id: t.id }, t.definition))
@@ -967,7 +966,6 @@ impl GlobalBarrierManager {
         // If failed, enter recovery mode.
         self.set_status(BarrierManagerStatus::Recovering).await;
         let mut tracker = self.tracker.lock().await;
-        println!("creating_table_ids {:?}", creating_table_ids);
         *tracker = CreateMviewProgressTracker::recover(
             table_map,
             upstream_mv_counts,
@@ -1076,7 +1074,6 @@ impl GlobalBarrierManager {
                                 sst_to_worker,
                             )
                             .await?;
-                        // TODO: Also store the stream job state.
                     }
                     BarrierKind::Barrier => {
                         new_snapshot = Some(self.hummock_manager.update_current_epoch(prev_epoch));

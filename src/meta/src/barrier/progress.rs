@@ -111,8 +111,6 @@ impl Progress {
 
     /// Returns whether all chains are done.
     fn is_done(&self) -> bool {
-        println!("done_count: {:#?}", self.done_count);
-        println!("states_len: {:#?}", self.states.len());
         self.done_count == self.states.len()
     }
 
@@ -260,8 +258,6 @@ impl CreateMviewProgressTracker {
                 .sum();
             let definition = definitions.remove(&creating_table_id).unwrap();
             let progress = Progress {
-                // FIXME: I guess this has to be non-empty?
-                // Maybe set to 0.
                 states,
                 done_count: 0, // Fill only after first barrier pass
                 upstream_mv_count,
@@ -417,7 +413,6 @@ impl CreateMviewProgressTracker {
             );
             return None;
         };
-        println!("stream_job table_id: {:#?}", table_id);
 
         let new_state = if progress.done {
             ChainState::Done(progress.consumed_rows)
