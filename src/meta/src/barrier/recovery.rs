@@ -18,6 +18,8 @@ use std::time::{Duration, Instant};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
+use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
@@ -58,6 +60,16 @@ impl GlobalBarrierManager {
             &Command::barrier(),
         )
         .await
+    }
+
+    /// Foreground stream jobs with "CREATING" status
+    /// should be cleaned
+    async fn clean_dirty_tables(&self) -> MetaResult<()> {
+        let fragment_manager = self.fragment_manager.clone();
+        self.catalog_manager
+            .clean_dirty_tables(fragment_manager)
+            .await?;
+        Ok(())
     }
 
     /// Clean up all dirty streaming jobs.

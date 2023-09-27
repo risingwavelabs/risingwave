@@ -732,7 +732,7 @@ impl DdlController {
             StreamingJob::MaterializedView(table) => {
                 creating_internal_table_ids.push(table.id);
                 self.catalog_manager
-                    .cancel_create_table_procedure(table)
+                    .cancel_create_table_procedure(table, self.fragment_manager.clone())
                     .await;
             }
             StreamingJob::Sink(sink) => {
@@ -748,7 +748,7 @@ impl DdlController {
                         .await;
                 } else {
                     self.catalog_manager
-                        .cancel_create_table_procedure(table)
+                        .cancel_create_table_procedure(table, self.fragment_manager.clone())
                         .await;
                 }
             }
