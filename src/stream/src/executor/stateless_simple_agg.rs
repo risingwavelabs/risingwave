@@ -55,14 +55,13 @@ impl Executor for StatelessSimpleAggExecutor {
 
 impl StatelessSimpleAggExecutor {
     async fn apply_chunk(
-        identity: &str,
         agg_calls: &[AggCall],
         aggs: &[BoxedAggregateFunction],
         states: &mut [AggregateState],
         chunk: &StreamChunk,
     ) -> StreamExecutorResult<()> {
         for ((agg, call), state) in aggs.iter().zip_eq_fast(agg_calls).zip_eq_fast(states) {
-            let vis = agg_call_filter_res(identity, call, chunk).await?;
+            let vis = agg_call_filter_res(call, chunk).await?;
             let chunk = chunk.project_with_vis(call.args.val_indices(), vis);
             agg.update(state, &chunk).await?;
         }
@@ -88,8 +87,7 @@ impl StatelessSimpleAggExecutor {
             match msg {
                 Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&info.identity, &agg_calls, &aggs, &mut states, &chunk)
-                        .await?;
+                    Self::apply_chunk(&agg_calls, &aggs, &mut states, &chunk).await?;
                     is_dirty = true;
                 }
                 m @ Message::Barrier(_) => {

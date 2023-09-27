@@ -310,7 +310,6 @@ struct HashJoinChunkBuilder<const T: JoinTypePrimitive, const SIDE: SideTypePrim
 
 struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     ctx: &'a ActorContextRef,
-    _identity: &'a str,
     side_l: &'a mut JoinSide<K, S>,
     side_r: &'a mut JoinSide<K, S>,
     actual_output_data_types: &'a [DataType],
@@ -745,7 +744,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     #[for_await]
                     for chunk in Self::eq_join_left(EqJoinArgs {
                         ctx: &self.ctx,
-                        _identity: &self.identity,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
                         actual_output_data_types: &self.actual_output_data_types,
@@ -772,7 +770,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     #[for_await]
                     for chunk in Self::eq_join_right(EqJoinArgs {
                         ctx: &self.ctx,
-                        _identity: &self.identity,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
                         actual_output_data_types: &self.actual_output_data_types,

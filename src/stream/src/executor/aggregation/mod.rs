@@ -59,7 +59,6 @@ pub fn generate_agg_schema(
 }
 
 pub async fn agg_call_filter_res(
-    _identity: &str,
     agg_call: &AggCall,
     chunk: &DataChunk,
 ) -> StreamExecutorResult<Bitmap> {
