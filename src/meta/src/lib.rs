@@ -246,7 +246,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .collect()
             });
 
-        info!("Meta server listening at {}", listen_addr);
+        info!("Meta server will listen at {}", listen_addr);
         let add_info = AddressInfo {
             advertise_addr: opts.advertise_addr,
             listen_addr,
@@ -318,6 +318,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         )
         .await
         .unwrap();
+
+        tracing::info!("Meta server listening at {}", listen_addr);
 
         match leader_lost_handle {
             None => {
