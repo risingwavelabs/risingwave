@@ -996,9 +996,9 @@ impl GlobalBarrierManager {
                     //     .cancel_create_table_procedure(&table, fragment_manager)
                     //     .await
                     //     .unwrap();
+                    // FIXME: If stream job failed to complete, perhaps we should clean up,
+                    // since there isn't barrier dispatched to clean it up.
                 }
-                // FIXME: Should copy the functionality from DDLController,
-                // and call cancel_stream_job here if any part of this failed.
             });
         }
         Ok(())

@@ -45,7 +45,7 @@ use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
 use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob};
-use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction};
+use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction};
 use crate::storage::Transaction;
 use crate::{MetaError, MetaResult};
 
@@ -835,11 +835,12 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn cancel_create_table_procedure(
+    pub async fn cancel_create_table_procedure_with_internal_table_ids(
         &self,
         table_id: TableId,
-        fragment_manager: FragmentManagerRef,
+        internal_table_ids: Vec<TableId>,
     ) -> MetaResult<()> {
+        println!("Calling cancel for: {table_id}");
         let core = &mut self.core.lock().await;
         let table = {
             let database_core = &mut core.database;
@@ -861,9 +862,49 @@ impl CatalogManager {
         }
 
         let mut table_ids = vec![table.id];
-        let fragment = fragment_manager
-            .select_table_fragments_by_table_id(&table.id.into())
-            .await?;
+        table_ids.extend(internal_table_ids);
+
+        let tables = &mut database_core.tables;
+        let mut tables = BTreeMapTransaction::new(tables);
+        for table_id in table_ids {
+            let table = tables.remove(table_id);
+            assert!(table.is_some())
+        }
+        commit_meta!(self, tables)?;
+
+        let tables = &mut database_core.tables;
+        assert!(tables.get(&table.id).is_none());
+        Ok(())
+    }
+
+    pub async fn cancel_create_table_procedure_with_table_fragments(
+        &self,
+        table_id: TableId,
+        fragment: &TableFragments,
+    ) -> MetaResult<()> {
+        println!("Calling cancel for: {table_id}");
+        let core = &mut self.core.lock().await;
+        let table = {
+            let database_core = &mut core.database;
+            let tables = &mut database_core.tables;
+            let Some(table) = tables.get(&table_id).cloned() else {
+                bail!("Table ID: {table_id} missing when attempting to cancel job")
+            };
+            table
+        };
+
+        {
+            let user_core = &mut core.user;
+            user_core.decrease_ref(table.owner);
+        }
+
+        let database_core = &mut core.database;
+        for &dependent_relation_id in &table.dependent_relations {
+            database_core.decrease_ref_count(dependent_relation_id);
+        }
+
+        let mut table_ids = vec![table.id];
+
         let internal_table_ids = fragment.internal_table_ids();
         table_ids.extend(internal_table_ids);
 
@@ -874,6 +915,9 @@ impl CatalogManager {
             assert!(table.is_some())
         }
         commit_meta!(self, tables)?;
+
+        let tables = &mut database_core.tables;
+        assert!(tables.get(&table.id).is_none());
         Ok(())
     }
 

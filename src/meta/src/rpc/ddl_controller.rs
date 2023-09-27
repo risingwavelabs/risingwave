@@ -710,11 +710,18 @@ impl DdlController {
         // 1. cancel create procedure.
         match stream_job {
             StreamingJob::MaterializedView(table) => {
-                creating_internal_table_ids.push(table.id);
                 // barrier manager will do the cleanup.
-                // self.catalog_manager
-                //     .cancel_create_table_procedure(table, self.fragment_manager.clone())
-                //     .await?;
+                let result = self
+                    .catalog_manager
+                    .cancel_create_table_procedure_with_internal_table_ids(
+                        table.id,
+                        creating_internal_table_ids.clone(),
+                    )
+                    .await;
+                creating_internal_table_ids.push(table.id);
+                if let Err(e) = result {
+                    tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
+                }
             }
             StreamingJob::Sink(sink) => {
                 self.catalog_manager
@@ -722,7 +729,6 @@ impl DdlController {
                     .await;
             }
             StreamingJob::Table(source, table) => {
-                creating_internal_table_ids.push(table.id);
                 if let Some(source) = source {
                     self.catalog_manager
                         .cancel_create_table_procedure_with_source(source, table)
@@ -732,10 +738,18 @@ impl DdlController {
                     // Or we need to revert the cancel table, and only drop
                     // the tables from meta store in barrier manager,
                     // and do other cleanups here?
-                    // self.catalog_manager
-                    //     .cancel_create_table_procedure(table, self.fragment_manager.clone())
-                    //     .await?;
+                    let result = self
+                        .catalog_manager
+                        .cancel_create_table_procedure_with_internal_table_ids(
+                            table.id,
+                            creating_internal_table_ids.clone(),
+                        )
+                        .await;
+                    if let Err(e) = result {
+                        tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
+                    }
                 }
+                creating_internal_table_ids.push(table.id);
             }
             StreamingJob::Index(index, table) => {
                 creating_internal_table_ids.push(table.id);

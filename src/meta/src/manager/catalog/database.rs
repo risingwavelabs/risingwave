@@ -199,6 +199,14 @@ impl DatabaseManager {
                 && x.schema_id == relation_key.1
                 && x.name.eq(&relation_key.2)
         }) {
+            println!(
+                "duplicated for table_id: {:#?}",
+                self.tables
+                    .values()
+                    .find(|v| v.name.eq(&relation_key.2))
+                    .unwrap()
+                    .id
+            );
             Err(MetaError::catalog_duplicated("table", &relation_key.2))
         } else if self.sources.values().any(|x| {
             x.database_id == relation_key.0
