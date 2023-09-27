@@ -154,6 +154,7 @@ test_foreground_ddl_cancel() {
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/validate_after_cancel.slt"
 
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/create_mv_after_cancel.slt"
+  run_sql "DROP MATERIALIZED VIEW m1;"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/drop.slt"
 
   cargo make kill

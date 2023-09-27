@@ -1,5 +1,2 @@
 statement ok
-DROP MATERIALIZED VIEW m1;
-
-statement ok
 DROP TABLE t;
