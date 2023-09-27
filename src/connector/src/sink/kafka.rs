@@ -335,12 +335,17 @@ impl Sink for KafkaSink {
         // Try Kafka connection.
         // There is no such interface for kafka producer to validate a connection
         // use enumerator to validate broker reachability and existence of topic
-        let mut ticker = KafkaSplitEnumerator::new(
+        let check = KafkaSplitEnumerator::new(
             KafkaProperties::from(self.config.clone()),
             Arc::new(SourceEnumeratorContext::default()),
         )
         .await?;
-        _ = ticker.list_splits().await?;
+        if !check.check_reachability().await {
+            return Err(SinkError::Config(anyhow!(
+                "cannot connect to kafka broker ({})",
+                self.config.common.brokers
+            )));
+        }
         Ok(())
     }
 }
