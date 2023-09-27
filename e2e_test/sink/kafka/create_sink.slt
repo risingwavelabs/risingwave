@@ -10,7 +10,7 @@ create table t_kafka (
     v_timestamp timestamp
 );
 
-statement error failed to fetch metadata from kafka
+statement error cannot connect to kafka broker
 create sink sink_non_exist_broker from t_kafka with (
     connector = 'kafka',
     properties.bootstrap.server = 'make no sense',
