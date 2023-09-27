@@ -351,7 +351,7 @@ impl Sink for KafkaSink {
 const KAFKA_WRITER_MAX_QUEUE_SIZE_RATIO: f32 = 1.2;
 /// The default queue size used to enforce a commit in kafka producer if `queue.buffering.max.messages` is not specified.
 /// This default value is determined based on the librdkafka default. See the following doc for more details:
-/// https://github.com/confluentinc/librdkafka/blob/1cb80090dfc75f5a36eae3f4f8844b14885c045e/CONFIGURATION.md?plain=1#L139
+/// https://github.com/confluentinc/librdkafka/blob/1cb80090dfc75f5a36eae3f4f8844b14885c045e/CONFIGURATION.md
 const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 100000;
 
 struct KafkaPayloadWriter {
@@ -429,12 +429,18 @@ impl KafkaPayloadWriter {
             .unwrap_or(KAFKA_WRITER_MAX_QUEUE_SIZE) as f32
             * KAFKA_WRITER_MAX_QUEUE_SIZE_RATIO) as usize;
 
-        for _ in 0..self.config.max_retry_num {
+        for i in 0..self.config.max_retry_num {
             match self.inner.send_result(record) {
                 Ok(delivery_future) => {
                     // First check if the current length is
                     // greater than the preset limit
                     while self.future_delivery_buffer.len() >= max_delivery_buffer_size {
+                        tracing::warn!(
+                            "Number of records being delivered ({}) >= expected kafka producer queue size ({}). 
+                            This indicates the default value of queue.buffering.max.messages has changed.",
+                            self.future_delivery_buffer.len(),
+                            max_delivery_buffer_size
+                        );
                         Self::map_future_result(
                             self.future_delivery_buffer
                                 .pop_front()
@@ -450,14 +456,19 @@ impl KafkaPayloadWriter {
                 // The enqueue buffer is full, `send_result` will immediately return
                 // We can retry for another round after sleeping for sometime
                 Err((e, rec)) => {
+                    tracing::warn!(
+                        "producing message (key {:?}) to topic {} failed, err {:?}.",
+                        record.key.map(|k| k.to_bytes()),
+                        record.topic,
+                        err
+                    );
                     record = rec;
                     match e {
                         err @ KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
                             tracing::warn!(
-                                "producing message (key {:?}) to topic {} failed, err {:?}, retrying",
-                                record.key.map(|k| k.to_bytes()),
-                                record.topic,
-                                err
+                                "Producer queue full. Delivery future buffer size={}. Await and retry #{}",
+                                self.future_delivery_buffer.len(),
+                                i
                             );
                             Self::map_future_result(
                                 self.future_delivery_buffer
