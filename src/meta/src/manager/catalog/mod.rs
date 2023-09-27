@@ -783,10 +783,12 @@ impl CatalogManager {
 
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
+        let user_core = &mut core.user;
         for table in &tables {
             for relation_id in &table.dependent_relations {
                 database_core.decrease_ref_count(*relation_id);
             }
+            user_core.decrease_ref(table.owner);
         }
 
         let tables = &mut database_core.tables;
@@ -844,7 +846,7 @@ impl CatalogManager {
         &self,
         table: &Table,
         fragment_manager: FragmentManagerRef,
-    ) {
+    ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -854,7 +856,22 @@ impl CatalogManager {
             database_core.decrease_ref_count(dependent_relation_id);
         }
         user_core.decrease_ref(table.owner);
-        self.clean_dirty_tables(fragment_manager).await.unwrap();
+
+        let mut table_ids = vec![table.id];
+        let fragment = fragment_manager
+            .select_table_fragments_by_table_id(&table.id.into())
+            .await?;
+        let internal_table_ids = fragment.internal_table_ids();
+        table_ids.extend(internal_table_ids);
+
+        let tables = &mut database_core.tables;
+        let mut tables = BTreeMapTransaction::new(tables);
+        for table_id in table_ids {
+            let table = tables.remove(table_id);
+            assert!(table.is_some())
+        }
+        commit_meta!(self, tables)?;
+        Ok(())
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.

@@ -455,7 +455,7 @@ impl DdlController {
         let (ctx, table_fragments) = match result {
             Ok(r) => r,
             Err(e) => {
-                self.cancel_stream_job(&stream_job, internal_tables).await;
+                self.cancel_stream_job(&stream_job, internal_tables).await?;
                 return Err(e);
             }
         };
@@ -512,7 +512,7 @@ impl DdlController {
             .create_streaming_job(table_fragments, ctx)
             .await;
         if let Err(e) = result {
-            self.cancel_stream_job(&stream_job, internal_tables).await;
+            self.cancel_stream_job(&stream_job, internal_tables).await?;
             return Err(e);
         };
         self.finish_stream_job(stream_job, internal_tables).await
@@ -724,7 +724,11 @@ impl DdlController {
     }
 
     /// `cancel_stream_job` cancels a stream job and clean some states.
-    async fn cancel_stream_job(&self, stream_job: &StreamingJob, internal_tables: Vec<Table>) {
+    async fn cancel_stream_job(
+        &self,
+        stream_job: &StreamingJob,
+        internal_tables: Vec<Table>,
+    ) -> MetaResult<()> {
         let mut creating_internal_table_ids =
             internal_tables.into_iter().map(|t| t.id).collect_vec();
         // 1. cancel create procedure.
@@ -733,7 +737,7 @@ impl DdlController {
                 creating_internal_table_ids.push(table.id);
                 self.catalog_manager
                     .cancel_create_table_procedure(table, self.fragment_manager.clone())
-                    .await;
+                    .await?;
             }
             StreamingJob::Sink(sink) => {
                 self.catalog_manager
@@ -749,7 +753,7 @@ impl DdlController {
                 } else {
                     self.catalog_manager
                         .cancel_create_table_procedure(table, self.fragment_manager.clone())
-                        .await;
+                        .await?;
                 }
             }
             StreamingJob::Index(index, table) => {
@@ -763,6 +767,7 @@ impl DdlController {
         self.catalog_manager
             .unmark_creating_tables(&creating_internal_table_ids, true)
             .await;
+        Ok(())
     }
 
     /// `finish_stream_job` finishes a stream job and clean some states.
