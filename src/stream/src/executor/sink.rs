@@ -226,6 +226,8 @@ impl<F: LogStoreFactory> Executor for SinkExecutor<F> {
 #[cfg(test)]
 mod test {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_connector::sink::catalog::SinkFormatDesc;
+    use risingwave_connector::sink::SINK_TYPE_APPEND_ONLY;
 
     use super::*;
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
@@ -301,6 +303,7 @@ mod test {
                 .collect(),
             downstream_pk: pk.clone(),
             sink_type: SinkType::ForceAppendOnly,
+            format_desc: SinkFormatDesc::from_legacy_type(SINK_TYPE_APPEND_ONLY),
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -399,6 +402,7 @@ mod test {
                 .collect(),
             downstream_pk: pk.clone(),
             sink_type: SinkType::ForceAppendOnly,
+            format_desc: SinkFormatDesc::from_legacy_type(SINK_TYPE_APPEND_ONLY),
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };

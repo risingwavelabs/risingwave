@@ -50,7 +50,7 @@ use risingwave_rpc_client::{ConnectorClient, MetaClient};
 use thiserror::Error;
 pub use tracing;
 
-use self::catalog::SinkType;
+use self::catalog::{SinkFormatDesc, SinkType};
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::LogReader;
 use crate::sink::writer::SinkWriter;
@@ -132,6 +132,7 @@ pub struct SinkParam {
     pub columns: Vec<ColumnDesc>,
     pub downstream_pk: Vec<usize>,
     pub sink_type: SinkType,
+    pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
     pub sink_from_name: String,
 }
@@ -139,6 +140,13 @@ pub struct SinkParam {
 impl SinkParam {
     pub fn from_proto(pb_param: PbSinkParam) -> Self {
         let table_schema = pb_param.table_schema.expect("should contain table schema");
+        let format_desc = match pb_param.format_desc {
+            Some(f) => f.try_into().ok(),
+            None => pb_param
+                .properties
+                .get(SINK_TYPE_OPTION)
+                .and_then(|t| SinkFormatDesc::from_legacy_type(t)),
+        };
         Self {
             sink_id: SinkId::from(pb_param.sink_id),
             properties: pb_param.properties,
@@ -151,6 +159,7 @@ impl SinkParam {
             sink_type: SinkType::from_proto(
                 PbSinkType::from_i32(pb_param.sink_type).expect("should be able to convert"),
             ),
+            format_desc,
             db_name: pb_param.db_name,
             sink_from_name: pb_param.sink_from_name,
         }
@@ -165,6 +174,7 @@ impl SinkParam {
                 pk_indices: self.downstream_pk.iter().map(|i| *i as u32).collect(),
             }),
             sink_type: self.sink_type.to_proto().into(),
+            format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
         }
@@ -189,6 +199,7 @@ impl From<SinkCatalog> for SinkParam {
             columns,
             downstream_pk: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
+            format_desc: sink_catalog.format_desc,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
         }
