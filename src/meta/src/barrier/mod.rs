@@ -56,12 +56,11 @@ use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
-    CatalogManager, CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification,
-    MetaSrvEnv, WorkerId,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
+    WorkerId,
 };
 use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -979,7 +978,7 @@ impl GlobalBarrierManager {
         drop(tracker);
         for (table, internal_tables, finished) in receivers {
             let catalog_manager = self.catalog_manager.clone();
-            let fragment_manager = self.fragment_manager.clone();
+            let _fragment_manager = self.fragment_manager.clone();
             tokio::spawn(async move {
                 let res: MetaResult<()> = try {
                     finished

@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_pb::backup_service::MetaBackupManifestId;
-use risingwave_pb::catalog::{PbStreamJobStatus, Table};
+use risingwave_pb::catalog::Table;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::WriteLimits;

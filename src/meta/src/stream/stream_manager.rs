@@ -112,7 +112,10 @@ impl CreatingStreamingJobInfo {
         jobs.remove(&job_id);
     }
 
-    async fn cancel_jobs(&self, job_ids: Vec<TableId>) -> (HashMap<TableId, oneshot::Receiver<()>>, Vec<TableId>) {
+    async fn cancel_jobs(
+        &self,
+        job_ids: Vec<TableId>,
+    ) -> (HashMap<TableId, oneshot::Receiver<()>>, Vec<TableId>) {
         let mut jobs = self.streaming_jobs.lock().await;
         let mut receivers = HashMap::new();
         let mut recovered_job_ids = vec![];
@@ -582,7 +585,8 @@ impl GlobalStreamManager {
         for fragment in fragments {
             self.barrier_scheduler
                 .run_command(Command::CancelStreamingJob(fragment))
-                .await.expect("should be able to cancel recovered stream job");
+                .await
+                .expect("should be able to cancel recovered stream job");
         }
         cancelled_ids.extend(recovered_job_ids);
         cancelled_ids

@@ -402,11 +402,6 @@ impl DdlController {
         Ok(())
     }
 
-    // FIXME
-    async fn check_key(&self, table: &Table) -> bool {
-        self.catalog_manager.check_key(table).await
-    }
-
     async fn create_streaming_job(
         &self,
         mut stream_job: StreamingJob,
@@ -459,16 +454,6 @@ impl DdlController {
                 return Err(e);
             }
         };
-
-        // At this point the key should be present in the creating tables.
-        match stream_job {
-            StreamingJob::Table(_, ref t) => {
-                if !self.check_key(t).await {
-                    println!("Key not present after building stream job for {t:#?}")
-                }
-            }
-            _ => {}
-        }
 
         match create_type {
             CreateType::Foreground | CreateType::Unspecified => {
@@ -710,15 +695,6 @@ impl DdlController {
         self.catalog_manager
             .mark_creating_tables(&creating_tables)
             .await;
-
-        match stream_job {
-            StreamingJob::Table(_, ref t) => {
-                if !self.check_key(t).await {
-                    println!("Key not present within building stream job for {t:#?}")
-                }
-            }
-            _ => {}
-        }
 
         Ok((ctx, table_fragments))
     }

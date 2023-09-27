@@ -261,11 +261,11 @@ impl DatabaseManager {
     pub fn list_creating_tables(&self) -> Vec<Table> {
         self.tables
             .values()
-            .cloned()
-            .filter(|t| {
+            .filter(|&t| {
                 t.stream_job_status == PbStreamJobStatus::Creating as i32
                     && t.table_type == TableType::MaterializedView as i32
             })
+            .cloned()
             .collect_vec()
         // self.in_progress_creating_tables
         //     .values()

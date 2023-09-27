@@ -185,10 +185,10 @@ test_foreground_ddl_no_recover() {
 
 main() {
   set -euo pipefail
-  # test_snapshot_and_upstream_read
-  # test_background_ddl_recovery
-  # test_background_ddl_cancel
-  # test_foreground_ddl_no_recover
+  test_snapshot_and_upstream_read
+  test_background_ddl_recovery
+  test_background_ddl_cancel
+  test_foreground_ddl_no_recover
   test_foreground_ddl_cancel
 }
 

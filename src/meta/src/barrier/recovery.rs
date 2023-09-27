@@ -18,8 +18,6 @@ use std::time::{Duration, Instant};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
-use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
@@ -220,7 +218,7 @@ impl GlobalBarrierManager {
                         tokio::sync::mpsc::unbounded_channel();
                     self.inject_barrier(command_ctx.clone(), &barrier_complete_tx)
                         .await;
-                    let res = match barrier_complete_rx.recv().await.unwrap().result {
+                    let _res = match barrier_complete_rx.recv().await.unwrap().result {
                         Ok(response) => {
                             if let Err(err) = command_ctx.post_collect().await {
                                 warn!(err = ?err, "post_collect failed");

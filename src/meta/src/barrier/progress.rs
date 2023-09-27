@@ -14,13 +14,10 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::marker::Actor;
-use risingwave_common::row::Chain;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -31,7 +28,6 @@ use super::notifier::Notifier;
 use crate::barrier::Command;
 use crate::model::ActorId;
 
-type CreateMviewEpoch = Epoch;
 type ConsumedRows = u64;
 
 #[derive(Clone, Copy, Debug)]
@@ -161,19 +157,19 @@ pub(super) struct TrackingCommand {
 /// called on registered notifiers.
 ///
 /// Tracking is done as follows:
-/// Several ActorIds constitute a StreamJob.
-/// A StreamJob is IDead by the Epoch of its initial barrier,
-/// i.e. CreateMviewEpoch.
+/// Several `ActorIds` constitute a `StreamJob`.
+/// A `StreamJob` is `IDead` by the Epoch of its initial barrier,
+/// i.e. `CreateMviewEpoch`.
 /// We can ID it that way because the initial barrier should ONLY
-/// be used for exactly one StreamJob.
+/// be used for exactly one `StreamJob`.
 /// We don't allow multiple stream jobs scheduled on the same barrier.
 ///
-/// With `actor_map` we can use any `ActorId` to find the ID of the StreamJob,
-/// and with `progress_map` we can use the ID of the StreamJob
+/// With `actor_map` we can use any `ActorId` to find the ID of the `StreamJob`,
+/// and with `progress_map` we can use the ID of the `StreamJob`
 /// to view its progress.
 ///
-/// We track the progress of each ActorId in a StreamJob,
-/// because ALL of their progress constitutes the progress of the StreamJob.
+/// We track the progress of each `ActorId` in a `StreamJob`,
+/// because ALL of their progress constitutes the progress of the `StreamJob`.
 pub(super) struct CreateMviewProgressTracker {
     // TODO(kwannoel): The real purpose of `CreateMviewEpoch`
     // Is to serve as a unique identifier for a stream job.
@@ -189,8 +185,8 @@ pub(super) struct CreateMviewProgressTracker {
 }
 
 impl CreateMviewProgressTracker {
-    /// Backfill progress and tracking_commands are the only dynamic parts of the state.
-    /// For BackfillProgress, it can also be derived from state_table.
+    /// Backfill progress and `tracking_commands` are the only dynamic parts of the state.
+    /// For `BackfillProgress`, it can also be derived from `state_table`.
     /// However, this requires the stream graph to init BEFORE meta
     /// recovers fully.
     /// To support that meta needs to recover in 2 parts:
@@ -206,7 +202,7 @@ impl CreateMviewProgressTracker {
     /// The `actor_map` contains the mapping from actor to its stream job identifier
     /// (the epoch where it was created).
     ///
-    /// Just use TableId to stream id.
+    /// Just use `TableId` to stream id.
     /// Report the status to local barrier manager.
     ///
     /// Need to add some extra fields in initialize barrier to include
@@ -239,7 +235,7 @@ impl CreateMviewProgressTracker {
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        for (creating_table_id, actors) in table_map.into_iter() {
+        for (creating_table_id, actors) in table_map {
             let mut states = HashMap::new();
             for actor in actors {
                 actor_map.insert(actor, creating_table_id);

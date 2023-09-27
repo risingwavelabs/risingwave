@@ -700,7 +700,7 @@ impl CatalogManager {
 
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
     /// TODO(kwannoel): Should both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`
-    /// commit_meta? Or it doesn't matter?
+    /// `commit_meta`? Or it doesn't matter?
     pub async fn start_create_table_procedure(
         &self,
         table: &Table,
@@ -740,14 +740,6 @@ impl CatalogManager {
             user_core.increase_ref(table.owner);
             Ok(())
         }
-    }
-
-    // FIXME
-    pub async fn check_key(&self, table: &Table) -> bool {
-        let core = &mut *self.core.lock().await;
-        let database_core = &mut core.database;
-        let key = (table.database_id, table.schema_id, table.name.clone());
-        database_core.in_progress_creation_tracker.contains(&key)
     }
 
     fn check_table_creating(tables: &BTreeMap<TableId, Table>, table: &Table) {
@@ -842,48 +834,30 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn cancel_create_table_procedure_with_id(
+    pub async fn cancel_create_table_procedure(
         &self,
         table_id: TableId,
         fragment_manager: FragmentManagerRef,
     ) -> MetaResult<()> {
-        {
-            let core = &mut *self.core.lock().await;
+        let core = &mut self.core.lock().await;
+        let table = {
             let database_core = &mut core.database;
             let tables = &mut database_core.tables;
-            if let Some(table) = tables.get(&table_id).cloned() {
-                self.cancel_create_table_procedure_inner(core, &table, fragment_manager)
-                    .await?;
-                return Ok(());
-            }
+            let Some(table) = tables.get(&table_id).cloned() else {
+                bail!("Table ID: {table_id} missing when attempting to cancel job")
+            };
+            table
+        };
+
+        {
+            let user_core = &mut core.user;
+            user_core.decrease_ref(table.owner);
         }
-        bail!("Table ID: {table_id} missing when attempting to cancel job")
-    }
 
-    pub async fn cancel_create_table_procedure(
-        &self,
-        table: &Table,
-        fragment_manager: FragmentManagerRef,
-    ) -> MetaResult<()> {
-        let core = &mut *self.core.lock().await;
-        self.cancel_create_table_procedure_inner(core, table, fragment_manager)
-            .await
-    }
-
-    pub async fn cancel_create_table_procedure_inner(
-        &self,
-        core: &mut CatalogManagerCore,
-        table: &Table,
-        fragment_manager: FragmentManagerRef,
-    ) -> MetaResult<()> {
         let database_core = &mut core.database;
-        let user_core = &mut core.user;
-        Self::check_table_creating(&database_core.tables, &table);
-
         for &dependent_relation_id in &table.dependent_relations {
             database_core.decrease_ref_count(dependent_relation_id);
         }
-        user_core.decrease_ref(table.owner);
 
         let mut table_ids = vec![table.id];
         let fragment = fragment_manager

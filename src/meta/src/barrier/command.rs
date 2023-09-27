@@ -667,7 +667,7 @@ impl CommandContext {
                 let node_actors = table_fragments.worker_actor_ids();
                 self.clean_up(node_actors).await?;
                 self.catalog_manager
-                    .cancel_create_table_procedure_with_id(
+                    .cancel_create_table_procedure(
                         table_fragments.table_id().table_id,
                         self.fragment_manager.clone(),
                     )
