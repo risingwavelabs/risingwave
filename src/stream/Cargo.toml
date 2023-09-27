@@ -27,7 +27,11 @@ either = "1"
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-governor = { version = "0.6", default-features = false, features = ["std", "dashmap", "jitter"] }
+governor = { version = "0.6", default-features = false, features = [
+    "std",
+    "dashmap",
+    "jitter",
+] }
 hytra = "0.1.2"
 iter-chunks = "0.1"
 itertools = "0.11"
@@ -80,6 +84,7 @@ workspace-hack = { path = "../workspace-hack" }
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 expect-test = "1"
+risingwave_expr_impl = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
     "test",
 ] }

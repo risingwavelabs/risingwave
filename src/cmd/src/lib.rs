@@ -37,6 +37,8 @@ macro_rules! main {
     };
 }
 
+risingwave_expr_impl::enable!();
+
 // Entry point functions.
 
 pub fn compute(opts: ComputeNodeOpts) {

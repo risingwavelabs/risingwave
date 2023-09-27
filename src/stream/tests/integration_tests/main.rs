@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+risingwave_expr_impl::enable!();
+
 // tests
 mod eowc_over_window;
 mod hash_agg;

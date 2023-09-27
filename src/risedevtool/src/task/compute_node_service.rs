@@ -56,8 +56,6 @@ impl ComputeNodeService {
             ))
             .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
-            .arg("--metrics-level")
-            .arg("info")
             .arg("--async-stack-trace")
             .arg(&config.async_stack_trace)
             .arg("--connector-rpc-endpoint")

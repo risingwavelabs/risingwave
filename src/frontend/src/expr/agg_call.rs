@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::sig::agg::AGG_FUNC_SIG_MAP;
 
 use super::{Expr, ExprImpl, Literal, OrderBy};

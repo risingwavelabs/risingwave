@@ -18,7 +18,9 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{build_retractable, AggCall, AggregateState, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{
+    build_retractable, AggCall, AggregateState, BoxedAggregateFunction,
+};
 
 use super::aggregation::{agg_call_filter_res, generate_agg_schema};
 use super::error::StreamExecutorError;
