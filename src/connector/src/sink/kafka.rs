@@ -331,12 +331,17 @@ impl Sink for KafkaSink {
         // Try Kafka connection.
         // There is no such interface for kafka producer to validate a connection
         // use enumerator to validate broker reachability and existence of topic
-        let mut ticker = KafkaSplitEnumerator::new(
+        let check = KafkaSplitEnumerator::new(
             KafkaProperties::from(self.config.clone()),
             Arc::new(SourceEnumeratorContext::default()),
         )
         .await?;
-        _ = ticker.list_splits().await?;
+        if !check.check_reachability().await {
+            return Err(SinkError::Config(anyhow!(
+                "cannot connect to kafka broker ({})",
+                self.config.common.brokers
+            )));
+        }
         Ok(())
     }
 }
@@ -409,18 +414,6 @@ impl<F: DeliveryFutureTrait> KafkaDeliveryFutureManager<F> {
             .push_back((epoch, KafkaDeliveryFutureManagerItem::Barrier));
     }
 
-    async fn await_one_delivery(&mut self) -> Result<()> {
-        for (_, item) in self.items.iter_mut().rev() {
-            if let KafkaDeliveryFutureManagerItem::Chunk {futures, ..} = item && !futures.is_empty() {
-                let delivery_future = futures.pop_front().expect("have checked non-empty");
-                return map_future_result(delivery_future.await).map_err(SinkError::Kafka);
-            } else {
-                continue;
-            }
-        }
-        Ok(())
-    }
-
     fn start_write_chunk(
         &mut self,
         epoch: u64,
@@ -465,8 +458,14 @@ struct KafkaDeliveryFutureManagerAddFuture<'a, F>(&'a mut KafkaDeliveryFutureMan
 
 impl<'a, F: DeliveryFutureTrait> KafkaDeliveryFutureManagerAddFuture<'a, F> {
     async fn add_future(&mut self, future: F) -> Result<()> {
-        if self.0.future_count == self.0.max_future_count {
-            self.0.await_one_delivery().await?;
+        while self.0.future_count >= self.0.max_future_count {
+            tracing::warn!(
+                "Number of records being delivered ({}) >= expected kafka producer queue size ({}).
+                This indicates the default value of queue.buffering.max.messages has changed.",
+                self.0.future_count,
+                self.0.max_future_count,
+            );
+            self.await_one_delivery().await?;
         }
         match self.0.items.back_mut() {
             Some((_, KafkaDeliveryFutureManagerItem::Chunk { futures, .. })) => {
@@ -476,6 +475,19 @@ impl<'a, F: DeliveryFutureTrait> KafkaDeliveryFutureManagerAddFuture<'a, F> {
             }
             _ => unreachable!("should add future only after add a new chunk"),
         }
+    }
+
+    async fn await_one_delivery(&mut self) -> Result<()> {
+        for (_, item) in self.0.items.iter_mut().rev() {
+            if let KafkaDeliveryFutureManagerItem::Chunk {futures, ..} = item && !futures.is_empty() {
+                let delivery_future = futures.pop_front().expect("have checked non-empty");
+                self.0.future_count -= 1;
+                return map_future_result(delivery_future.await).map_err(SinkError::Kafka);
+            } else {
+                continue;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -529,10 +541,14 @@ impl<F: DeliveryFutureTrait> KafkaDeliveryFutureManager<F> {
     }
 }
 
-/// The delivery buffer queue size
 /// When the `DeliveryFuture` the current `future_delivery_buffer`
-/// is buffering is greater than this size, then enforcing commit once
-const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 65536;
+/// is buffering is greater than `queue_buffering_max_messages` * `KAFKA_WRITER_MAX_QUEUE_SIZE_RATIO`,
+/// then enforcing commit once
+const KAFKA_WRITER_MAX_QUEUE_SIZE_RATIO: f32 = 1.2;
+/// The default queue size used to enforce a commit in kafka producer if `queue.buffering.max.messages` is not specified.
+/// This default value is determined based on the librdkafka default. See the following doc for more details:
+/// <https://github.com/confluentinc/librdkafka/blob/1cb80090dfc75f5a36eae3f4f8844b14885c045e/CONFIGURATION.md>
+const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 100000;
 
 struct KafkaPayloadWriter<'a> {
     inner: &'a FutureProducer<PrivateLinkProducerContext>,
@@ -573,11 +589,20 @@ impl KafkaLogSinker {
             // Generate the producer
             c.create_with_context(producer_ctx).await?
         };
+
+        let max_delivery_buffer_size = (config
+            .rdkafka_properties
+            .queue_buffering_max_messages
+            .as_ref()
+            .cloned()
+            .unwrap_or(KAFKA_WRITER_MAX_QUEUE_SIZE) as f32
+            * KAFKA_WRITER_MAX_QUEUE_SIZE_RATIO) as usize;
+
         Ok(KafkaLogSinker {
             formatter,
             inner,
             config: config.clone(),
-            future_manager: KafkaDeliveryFutureManager::new(KAFKA_WRITER_MAX_QUEUE_SIZE),
+            future_manager: KafkaDeliveryFutureManager::new(max_delivery_buffer_size),
         })
     }
 }
@@ -594,7 +619,7 @@ impl<'w> KafkaPayloadWriter<'w> {
 
         let mut ret = Ok(());
 
-        for _ in 0..self.config.max_retry_num {
+        for i in 0..self.config.max_retry_num {
             match self.inner.send_result(record) {
                 Ok(delivery_future) => {
                     self.add_future.add_future(delivery_future).await?;
@@ -604,17 +629,21 @@ impl<'w> KafkaPayloadWriter<'w> {
                 // The enqueue buffer is full, `send_result` will immediately return
                 // We can retry for another round after sleeping for sometime
                 Err((e, rec)) => {
+                    tracing::warn!(
+                        "producing message (key {:?}) to topic {} failed, err {:?}.",
+                        rec.key.map(|k| k.to_bytes()),
+                        rec.topic,
+                        e
+                    );
                     record = rec;
                     match e {
-                        err @ KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull)
-                        | err @ KafkaError::MessageProduction(RDKafkaErrorCode::MessageTimedOut) => {
+                        KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
                             tracing::warn!(
-                                "producing message (key {:?}) to topic {} failed, err {:?}, retrying",
-                                record.key.map(|k| k.to_bytes()),
-                                record.topic,
-                                err
+                                "Producer queue full. Delivery future buffer size={}. Await and retry #{}",
+                                self.add_future.0.future_count,
+                                i
                             );
-                            tokio::time::sleep(self.config.retry_interval).await;
+                            self.add_future.await_one_delivery().await?;
                             continue;
                         }
                         _ => return Err(e.into()),

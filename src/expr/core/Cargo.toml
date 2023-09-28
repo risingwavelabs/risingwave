@@ -20,6 +20,7 @@ anyhow = "1"
 arrow-array = { workspace = true }
 arrow-schema = { workspace = true }
 async-trait = "0.1"
+auto_impl = "1"
 await-tree = { workspace = true }
 cfg-or-panic = "0.2"
 chrono = { version = "0.4", default-features = false, features = [

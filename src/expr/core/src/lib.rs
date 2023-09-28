@@ -19,6 +19,7 @@
 #![feature(lazy_cell)]
 #![feature(generators)]
 #![feature(arc_unwrap_or_clone)]
+#![feature(never_type)]
 
 extern crate self as risingwave_expr;
 

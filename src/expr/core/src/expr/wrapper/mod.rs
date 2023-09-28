@@ -13,5 +13,7 @@
 // limitations under the License.
 
 mod checked;
+mod non_strict;
 
 pub use checked::Checked;
+pub use non_strict::{EvalErrorReport, NonStrict};

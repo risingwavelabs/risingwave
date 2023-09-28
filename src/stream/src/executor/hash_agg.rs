@@ -347,8 +347,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // Calculate the row visibility for every agg call.
         let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
         for agg_call in &this.agg_calls {
-            let agg_call_filter_res =
-                agg_call_filter_res(&this.actor_ctx, &this.info.identity, agg_call, &chunk).await?;
+            let agg_call_filter_res = agg_call_filter_res(agg_call, &chunk).await?;
             call_visibilities.push(agg_call_filter_res);
         }
 
