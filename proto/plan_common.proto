@@ -66,6 +66,8 @@ message StorageTableDesc {
   bool versioned = 8;
   repeated uint32 stream_key = 9;
   optional string table_name = 10;
+  // use string as a work around until https://github.com/madsim-rs/madsim/issues/169 finished
+  optional string connect_properties = 11;
 }
 
 enum JoinType {

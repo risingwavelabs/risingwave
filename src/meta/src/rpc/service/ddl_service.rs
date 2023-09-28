@@ -37,7 +37,7 @@ use crate::barrier::BarrierManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, FragmentManagerRef, IdCategory,
-    IdCategoryType, MetaSrvEnv, StreamingJob, TableJobSubType,
+    IdCategoryType, MetaSrvEnv, StreamingJob, TableJobType,
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::ddl_controller::{DdlCommand, DdlController, DropMode, StreamingJobId};
@@ -447,7 +447,7 @@ impl DdlService for DdlServiceImpl {
         }
 
         let mut stream_job =
-            StreamingJob::Table(source, mview, TableJobSubType::from_protobuf(sub_type));
+            StreamingJob::Table(source, mview, TableJobType::from_protobuf(sub_type));
 
         stream_job.set_id(table_id);
 
@@ -550,7 +550,7 @@ impl DdlService for DdlServiceImpl {
         }
         let table_col_index_mapping =
             ColIndexMapping::from_protobuf(&req.table_col_index_mapping.unwrap());
-        let stream_job = StreamingJob::Table(source, table, TableJobSubType::default());
+        let stream_job = StreamingJob::Table(source, table, TableJobType::default());
 
         let version = self
             .ddl_controller

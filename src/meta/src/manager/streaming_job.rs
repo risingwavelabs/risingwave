@@ -22,13 +22,13 @@ use risingwave_pb::ddl_service::PbTableSubType;
 use crate::model::FragmentId;
 
 #[derive(Default, Debug, Clone)]
-pub enum TableJobSubType {
+pub enum TableJobType {
     #[default]
     Normal,
     SharedCdcSource,
 }
 
-impl TableJobSubType {
+impl TableJobType {
     pub fn from_protobuf(pb: PbTableSubType) -> Self {
         match pb {
             PbTableSubType::Unspecified => Self::default(),
@@ -44,7 +44,7 @@ impl TableJobSubType {
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink),
-    Table(Option<PbSource>, Table, TableJobSubType),
+    Table(Option<PbSource>, Table, TableJobType),
     Index(Index, Table),
     Source(PbSource),
 }
@@ -235,7 +235,7 @@ impl StreamingJob {
         }
     }
 
-    pub fn table_sub_type(&self) -> Option<TableJobSubType> {
+    pub fn table_sub_type(&self) -> Option<TableJobType> {
         if let Self::Table(.., sub_type) = self {
             Some(sub_type.clone())
         } else {

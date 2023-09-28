@@ -15,9 +15,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use maplit::hashmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::external::{ExternalTableType, SchemaTableName};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{ChainNode, ChainType};
@@ -96,33 +98,18 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             )
             .boxed(),
             ChainType::CdcBackfill => {
-                // TODO: pass the connector properties via barrier
-                let properties: HashMap<String, String> = hashmap!(
-                    "connector" => "mysql-cdc",
-                    "hostname" => "localhost",
-                    "port" => "8306",
-                    "username" => "root",
-                    "password" => "123456",
-                    "database.name" => "mydb",
-                    "table.name" => "t1",
-                    "server.id" => "5085"
-                )
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect();
-
                 let table_desc: &StorageTableDesc = node.get_table_desc()?;
-                // last column may be `_rw_offset`
-                // let schema = Schema::new(
-                //     table_desc
-                //         .columns
-                //         .iter()
-                //         .map(|col| Field::from(col))
-                //         .collect_vec(),
-                // );
-
+                let properties =
+                    serde_json::from_str(table_desc.connect_properties.as_ref().ok_or_else(
+                        || ConnectorError::Internal(anyhow!("connect properties not found")),
+                    )?)
+                    .map_err(|err| {
+                        ConnectorError::Internal(anyhow!(
+                            "invalid connect properties {:?}",
+                            table_desc.connect_properties
+                        ))
+                    })?;
                 let table_type = ExternalTableType::from_properties(&properties);
-                // TODO: use fixed properties for test, then pass the properties via barrier
                 let table_reader =
                     table_type.create_table_reader(properties.clone(), schema.clone())?;
 

@@ -38,8 +38,7 @@ use crate::barrier::BarrierManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
     IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
-    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, TableJobSubType,
-    ViewId,
+    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, TableJobType, ViewId,
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -441,38 +440,15 @@ impl DdlController {
         let mut internal_tables = vec![];
         let result = try {
             let (ctx, table_fragments) = self
-                .build_stream_job(env, &stream_job, fragment_graph)
+                .build_stream_job(env, &mut stream_job, fragment_graph)
                 .await?;
 
             internal_tables = ctx.internal_tables();
 
             match &mut stream_job {
-                StreamingJob::Table(Some(source), _, TableJobSubType::Normal) => {
+                StreamingJob::Table(Some(source), _, _) => {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
-                }
-                StreamingJob::Table(None, table, TableJobSubType::SharedCdcSource) => {
-                    // fill in cdc connector properties to the table
-                    // get the upstream source id from the table fragment
-                    let source_id = table_fragments
-                        .dependent_table_ids()
-                        .into_iter()
-                        .exactly_one()
-                        .map_err(|err| {
-                            MetaError::from(anyhow!("expect only one source for shared cdc table"))
-                        })?;
-                    let source = self
-                        .catalog_manager
-                        .get_source(source_id.table_id.into())
-                        .await
-                        .ok_or(MetaError::from(anyhow!(
-                            "upstream cdc source {} not found",
-                            source_id.table_id
-                        )))?;
-                    table
-                        .properties
-                        .extend(source.properties.clone().into_iter());
-                    tracing::debug!("table properties: {:?}", table.properties);
                 }
                 StreamingJob::Sink(sink) => {
                     // Validate the sink on the connector node.
@@ -485,7 +461,6 @@ impl DdlController {
                 _ => {}
             }
 
-            // TODO: check this func
             self.stream_manager
                 .create_streaming_job(table_fragments, ctx)
                 .await?;
@@ -644,7 +619,7 @@ impl DdlController {
             .collect();
 
         let complete_graph = match stream_job.table_sub_type().as_ref() {
-            Some(TableJobSubType::SharedCdcSource) => {
+            Some(TableJobType::SharedCdcSource) => {
                 let upstream_source_fragments = self
                     .fragment_manager
                     .get_upstream_source_fragments(fragment_graph.dependent_table_ids())

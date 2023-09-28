@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::iter::once;
 use std::rc::Rc;
 
+use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -25,8 +27,12 @@ use risingwave_common::catalog::{
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_connector::source::cdc::{CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY};
-use risingwave_connector::source::external::ExternalTableType;
+use risingwave_connector::source::cdc::{
+    CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, MYSQL_CDC_CONNECTOR,
+};
+use risingwave_connector::source::external::{
+    ExternalTableType, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
+};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::ddl_service::TableSubType;
@@ -42,6 +48,7 @@ use risingwave_sqlparser::ast::{
 
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
 use crate::expr::{Expr, ExprImpl, FunctionCall};
@@ -534,6 +541,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
             value_indices: (0..columns.len()).collect_vec(), /* FIXME: maybe we can remove `_rw_offset` from TableDesc */
             read_prefix_len_hint: 0,
             watermark_columns: Default::default(),
+            connect_properties: Default::default(),
             versioned: false,
         };
         tracing::debug!("upstream table desc: {:?}", upstream_table_desc);
@@ -795,8 +803,11 @@ fn gen_create_table_plan_for_cdc_source(
         .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
         .collect();
 
+    let connect_properties =
+        derive_connect_properties(source.as_ref(), external_table_name.clone())?;
+
     let external_table_desc = TableDesc {
-        table_id: source.id.into(), // reference the cdc source
+        table_id: source.id.into(), // source can be considered as an external table
         pk: table_pk,
         columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
         // distribution_key: vec![offset_column_idx], // use offset column as distribution key
@@ -807,6 +818,7 @@ fn gen_create_table_plan_for_cdc_source(
         value_indices: (0..columns.len()).collect_vec(),
         read_prefix_len_hint: 0,
         watermark_columns: FixedBitSet::with_capacity(columns.len()), // no watermarks
+        connect_properties,
         versioned: false,
         table_name: Some(external_table_name),
     };
@@ -849,6 +861,38 @@ fn gen_create_table_plan_for_cdc_source(
     let mut table = materialize.table().to_prost(schema_id, database_id);
     table.owner = session.user_id();
     Ok((materialize.into(), None, table))
+}
+
+fn derive_connect_properties(
+    source: &SourceCatalog,
+    external_table_name: String,
+) -> Result<BTreeMap<String, String>> {
+    // we should remove the prefix from `full_table_name`
+    let mut connect_properties = source.properties.clone();
+    if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY) {
+        let table_name = match connector.as_str() {
+            MYSQL_CDC_CONNECTOR => {
+                let db_name = connect_properties.get(DATABASE_NAME_KEY).ok_or_else(|| {
+                    anyhow!("{} not found in source properties", DATABASE_NAME_KEY)
+                })?;
+
+                external_table_name
+                    .strip_prefix(db_name)
+                    .ok_or_else(|| anyhow!("external table name must contain database prefix"))?
+            }
+            _POSTGRES_CDC_CONNECTOR => {
+                let schema_name = connect_properties
+                    .get(SCHEMA_NAME_KEY)
+                    .ok_or_else(|| anyhow!("{} not found in source properties", SCHEMA_NAME_KEY))?;
+
+                external_table_name
+                    .strip_prefix(schema_name)
+                    .ok_or_else(|| anyhow!("external table name must contain schema prefix"))?
+            }
+        };
+        connect_properties.insert(TABLE_NAME_KEY.into(), table_name.into());
+    }
+    Ok(connect_properties.into_iter().collect())
 }
 
 #[allow(clippy::too_many_arguments)]

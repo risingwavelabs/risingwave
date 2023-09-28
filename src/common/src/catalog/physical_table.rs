@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -54,6 +54,9 @@ pub struct TableDesc {
 
     /// the column indices which could receive watermarks.
     pub watermark_columns: FixedBitSet,
+
+    /// properties will be passed into the ChainNode
+    pub connect_properties: BTreeMap<String, String>,
 
     /// Whether the table is versioned. If `true`, column-aware row encoding will be used
     /// to be compatible with schema changes.
@@ -112,6 +115,10 @@ impl TableDesc {
             versioned: self.versioned,
             stream_key: self.stream_key.iter().map(|&x| x as u32).collect(),
             table_name: self.table_name.clone(),
+            connect_properties: Some(
+                serde_json::to_string(&self.connect_properties)
+                    .expect("failed to serialize connect_properties"),
+            ),
         }
     }
 
