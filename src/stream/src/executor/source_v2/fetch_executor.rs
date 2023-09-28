@@ -236,7 +236,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
         );
         
         // If it is a recovery startup,
-        // there can be file assigments in state store.
+        // there can be file assignments in state store.
         // Hence we try to build a reader first.
         Self::try_replace_with_new_reader(
             &mut is_datastream_empty,
