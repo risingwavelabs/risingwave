@@ -1,0 +1,5 @@
+statement ok
+DROP INDEX i;
+
+statement ok
+DROP TABLE t;

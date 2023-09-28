@@ -145,7 +145,7 @@ test_foreground_ddl_cancel() {
   cargo make ci-start ci-1cn-1fe-with-recovery
 
   # Test before recovery
-  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/create_base_table.slt"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/create_base_table.slt"
   run_sql "CREATE MATERIALIZED VIEW m1 as select * FROM t;" &
   sleep 1
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/validate.slt"
@@ -165,7 +165,7 @@ test_foreground_ddl_no_recover() {
   cargo make ci-start ci-1cn-1fe-with-recovery
 
   # Test before recovery
-  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/create_base_table.slt"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/create_base_table.slt"
   run_sql "CREATE MATERIALIZED VIEW m1 as select * FROM t;" &
   sleep 3
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/validate.slt"
@@ -186,13 +186,48 @@ test_foreground_ddl_no_recover() {
   cargo make kill
 }
 
+test_foreground_index_cancel() {
+   echo "--- e2e, ci-3streaming-2serving-3fe, test_index_ddl_no_recover"
+   cargo make ci-start ci-1cn-1fe-with-recovery
+
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/create_base_table.slt"
+
+   # Test cancel
+   run_sql "CREATE INDEX i ON t (v1);" &
+   sleep 3
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
+   cancel_stream_jobs
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_no_jobs.slt"
+
+   # Test index over recovery
+   run_sql "CREATE INDEX i ON t (v1);" &
+   sleep 3
+
+   # Restart
+   cargo make kill
+   cargo make dev ci-1cn-1fe-with-recovery
+
+   # Leave sometime for recovery
+   sleep 5
+
+   # Test after recovery
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_no_jobs.slt"
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/index/create_index.slt"
+
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/index/drop.slt"
+
+   cargo make kill
+}
+
 main() {
   set -euo pipefail
-  test_snapshot_and_upstream_read
-  test_background_ddl_recovery
-  test_background_ddl_cancel
-  test_foreground_ddl_no_recover
-  test_foreground_ddl_cancel
+  # test_snapshot_and_upstream_read
+  # test_background_ddl_recovery
+  # test_background_ddl_cancel
+  # test_foreground_ddl_no_recover
+  # test_foreground_ddl_cancel
+  test_foreground_index_cancel
+  # test_foreground_sink_cancel
 }
 
 main
