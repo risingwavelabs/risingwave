@@ -515,7 +515,7 @@ impl ToBatch for LogicalSource {
         {
             return Err(RwError::from(ErrorCode::NotImplemented(
                 "New S3 connector for batch".to_string(),
-                TrackingIssue(None),
+                TrackingIssue::from(None),
             )));
         }
         let source = self.wrap_with_optional_generated_columns_batch_proj()?;
