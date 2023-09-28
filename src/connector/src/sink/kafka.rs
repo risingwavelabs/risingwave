@@ -14,19 +14,22 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
+use std::future::poll_fn;
+use std::pin::pin;
 use std::sync::Arc;
+use std::task::Poll;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::future::try_join_all;
+use futures::future::{select, Either};
 use futures::{Future, FutureExt};
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
-use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::drop_either_future;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
@@ -37,10 +40,9 @@ use super::{
 };
 use crate::common::KafkaCommon;
 use crate::sink::formatter::SinkFormatterImpl;
-use crate::sink::writer::{
-    FormattedSink, LogSinkerOf, SinkWriterExt, SinkWriterV1, SinkWriterV1Adapter,
-};
-use crate::sink::{DummySinkCommitCoordinator, Result, SinkWriterParam};
+use crate::sink::log_store::{ChunkId, LogReader, LogStoreReadItem, TruncateOffset};
+use crate::sink::writer::FormattedSink;
+use crate::sink::{DummySinkCommitCoordinator, LogSinker, Result, SinkWriterParam};
 use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkProducerContext};
 use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
@@ -301,26 +303,20 @@ impl TryFrom<SinkParam> for KafkaSink {
 
 impl Sink for KafkaSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<SinkWriterV1Adapter<KafkaSinkWriter>>;
+    type LogSinker = KafkaLogSinker;
 
     const SINK_NAME: &'static str = KAFKA_SINK;
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(SinkWriterV1Adapter::new(
-            KafkaSinkWriter::new(
-                self.config.clone(),
-                SinkFormatterImpl::new(
-                    &self.config.r#type,
-                    self.schema.clone(),
-                    self.pk_indices.clone(),
-                    self.is_append_only,
-                    self.db_name.clone(),
-                    self.sink_from_name.clone(),
-                )?,
-            )
-            .await?,
-        )
-        .into_log_sinker(writer_param.sink_metrics))
+    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        let formatter = SinkFormatterImpl::new(
+            &self.config.r#type,
+            self.schema.clone(),
+            self.pk_indices.clone(),
+            self.is_append_only,
+            self.db_name.clone(),
+            self.sink_from_name.clone(),
+        )?;
+        KafkaLogSinker::new(self.config.clone(), formatter).await
     }
 
     async fn validate(&self) -> Result<()> {
@@ -345,25 +341,214 @@ impl Sink for KafkaSink {
     }
 }
 
+trait DeliveryFutureTrait = Future<Output = <DeliveryFuture as Future>::Output> + Unpin + 'static;
+
+enum KafkaDeliveryFutureManagerItem<F> {
+    Chunk {
+        chunk_id: ChunkId,
+        // earlier future at the front
+        futures: VecDeque<F>,
+    },
+    Barrier,
+}
+
+struct KafkaDeliveryFutureManager<F> {
+    future_count: usize,
+    max_future_count: usize,
+    // earlier items at the front
+    items: VecDeque<(u64, KafkaDeliveryFutureManagerItem<F>)>,
+}
+
+fn map_future_result(
+    delivery_future_result: <DeliveryFuture as Future>::Output,
+) -> KafkaResult<()> {
+    match delivery_future_result {
+        // Successfully sent the record
+        // Will return the partition and offset of the message (i32, i64)
+        // Note that `Vec<()>` won't cause memory allocation
+        Ok(Ok(_)) => Ok(()),
+        // If the message failed to be delivered. (i.e., flush)
+        // The error & the copy of the original message will be returned
+        // i.e., (KafkaError, OwnedMessage)
+        // We will just stop the loop, and return the error
+        // The sink executor will back to the latest checkpoint
+        Ok(Err((k_err, _msg))) => Err(k_err),
+        // This represents the producer is dropped
+        // before the delivery status is received
+        // Return `KafkaError::Canceled`
+        Err(_) => Err(KafkaError::Canceled),
+    }
+}
+
+impl<F: DeliveryFutureTrait> KafkaDeliveryFutureManager<F> {
+    fn new(max_future_count: usize) -> Self {
+        Self {
+            future_count: 0,
+            max_future_count,
+            items: Default::default(),
+        }
+    }
+
+    fn add_barrier(&mut self, epoch: u64) {
+        if let Some((item_epoch, last_item)) = self.items.back() {
+            match last_item {
+                KafkaDeliveryFutureManagerItem::Chunk { .. } => {
+                    assert_eq!(*item_epoch, epoch)
+                }
+                KafkaDeliveryFutureManagerItem::Barrier => {
+                    assert!(
+                        epoch > *item_epoch,
+                        "new barrier epoch {} should be greater than prev barrier {}",
+                        epoch,
+                        item_epoch
+                    );
+                }
+            }
+        }
+        self.items
+            .push_back((epoch, KafkaDeliveryFutureManagerItem::Barrier));
+    }
+
+    async fn await_one_delivery(&mut self) -> Result<()> {
+        for (_, item) in self.items.iter_mut().rev() {
+            if let KafkaDeliveryFutureManagerItem::Chunk {futures, ..} = item && !futures.is_empty() {
+                let delivery_future = futures.pop_front().expect("have checked non-empty");
+                return map_future_result(delivery_future.await).map_err(SinkError::Kafka);
+            } else {
+                continue;
+            }
+        }
+        Ok(())
+    }
+
+    fn start_write_chunk(
+        &mut self,
+        epoch: u64,
+        chunk_id: ChunkId,
+    ) -> KafkaDeliveryFutureManagerAddFuture<'_, F> {
+        if let Some((item_epoch, item)) = self.items.back() {
+            match item {
+                KafkaDeliveryFutureManagerItem::Chunk {
+                    chunk_id: item_chunk_id,
+                    ..
+                } => {
+                    assert_eq!(epoch, *item_epoch);
+                    assert!(
+                        chunk_id > *item_chunk_id,
+                        "new chunk id {} should be greater than prev chunk id {}",
+                        chunk_id,
+                        item_chunk_id
+                    );
+                }
+                KafkaDeliveryFutureManagerItem::Barrier => {
+                    assert!(
+                        epoch > *item_epoch,
+                        "new chunk epoch {} should be greater than prev barrier: {}",
+                        epoch,
+                        item_epoch
+                    );
+                }
+            }
+        }
+        self.items.push_back((
+            epoch,
+            KafkaDeliveryFutureManagerItem::Chunk {
+                chunk_id,
+                futures: VecDeque::new(),
+            },
+        ));
+        KafkaDeliveryFutureManagerAddFuture(self)
+    }
+}
+
+struct KafkaDeliveryFutureManagerAddFuture<'a, F>(&'a mut KafkaDeliveryFutureManager<F>);
+
+impl<'a, F: DeliveryFutureTrait> KafkaDeliveryFutureManagerAddFuture<'a, F> {
+    async fn add_future(&mut self, future: F) -> Result<()> {
+        if self.0.future_count == self.0.max_future_count {
+            self.0.await_one_delivery().await?;
+        }
+        match self.0.items.back_mut() {
+            Some((_, KafkaDeliveryFutureManagerItem::Chunk { futures, .. })) => {
+                futures.push_back(future);
+                self.0.future_count += 1;
+                Ok(())
+            }
+            _ => unreachable!("should add future only after add a new chunk"),
+        }
+    }
+}
+
+impl<F: DeliveryFutureTrait> KafkaDeliveryFutureManager<F> {
+    fn next_truncate_offset(&mut self) -> impl Future<Output = Result<TruncateOffset>> + '_ {
+        poll_fn(move |cx| {
+            let mut latest_offset: Option<TruncateOffset> = None;
+            'outer: loop {
+                if let Some((epoch, item)) = self.items.front_mut() {
+                    match item {
+                        KafkaDeliveryFutureManagerItem::Chunk { chunk_id, futures } => {
+                            while let Some(future) = futures.front_mut() {
+                                match future.poll_unpin(cx) {
+                                    Poll::Ready(result) => match map_future_result(result) {
+                                        Ok(()) => {
+                                            self.future_count -= 1;
+                                            futures.pop_front();
+                                        }
+                                        Err(result) => {
+                                            return Poll::Ready(Err(SinkError::Kafka(result)));
+                                        }
+                                    },
+                                    Poll::Pending => {
+                                        break 'outer;
+                                    }
+                                }
+                            }
+
+                            // when we reach here, there must not be any pending or error future.
+                            // Which means all futures of this stream chunk have been finished
+                            assert!(futures.is_empty());
+                            latest_offset = Some(TruncateOffset::Chunk {
+                                epoch: *epoch,
+                                chunk_id: *chunk_id,
+                            });
+                            self.items.pop_front().expect("items not empty");
+                        }
+                        KafkaDeliveryFutureManagerItem::Barrier => {
+                            // Barrier will be yielded anyway
+                            return Poll::Ready(Ok(TruncateOffset::Barrier { epoch: *epoch }));
+                        }
+                    }
+                }
+            }
+            if let Some(offset) = latest_offset {
+                Poll::Ready(Ok(offset))
+            } else {
+                Poll::Pending
+            }
+        })
+    }
+}
+
 /// The delivery buffer queue size
 /// When the `DeliveryFuture` the current `future_delivery_buffer`
 /// is buffering is greater than this size, then enforcing commit once
 const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 65536;
 
-struct KafkaPayloadWriter {
+struct KafkaPayloadWriter<'a> {
+    inner: &'a FutureProducer<PrivateLinkProducerContext>,
+    add_future: KafkaDeliveryFutureManagerAddFuture<'a, DeliveryFuture>,
+    config: &'a KafkaConfig,
+}
+
+pub struct KafkaLogSinker {
+    formatter: SinkFormatterImpl,
     inner: FutureProducer<PrivateLinkProducerContext>,
-    future_delivery_buffer: VecDeque<DeliveryFuture>,
+    future_manager: KafkaDeliveryFutureManager<DeliveryFuture>,
     config: KafkaConfig,
 }
 
-pub struct KafkaSinkWriter {
-    pub config: KafkaConfig,
-    payload_writer: KafkaPayloadWriter,
-    formatter: SinkFormatterImpl,
-}
-
-impl KafkaSinkWriter {
-    pub async fn new(mut config: KafkaConfig, formatter: SinkFormatterImpl) -> Result<Self> {
+impl KafkaLogSinker {
+    async fn new(mut config: KafkaConfig, formatter: SinkFormatterImpl) -> Result<Self> {
         let inner: FutureProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
 
@@ -388,26 +573,19 @@ impl KafkaSinkWriter {
             // Generate the producer
             c.create_with_context(producer_ctx).await?
         };
-
-        Ok(KafkaSinkWriter {
-            config: config.clone(),
-            payload_writer: KafkaPayloadWriter {
-                inner,
-                future_delivery_buffer: VecDeque::new(),
-                config,
-            },
+        Ok(KafkaLogSinker {
             formatter,
+            inner,
+            config: config.clone(),
+            future_manager: KafkaDeliveryFutureManager::new(KAFKA_WRITER_MAX_QUEUE_SIZE),
         })
     }
 }
 
-impl KafkaPayloadWriter {
+impl<'w> KafkaPayloadWriter<'w> {
     /// The actual `send_result` function, will be called when the `KafkaSinkWriter` needs to sink
     /// messages
-    async fn send_result<'a, K, P>(
-        &'a mut self,
-        mut record: FutureRecord<'a, K, P>,
-    ) -> KafkaResult<()>
+    async fn send_result<'a, K, P>(&'a mut self, mut record: FutureRecord<'a, K, P>) -> Result<()>
     where
         K: ToBytes + ?Sized,
         P: ToBytes + ?Sized,
@@ -419,18 +597,7 @@ impl KafkaPayloadWriter {
         for _ in 0..self.config.max_retry_num {
             match self.inner.send_result(record) {
                 Ok(delivery_future) => {
-                    // First check if the current length is
-                    // greater than the preset limit
-                    while self.future_delivery_buffer.len() >= KAFKA_WRITER_MAX_QUEUE_SIZE {
-                        Self::map_future_result(
-                            self.future_delivery_buffer
-                                .pop_front()
-                                .expect("Expect the future not to be None")
-                                .await,
-                        )?;
-                    }
-
-                    self.future_delivery_buffer.push_back(delivery_future);
+                    self.add_future.add_future(delivery_future).await?;
                     success_flag = true;
                     break;
                 }
@@ -450,7 +617,7 @@ impl KafkaPayloadWriter {
                             tokio::time::sleep(self.config.retry_interval).await;
                             continue;
                         }
-                        _ => return Err(e),
+                        _ => return Err(e.into()),
                     }
                 }
             }
@@ -459,7 +626,7 @@ impl KafkaPayloadWriter {
         if !success_flag {
             // In this case, after trying `max_retry_num`
             // The enqueue buffer is still full
-            ret = Err(KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull));
+            ret = Err(KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull).into());
         }
 
         ret
@@ -485,51 +652,9 @@ impl KafkaPayloadWriter {
         self.send_result(record).await?;
         Ok(())
     }
-
-    fn map_future_result(
-        delivery_future_result: <DeliveryFuture as Future>::Output,
-    ) -> KafkaResult<()> {
-        match delivery_future_result {
-            // Successfully sent the record
-            // Will return the partition and offset of the message (i32, i64)
-            // Note that `Vec<()>` won't cause memory allocation
-            Ok(Ok(_)) => Ok(()),
-            // If the message failed to be delivered. (i.e., flush)
-            // The error & the copy of the original message will be returned
-            // i.e., (KafkaError, OwnedMessage)
-            // We will just stop the loop, and return the error
-            // The sink executor will back to the latest checkpoint
-            Ok(Err((k_err, _msg))) => Err(k_err),
-            // This represents the producer is dropped
-            // before the delivery status is received
-            // Return `KafkaError::Canceled`
-            Err(_) => Err(KafkaError::Canceled),
-        }
-    }
-
-    async fn commit_inner(&mut self) -> Result<()> {
-        let _v = try_join_all(
-            self.future_delivery_buffer
-                .drain(..)
-                .map(|delivery_future| {
-                    delivery_future.map(|delivery_future_result| {
-                        Self::map_future_result(delivery_future_result).map_err(SinkError::Kafka)
-                    })
-                }),
-        )
-        .await?;
-
-        // Sanity check
-        debug_assert!(
-            self.future_delivery_buffer.is_empty(),
-            "The buffer after `commit_inner` must be empty"
-        );
-
-        Ok(())
-    }
 }
 
-impl FormattedSink for KafkaPayloadWriter {
+impl<'a> FormattedSink for KafkaPayloadWriter<'a> {
     type K = Vec<u8>;
     type V = Vec<u8>;
 
@@ -538,32 +663,47 @@ impl FormattedSink for KafkaPayloadWriter {
     }
 }
 
-#[async_trait::async_trait]
-impl SinkWriterV1 for KafkaSinkWriter {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
-            self.payload_writer.write_chunk(chunk, formatter).await
-        })
-    }
-
-    /// ---------------------------------------------------------------------------------------
-    /// Note: The following functions are just to satisfy `SinkWriterV1` trait                |
-    /// We do not need transaction-related functionality for sink executor, return Ok(())     |
-    /// ---------------------------------------------------------------------------------------
-    // Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
-    // transaction.
-    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
-        Ok(())
-    }
-
-    async fn commit(&mut self) -> Result<()> {
-        // Group delivery (await the `FutureRecord`) here
-        self.payload_writer.commit_inner().await?;
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
+impl LogSinker for KafkaLogSinker {
+    async fn consume_log_and_sink(mut self, mut log_reader: impl LogReader) -> Result<()> {
+        log_reader.init().await?;
+        loop {
+            let select_result = drop_either_future(
+                select(
+                    pin!(log_reader.next_item()),
+                    pin!(self.future_manager.next_truncate_offset()),
+                )
+                .await,
+            );
+            match select_result {
+                Either::Left(item_result) => {
+                    let (epoch, item) = item_result?;
+                    match item {
+                        LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
+                            dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+                                let mut writer = KafkaPayloadWriter {
+                                    inner: &self.inner,
+                                    add_future: self
+                                        .future_manager
+                                        .start_write_chunk(epoch, chunk_id),
+                                    config: &self.config,
+                                };
+                                writer.write_chunk(chunk, formatter).await?;
+                            })
+                        }
+                        LogStoreReadItem::Barrier {
+                            is_checkpoint: _is_checkpoint,
+                        } => {
+                            self.future_manager.add_barrier(epoch);
+                        }
+                        LogStoreReadItem::UpdateVnodeBitmap(_) => {}
+                    }
+                }
+                Either::Right(offset_result) => {
+                    let offset = offset_result?;
+                    log_reader.truncate(offset).await?;
+                }
+            }
+        }
     }
 }
 
@@ -748,7 +888,7 @@ mod test {
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
 
         // Create the actual sink writer to Kafka
-        let mut sink = KafkaSinkWriter::new(
+        let mut sink = KafkaLogSinker::new(
             kafka_config.clone(),
             SinkFormatterImpl::AppendOnlyJson(AppendOnlyFormatter::new(
                 JsonEncoder::new(
@@ -763,12 +903,14 @@ mod test {
         .unwrap();
 
         for i in 0..10 {
-            let mut fail_flag = false;
-            sink.begin_epoch(i).await?;
             println!("epoch: {}", i);
             for j in 0..100 {
-                match sink
-                    .payload_writer
+                let mut writer = KafkaPayloadWriter {
+                    inner: &sink.inner,
+                    add_future: sink.future_manager.start_write_chunk(i, j),
+                    config: &sink.config,
+                };
+                match writer
                     .send_result(
                         FutureRecord::to(kafka_config.common.topic.as_str())
                             .payload(format!("value-{}", j).as_bytes())
@@ -778,15 +920,10 @@ mod test {
                 {
                     Ok(_) => {}
                     Err(e) => {
-                        fail_flag = true;
                         println!("{:?}", e);
-                        sink.abort().await?;
+                        break;
                     }
                 };
-            }
-            if !fail_flag {
-                sink.commit().await?;
-                println!("commit success");
             }
         }
 
