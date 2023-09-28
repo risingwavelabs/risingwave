@@ -30,10 +30,12 @@ buildx_args="
 
 docker buildx build -f docker/Dockerfile \
   -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" \
+  --target risingwave \
   ${buildx_args} .
 
 docker buildx build -f docker/Dockerfile \
   -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}-debug" \
+  --target risingwave-debug \
   ${buildx_args} .
 
 echo "--- check the image can start correctly"
