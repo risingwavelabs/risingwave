@@ -134,6 +134,7 @@ impl GlobalBarrierManager {
         prev_epoch: TracedEpoch,
         paused_reason: Option<PausedReason>,
     ) -> BarrierManagerState {
+        println!("recovery triggered");
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering")
@@ -146,6 +147,8 @@ impl GlobalBarrierManager {
         self.clean_dirty_fragments()
             .await
             .expect("clean dirty fragments");
+
+
         self.sink_manager.reset().await;
         let retry_strategy = Self::get_retry_strategy();
 
@@ -156,6 +159,10 @@ impl GlobalBarrierManager {
         let state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<_> = try {
+                    tracing::info!("recovering mview progress");
+                    self.recover_mview_progress().await?;
+                    tracing::info!("recovered mview progress");
+
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     let mut info = self.resolve_actor_info_for_recovery().await;
@@ -239,8 +246,6 @@ impl GlobalBarrierManager {
                         }
                     };
                     let (new_epoch, _) = res?;
-
-                    self.recover_mview_progress().await?;
 
                     BarrierManagerState::new(new_epoch, command_ctx.next_paused_reason())
                 };

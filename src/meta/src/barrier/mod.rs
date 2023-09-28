@@ -921,6 +921,7 @@ impl GlobalBarrierManager {
 
     async fn recover_mview_progress(&self) -> MetaResult<()> {
         let creating_tables = self.catalog_manager.list_creating_tables().await;
+        assert!(creating_tables.is_empty(), "creating tables should be empty!");
         let creating_table_ids = creating_tables
             .iter()
             .map(|t| TableId { table_id: t.id })
