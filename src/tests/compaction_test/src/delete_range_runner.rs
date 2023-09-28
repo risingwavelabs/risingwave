@@ -32,6 +32,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_hummock_test::local_state_store_test_utils::LocalStateStoreTestExt;
+use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
@@ -90,9 +91,10 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
 }
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
     let config = load_config(&opts.config_path, NoOverride);
-    let compaction_config = config.meta.compaction_config.clone();
+    let compaction_config =
+        CompactionConfigBuilder::with_opt(&config.meta.compaction_config).build();
     compaction_test(
-        CompactionConfig::from(compaction_config),
+        compaction_config,
         config,
         &opts.state_store,
         1000000,
