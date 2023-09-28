@@ -105,10 +105,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let connector_sink_rows_received = stream
             .streaming_metrics
             .connector_sink_rows_received
-            .with_label_values(&[
-                connector,
-                &sink_param.sink_id.sink_id.to_string(),
-            ]);
+            .with_label_values(&[connector, &sink_param.sink_id.sink_id.to_string()]);
 
         let sink_metrics = SinkMetrics {
             sink_commit_duration_metrics,
