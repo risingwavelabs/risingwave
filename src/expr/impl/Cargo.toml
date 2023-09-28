@@ -1,0 +1,64 @@
+[package]
+name = "risingwave_expr_impl"
+description = "RisingWave function implementations."
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack", "ctor"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack", "ctor"]
+
+[dependencies]
+aho-corasick = "1"
+anyhow = "1"
+async-trait = "0.1"
+auto_enums = "0.8"
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
+fancy-regex = "0.11"
+futures-async-stream = { workspace = true }
+futures-util = "0.3"
+hex = "0.4"
+itertools = "0.11"
+md5 = "0.7"
+num-traits = "0.2"
+regex = "1"
+risingwave_common = { workspace = true }
+risingwave_expr = { workspace = true }
+risingwave_pb = { workspace = true }
+rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+self_cell = "1.0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.10"
+sha2 = "0.10"
+thiserror = "1"
+tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
+tracing = "0.1"
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
+
+[dev-dependencies]
+criterion = { workspace = true }
+expect-test = "1"
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "macros",
+] }
+
+[[bench]]
+name = "expr"
+harness = false
+
+[lints]
+workspace = true

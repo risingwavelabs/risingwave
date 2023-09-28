@@ -47,12 +47,14 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::ScalarRefImpl;
 use risingwave_common::util::panic::rw_catch_unwind;
-use risingwave_pb::connector_service::GetEventStreamResponse;
+use risingwave_pb::connector_service::{
+    GetEventStreamResponse, SinkWriterStreamRequest, SinkWriterStreamResponse,
+};
 use risingwave_pb::data::Op;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::hummock_iterator::HummockJavaBindingIterator;
 pub use crate::jvm_runtime::register_native_method_for_jvm;
@@ -866,14 +868,50 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToCh
         let get_event_stream_response: GetEventStreamResponse =
             Message::decode(to_guarded_slice(&msg, env)?.deref())?;
 
-        tracing::debug!("before send");
         match channel.as_ref().blocking_send(get_event_stream_response) {
-            Ok(_) => {
-                tracing::debug!("send successfully");
-                Ok(JNI_TRUE)
-            }
+            Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
-                tracing::debug!("send error.  {:?}", e);
+                tracing::info!("send error.  {:?}", e);
+                Ok(JNI_FALSE)
+            }
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRequestFromChannel<
+    'a,
+>(
+    env: EnvParam<'a>,
+    mut channel: Pointer<'a, Receiver<SinkWriterStreamRequest>>,
+) -> JByteArray<'a> {
+    execute_and_catch(env, move |env| match channel.as_mut().blocking_recv() {
+        Some(msg) => {
+            let bytes = env
+                .byte_array_from_slice(&Message::encode_to_vec(&msg))
+                .unwrap();
+            Ok(bytes)
+        }
+        None => Ok(JObject::null().into()),
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterResponseToChannel<
+    'a,
+>(
+    env: EnvParam<'a>,
+    channel: Pointer<'a, Sender<SinkWriterStreamResponse>>,
+    msg: JByteArray<'a>,
+) -> jboolean {
+    execute_and_catch(env, move |env| {
+        let sink_writer_stream_response: SinkWriterStreamResponse =
+            Message::decode(to_guarded_slice(&msg, env)?.deref())?;
+
+        match channel.as_ref().blocking_send(sink_writer_stream_response) {
+            Ok(_) => Ok(JNI_TRUE),
+            Err(e) => {
+                tracing::info!("send error.  {:?}", e);
                 Ok(JNI_FALSE)
             }
         }
@@ -882,8 +920,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToCh
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::{DataType, Timestamptz};
-    use risingwave_expr::vector_op::cast::literal_parsing;
+    use risingwave_common::types::Timestamptz;
 
     /// make sure that the [`ScalarRefImpl::Int64`] received by
     /// [`Java_com_risingwave_java_binding_Binding_iteratorGetTimestampValue`]
@@ -891,8 +928,8 @@ mod tests {
     #[test]
     fn test_timestamptz_to_i64() {
         assert_eq!(
-            literal_parsing(&DataType::Timestamptz, "2023-06-01 09:45:00+08:00").unwrap(),
-            Timestamptz::from_micros(1_685_583_900_000_000).into()
+            "2023-06-01 09:45:00+08:00".parse::<Timestamptz>().unwrap(),
+            Timestamptz::from_micros(1_685_583_900_000_000)
         );
     }
 }
