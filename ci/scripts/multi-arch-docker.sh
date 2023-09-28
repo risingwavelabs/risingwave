@@ -25,32 +25,29 @@ if [ "${SKIP_TARGET_AARCH64:-false}" != "true" ]; then
   arches+=("aarch64")
 fi
 
-# push images to gchr
-function pushGchr() {
-  GHCRTAG="${ghcraddr}:$1"
-  echo "push to gchr, image tag: ${GHCRTAG}"
+# doPush <registry> <image_tag> <debug_suffix>
+function doPush() {
+  debug_suffix=$3
+  tag="$1:$2${debug_suffix}"
+  echo "image tag: ${tag}"
   args=()
   for arch in "${arches[@]}"
   do
-    args+=( --amend "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" )
-    args+=( --amend "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}-debug" )
+    args+=( --amend "$1:${BUILDKITE_COMMIT}-${arch}${debug_suffix}" )
   done
-  docker manifest create --insecure "$GHCRTAG" "${args[@]}"
-  docker manifest push --insecure "$GHCRTAG"
+  docker manifest create --insecure "$tag" "$2"
+  docker manifest push --insecure "$tag"
 }
 
-# push images to dockerhub
+# push images to gchr
+function pushGchr() {
+  doPush "${ghcraddr}" "$1" ""
+  doPush "${ghcraddr}" "$1" "-debug"
+}
+
 function pushDockerhub() {
-  DOCKERTAG="${dockerhubaddr}:$1"
-  echo "push to dockerhub, image tag: ${DOCKERTAG}"
-  args=()
-  for arch in "${arches[@]}"
-  do
-    args+=( --amend "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}" )
-    args+=( --amend "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}-debug" )
-  done
-  docker manifest create --insecure "$DOCKERTAG" "${args[@]}"
-  docker manifest push --insecure "$DOCKERTAG"
+  doPush "${dockerhubaddr}" "$1" ""
+  doPush "${dockerhubaddr}" "$1" "-debug"
 }
 
 echo "--- ghcr login"
