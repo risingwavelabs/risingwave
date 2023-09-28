@@ -354,6 +354,12 @@ pub enum SinkError {
     Internal(anyhow::Error),
 }
 
+impl From<icelake::Error> for SinkError {
+    fn from(value: icelake::Error) -> Self {
+        SinkError::Iceberg(anyhow_error!("{}", value))
+    }
+}
+
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
         SinkError::Remote(anyhow_error!("{}", value))
