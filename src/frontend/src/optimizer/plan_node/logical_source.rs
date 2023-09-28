@@ -23,7 +23,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError, TrackingIssue};
 use risingwave_connector::source::{ConnectorProperties, DataType};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
@@ -513,7 +513,10 @@ impl ToBatch for LogicalSource {
                 &self.core.catalog.as_ref().unwrap().properties,
             )
         {
-            todo!()
+            return Err(RwError::from(ErrorCode::NotImplemented(
+                "New S3 connector for batch".to_string(),
+                TrackingIssue(None),
+            )));
         }
         let source = self.wrap_with_optional_generated_columns_batch_proj()?;
         Ok(source)
