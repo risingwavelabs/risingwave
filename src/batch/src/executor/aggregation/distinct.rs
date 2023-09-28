@@ -20,7 +20,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::agg::{
+use risingwave_expr::aggregate::{
     AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction,
 };
 use risingwave_expr::Result;
@@ -112,7 +112,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{Datum, Decimal};
-    use risingwave_expr::agg::AggCall;
+    use risingwave_expr::aggregate::AggCall;
 
     use super::super::build;
 

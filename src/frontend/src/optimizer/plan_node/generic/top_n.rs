@@ -170,13 +170,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
         self.input.schema().clone()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         // We can use the group key as the stream key when there is at most one record for each
         // value of the group key.
         if self.limit_attr.max_one_row() {
             Some(self.group_key.clone())
         } else {
-            let mut pk = self.input.logical_pk().to_vec();
+            let mut pk = self.input.stream_key().to_vec();
             for i in &self.group_key {
                 if !pk.contains(i) {
                     pk.push(*i);

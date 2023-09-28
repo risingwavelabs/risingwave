@@ -20,6 +20,7 @@ use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use itertools::Itertools;
+use model_migration::{Migrator, MigratorTrait};
 use regex::Regex;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -57,6 +58,8 @@ use super::service::serving_service::ServingServiceImpl;
 use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
+use crate::controller::system_param::SystemParamsController;
+use crate::controller::SqlMetaStore;
 use crate::hummock::HummockManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
@@ -98,6 +101,11 @@ pub enum MetaStoreBackend {
     Mem,
 }
 
+#[derive(Debug)]
+pub struct MetaStoreSqlBackend {
+    pub(crate) endpoint: String,
+}
+
 #[derive(Clone)]
 pub struct AddressInfo {
     pub advertise_addr: String,
@@ -124,11 +132,24 @@ pub type ElectionClientRef = Arc<dyn ElectionClient>;
 pub async fn rpc_serve(
     address_info: AddressInfo,
     meta_store_backend: MetaStoreBackend,
+    meta_store_sql_backend: Option<MetaStoreSqlBackend>,
     max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
     init_system_params: SystemParams,
 ) -> MetaResult<(JoinHandle<()>, Option<JoinHandle<()>>, WatchSender<()>)> {
+    let meta_store_sql = match meta_store_sql_backend {
+        Some(backend) => {
+            let mut options = sea_orm::ConnectOptions::new(backend.endpoint);
+            options
+                .max_connections(20)
+                .connect_timeout(Duration::from_secs(10))
+                .idle_timeout(Duration::from_secs(30));
+            let conn = sea_orm::Database::connect(options).await?;
+            Some(SqlMetaStore::new(conn))
+        }
+        None => None,
+    };
     match meta_store_backend {
         MetaStoreBackend::Etcd {
             endpoints,
@@ -165,6 +186,7 @@ pub async fn rpc_serve(
             rpc_serve_with_store(
                 meta_store,
                 Some(election_client),
+                meta_store_sql,
                 address_info,
                 max_cluster_heartbeat_interval,
                 lease_interval_secs,
@@ -177,6 +199,7 @@ pub async fn rpc_serve(
             rpc_serve_with_store(
                 meta_store,
                 None,
+                meta_store_sql,
                 address_info,
                 max_cluster_heartbeat_interval,
                 lease_interval_secs,
@@ -191,6 +214,7 @@ pub async fn rpc_serve(
 pub fn rpc_serve_with_store(
     meta_store: MetaStoreRef,
     election_client: Option<ElectionClientRef>,
+    meta_store_sql: Option<SqlMetaStore>,
     address_info: AddressInfo,
     max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
@@ -273,6 +297,7 @@ pub fn rpc_serve_with_store(
 
         start_service_as_election_leader(
             meta_store,
+            meta_store_sql,
             address_info,
             max_cluster_heartbeat_interval,
             opts,
@@ -344,6 +369,7 @@ pub async fn start_service_as_election_follower(
 /// Returns an error if the service initialization failed
 pub async fn start_service_as_election_leader(
     meta_store: MetaStoreRef,
+    meta_store_sql: Option<SqlMetaStore>,
     address_info: AddressInfo,
     max_cluster_heartbeat_interval: Duration,
     opts: MetaOpts,
@@ -352,12 +378,31 @@ pub async fn start_service_as_election_leader(
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
+    if let Some(sql_store) = &meta_store_sql {
+        // Try to upgrade if any new model changes are added.
+        Migrator::up(&sql_store.conn, None)
+            .await
+            .expect("Failed to upgrade models in meta store");
+    }
+
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let env = MetaSrvEnv::new(opts.clone(), init_system_params, meta_store.clone()).await?;
+    let env = MetaSrvEnv::new(
+        opts.clone(),
+        init_system_params,
+        meta_store.clone(),
+        meta_store_sql.clone(),
+    )
+    .await?;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
 
     let system_params_manager = env.system_params_manager_ref();
-    let system_params_reader = system_params_manager.get_params().await;
+    let mut system_params_reader = system_params_manager.get_params().await;
+
+    // Using new reader instead if the controller is set.
+    let system_params_controller = env.system_params_controller_ref();
+    if let Some(ctl) = &system_params_controller {
+        system_params_reader = ctl.get_params().await;
+    }
 
     let data_directory = system_params_reader.data_directory();
     if !is_correct_data_directory(data_directory) {
@@ -572,8 +617,11 @@ pub async fn start_service_as_election_leader(
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
-    let telemetry_srv = TelemetryInfoServiceImpl::new(meta_store.clone());
-    let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
+    let telemetry_srv = TelemetryInfoServiceImpl::new(meta_store.clone(), env.sql_meta_store());
+    let system_params_srv = SystemParamsServiceImpl::new(
+        system_params_manager.clone(),
+        system_params_controller.clone(),
+    );
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
     let cloud_srv = CloudServiceImpl::new(catalog_manager.clone(), aws_cli);
@@ -608,9 +656,15 @@ pub async fn start_service_as_election_leader(
         )
         .await,
     );
-    sub_tasks.push(SystemParamsManager::start_params_notifier(
-        system_params_manager.clone(),
-    ));
+    if let Some(system_params_ctl) = system_params_controller {
+        sub_tasks.push(SystemParamsController::start_params_notifier(
+            system_params_ctl,
+        ));
+    } else {
+        sub_tasks.push(SystemParamsManager::start_params_notifier(
+            system_params_manager.clone(),
+        ));
+    }
     sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager.clone()));
     sub_tasks.push(HummockManager::compaction_event_loop(
         hummock_manager,
@@ -693,8 +747,10 @@ pub async fn start_service_as_election_leader(
 
     // Persist params before starting services so that invalid params that cause meta node
     // to crash will not be persisted.
-    system_params_manager.flush_params().await?;
-    env.cluster_id().put_at_meta_store(&meta_store).await?;
+    if meta_store_sql.is_none() {
+        system_params_manager.flush_params().await?;
+        env.cluster_id().put_at_meta_store(&meta_store).await?;
+    }
 
     tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
     tracing::info!("Starting meta services");
