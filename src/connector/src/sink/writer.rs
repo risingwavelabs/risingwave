@@ -224,6 +224,9 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
             };
             match item {
                 LogStoreReadItem::StreamChunk { chunk, .. } => {
+                    sink_metrics
+                        .connector_sink_rows_received
+                        .inc_by(chunk.cardinality() as u64);
                     if let Err(e) = sink_writer.write_batch(chunk).await {
                         sink_writer.abort().await?;
                         return Err(e);

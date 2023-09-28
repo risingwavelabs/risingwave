@@ -39,7 +39,8 @@ use std::future::Future;
 use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use prometheus::{Histogram, HistogramOpts};
+use prometheus::core::{AtomicU64, GenericCounter};
+use prometheus::{Histogram, HistogramOpts, Opts};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
@@ -198,6 +199,7 @@ impl From<SinkCatalog> for SinkParam {
 #[derive(Clone)]
 pub struct SinkMetrics {
     pub sink_commit_duration_metrics: Histogram,
+    pub connector_sink_rows_received: GenericCounter<AtomicU64>,
 }
 
 impl Default for SinkMetrics {
@@ -207,6 +209,8 @@ impl Default for SinkMetrics {
                 "unused", "unused",
             ))
             .unwrap(),
+            connector_sink_rows_received: GenericCounter::with_opts(Opts::new("unused", "unused"))
+                .unwrap(),
         }
     }
 }

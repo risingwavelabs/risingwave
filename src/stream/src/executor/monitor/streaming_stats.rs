@@ -120,6 +120,7 @@ pub struct StreamingMetrics {
     pub barrier_manager_progress: IntCounter,
 
     pub sink_commit_duration: HistogramVec,
+    pub connector_sink_rows_received: GenericCounterVec<AtomicU64>,
 
     // Memory management
     // FIXME(yuhao): use u64 here
@@ -697,6 +698,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let connector_sink_rows_received = register_int_counter_vec_with_registry!(
+            "connector_sink_rows_received",
+            "Number of rows received by sink",
+            &["connector_type", "sink_id"],
+            registry
+        )
+        .unwrap();
+
         let lru_current_watermark_time_ms = register_int_gauge_with_registry!(
             "lru_current_watermark_time_ms",
             "Current LRU manager watermark time(ms)",
@@ -860,6 +869,7 @@ impl StreamingMetrics {
             barrier_sync_latency,
             barrier_manager_progress,
             sink_commit_duration,
+            connector_sink_rows_received,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,
             lru_runtime_loop_count,
