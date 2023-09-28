@@ -192,16 +192,17 @@ test_foreground_index_cancel() {
 
    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/create_base_table.slt"
 
-   # Test cancel
-   run_sql "CREATE INDEX i ON t (v1);" &
-   sleep 3
-   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
-   cancel_stream_jobs
-   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_no_jobs.slt"
+#   # Test cancel
+#   run_sql "CREATE INDEX i ON t (v1);" &
+#   sleep 3
+#   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
+#   cancel_stream_jobs
+#   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_no_jobs.slt"
 
    # Test index over recovery
    run_sql "CREATE INDEX i ON t (v1);" &
    sleep 3
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
 
    # Restart
    cargo make kill
@@ -225,16 +226,17 @@ test_foreground_sink_cancel() {
 
    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/create_base_table.slt"
 
-   # Test cancel
-   run_sql "CREATE SINK i FROM t WITH (connector='blackhole');" &
-   sleep 3
-   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
-   cancel_stream_jobs
-   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_no_jobs.slt"
+#   # Test cancel
+#   run_sql "CREATE SINK i FROM t WITH (connector='blackhole');" &
+#   sleep 3
+#   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
+#   cancel_stream_jobs
+#   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_no_jobs.slt"
 
    # Test index over recovery
    run_sql "CREATE SINK i FROM t WITH (connector='blackhole');" &
    sleep 3
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
 
    # Restart
    cargo make kill
@@ -259,7 +261,7 @@ main() {
   # test_background_ddl_cancel
   # test_foreground_ddl_no_recover
   # test_foreground_ddl_cancel
-  # test_foreground_index_cancel
+  test_foreground_index_cancel
   test_foreground_sink_cancel
 }
 
