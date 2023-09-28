@@ -411,7 +411,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
-            SinkWriterParam::default(),
+            SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
             ActorContext::create(0),
@@ -532,7 +532,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
-            SinkWriterParam::default(),
+            SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
             ActorContext::create(0),
@@ -650,7 +650,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
-            SinkWriterParam::default(),
+            SinkWriterParam::for_test(),
             sink_param,
             columns,
             ActorContext::create(0),

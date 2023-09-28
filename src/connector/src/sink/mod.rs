@@ -202,8 +202,8 @@ pub struct SinkMetrics {
     pub connector_sink_rows_received: GenericCounter<AtomicU64>,
 }
 
-impl Default for SinkMetrics {
-    fn default() -> Self {
+impl SinkMetrics {
+    fn for_test() -> Self {
         SinkMetrics {
             sink_commit_duration_metrics: Histogram::with_opts(HistogramOpts::new(
                 "unused", "unused",
@@ -215,13 +215,25 @@ impl Default for SinkMetrics {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<MetaClient>,
     pub sink_metrics: SinkMetrics,
+}
+
+impl SinkWriterParam {
+    pub fn for_test() -> Self {
+        SinkWriterParam {
+            connector_params: Default::default(),
+            executor_id: Default::default(),
+            vnode_bitmap: Default::default(),
+            meta_client: Default::default(),
+            sink_metrics: SinkMetrics::for_test(),
+        }
+    }
 }
 
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
