@@ -351,7 +351,7 @@ impl Sink for KafkaSink {
 const KAFKA_WRITER_MAX_QUEUE_SIZE_RATIO: f32 = 1.2;
 /// The default queue size used to enforce a commit in kafka producer if `queue.buffering.max.messages` is not specified.
 /// This default value is determined based on the librdkafka default. See the following doc for more details:
-/// https://github.com/confluentinc/librdkafka/blob/1cb80090dfc75f5a36eae3f4f8844b14885c045e/CONFIGURATION.md
+/// <https://github.com/confluentinc/librdkafka/blob/1cb80090dfc75f5a36eae3f4f8844b14885c045e/CONFIGURATION.md>
 const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 100000;
 
 struct KafkaPayloadWriter {
