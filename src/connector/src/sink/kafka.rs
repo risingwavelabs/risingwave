@@ -150,7 +150,7 @@ pub struct RdKafkaPropertiesProducer {
         rename = "properties.message.timeout.ms",
         default = "_default_message_timeout_ms"
     )]
-    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[serde_as(as = "DisplayFromStr")]
     message_timeout_ms: usize,
 
     /// The maximum number of unacknowledged requests the client will send on a single connection before blocking.
@@ -158,7 +158,7 @@ pub struct RdKafkaPropertiesProducer {
         rename = "properties.max.in.flight.requests.per.connection",
         default = "_default_max_in_flight_requests_per_connection"
     )]
-    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[serde_as(as = "DisplayFromStr")]
     max_in_flight_requests_per_connection: usize,
 }
 
@@ -375,7 +375,7 @@ pub struct KafkaSinkWriter {
 }
 
 impl KafkaSinkWriter {
-    pub async fn new(mut config: KafkaConfig, formatter: SinkFormatterImpl) -> Result<Self> {
+    pub async fn new(config: KafkaConfig, formatter: SinkFormatterImpl) -> Result<Self> {
         let inner: FutureProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
 
