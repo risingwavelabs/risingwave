@@ -518,6 +518,20 @@ pub trait SourceLister: Sized {
     fn paginate(self) -> BoxTryStream<FsPage>;
 }
 
+#[async_trait]
+pub trait SourceReader: Sized + Send {
+    type Properties;
+
+    async fn new(
+        properties: Self::Properties,
+        parser_config: ParserConfig,
+        source_ctx: SourceContextRef,
+        columns: Option<Vec<Column>>,
+    ) -> Result<Self>;
+
+    fn build_read_stream(&mut self, split: FsSplit) -> BoxSourceWithStateStream;
+}
+
 #[cfg(test)]
 mod tests {
     use maplit::*;
