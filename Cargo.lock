@@ -347,6 +347,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrow-ord"
+version = "46.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "584325c91293abbca7aaaabf8da9fe303245d641f5f4a18a6058dc68009c7ebf"
+dependencies = [
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-data",
+ "arrow-schema",
+ "arrow-select",
+ "half 2.3.1",
+ "num",
+]
+
+[[package]]
 name = "arrow-row"
 version = "46.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3834,7 +3849,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.0.10"
-source = "git+https://github.com/icelake-io/icelake?rev=166a36b1a40a64086db09a0e0f2ed6791cec548b#166a36b1a40a64086db09a0e0f2ed6791cec548b"
+source = "git+https://github.com/icelake-io/icelake?rev=72a65aed6ed7b3d529b311031c2c8d99650990e2#72a65aed6ed7b3d529b311031c2c8d99650990e2"
 dependencies = [
  "anyhow",
  "apache-avro 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3842,6 +3857,7 @@ dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-cast",
+ "arrow-ord",
  "arrow-row",
  "arrow-schema",
  "arrow-select",
@@ -3857,7 +3873,7 @@ dependencies = [
  "log",
  "murmur3",
  "once_cell",
- "opendal",
+ "opendal 0.40.0",
  "ordered-float 3.9.1",
  "parquet",
  "regex",
@@ -5218,6 +5234,39 @@ name = "opendal"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ad95e460e5976ab1b74f398ab856c59f8417b3dd32202329e3491dcbe3a6b84"
+dependencies = [
+ "anyhow",
+ "async-compat",
+ "async-trait",
+ "backon",
+ "base64 0.21.3",
+ "bytes",
+ "chrono",
+ "flagset",
+ "futures",
+ "http",
+ "hyper",
+ "log",
+ "md-5",
+ "once_cell",
+ "parking_lot 0.12.1",
+ "percent-encoding",
+ "pin-project",
+ "quick-xml 0.29.0",
+ "reqsign",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "opendal"
+version = "0.40.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ddba7299bab261d3ae2f37617fb7f45b19ed872752bb4e22cf93a69d979366c5"
 dependencies = [
  "anyhow",
  "async-compat",
@@ -6895,6 +6944,7 @@ dependencies = [
  "arc-swap",
  "arrow-array",
  "arrow-buffer",
+ "arrow-cast",
  "arrow-schema",
  "async-trait",
  "auto_enums",
@@ -7152,7 +7202,7 @@ dependencies = [
  "nexmark",
  "nkeys",
  "num-bigint",
- "opendal",
+ "opendal 0.39.0",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
@@ -7578,7 +7628,7 @@ dependencies = [
  "itertools 0.11.0",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
- "opendal",
+ "opendal 0.39.0",
  "prometheus",
  "risingwave_common",
  "spin 0.9.8",
