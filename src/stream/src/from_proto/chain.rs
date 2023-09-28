@@ -20,7 +20,7 @@ use maplit::hashmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::external::{ExternalTableType, SchemaTableName};
+use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{ChainNode, ChainType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -109,7 +109,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                             table_desc.connect_properties
                         ))
                     })?;
-                let table_type = ExternalTableType::from_properties(&properties);
+                let table_type = CdcTableType::from_properties(&properties);
                 let table_reader =
                     table_type.create_table_reader(properties.clone(), schema.clone())?;
 
@@ -146,7 +146,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     external_table,
                     upstream,
                     (0..table_desc.columns.len()).collect_vec(), /* eliminate the last column (_rw_offset) */
-                    None,
+                    Some(progress),
                     schema.clone(),
                     pk_indices,
                     params.executor_stats,

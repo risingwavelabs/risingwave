@@ -434,7 +434,7 @@ impl DdlService for DdlServiceImpl {
         request: Request<CreateTableRequest>,
     ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
-        let sub_type = request.get_sub_type().unwrap_or_default();
+        let job_type = request.get_job_type().unwrap_or_default();
         let mut source = request.source;
         let mut mview = request.materialized_view.unwrap();
         let mut fragment_graph = request.fragment_graph.unwrap();
@@ -447,7 +447,7 @@ impl DdlService for DdlServiceImpl {
         }
 
         let mut stream_job =
-            StreamingJob::Table(source, mview, TableJobType::from_protobuf(sub_type));
+            StreamingJob::Table(source, mview, TableJobType::from_protobuf(job_type));
 
         stream_job.set_id(table_id);
 

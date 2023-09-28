@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::{Index, PbSource, Sink, Table};
-use risingwave_pb::ddl_service::PbTableSubType;
+use risingwave_pb::ddl_service::PbTableJobType;
 
 use crate::model::FragmentId;
 
@@ -29,11 +29,11 @@ pub enum TableJobType {
 }
 
 impl TableJobType {
-    pub fn from_protobuf(pb: PbTableSubType) -> Self {
+    pub fn from_protobuf(pb: PbTableJobType) -> Self {
         match pb {
-            PbTableSubType::Unspecified => Self::default(),
-            PbTableSubType::Normal => Self::Normal,
-            PbTableSubType::SharedCdcSource => Self::SharedCdcSource,
+            PbTableJobType::Unspecified => Self::default(),
+            PbTableJobType::Normal => Self::Normal,
+            PbTableJobType::SharedCdcSource => Self::SharedCdcSource,
         }
     }
 }

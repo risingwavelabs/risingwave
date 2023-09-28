@@ -15,7 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::ddl_service::TableSubType;
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query, Statement};
 
@@ -126,7 +126,7 @@ pub async fn handle_create_as(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_table(source, table, graph, TableSubType::Normal)
+        .create_table(source, table, graph, TableJobType::Normal)
         .await?;
 
     // Generate insert

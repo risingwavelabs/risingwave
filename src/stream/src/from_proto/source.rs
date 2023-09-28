@@ -15,7 +15,7 @@
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::external::{ExternalTableType, SchemaTableName};
+use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
 use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
@@ -143,7 +143,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.env.connector_params(),
                     );
 
-                    let table_type = ExternalTableType::from_properties(&source.properties);
+                    let table_type = CdcTableType::from_properties(&source.properties);
                     if table_type.can_backfill() && let Some(table_desc) = source_info.upstream_table.clone() {
                         let upstream_table_name = SchemaTableName::from_properties(&source.properties);
                         let pk_indices = table_desc

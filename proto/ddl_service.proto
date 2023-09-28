@@ -139,7 +139,7 @@ message DropViewResponse {
   uint64 version = 2;
 }
 
-enum TableSubType {
+enum TableJobType {
     UNSPECIFIED = 0;
     NORMAL = 1;
     // The table is shared a CDC source
@@ -152,7 +152,7 @@ message CreateTableRequest {
   catalog.Source source = 1;
   catalog.Table materialized_view = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
-  TableSubType sub_type = 4;
+  TableJobType job_type = 4;
 }
 
 message CreateTableResponse {

@@ -31,11 +31,11 @@ use risingwave_connector::source::cdc::{
     CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, MYSQL_CDC_CONNECTOR,
 };
 use risingwave_connector::source::external::{
-    ExternalTableType, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
+    CdcTableType, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
-use risingwave_pb::ddl_service::TableSubType;
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
@@ -503,7 +503,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         .into());
     }
 
-    let table_type = ExternalTableType::from_properties(&properties);
+    let table_type = CdcTableType::from_properties(&properties);
     if table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
         // Add a column for storing the event offset
         let offset_column = ColumnCatalog::offset_column();
@@ -929,14 +929,13 @@ pub async fn handle_create_table(
         Ok(_) => {}
     };
 
-    let (graph, source, table, sub_type) =
-        {
-            let context = OptimizerContext::from_handler_args(handler_args);
-            let source_schema =
-                check_create_table_with_source(context.with_options(), source_schema)?;
-            let mut col_id_gen = ColumnIdGenerator::new_initial();
+    let (graph, source, table, job_type) = {
+        let context = OptimizerContext::from_handler_args(handler_args);
+        let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
+        let mut col_id_gen = ColumnIdGenerator::new_initial();
+        let mut properties = context.with_options().inner().clone().into_iter().collect();
 
-            let ((plan, source, table), sub_type) = match (source_schema, cdc_source.as_ref()) {
+        let ((plan, source, table), job_type) = match (source_schema, cdc_source.as_ref()) {
             (Some(source_schema), None) => (
                 gen_create_table_plan_with_source(
                     context,
@@ -949,7 +948,7 @@ pub async fn handle_create_table(
                     append_only,
                 )
                 .await?,
-                TableSubType::Normal,
+                TableJobType::Normal,
             ),
             (None, None) => (
                 gen_create_table_plan(
@@ -961,18 +960,21 @@ pub async fn handle_create_table(
                     source_watermarks,
                     append_only,
                 )?,
-                TableSubType::Normal,
+                TableJobType::Normal,
             ),
 
-            (None, Some(source_name)) => (gen_create_table_plan_for_cdc_source(
-                context.into(),
-                source_name.clone(),
-                table_name.clone(),
-                external_table.unwrap_or(table_name.real_value()),
-                column_defs,
-                constraints,
-                col_id_gen,
-            )?, TableSubType::SharedCdcSource,),
+            (None, Some(source_name)) => (
+                gen_create_table_plan_for_cdc_source(
+                    context.into(),
+                    source_name.clone(),
+                    table_name.clone(),
+                    external_table.unwrap_or(table_name.real_value()),
+                    column_defs,
+                    constraints,
+                    col_id_gen,
+                )?,
+                TableJobType::SharedCdcSource,
+            ),
             (Some(_), Some(_)) => return Err(ErrorCode::NotSupported(
                 "Data format and encoding format doesn't apply to table created from a CDC source"
                     .into(),
@@ -980,18 +982,18 @@ pub async fn handle_create_table(
             )
             .into()),
         };
-
-            let mut graph = build_graph(plan);
-            graph.parallelism = if cdc_source.is_none() {
+        let mut graph = build_graph(plan);
+        graph.parallelism =
+            if cdc_source.is_some() || CdcTableType::from_properties(&properties).can_backfill() {
+                Some(Parallelism { parallelism: 1 })
+            } else {
                 session
                     .config()
                     .get_streaming_parallelism()
                     .map(|parallelism| Parallelism { parallelism })
-            } else {
-                Some(Parallelism { parallelism: 1 })
             };
-            (graph, source, table, sub_type)
-        };
+        (graph, source, table, job_type)
+    };
 
     tracing::debug!(
         "name={}, graph=\n{}",
@@ -1001,7 +1003,7 @@ pub async fn handle_create_table(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_table(source, table, graph, sub_type)
+        .create_table(source, table, graph, job_type)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
