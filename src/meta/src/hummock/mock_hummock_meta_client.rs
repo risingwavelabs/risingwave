@@ -282,27 +282,24 @@ impl HummockMetaClient for MockHummockMetaClient {
 
             loop {
                 if let Some(item) = request_receiver.recv().await {
-                    match item.event.unwrap() {
-                        Event::ReportTask(ReportTask {
-                            task_id,
-                            task_status,
-                            sorted_output_ssts,
-                            table_stats_change,
-                        }) => {
-                            if let Err(e) = hummock_manager_compact
-                                .report_compact_task(
-                                    task_id,
-                                    TaskStatus::from_i32(task_status).unwrap(),
-                                    sorted_output_ssts,
-                                    Some(table_stats_change),
-                                )
-                                .await
-                            {
-                                tracing::error!("report compact_tack fail {e:?}");
-                            }
+                    if let Event::ReportTask(ReportTask {
+                        task_id,
+                        task_status,
+                        sorted_output_ssts,
+                        table_stats_change,
+                    }) = item.event.unwrap()
+                    {
+                        if let Err(e) = hummock_manager_compact
+                            .report_compact_task(
+                                task_id,
+                                TaskStatus::from_i32(task_status).unwrap(),
+                                sorted_output_ssts,
+                                Some(table_stats_change),
+                            )
+                            .await
+                        {
+                            tracing::error!("report compact_tack fail {e:?}");
                         }
-
-                        _ => {}
                     }
                 }
             }
