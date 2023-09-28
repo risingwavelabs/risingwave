@@ -436,7 +436,7 @@ impl KafkaPayloadWriter {
                     // greater than the preset limit
                     while self.future_delivery_buffer.len() >= max_delivery_buffer_size {
                         tracing::warn!(
-                            "Number of records being delivered ({}) >= expected kafka producer queue size ({}). 
+                            "Number of records being delivered ({}) >= expected kafka producer queue size ({}).
                             This indicates the default value of queue.buffering.max.messages has changed.",
                             self.future_delivery_buffer.len(),
                             max_delivery_buffer_size
