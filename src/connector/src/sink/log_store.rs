@@ -13,11 +13,14 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::fmt::Debug;
-use std::future::Future;
+use std::future::{poll_fn, Future};
 use std::sync::Arc;
+use std::task::Poll;
 
 use anyhow::anyhow;
+use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::epoch::EpochPair;
@@ -189,6 +192,186 @@ where
         f: F,
     ) -> TransformChunkLogReader<F, Self> {
         TransformChunkLogReader { f, inner: self }
+    }
+}
+
+enum DeliveryFutureManagerItem<F> {
+    Chunk {
+        chunk_id: ChunkId,
+        // earlier future at the front
+        futures: VecDeque<F>,
+    },
+    Barrier,
+}
+
+pub struct DeliveryFutureManager<F> {
+    future_count: usize,
+    max_future_count: usize,
+    // earlier items at the front
+    items: VecDeque<(u64, DeliveryFutureManagerItem<F>)>,
+}
+
+impl<F> DeliveryFutureManager<F> {
+    pub fn new(max_future_count: usize) -> Self {
+        Self {
+            future_count: 0,
+            max_future_count,
+            items: Default::default(),
+        }
+    }
+
+    pub fn add_barrier(&mut self, epoch: u64) {
+        if let Some((item_epoch, last_item)) = self.items.back() {
+            match last_item {
+                DeliveryFutureManagerItem::Chunk { .. } => {
+                    assert_eq!(*item_epoch, epoch)
+                }
+                DeliveryFutureManagerItem::Barrier => {
+                    assert!(
+                        epoch > *item_epoch,
+                        "new barrier epoch {} should be greater than prev barrier {}",
+                        epoch,
+                        item_epoch
+                    );
+                }
+            }
+        }
+        self.items
+            .push_back((epoch, DeliveryFutureManagerItem::Barrier));
+    }
+
+    pub fn start_write_chunk(
+        &mut self,
+        epoch: u64,
+        chunk_id: ChunkId,
+    ) -> DeliveryFutureManagerAddFuture<'_, F> {
+        if let Some((item_epoch, item)) = self.items.back() {
+            match item {
+                DeliveryFutureManagerItem::Chunk {
+                    chunk_id: item_chunk_id,
+                    ..
+                } => {
+                    assert_eq!(epoch, *item_epoch);
+                    assert!(
+                        chunk_id > *item_chunk_id,
+                        "new chunk id {} should be greater than prev chunk id {}",
+                        chunk_id,
+                        item_chunk_id
+                    );
+                }
+                DeliveryFutureManagerItem::Barrier => {
+                    assert!(
+                        epoch > *item_epoch,
+                        "new chunk epoch {} should be greater than prev barrier: {}",
+                        epoch,
+                        item_epoch
+                    );
+                }
+            }
+        }
+        self.items.push_back((
+            epoch,
+            DeliveryFutureManagerItem::Chunk {
+                chunk_id,
+                futures: VecDeque::new(),
+            },
+        ));
+        DeliveryFutureManagerAddFuture(self)
+    }
+}
+
+pub struct DeliveryFutureManagerAddFuture<'a, F>(&'a mut DeliveryFutureManager<F>);
+
+impl<'a, F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManagerAddFuture<'a, F> {
+    /// Add a new future to the latest started written chunk.
+    /// The returned bool value indicate whether we have awaited on any previous futures.
+    pub async fn add_future_may_await(&mut self, future: F) -> Result<bool, F::Error> {
+        let mut has_await = false;
+        while self.0.future_count >= self.0.max_future_count {
+            self.await_one_delivery().await?;
+            has_await = true;
+        }
+        match self.0.items.back_mut() {
+            Some((_, DeliveryFutureManagerItem::Chunk { futures, .. })) => {
+                futures.push_back(future);
+                self.0.future_count += 1;
+                Ok(has_await)
+            }
+            _ => unreachable!("should add future only after add a new chunk"),
+        }
+    }
+
+    pub async fn await_one_delivery(&mut self) -> Result<(), F::Error> {
+        for (_, item) in self.0.items.iter_mut().rev() {
+            if let DeliveryFutureManagerItem::Chunk {futures, ..} = item && !futures.is_empty() {
+                let mut delivery_future = futures.pop_front().expect("have checked non-empty");
+                self.0.future_count -= 1;
+                return poll_fn(|cx| delivery_future.try_poll_unpin(cx)).await;
+            } else {
+                continue;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn future_count(&self) -> usize {
+        self.0.future_count
+    }
+
+    pub fn max_future_count(&self) -> usize {
+        self.0.max_future_count
+    }
+}
+
+impl<F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManager<F> {
+    pub fn next_truncate_offset(
+        &mut self,
+    ) -> impl Future<Output = Result<TruncateOffset, F::Error>> + '_ {
+        poll_fn(move |cx| {
+            let mut latest_offset: Option<TruncateOffset> = None;
+            'outer: loop {
+                if let Some((epoch, item)) = self.items.front_mut() {
+                    match item {
+                        DeliveryFutureManagerItem::Chunk { chunk_id, futures } => {
+                            while let Some(future) = futures.front_mut() {
+                                match future.try_poll_unpin(cx) {
+                                    Poll::Ready(result) => match result {
+                                        Ok(()) => {
+                                            self.future_count -= 1;
+                                            futures.pop_front();
+                                        }
+                                        Err(e) => {
+                                            return Poll::Ready(Err(e));
+                                        }
+                                    },
+                                    Poll::Pending => {
+                                        break 'outer;
+                                    }
+                                }
+                            }
+
+                            // when we reach here, there must not be any pending or error future.
+                            // Which means all futures of this stream chunk have been finished
+                            assert!(futures.is_empty());
+                            latest_offset = Some(TruncateOffset::Chunk {
+                                epoch: *epoch,
+                                chunk_id: *chunk_id,
+                            });
+                            self.items.pop_front().expect("items not empty");
+                        }
+                        DeliveryFutureManagerItem::Barrier => {
+                            // Barrier will be yielded anyway
+                            return Poll::Ready(Ok(TruncateOffset::Barrier { epoch: *epoch }));
+                        }
+                    }
+                }
+            }
+            if let Some(offset) = latest_offset {
+                Poll::Ready(Ok(offset))
+            } else {
+                Poll::Pending
+            }
+        })
     }
 }
 
