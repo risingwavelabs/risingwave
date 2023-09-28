@@ -763,6 +763,7 @@ impl CatalogManager {
 
         let mut table_ids = vec![];
         let mv_table_ids = tables.iter().map(|t| t.id).collect_vec();
+        println!("Cleaning dirty mv table ids: {mv_table_ids:?}");
         for table_id in &mv_table_ids {
             let fragment = fragment_manager
                 .select_table_fragments_by_table_id(&table_id.into())
@@ -840,6 +841,7 @@ impl CatalogManager {
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
     ) -> MetaResult<()> {
+        println!("remove create table with id: {table_id}");
         let core = &mut self.core.lock().await;
         let table = {
             let database_core = &mut core.database;
@@ -881,6 +883,7 @@ impl CatalogManager {
         table_id: TableId,
         fragment: &TableFragments,
     ) -> MetaResult<()> {
+        println!("remove create table with fragment: {table_id}");
         let core = &mut self.core.lock().await;
         let table = {
             let database_core = &mut core.database;
