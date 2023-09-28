@@ -66,7 +66,7 @@ const fn _default_message_timeout_ms() -> usize {
     5000
 }
 
-const fn _default_max_in_flight_requests_per_connection() -> uszie {
+const fn _default_max_in_flight_requests_per_connection() -> usize {
     5
 }
 
