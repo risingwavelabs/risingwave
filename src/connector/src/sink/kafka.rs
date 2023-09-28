@@ -80,7 +80,7 @@ enum CompressionCodec {
     Zstd,
 }
 
-/// See https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md
+/// See <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
 /// for the detailed meaning of these librdkafka producer properties
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
