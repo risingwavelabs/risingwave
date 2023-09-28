@@ -536,8 +536,8 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::types::DataType;
 
-    use crate::sink::catalog::{SinkFormatDesc, SinkType};
-    use crate::sink::{SinkParam, SINK_TYPE_APPEND_ONLY};
+    use crate::sink::catalog::SinkType;
+    use crate::sink::SinkParam;
     use crate::source::external::{
         CdcOffset, ExternalTableReader, MySqlExternalTableReader, MySqlOffset, SchemaTableName,
     };
@@ -587,7 +587,7 @@ mod tests {
             ],
             downstream_pk: vec![0],
             sink_type: SinkType::AppendOnly,
-            format_desc: SinkFormatDesc::from_legacy_type(SINK_TYPE_APPEND_ONLY),
+            format_desc: None,
             db_name: "db".into(),
             sink_from_name: "table".into(),
         };

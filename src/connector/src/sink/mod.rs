@@ -142,10 +142,14 @@ impl SinkParam {
         let table_schema = pb_param.table_schema.expect("should contain table schema");
         let format_desc = match pb_param.format_desc {
             Some(f) => f.try_into().ok(),
-            None => pb_param
-                .properties
-                .get(SINK_TYPE_OPTION)
-                .and_then(|t| SinkFormatDesc::from_legacy_type(t)),
+            None => {
+                let connector = pb_param.properties.get(CONNECTOR_TYPE_KEY);
+                let r#type = pb_param.properties.get(SINK_TYPE_OPTION);
+                match (connector, r#type) {
+                    (Some(c), Some(t)) => SinkFormatDesc::from_legacy_type(c, t).ok().flatten(),
+                    _ => None,
+                }
+            }
         };
         Self {
             sink_id: SinkId::from(pb_param.sink_id),

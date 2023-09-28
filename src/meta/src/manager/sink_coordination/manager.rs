@@ -376,10 +376,8 @@ mod tests {
     use rand::seq::SliceRandom;
     use risingwave_common::buffer::{Bitmap, BitmapBuilder};
     use risingwave_common::hash::VirtualNode;
-    use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
-    use risingwave_connector::sink::{
-        SinkCommitCoordinator, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY,
-    };
+    use risingwave_connector::sink::catalog::{SinkId, SinkType};
+    use risingwave_connector::sink::{SinkCommitCoordinator, SinkError, SinkParam};
     use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
     use risingwave_pb::connector_service::SinkMetadata;
     use risingwave_rpc_client::CoordinatorStreamHandle;
@@ -424,7 +422,7 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
-            format_desc: SinkFormatDesc::from_legacy_type(SINK_TYPE_APPEND_ONLY),
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -598,7 +596,7 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
-            format_desc: SinkFormatDesc::from_legacy_type(SINK_TYPE_APPEND_ONLY),
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -637,7 +635,7 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
-            format_desc: SinkFormatDesc::from_legacy_type(SINK_TYPE_APPEND_ONLY),
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -720,7 +718,7 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
-            format_desc: SinkFormatDesc::from_legacy_type(SINK_TYPE_APPEND_ONLY),
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };

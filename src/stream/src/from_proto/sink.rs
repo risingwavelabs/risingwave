@@ -45,19 +45,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
-        let format_desc = match &sink_desc.format_desc {
-            // Case A: new syntax `format ... encode ...`
-            Some(f) => Some(f.clone().try_into().map_err(|e| anyhow!("{e}"))?),
-            None => match sink_desc.properties.get(SINK_TYPE_OPTION) {
-                // Case B: old syntax `type = '...'`
-                Some(t) => Some(
-                    SinkFormatDesc::from_legacy_type(t)
-                        .ok_or_else(|| anyhow!("sink type unsupported: {t}"))?,
-                ),
-                // Case C: no format + encode required
-                None => None,
-            },
-        };
         let sink_id = sink_desc.get_id().into();
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
@@ -93,6 +80,16 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 }
             )
         }?;
+        let format_desc = match &sink_desc.format_desc {
+            // Case A: new syntax `format ... encode ...`
+            Some(f) => Some(f.clone().try_into().map_err(|e| anyhow!("{e}"))?),
+            None => match sink_desc.properties.get(SINK_TYPE_OPTION) {
+                // Case B: old syntax `type = '...'`
+                Some(t) => SinkFormatDesc::from_legacy_type(connector, t)?,
+                // Case C: no format + encode required
+                None => None,
+            },
+        };
 
         let sink_param = SinkParam {
             sink_id,

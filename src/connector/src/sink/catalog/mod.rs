@@ -16,6 +16,7 @@ pub mod desc;
 
 use std::collections::{BTreeMap, HashMap};
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
@@ -24,7 +25,10 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus};
 
-use super::{SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
+use super::{
+    SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT,
+};
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct SinkId {
@@ -125,18 +129,27 @@ pub enum SinkEncode {
 }
 
 impl SinkFormatDesc {
-    pub fn from_legacy_type(t: &str) -> Option<Self> {
-        let format = match t {
+    pub fn from_legacy_type(connector: &str, r#type: &str) -> Result<Option<Self>, SinkError> {
+        let format = match r#type {
             SINK_TYPE_APPEND_ONLY => SinkFormat::AppendOnly,
             SINK_TYPE_UPSERT => SinkFormat::Upsert,
             SINK_TYPE_DEBEZIUM => SinkFormat::Debezium,
-            _ => return None,
+            _ => {
+                return Err(SinkError::Config(anyhow!(
+                    "sink type unsupported: {}",
+                    r#type
+                )))
+            }
         };
-        Some(Self {
+        let encode = match connector {
+            "kafka" => SinkEncode::Json,
+            _ => return Ok(None),
+        };
+        Ok(Some(Self {
             format,
-            encode: SinkEncode::Json,
+            encode,
             options: Default::default(),
-        })
+        }))
     }
 
     pub fn to_proto(&self) -> PbSinkFormatDesc {
@@ -341,10 +354,14 @@ impl From<PbSink> for SinkCatalog {
         let sink_type = pb.get_sink_type().unwrap();
         let format_desc = match pb.format_desc {
             Some(f) => f.try_into().ok(),
-            None => pb
-                .properties
-                .get(SINK_TYPE_OPTION)
-                .and_then(|t| SinkFormatDesc::from_legacy_type(t)),
+            None => {
+                let connector = pb.properties.get(CONNECTOR_TYPE_KEY);
+                let r#type = pb.properties.get(SINK_TYPE_OPTION);
+                match (connector, r#type) {
+                    (Some(c), Some(t)) => SinkFormatDesc::from_legacy_type(c, t).ok().flatten(),
+                    _ => None,
+                }
+            }
         };
         SinkCatalog {
             id: pb.id.into(),

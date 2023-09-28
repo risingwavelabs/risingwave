@@ -19,7 +19,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
-use risingwave_connector::sink::SINK_TYPE_OPTION;
+use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, EmitMode, ObjectName, Query, Select, SelectItem, SetExpr,
@@ -116,15 +116,17 @@ pub fn gen_sink_plan(
         context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
     }
 
+    let connector = with_options
+        .get(CONNECTOR_TYPE_KEY)
+        .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
     let format_desc = match stmt.sink_schema {
         // Case A: new syntax `format ... encode ...`
         Some(f) => Some(bind_sink_format_desc(f)?),
         None => match with_options.get(SINK_TYPE_OPTION) {
             // Case B: old syntax `type = '...'`
-            Some(t) => Some(
-                SinkFormatDesc::from_legacy_type(t)
-                    .ok_or_else(|| ErrorCode::BindError(format!("sink type unsupported: {t}")))?,
-            ),
+            Some(t) => SinkFormatDesc::from_legacy_type(connector, t)?.inspect(|_| {
+                session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.")
+            }),
             // Case C: no format + encode required
             None => None,
         },
@@ -244,11 +246,16 @@ fn bind_sink_format_desc(value: SinkSchema) -> Result<SinkFormatDesc> {
 }
 
 /// For `planner_test` crate so that it does not depend directly on `connector` crate just for `SinkFormatDesc`.
-impl From<&WithOptions> for Option<SinkFormatDesc> {
-    fn from(value: &WithOptions) -> Self {
-        value
-            .get(SINK_TYPE_OPTION)
-            .and_then(|t| SinkFormatDesc::from_legacy_type(t))
+impl TryFrom<&WithOptions> for Option<SinkFormatDesc> {
+    type Error = risingwave_connector::sink::SinkError;
+
+    fn try_from(value: &WithOptions) -> std::result::Result<Self, Self::Error> {
+        let connector = value.get(CONNECTOR_TYPE_KEY);
+        let r#type = value.get(SINK_TYPE_OPTION);
+        match (connector, r#type) {
+            (Some(c), Some(t)) => SinkFormatDesc::from_legacy_type(c, t),
+            _ => Ok(None),
+        }
     }
 }
 
