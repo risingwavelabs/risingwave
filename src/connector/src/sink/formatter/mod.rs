@@ -56,7 +56,6 @@ macro_rules! tri {
     };
 }
 
-#[expect(clippy::enum_variant_names)]
 pub enum SinkFormatterImpl {
     AppendOnlyJson(AppendOnlyFormatter<JsonEncoder, JsonEncoder>),
     UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),

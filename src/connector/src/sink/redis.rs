@@ -67,16 +67,18 @@ pub struct RedisSink {
     pk_indices: Vec<usize>,
 }
 
-fn check_string_format(format: &str, set: &HashSet<String>) -> Result<()> {
-    let re = Regex::new(r"\{([^}]*)\}").unwrap();
-    if !re.is_match(format) {
-        return Err(SinkError::Redis(
-            "Can't find {} in key_format or value_format".to_string(),
-        ));
-    }
-    for capture in re.captures_iter(format) {
-        if let Some(inner_content) = capture.get(1) && !set.contains(inner_content.as_str()){
-            return Err(SinkError::Redis(format!("Can't find field({:?}) in key_format or value_format",inner_content.as_str())))
+fn check_string_format(format: &Option<String>, set: &HashSet<String>) -> Result<()> {
+    if let Some(format) = format {
+        let re = Regex::new(r"\{([^}]*)\}").unwrap();
+        if !re.is_match(format) {
+            return Err(SinkError::Redis(
+                "Can't find {} in key_format or value_format".to_string(),
+            ));
+        }
+        for capture in re.captures_iter(format) {
+            if let Some(inner_content) = capture.get(1) && !set.contains(inner_content.as_str()){
+                return Err(SinkError::Redis(format!("Can't find field({:?}) in key_format or value_format",inner_content.as_str())))
+            }
         }
     }
     Ok(())
@@ -135,22 +137,8 @@ impl Sink for RedisSink {
             .filter(|(k, _)| self.pk_indices.contains(k))
             .map(|(_, v)| v.name.clone())
             .collect();
-        match (
-            &self.config.common.key_format,
-            &self.config.common.value_format,
-        ) {
-            (Some(key_format), Some(value_format)) => {
-                check_string_format(key_format, &pk_set)?;
-                check_string_format(value_format, &all_set)?;
-            }
-            (Some(key_format), None) => {
-                check_string_format(key_format, &pk_set)?;
-            }
-            (None, Some(value_format)) => {
-                check_string_format(value_format, &all_set)?;
-            }
-            (None, None) => {}
-        };
+        check_string_format(&self.config.common.key_format, &pk_set)?;
+        check_string_format(&self.config.common.value_format, &all_set)?;
         Ok(())
     }
 }
