@@ -106,7 +106,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .streaming_metrics
             .connector_sink_rows_received
             .with_label_values(&[
-                sink_param.properties.get("connector").unwrap().as_str(),
+                connector,
                 &sink_param.sink_id.sink_id.to_string(),
             ]);
 
