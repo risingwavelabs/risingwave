@@ -148,7 +148,6 @@ impl GlobalBarrierManager {
             .await
             .expect("clean dirty fragments");
 
-
         self.sink_manager.reset().await;
         let retry_strategy = Self::get_retry_strategy();
 

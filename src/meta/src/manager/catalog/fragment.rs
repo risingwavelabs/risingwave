@@ -593,10 +593,7 @@ impl FragmentManager {
             commit_meta_with_trx!(self, trx, table_fragments)?;
             guard.table_revision = next_revision;
         }
-        let to_delete_ids = to_delete_table_fragments
-            .iter()
-            .map(|f| f.table_id())
-            .collect_vec();
+
         // println!("to_delete_table_fragment_ids: {:#?}", to_delete_ids);
         // println!("to_delete_table_fragments: {:#?}", to_delete_table_fragments);
 
