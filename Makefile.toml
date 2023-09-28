@@ -1033,6 +1033,26 @@ cargo llvm-cov run \
   --html "$@"
 """
 
+[tasks.recovery-test]
+category = "RiseDev - Deterministic Simulation"
+description = "Run integration tests in deterministic simulation mode"
+dependencies = ["install-nextest"]
+env = { CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/usr/bin/env bash
+set -e
+MADSIM_TEST_SEED=3 \
+RUST_LOG="info,risingwave_meta::barrier::recovery=debug" \
+cargo run \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
+  -p risingwave_simulation \
+  -- \
+  --kill \
+  --kill-rate=0.5 \
+  ./e2e_test/ddl/\\*\\*/\\*.slt \
+  "$@"
+"""
+
 [tasks.check-java]
 private = true
 category = "RiseDev - Check"

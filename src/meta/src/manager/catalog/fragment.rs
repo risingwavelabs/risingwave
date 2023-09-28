@@ -541,6 +541,7 @@ impl FragmentManager {
     /// Drop table fragments info and remove downstream actor infos in fragments from its dependent
     /// tables.
     pub async fn drop_table_fragments_vec(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
+        println!("to_delete table ids: {:#?}", table_ids);
         let mut guard = self.core.write().await;
         let current_revision = guard.table_revision;
 
@@ -596,7 +597,8 @@ impl FragmentManager {
             .iter()
             .map(|f| f.table_id())
             .collect_vec();
-        println!("to_delete_table_fragments: {:#?}", to_delete_ids);
+        println!("to_delete_table_fragment_ids: {:#?}", to_delete_ids);
+        println!("to_delete_table_fragments: {:#?}", to_delete_table_fragments);
 
         for table_fragments in to_delete_table_fragments {
             if table_fragments.state() != State::Initial {
