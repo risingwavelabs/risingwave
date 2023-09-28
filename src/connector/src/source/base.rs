@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use aws_sdk_s3::types::Object;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
@@ -40,7 +41,7 @@ use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
-use crate::source::filesystem::S3_V2_CONNECTOR;
+use crate::source::filesystem::{FsPageItem, S3_V2_CONNECTOR};
 use crate::source::monitor::EnumeratorMetrics;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
@@ -510,12 +511,17 @@ pub trait SplitMetaData: Sized {
 pub type ConnectorState = Option<Vec<SplitImpl>>;
 
 #[async_trait]
-pub trait SourceLister: Sized {
-    type Split: SplitMetaData + Send;
-    type Properties;
+pub trait FsListInner: Sized {
+    // fixme: better to implement as an Iterator, but the last page still have some contents
+    async fn get_next_page<T: for<'a> From<&'a Object>>(&mut self) -> Result<(Vec<T>, bool)>;
+}
 
-    async fn new(properties: Self::Properties) -> Result<Self>;
+pub struct FsFilterCtrlCtx;
+
+#[async_trait]
+pub trait FsSourceList: Sized + FsListInner {
     fn paginate(self) -> BoxTryStream<FsPage>;
+    fn ctrl_policy(ctx: &FsFilterCtrlCtx, page_num: usize, item: &FsPageItem) -> bool;
 }
 
 #[cfg(test)]

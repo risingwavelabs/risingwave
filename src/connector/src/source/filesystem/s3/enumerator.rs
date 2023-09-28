@@ -16,16 +16,17 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use aws_sdk_s3::client::Client;
 use aws_sdk_s3::error::DisplayErrorContext;
+use aws_sdk_s3::types::Object;
 use itertools::Itertools;
 
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::{default_conn_config, s3_client};
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
+use crate::source::{FsListInner, SourceEnumeratorContextRef, SplitEnumerator};
 
 /// Get the prefix from a glob
-fn get_prefix(glob: &str) -> String {
+pub fn get_prefix(glob: &str) -> String {
     let mut escaped = false;
     let mut escaped_filter = false;
     glob.chars()
@@ -64,6 +65,9 @@ pub struct S3SplitEnumerator {
     prefix: Option<String>,
     matcher: Option<glob::Pattern>,
     client: Client,
+
+    // token get the next page, used when the current page is truncated
+    pub(crate) next_continuation_token: Option<String>,
 }
 
 #[async_trait]
@@ -92,34 +96,49 @@ impl SplitEnumerator for S3SplitEnumerator {
             matcher,
             prefix,
             client: s3_client,
+            next_continuation_token: None,
         })
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
         let mut objects = Vec::new();
-        let mut next_continuation_token = None;
         loop {
-            let mut req = self
-                .client
-                .list_objects_v2()
-                .bucket(&self.bucket_name)
-                .set_prefix(self.prefix.clone());
-            if let Some(continuation_token) = next_continuation_token.take() {
-                req = req.continuation_token(continuation_token);
-            }
-            let mut res = req
-                .send()
-                .await
-                .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
-            objects.extend(res.contents.take().unwrap_or_default());
-            if res.is_truncated() {
-                next_continuation_token = Some(res.next_continuation_token.unwrap())
-            } else {
+            let (files, has_finished) = self.get_next_page::<FsSplit>().await?;
+            objects.extend(files);
+            if has_finished {
                 break;
             }
         }
+        self.next_continuation_token = None;
+        Ok(objects)
+    }
+}
 
-        let matched_objs = objects
+#[async_trait]
+impl FsListInner for S3SplitEnumerator {
+    async fn get_next_page<T: for<'a> From<&'a Object>>(
+        &mut self,
+    ) -> anyhow::Result<(Vec<T>, bool)> {
+        let mut has_finished = false;
+        let mut req = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket_name)
+            .set_prefix(self.prefix.clone());
+        if let Some(continuation_token) = self.next_continuation_token.take() {
+            req = req.continuation_token(continuation_token);
+        }
+        let mut res = req
+            .send()
+            .await
+            .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
+        if res.is_truncated() {
+            self.next_continuation_token = res.next_continuation_token.clone();
+        } else {
+            has_finished = true;
+        }
+        let objects = res.contents.take().unwrap_or_default();
+        let matched_objs: Vec<T> = objects
             .iter()
             .filter(|obj| obj.key().is_some())
             .filter(|obj| {
@@ -128,12 +147,9 @@ impl SplitEnumerator for S3SplitEnumerator {
                     .map(|m| m.matches(obj.key().unwrap()))
                     .unwrap_or(true)
             })
+            .map(T::from)
             .collect_vec();
-
-        Ok(matched_objs
-            .into_iter()
-            .map(|obj| FsSplit::new(obj.key().unwrap().to_owned(), 0, obj.size() as usize))
-            .collect_vec())
+        Ok((matched_objs, has_finished))
     }
 }
 

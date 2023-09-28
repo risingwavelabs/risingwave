@@ -27,6 +27,7 @@ use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
+
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::stream_reader::StreamReaderWithPause;
@@ -98,22 +99,24 @@ impl<S: StateStore> FsListExecutor<S> {
             .await
             .map_err(StreamExecutorError::connector_error)?;
 
-        Ok(stream.map(|item| {
-            item.map(Self::map_fs_page_to_chunk)
-        }).boxed())
+        Ok(stream
+            .map(|item| item.map(Self::map_fs_page_to_chunk))
+            .boxed())
     }
 
     fn map_fs_page_to_chunk(page: FsPage) -> StreamChunk {
         let rows = page
             .into_iter()
-            .map(|split| {(
-                Op::Insert,
-                OwnedRow::new(vec![
-                    Some(ScalarImpl::Utf8(split.name.into_boxed_str())),
-                    Some(ScalarImpl::Timestamp(split.timestamp)),
-                    Some(ScalarImpl::Int64(split.size as i64)),
-                ]),
-            )})
+            .map(|split| {
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8(split.name.into_boxed_str())),
+                        Some(ScalarImpl::Timestamp(split.timestamp)),
+                        Some(ScalarImpl::Int64(split.size as i64)),
+                    ]),
+                )
+            })
             .collect::<Vec<_>>();
         StreamChunk::from_rows(
             &rows,
@@ -150,10 +153,8 @@ impl<S: StateStore> FsListExecutor<S> {
         let chunked_paginate_stream = self.build_chunked_paginate_stream(&source_desc).await?;
 
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
-        let mut stream = StreamReaderWithPause::<true, _>::new(
-            barrier_stream,
-            chunked_paginate_stream
-        );
+        let mut stream =
+            StreamReaderWithPause::<true, _>::new(barrier_stream, chunked_paginate_stream);
 
         if barrier.is_pause_on_startup() {
             stream.pause_stream();
@@ -175,7 +176,7 @@ impl<S: StateStore> FsListExecutor<S> {
                                     _ => (),
                                 }
                             }
-                            
+
                             // Propagate the barrier.
                             yield msg;
                         }
@@ -304,16 +305,16 @@ mod tests {
         // Consume the second barrier.
         let barrier = Barrier::new_test_barrier(2);
         barrier_tx.send(barrier).unwrap();
-        let msg = executor.next().await.unwrap().unwrap();  // page chunk
-        executor.next().await.unwrap().unwrap();                     // barrier
+        let msg = executor.next().await.unwrap().unwrap(); // page chunk
+        executor.next().await.unwrap().unwrap(); // barrier
 
         println!("barrier 2: {:#?}", msg);
 
         // Consume the third barrier.
         let barrier = Barrier::new_test_barrier(3);
         barrier_tx.send(barrier).unwrap();
-        let msg = executor.next().await.unwrap().unwrap();  // page chunk
-        executor.next().await.unwrap().unwrap();                     // barrier
+        let msg = executor.next().await.unwrap().unwrap(); // page chunk
+        executor.next().await.unwrap().unwrap(); // barrier
 
         println!("barrier 3: {:#?}", msg);
     }

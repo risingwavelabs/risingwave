@@ -29,7 +29,7 @@ use risingwave_connector::source::filesystem::s3_v2::lister::S3SourceLister;
 use risingwave_connector::source::filesystem::FsPage;
 use risingwave_connector::source::{
     create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
-    ConnectorState, SourceColumnDesc, SourceContext, SourceLister, SplitReader,
+    ConnectorState, FsSourceList, SourceColumnDesc, SourceContext, SplitReader,
 };
 
 #[derive(Clone, Debug)]

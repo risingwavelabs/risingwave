@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use anyhow::anyhow;
+use aws_sdk_s3::types::Object;
 use risingwave_common::types::{JsonbVal, Timestamp};
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +25,16 @@ pub struct FsSplit {
     pub name: String,
     pub offset: usize,
     pub size: usize,
+}
+
+impl From<&Object> for FsSplit {
+    fn from(value: &Object) -> Self {
+        Self {
+            name: value.key().unwrap().to_owned(),
+            offset: 0,
+            size: value.size() as usize,
+        }
+    }
 }
 
 impl SplitMetaData for FsSplit {
@@ -58,7 +69,7 @@ impl FsSplit {
 
 pub struct FsPageItem {
     pub name: String,
-    pub size: usize,
+    pub size: i64,
     pub timestamp: Timestamp,
 }
 
@@ -73,3 +84,14 @@ impl FsPageItem {
 }
 
 pub type FsPage = Vec<FsPageItem>;
+
+impl From<&Object> for FsPageItem {
+    fn from(value: &Object) -> Self {
+        let aws_ts = value.last_modified().unwrap();
+        Self {
+            name: value.key().unwrap().to_owned(),
+            size: value.size(),
+            timestamp: Timestamp::from_timestamp_uncheck(aws_ts.secs(), aws_ts.subsec_nanos()),
+        }
+    }
+}
