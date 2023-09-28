@@ -552,11 +552,11 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
             StreamState::AllConsumingRow { curr_epoch }
             | StreamState::BarrierAligning { curr_epoch, .. } => {
                 return if *curr_epoch != epoch {
-                    Err(LogStoreError::Internal(anyhow!(
+                    Err(anyhow!(
                         "epoch {} does not match with current epoch {}",
                         epoch,
                         curr_epoch
-                    )))
+                    ))
                 } else {
                     Ok(())
                 };
@@ -564,11 +564,11 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
         };
 
         if prev_epoch >= epoch {
-            return Err(LogStoreError::Internal(anyhow!(
+            return Err(anyhow!(
                 "epoch {} should be greater than prev epoch {}",
                 epoch,
                 prev_epoch
-            )));
+            ));
         }
 
         while let Some((stream_epoch, _)) = self.not_started_streams.last() {
@@ -582,8 +582,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
                     "current epoch {} has exceed epoch {} of stream not started",
                     epoch,
                     stream_epoch
-                )
-                .into());
+                ));
             }
             let (_, stream) = self.not_started_streams.pop().expect("should not be empty");
             self.row_streams.push(stream.into_future());
@@ -650,8 +649,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
         if !self.not_started_streams.is_empty() {
             return Err(anyhow!(
                 "a stream has reached the end but some other stream has not started yet"
-            )
-            .into());
+            ));
         }
         if cfg!(debug_assertion) {
             while let Some((opt, _stream)) = self.row_streams.next().await {
