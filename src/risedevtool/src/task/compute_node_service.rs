@@ -56,8 +56,6 @@ impl ComputeNodeService {
             ))
             .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
-            .arg("--metrics-level")
-            .arg("info")
             .arg("--async-stack-trace")
             .arg(&config.async_stack_trace)
             .arg("--connector-rpc-endpoint")
@@ -92,8 +90,6 @@ impl Task for ComputeNodeService {
             "TOKIO_CONSOLE_BIND",
             format!("127.0.0.1:{}", self.config.port + 1000),
         );
-        // FIXME: Otherwise, CI will throw log size too large error
-        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
                 "RW_PROFILE_PATH",

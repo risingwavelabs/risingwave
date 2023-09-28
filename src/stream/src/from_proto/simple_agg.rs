@@ -14,7 +14,7 @@
 
 //! Streaming Simple Aggregator
 
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
 use risingwave_pb::stream_plan::SimpleAggNode;
 
 use super::agg_common::{
@@ -46,9 +46,13 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         let storages =
             build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)
                 .await;
-        let result_table =
-            StateTable::from_table_catalog(node.get_result_table().unwrap(), store.clone(), None)
-                .await;
+        // disable sanity check so that old value is not required when updating states
+        let intermediate_state_table = StateTable::from_table_catalog_inconsistent_op(
+            node.get_intermediate_state_table().unwrap(),
+            store.clone(),
+            None,
+        )
+        .await;
         let distinct_dedup_tables =
             build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, None)
                 .await;
@@ -64,7 +68,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             agg_calls,
             row_count_index: node.get_row_count_index() as usize,
             storages,
-            result_table,
+            intermediate_state_table,
             distinct_dedup_tables,
             watermark_epoch: stream.get_watermark_epoch(),
             metrics: params.executor_stats,

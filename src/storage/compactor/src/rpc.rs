@@ -17,21 +17,54 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use risingwave_pb::compactor::compactor_service_server::CompactorService;
-use risingwave_pb::compactor::{EchoRequest, EchoResponse};
+use risingwave_pb::compactor::{
+    DispatchCompactionTaskRequest, DispatchCompactionTaskResponse, EchoRequest, EchoResponse,
+};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    HeapProfilingRequest, HeapProfilingResponse, ProfilingRequest, ProfilingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
+    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
+use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
 #[derive(Default)]
-pub struct CompactorServiceImpl {}
-
+pub struct CompactorServiceImpl {
+    sender: Option<mpsc::UnboundedSender<Request<DispatchCompactionTaskRequest>>>,
+}
+impl CompactorServiceImpl {
+    pub fn new(sender: mpsc::UnboundedSender<Request<DispatchCompactionTaskRequest>>) -> Self {
+        Self {
+            sender: Some(sender),
+        }
+    }
+}
 #[async_trait::async_trait]
 impl CompactorService for CompactorServiceImpl {
     async fn echo(&self, _request: Request<EchoRequest>) -> Result<Response<EchoResponse>, Status> {
         Ok(Response::new(EchoResponse {}))
+    }
+
+    async fn dispatch_compaction_task(
+        &self,
+        request: Request<DispatchCompactionTaskRequest>,
+    ) -> Result<Response<DispatchCompactionTaskResponse>, Status> {
+        match &self.sender.as_ref() {
+            Some(sender) => {
+                sender
+                    .send(request)
+                    .expect("DispatchCompactionTaskRequest should be able to send");
+            }
+            None => {
+                tracing::error!(
+                    "fail to send DispatchCompactionTaskRequest, sender has not been initialized."
+                );
+            }
+        }
+        Ok(Response::new(DispatchCompactionTaskResponse {
+            status: None,
+        }))
     }
 }
 
@@ -79,6 +112,24 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<HeapProfilingRequest>,
     ) -> Result<Response<HeapProfilingResponse>, Status> {
+        Err(Status::unimplemented(
+            "Heap profiling unimplemented in compactor",
+        ))
+    }
+
+    async fn list_heap_profiling(
+        &self,
+        _request: Request<ListHeapProfilingRequest>,
+    ) -> Result<Response<ListHeapProfilingResponse>, Status> {
+        Err(Status::unimplemented(
+            "Heap profiling unimplemented in compactor",
+        ))
+    }
+
+    async fn analyze_heap(
+        &self,
+        _request: Request<AnalyzeHeapRequest>,
+    ) -> Result<Response<AnalyzeHeapResponse>, Status> {
         Err(Status::unimplemented(
             "Heap profiling unimplemented in compactor",
         ))

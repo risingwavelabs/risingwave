@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::agg::{AggregateFunction, AggregateState, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{AggregateFunction, AggregateState, BoxedAggregateFunction};
 use risingwave_expr::expr::Expression;
 use risingwave_expr::Result;
 
@@ -62,7 +62,7 @@ impl AggregateFunction for Filter {
             .as_bool()
             .to_bitmap();
         let mut input1 = input.clone();
-        input1.set_vis(input.vis() & &bitmap);
+        input1.set_visibility(input.visibility() & &bitmap);
         self.inner.update_range(state, &input1, range).await
     }
 
@@ -74,7 +74,7 @@ impl AggregateFunction for Filter {
 #[cfg(test)]
 mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_expr::agg::{build, AggCall};
+    use risingwave_expr::aggregate::{build_append_only, AggCall};
     use risingwave_expr::expr::{build_from_pretty, Expression, LiteralExpression};
 
     use super::*;
@@ -84,7 +84,7 @@ mod tests {
         let condition = LiteralExpression::new(DataType::Boolean, Some(true.into())).boxed();
         let agg = Filter::new(
             condition.into(),
-            build(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
+            build_append_only(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
         );
         let mut state = agg.create_state();
 
@@ -113,7 +113,7 @@ mod tests {
         let expr = build_from_pretty("(greater_than:boolean $0:int8 5:int8)");
         let agg = Filter::new(
             expr.into(),
-            build(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
+            build_append_only(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
         );
         let mut state = agg.create_state();
 
@@ -145,7 +145,7 @@ mod tests {
         let expr = build_from_pretty("(equal:boolean $0:int8 null:int8)");
         let agg = Filter::new(
             expr.into(),
-            build(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
+            build_append_only(&AggCall::from_pretty("(count:int8 $0:int8)")).unwrap(),
         );
         let mut state = agg.create_state();
 

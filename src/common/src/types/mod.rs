@@ -37,6 +37,7 @@ use crate::array::{
     ArrayBuilderImpl, ArrayError, ArrayResult, PrimitiveArrayItemType, NULL_VAL_FOR_HASH,
 };
 pub use crate::array::{ListRef, ListValue, StructRef, StructValue};
+use crate::cast::{str_to_bool, str_to_bytea};
 use crate::error::{BoxedError, ErrorCode, Result as RwResult};
 use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
@@ -422,13 +423,13 @@ impl DataType {
     ///
     /// ```
     /// use risingwave_common::types::DataType::*;
-    /// assert_eq!(List(Box::new(Int32)).unnest_list(), Int32);
-    /// assert_eq!(List(Box::new(List(Box::new(Int32)))).unnest_list(), Int32);
+    /// assert_eq!(List(Box::new(Int32)).unnest_list(), &Int32);
+    /// assert_eq!(List(Box::new(List(Box::new(Int32)))).unnest_list(), &Int32);
     /// ```
-    pub fn unnest_list(&self) -> Self {
+    pub fn unnest_list(&self) -> &Self {
         match self {
             DataType::List(inner) => inner.unnest_list(),
-            _ => self.clone(),
+            _ => self,
         }
     }
 
@@ -442,6 +443,14 @@ impl DataType {
             t = inner;
         }
         d
+    }
+
+    /// Compares the datatype with another, ignoring nested field names and metadata.
+    pub fn equals_datatype(&self, other: &DataType) -> bool {
+        match (self, other) {
+            (Self::Struct(s1), Self::Struct(s2)) => s1.equals_datatype(s2),
+            _ => self == other,
+        }
     }
 }
 
@@ -730,6 +739,18 @@ impl TryFrom<ScalarImpl> for String {
     }
 }
 
+impl From<&[u8]> for ScalarImpl {
+    fn from(s: &[u8]) -> Self {
+        Self::Bytea(s.into())
+    }
+}
+
+impl From<JsonbRef<'_>> for ScalarImpl {
+    fn from(jsonb: JsonbRef<'_>) -> Self {
+        Self::Jsonb(jsonb.to_owned_scalar())
+    }
+}
+
 impl ScalarImpl {
     pub fn from_binary(bytes: &Bytes, data_type: &DataType) -> RwResult<Self> {
         let res = match data_type {
@@ -934,9 +955,40 @@ impl ScalarImpl {
         };
         Ok(res)
     }
-}
 
-impl ScalarImpl {
+    /// A lite version of casting from string to target type. Used by frontend to handle types that have
+    /// to be created by casting.
+    ///
+    /// For example, the user can input `1` or `true` directly, but they have to use
+    /// `'2022-01-01'::date`.
+    pub fn from_literal(s: &str, t: &DataType) -> std::result::Result<Self, String> {
+        Ok(match t {
+            DataType::Boolean => str_to_bool(s)?.into(),
+            DataType::Int16 => i16::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Int32 => i32::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Int64 => i64::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Int256 => Int256::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Serial => return Err("not supported".into()),
+            DataType::Decimal => Decimal::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Float32 => F32::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Float64 => F64::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Varchar => s.into(),
+            DataType::Date => Date::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Timestamp => Timestamp::from_str(s).map_err(|e| e.to_string())?.into(),
+            // We only handle the case with timezone here, and leave the implicit session timezone case
+            // for later phase.
+            DataType::Timestamptz => Timestamptz::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Time => Time::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Interval => Interval::from_str(s).map_err(|e| e.to_string())?.into(),
+            // Not processing list or struct literal right now. Leave it for later phase (normal backend
+            // evaluation).
+            DataType::List { .. } => return Err("not supported".into()),
+            DataType::Struct(_) => return Err("not supported".into()),
+            DataType::Jsonb => return Err("not supported".into()),
+            DataType::Bytea => str_to_bytea(s)?.into(),
+        })
+    }
+
     /// Converts [`ScalarImpl`] to [`ScalarRefImpl`]
     pub fn as_scalar_ref_impl(&self) -> ScalarRefImpl<'_> {
         dispatch_scalar_variants!(self, inner, { inner.as_scalar_ref().into() })

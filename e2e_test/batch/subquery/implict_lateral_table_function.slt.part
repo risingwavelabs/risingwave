@@ -1,0 +1,24 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(x int , arr int[]);
+
+statement ok
+insert into t values (1, Array[11,111,1111]), (2, Array[22,222,2222]);
+
+
+query IAI rowsort
+select * from t cross join unnest(arr);
+----
+1 {11,111,1111} 11
+1 {11,111,1111} 111
+1 {11,111,1111} 1111
+2 {22,222,2222} 22
+2 {22,222,2222} 222
+2 {22,222,2222} 2222
+
+statement ok
+drop table t;
+
+

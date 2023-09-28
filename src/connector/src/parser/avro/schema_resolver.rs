@@ -62,7 +62,8 @@ impl ConfluentSchemaResolver {
 
     // get the writer schema by id
     pub async fn get(&self, schema_id: i32) -> Result<Arc<Schema>> {
-        if let Some(schema) = self.writer_schemas.get(&schema_id) {
+        // TODO: use `get_with`
+        if let Some(schema) = self.writer_schemas.get(&schema_id).await {
             Ok(schema)
         } else {
             let raw_schema = self.confluent_client.get_schema_by_id(schema_id).await?;

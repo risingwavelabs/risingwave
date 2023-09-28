@@ -125,11 +125,10 @@ impl ToBatch for LogicalUnion {
         // Convert union to union all + agg
         if !self.all() {
             let batch_union = BatchUnion::new(new_logical).into();
-            Ok(BatchHashAgg::new(generic::Agg::new(
-                vec![],
-                (0..self.base.schema.len()).collect(),
-                batch_union,
-            ))
+            Ok(BatchHashAgg::new(
+                generic::Agg::new(vec![], (0..self.base.schema.len()).collect(), batch_union)
+                    .with_enable_two_phase(false),
+            )
             .into())
         } else {
             Ok(BatchUnion::new(new_logical).into())
@@ -140,7 +139,7 @@ impl ToBatch for LogicalUnion {
 impl ToStream for LogicalUnion {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         // TODO: use round robin distribution instead of using hash distribution of all inputs.
-        let dist = RequiredDist::hash_shard(self.base.logical_pk());
+        let dist = RequiredDist::hash_shard(self.base.stream_key());
         let new_inputs: Result<Vec<_>> = self
             .inputs()
             .iter()
@@ -175,7 +174,7 @@ impl ToStream for LogicalUnion {
                     .map(|x| col_index_mapping.map(x))
                     .collect_vec();
                 new_input
-                    .logical_pk()
+                    .stream_key()
                     .iter()
                     .all(|x| original_schema_new_pos.contains(x))
             });
@@ -224,7 +223,7 @@ impl ToStream for LogicalUnion {
                 .iter()
                 .flat_map(|(new_input, _)| {
                     new_input
-                        .logical_pk()
+                        .stream_key()
                         .iter()
                         .map(|x| new_input.schema().fields[*x].data_type())
                 })
@@ -235,7 +234,7 @@ impl ToStream for LogicalUnion {
                 .collect_vec();
             let input_pk_lens = rewrites
                 .iter()
-                .map(|(new_input, _)| new_input.logical_pk().len())
+                .map(|(new_input, _)| new_input.stream_key().len())
                 .collect_vec();
             let mut input_pk_offsets = vec![0];
             for (i, len) in input_pk_lens.into_iter().enumerate() {
@@ -259,7 +258,7 @@ impl ToStream for LogicalUnion {
                         .collect_vec();
                     // input1_pk + input2_pk + ...
                     let mut input_pks = input_pk_nulls.clone();
-                    for (j, pk_idx) in new_input.logical_pk().iter().enumerate() {
+                    for (j, pk_idx) in new_input.stream_key().iter().enumerate() {
                         input_pks[input_pk_offsets[i] + j] = ExprImpl::InputRef(
                             InputRef::new(
                                 *pk_idx,

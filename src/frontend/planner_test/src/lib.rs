@@ -17,6 +17,8 @@
 
 //! Data-driven tests.
 
+risingwave_expr_impl::enable!();
+
 mod resolve_id;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -418,7 +420,8 @@ impl TestCase {
                 } => {
                     // TODO(st1page): refacor it
                     let notice = Default::default();
-                    let source_schema = source_schema.map(|schema| schema.into_source_schema_v2());
+                    let source_schema =
+                        source_schema.map(|schema| schema.into_source_schema_v2().0);
 
                     create_table::handle_create_table(
                         handler_args,

@@ -16,7 +16,7 @@ use std::fmt::{Debug, Formatter};
 use std::num::NonZeroU32;
 
 use governor::clock::MonotonicClock;
-use governor::{Quota, RateLimiter};
+use governor::{InsufficientCapacity, Quota, RateLimiter};
 use risingwave_common::catalog::Schema;
 
 use super::*;
@@ -58,10 +58,12 @@ impl FlowControlExecutor {
                         let result = rate_limiter
                             .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
                             .await;
-                        assert!(
-                            result.is_ok(),
-                            "the capacity of rate_limiter must be larger than the cardinality of chunk"
-                        );
+                        if let Err(InsufficientCapacity(n)) = result {
+                            tracing::error!(
+                                "Rate Limit {} smaller than chunk cardinality {n}",
+                                self.rate_limit,
+                            );
+                        }
                     }
                     yield Message::Chunk(chunk);
                 }

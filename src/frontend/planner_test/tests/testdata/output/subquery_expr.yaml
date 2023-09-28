@@ -234,3 +234,41 @@
       ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
       └─LogicalProject { exprs: [t2.y] }
         └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+- sql: |
+    create table t1 (a int);
+    create table t2 (b int);
+    SELECT *
+    FROM t1
+    WHERE EXISTS
+    (SELECT 1
+    FROM t2
+    GROUP BY a
+    ORDER BY a DESC LIMIT 90);
+  logical_plan: |-
+    LogicalProject { exprs: [t1.a] }
+    └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1._row_id] }
+      └─LogicalProject { exprs: [1:Int32] }
+        └─LogicalTopN { order: [$expr2 DESC], limit: 90, offset: 0 }
+          └─LogicalProject { exprs: [1:Int32, CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr2] }
+            └─LogicalAgg { group_key: [$expr1], aggs: [] }
+              └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
+                └─LogicalScan { table: t2, columns: [t2.b, t2._row_id] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: LeftSemi, predicate: t1.a IS NOT DISTINCT FROM t1.a, output: all }
+      ├─BatchExchange { order: [], dist: HashShard(t1.a) }
+      │ └─BatchScan { table: t1, columns: [t1.a], distribution: SomeShard }
+      └─BatchProject { exprs: [t1.a] }
+        └─BatchGroupTopN { order: [t1.a DESC], limit: 90, offset: 0, group_key: [t1.a] }
+          └─BatchExchange { order: [], dist: HashShard(t1.a) }
+            └─BatchProject { exprs: [t1.a, t1.a] }
+              └─BatchHashAgg { group_key: [t1.a], aggs: [] }
+                └─BatchExchange { order: [], dist: HashShard(t1.a) }
+                  └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+                    ├─BatchExchange { order: [], dist: Single }
+                    │ └─BatchHashAgg { group_key: [t1.a], aggs: [] }
+                    │   └─BatchExchange { order: [], dist: HashShard(t1.a) }
+                    │     └─BatchScan { table: t1, columns: [t1.a], distribution: SomeShard }
+                    └─BatchExchange { order: [], dist: Single }
+                      └─BatchScan { table: t2, columns: [], distribution: SomeShard }

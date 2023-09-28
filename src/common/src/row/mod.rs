@@ -337,8 +337,8 @@ impl<R: Row> Row for Option<R> {
 
     fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
         match self {
-            Some(row) => itertools::Either::Left(row.iter()),
-            None => itertools::Either::Right(EMPTY.iter()),
+            Some(row) => either::Either::Left(row.iter()),
+            None => either::Either::Right(EMPTY.iter()),
         }
     }
 
@@ -366,6 +366,65 @@ impl<R: Row> Row for Option<R> {
         if let Some(row) = self {
             row.memcmp_serialize_into(serde, buf);
         }
+    }
+}
+
+/// Implements [`Row`] for an [`either::Either`] of two different types of rows.
+impl<R1: Row, R2: Row> Row for either::Either<R1, R2> {
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        either::for_both!(self, row => row.datum_at(index))
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        either::for_both!(self, row => row.datum_at_unchecked(index))
+    }
+
+    fn len(&self) -> usize {
+        either::for_both!(self, row => row.len())
+    }
+
+    fn is_empty(&self) -> bool {
+        either::for_both!(self, row => row.is_empty())
+    }
+
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
+        self.as_ref().map_either(Row::iter, Row::iter)
+    }
+
+    fn to_owned_row(&self) -> OwnedRow {
+        either::for_both!(self, row => row.to_owned_row())
+    }
+
+    fn into_owned_row(self) -> OwnedRow {
+        either::for_both!(self, row => row.into_owned_row())
+    }
+
+    fn value_serialize_into(&self, buf: impl BufMut) {
+        either::for_both!(self, row => row.value_serialize_into(buf))
+    }
+
+    fn value_serialize(&self) -> Vec<u8> {
+        either::for_both!(self, row => row.value_serialize())
+    }
+
+    fn value_serialize_bytes(&self) -> Bytes {
+        either::for_both!(self, row => row.value_serialize_bytes())
+    }
+
+    fn memcmp_serialize_into(&self, serde: &OrderedRowSerde, buf: impl BufMut) {
+        either::for_both!(self, row => row.memcmp_serialize_into(serde, buf))
+    }
+
+    fn memcmp_serialize(&self, serde: &OrderedRowSerde) -> Vec<u8> {
+        either::for_both!(self, row => row.memcmp_serialize(serde))
+    }
+
+    fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode<H> {
+        either::for_both!(self, row => row.hash(hash_builder))
+    }
+
+    fn eq(this: &Self, other: impl Row) -> bool {
+        either::for_both!(this, row => Row::eq(row, other))
     }
 }
 

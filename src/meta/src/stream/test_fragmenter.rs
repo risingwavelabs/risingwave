@@ -271,7 +271,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
-            result_table: Some(make_empty_table(1)),
+            intermediate_state_table: Some(make_empty_table(1)),
             ..Default::default()
         })),
         input: vec![filter_node],
@@ -314,7 +314,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
-            result_table: Some(make_empty_table(2)),
+            intermediate_state_table: Some(make_empty_table(2)),
             ..Default::default()
         })),
         fields: vec![], // TODO: fill this later

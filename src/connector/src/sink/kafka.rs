@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::anyhow;
-use futures_async_stream::for_await;
+use futures::future::try_join_all;
+use futures::{Future, FutureExt};
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
@@ -26,27 +27,25 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_rpc_client::ConnectorClient;
 use serde_derive::{Deserialize, Serialize};
-use serde_json::Value;
 use serde_with::{serde_as, DisplayFromStr};
+use strum_macros::{Display, EnumString};
 
 use super::{
     Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
-use crate::sink::utils::{
-    gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
-    AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
+use crate::sink::formatter::SinkFormatterImpl;
+use crate::sink::writer::{
+    FormattedSink, LogSinkerOf, SinkWriterExt, SinkWriterV1, SinkWriterV1Adapter,
 };
-use crate::sink::{
-    DummySinkCommitCoordinator, Result, SinkWriterParam, SinkWriterV1, SinkWriterV1Adapter,
-};
+use crate::sink::{DummySinkCommitCoordinator, Result, SinkWriterParam};
 use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkProducerContext};
 use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
+    dispatch_sink_formatter_impl,
 };
 
 pub const KAFKA_SINK: &str = "kafka";
@@ -69,6 +68,16 @@ const fn _default_use_transaction() -> bool {
 
 const fn _default_force_append_only() -> bool {
     false
+}
+
+#[derive(Debug, Clone, PartialEq, Display, Serialize, Deserialize, EnumString)]
+#[strum(serialize_all = "snake_case")]
+enum CompressionCodec {
+    None,
+    Gzip,
+    Snappy,
+    Lz4,
+    Zstd,
 }
 
 #[serde_as]
@@ -126,6 +135,11 @@ pub struct RdKafkaPropertiesProducer {
     #[serde(rename = "properties.batch.size")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     batch_size: Option<usize>,
+
+    /// Compression codec to use for compressing message sets.
+    #[serde(rename = "properties.compression.codec")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    compression_codec: Option<CompressionCodec>,
 }
 
 impl RdKafkaPropertiesProducer {
@@ -153,6 +167,9 @@ impl RdKafkaPropertiesProducer {
         }
         if let Some(v) = self.batch_size {
             c.set("batch.size", v.to_string());
+        }
+        if let Some(v) = &self.compression_codec {
+            c.set("compression.codec", v.to_string());
         }
     }
 }
@@ -265,40 +282,48 @@ pub struct KafkaSink {
     sink_from_name: String,
 }
 
-impl KafkaSink {
-    pub fn new(config: KafkaConfig, param: SinkParam) -> Self {
-        Self {
+impl TryFrom<SinkParam> for KafkaSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = KafkaConfig::from_hashmap(param.properties)?;
+        Ok(Self {
             config,
-            schema: param.schema(),
-            pk_indices: param.pk_indices,
+            schema,
+            pk_indices: param.downstream_pk,
             is_append_only: param.sink_type.is_append_only(),
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,
-        }
+        })
     }
 }
 
-#[async_trait::async_trait]
 impl Sink for KafkaSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = SinkWriterV1Adapter<KafkaSinkWriter>;
+    type LogSinker = LogSinkerOf<SinkWriterV1Adapter<KafkaSinkWriter>>;
 
-    async fn new_writer(&self, writer_param: SinkWriterParam) -> Result<Self::Writer> {
+    const SINK_NAME: &'static str = KAFKA_SINK;
+
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(SinkWriterV1Adapter::new(
             KafkaSinkWriter::new(
                 self.config.clone(),
-                self.schema.clone(),
-                self.pk_indices.clone(),
-                self.is_append_only,
-                self.db_name.clone(),
-                self.sink_from_name.clone(),
-                format!("sink-{:?}", writer_param.executor_id),
+                SinkFormatterImpl::new(
+                    &self.config.r#type,
+                    self.schema.clone(),
+                    self.pk_indices.clone(),
+                    self.is_append_only,
+                    self.db_name.clone(),
+                    self.sink_from_name.clone(),
+                )?,
             )
             .await?,
-        ))
+        )
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
@@ -310,45 +335,40 @@ impl Sink for KafkaSink {
         // Try Kafka connection.
         // There is no such interface for kafka producer to validate a connection
         // use enumerator to validate broker reachability and existence of topic
-        let mut ticker = KafkaSplitEnumerator::new(
+        let check = KafkaSplitEnumerator::new(
             KafkaProperties::from(self.config.clone()),
             Arc::new(SourceEnumeratorContext::default()),
         )
         .await?;
-        _ = ticker.list_splits().await?;
+        if !check.check_reachability().await {
+            return Err(SinkError::Config(anyhow!(
+                "cannot connect to kafka broker ({})",
+                self.config.common.brokers
+            )));
+        }
         Ok(())
     }
 }
 
-#[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
-enum KafkaSinkState {
-    Init,
-    // State running with epoch.
-    Running(u64),
+/// The delivery buffer queue size
+/// When the `DeliveryFuture` the current `future_delivery_buffer`
+/// is buffering is greater than this size, then enforcing commit once
+const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 65536;
+
+struct KafkaPayloadWriter {
+    inner: FutureProducer<PrivateLinkProducerContext>,
+    future_delivery_buffer: VecDeque<DeliveryFuture>,
+    config: KafkaConfig,
 }
 
 pub struct KafkaSinkWriter {
     pub config: KafkaConfig,
-    pub inner: FutureProducer<PrivateLinkProducerContext>,
-    identifier: String,
-    state: KafkaSinkState,
-    schema: Schema,
-    pk_indices: Vec<usize>,
-    is_append_only: bool,
-    db_name: String,
-    sink_from_name: String,
+    payload_writer: KafkaPayloadWriter,
+    formatter: SinkFormatterImpl,
 }
 
 impl KafkaSinkWriter {
-    pub async fn new(
-        mut config: KafkaConfig,
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        is_append_only: bool,
-        db_name: String,
-        sink_from_name: String,
-        identifier: String,
-    ) -> Result<Self> {
+    pub async fn new(mut config: KafkaConfig, formatter: SinkFormatterImpl) -> Result<Self> {
         let inner: FutureProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
 
@@ -376,178 +396,159 @@ impl KafkaSinkWriter {
 
         Ok(KafkaSinkWriter {
             config: config.clone(),
-            inner,
-            identifier,
-            state: KafkaSinkState::Init,
-            schema,
-            pk_indices,
-            is_append_only,
-            db_name,
-            sink_from_name,
+            payload_writer: KafkaPayloadWriter {
+                inner,
+                future_delivery_buffer: VecDeque::new(),
+                config,
+            },
+            formatter,
         })
     }
+}
 
-    /// The wrapper function for the actual `FutureProducer::send_result`
-    /// Just for better error handling purpose
-    #[expect(clippy::unused_async)]
-    async fn send_result_inner<'a, K, P>(
-        &'a self,
-        record: FutureRecord<'a, K, P>,
-    ) -> core::result::Result<DeliveryFuture, (KafkaError, FutureRecord<'a, K, P>)>
-    where
-        K: ToBytes + ?Sized,
-        P: ToBytes + ?Sized,
-    {
-        self.inner.send_result(record)
-    }
-
+impl KafkaPayloadWriter {
     /// The actual `send_result` function, will be called when the `KafkaSinkWriter` needs to sink
     /// messages
-    async fn send_result<'a, K, P>(&'a self, mut record: FutureRecord<'a, K, P>) -> KafkaResult<()>
+    async fn send_result<'a, K, P>(
+        &'a mut self,
+        mut record: FutureRecord<'a, K, P>,
+    ) -> KafkaResult<()>
     where
         K: ToBytes + ?Sized,
         P: ToBytes + ?Sized,
     {
-        // The error to be returned
-        let mut err = KafkaError::Canceled;
+        let mut success_flag = false;
+
+        let mut ret = Ok(());
 
         for _ in 0..self.config.max_retry_num {
-            match self.send_result_inner(record).await {
-                Ok(delivery_future) => match delivery_future.await {
-                    Ok(delivery_future_result) => match delivery_future_result {
-                        // Successfully sent the record
-                        // Will return the partition and offset of the message (i32, i64)
-                        Ok(_) => return Ok(()),
-                        // If the message failed to be delivered. (i.e., flush)
-                        // The error & the copy of the original message will be returned
-                        // i.e., (KafkaError, OwnedMessage)
-                        // We will just stop the loop, and return the error
-                        // The sink executor will back to the latest checkpoint
-                        Err((k_err, _msg)) => {
-                            err = k_err;
-                            break;
-                        }
-                    },
-                    // Nothing to do here, since the err has already been set to
-                    // KafkaError::Canceled. This represents the producer is dropped
-                    // before the delivery status is received
-                    Err(_) => break,
-                },
+            match self.inner.send_result(record) {
+                Ok(delivery_future) => {
+                    // First check if the current length is
+                    // greater than the preset limit
+                    while self.future_delivery_buffer.len() >= KAFKA_WRITER_MAX_QUEUE_SIZE {
+                        Self::map_future_result(
+                            self.future_delivery_buffer
+                                .pop_front()
+                                .expect("Expect the future not to be None")
+                                .await,
+                        )?;
+                    }
+
+                    self.future_delivery_buffer.push_back(delivery_future);
+                    success_flag = true;
+                    break;
+                }
                 // The enqueue buffer is full, `send_result` will immediately return
                 // We can retry for another round after sleeping for sometime
                 Err((e, rec)) => {
-                    err = e;
                     record = rec;
-                    match err {
-                        KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
+                    match e {
+                        err @ KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull)
+                        | err @ KafkaError::MessageProduction(RDKafkaErrorCode::MessageTimedOut) => {
+                            tracing::warn!(
+                                "producing message (key {:?}) to topic {} failed, err {:?}, retrying",
+                                record.key.map(|k| k.to_bytes()),
+                                record.topic,
+                                err
+                            );
                             tokio::time::sleep(self.config.retry_interval).await;
                             continue;
                         }
-                        _ => break,
+                        _ => return Err(e),
                     }
                 }
             }
         }
 
-        Err(err)
+        if !success_flag {
+            // In this case, after trying `max_retry_num`
+            // The enqueue buffer is still full
+            ret = Err(KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull));
+        }
+
+        ret
     }
 
-    async fn write_json_objects(
-        &self,
-        event_key_object: Option<Value>,
-        event_object: Option<Value>,
+    async fn write_inner(
+        &mut self,
+        event_key_object: Option<Vec<u8>>,
+        event_object: Option<Vec<u8>>,
     ) -> Result<()> {
+        let topic = self.config.common.topic.clone();
         // here we assume the key part always exists and value part is optional.
         // if value is None, we will skip the payload part.
-        let key_str = event_key_object.unwrap().to_string();
-        let mut record = FutureRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
-            .key(key_str.as_bytes());
+        let key_str = event_key_object.unwrap();
+        let mut record = FutureRecord::<[u8], [u8]>::to(topic.as_str()).key(&key_str);
         let payload;
         if let Some(value) = event_object {
-            payload = value.to_string();
-            record = record.payload(payload.as_bytes());
+            payload = value;
+            record = record.payload(&payload);
         }
+        // Send the data but not wait it to finish sinking
+        // Will join all `DeliveryFuture` during commit
         self.send_result(record).await?;
         Ok(())
     }
 
-    async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
-        let dbz_stream = gen_debezium_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            ts_ms,
-            DebeziumAdapterOpts::default(),
-            &self.db_name,
-            &self.sink_from_name,
-        );
-
-        #[for_await]
-        for msg in dbz_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
+    fn map_future_result(
+        delivery_future_result: <DeliveryFuture as Future>::Output,
+    ) -> KafkaResult<()> {
+        match delivery_future_result {
+            // Successfully sent the record
+            // Will return the partition and offset of the message (i32, i64)
+            // Note that `Vec<()>` won't cause memory allocation
+            Ok(Ok(_)) => Ok(()),
+            // If the message failed to be delivered. (i.e., flush)
+            // The error & the copy of the original message will be returned
+            // i.e., (KafkaError, OwnedMessage)
+            // We will just stop the loop, and return the error
+            // The sink executor will back to the latest checkpoint
+            Ok(Err((k_err, _msg))) => Err(k_err),
+            // This represents the producer is dropped
+            // before the delivery status is received
+            // Return `KafkaError::Canceled`
+            Err(_) => Err(KafkaError::Canceled),
         }
-        Ok(())
     }
 
-    async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
-        let upsert_stream = gen_upsert_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            UpsertAdapterOpts::default(),
+    async fn commit_inner(&mut self) -> Result<()> {
+        let _v = try_join_all(
+            self.future_delivery_buffer
+                .drain(..)
+                .map(|delivery_future| {
+                    delivery_future.map(|delivery_future_result| {
+                        Self::map_future_result(delivery_future_result).map_err(SinkError::Kafka)
+                    })
+                }),
+        )
+        .await?;
+
+        // Sanity check
+        debug_assert!(
+            self.future_delivery_buffer.is_empty(),
+            "The buffer after `commit_inner` must be empty"
         );
 
-        #[for_await]
-        for msg in upsert_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
-        }
         Ok(())
     }
+}
 
-    async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
-        let append_only_stream = gen_append_only_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            AppendOnlyAdapterOpts::default(),
-        );
+impl FormattedSink for KafkaPayloadWriter {
+    type K = Vec<u8>;
+    type V = Vec<u8>;
 
-        #[for_await]
-        for msg in append_only_stream {
-            let (event_key_object, event_object) = msg?;
-            self.write_json_objects(event_key_object, event_object)
-                .await?;
-        }
-        Ok(())
+    async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
+        self.write_inner(k, v).await
     }
 }
 
 #[async_trait::async_trait]
 impl SinkWriterV1 for KafkaSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.is_append_only {
-            // Append-only
-            self.append_only(chunk).await
-        } else {
-            // Debezium
-            if self.config.r#type == SINK_TYPE_DEBEZIUM {
-                self.debezium_update(
-                    chunk,
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as u64,
-                )
-                .await
-            } else {
-                // Upsert
-                self.upsert(chunk).await
-            }
-        }
+        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+            self.payload_writer.write_chunk(chunk, formatter).await
+        })
     }
 
     /// ---------------------------------------------------------------------------------------
@@ -561,6 +562,8 @@ impl SinkWriterV1 for KafkaSinkWriter {
     }
 
     async fn commit(&mut self) -> Result<()> {
+        // Group delivery (await the `FutureRecord`) here
+        self.payload_writer.commit_inner().await?;
         Ok(())
     }
 
@@ -573,11 +576,11 @@ impl SinkWriterV1 for KafkaSinkWriter {
 mod test {
     use maplit::hashmap;
     use risingwave_common::catalog::Field;
-    use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::sink::utils::*;
+    use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
+    use crate::sink::formatter::AppendOnlyFormatter;
 
     #[test]
     fn parse_rdkafka_props() {
@@ -599,11 +602,16 @@ mod test {
             "properties.retry.backoff.ms".to_string() => "114514".to_string(),
             "properties.batch.num.messages".to_string() => "114514".to_string(),
             "properties.batch.size".to_string() => "114514".to_string(),
+            "properties.compression.codec".to_string() => "zstd".to_string(),
         };
         let c = KafkaConfig::from_hashmap(props).unwrap();
         assert_eq!(
             c.rdkafka_properties.queue_buffering_max_ms,
             Some(114.514f64)
+        );
+        assert_eq!(
+            c.rdkafka_properties.compression_codec,
+            Some(CompressionCodec::Zstd)
         );
 
         let props: HashMap<String, String> = hashmap! {
@@ -624,6 +632,16 @@ mod test {
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "append-only".to_string(),
             "properties.queue.buffering.max.kbytes".to_string() => "-114514".to_string(), // usize cannot be negative
+        };
+        assert!(KafkaConfig::from_hashmap(props).is_err());
+
+        let props: HashMap<String, String> = hashmap! {
+            // basic
+            "connector".to_string() => "kafka".to_string(),
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "type".to_string() => "append-only".to_string(),
+            "properties.compression.codec".to_string() => "notvalid".to_string(), // has to be a valid CompressionCodec
         };
         assert!(KafkaConfig::from_hashmap(props).is_err());
     }
@@ -701,7 +719,7 @@ mod test {
     }
 
     /// Note: Please enable the kafka by running `./risedev configure` before commenting #[ignore]
-    /// to run the test
+    /// to run the test, also remember to modify `risedev.yml`
     #[ignore]
     #[tokio::test]
     async fn test_kafka_producer() -> Result<()> {
@@ -711,6 +729,7 @@ mod test {
             "properties.bootstrap.server".to_string() => "localhost:29092".to_string(),
             "type".to_string() => "append-only".to_string(),
             "topic".to_string() => "test_topic".to_string(),
+            "properties.compression.codec".to_string() => "zstd".to_string(),
         };
 
         // Create a table with two columns (| id : INT32 | v2 : VARCHAR |) here
@@ -736,12 +755,14 @@ mod test {
         // Create the actual sink writer to Kafka
         let mut sink = KafkaSinkWriter::new(
             kafka_config.clone(),
-            schema,
-            pk_indices,
-            true,
-            "test_sink_1".to_string(),
-            "test_db".into(),
-            "test_table".into(),
+            SinkFormatterImpl::AppendOnlyJson(AppendOnlyFormatter::new(
+                JsonEncoder::new(
+                    schema.clone(),
+                    Some(pk_indices),
+                    TimestampHandlingMode::Milli,
+                ),
+                JsonEncoder::new(schema, None, TimestampHandlingMode::Milli),
+            )),
         )
         .await
         .unwrap();
@@ -752,6 +773,7 @@ mod test {
             println!("epoch: {}", i);
             for j in 0..100 {
                 match sink
+                    .payload_writer
                     .send_result(
                         FutureRecord::to(kafka_config.common.topic.as_str())
                             .payload(format!("value-{}", j).as_bytes())
@@ -772,71 +794,6 @@ mod test {
                 println!("commit success");
             }
         }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_chunk_to_json() -> Result<()> {
-        let chunk = StreamChunk::from_pretty(
-            " i   f   {i,f}
-            + 0 0.0 {0,0.0}
-            + 1 1.0 {1,1.0}
-            + 2 2.0 {2,2.0}
-            + 3 3.0 {3,3.0}
-            + 4 4.0 {4,4.0}
-            + 5 5.0 {5,5.0}
-            + 6 6.0 {6,6.0}
-            + 7 7.0 {7,7.0}
-            + 8 8.0 {8,8.0}
-            + 9 9.0 {9,9.0}",
-        );
-
-        let schema = Schema::new(vec![
-            Field {
-                data_type: DataType::Int32,
-                name: "v1".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
-            },
-            Field {
-                data_type: DataType::Float32,
-                name: "v2".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
-            },
-            Field {
-                data_type: DataType::new_struct(
-                    vec![DataType::Int32, DataType::Float32],
-                    vec!["v4".to_string(), "v5".to_string()],
-                ),
-                name: "v3".into(),
-                sub_fields: vec![
-                    Field {
-                        data_type: DataType::Int32,
-                        name: "v4".into(),
-                        sub_fields: vec![],
-                        type_name: "".into(),
-                    },
-                    Field {
-                        data_type: DataType::Float32,
-                        name: "v5".into(),
-                        sub_fields: vec![],
-                        type_name: "".into(),
-                    },
-                ],
-                type_name: "".into(),
-            },
-        ]);
-
-        let json_chunk = chunk_to_json(chunk, &schema).unwrap();
-        let schema_json = schema_to_json(&schema, "test_db", "test_table");
-        assert_eq!(schema_json, serde_json::from_str::<Value>("{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"source\",\"fields\":[{\"field\":\"db\",\"optional\":false,\"type\":\"string\"},{\"field\":\"table\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.test_db.test_table.Source\",\"optional\":false,\"type\":\"struct\"},{\"field\":\"op\",\"optional\":false,\"type\":\"string\"},{\"field\":\"ts_ms\",\"optional\":false,\"type\":\"int64\"}],\"name\":\"RisingWave.test_db.test_table.Envelope\",\"optional\":false,\"type\":\"struct\"}").unwrap());
-        assert_eq!(
-            serde_json::from_str::<Value>(&json_chunk[0]).unwrap(),
-            serde_json::from_str::<Value>("{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":0,\"v5\":0.0}}")
-                .unwrap()
-        );
 
         Ok(())
     }
