@@ -19,14 +19,22 @@ docker buildx create \
   --name container \
   --driver=docker-container
 
-docker buildx build -f docker/Dockerfile \
-  --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" \
+buildx_args="
+  --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" \
   --progress plain \
   --builder=container \
   --load \
   --cache-to "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
   --cache-from "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
-  .
+"
+
+docker buildx build -f docker/Dockerfile \
+  -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" \
+  ${buildx_args} .
+
+docker buildx build -f docker/Dockerfile \
+  -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}-debug" \
+  ${buildx_args} .
 
 echo "--- check the image can start correctly"
 container_id=$(docker run -d "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" playground)
@@ -44,7 +52,11 @@ docker images
 
 echo "--- docker push to ghcr"
 docker push "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"
+docker push "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}-debug"
 
 echo "--- docker push to dockerhub"
 docker tag "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
+docker tag "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}-debug" "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}-debug"
+
 docker push "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}"
+docker push "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}-debug"

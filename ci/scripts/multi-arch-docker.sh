@@ -33,6 +33,7 @@ function pushGchr() {
   for arch in "${arches[@]}"
   do
     args+=( --amend "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" )
+    args+=( --amend "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}-debug" )
   done
   docker manifest create --insecure "$GHCRTAG" "${args[@]}"
   docker manifest push --insecure "$GHCRTAG"
@@ -46,6 +47,7 @@ function pushDockerhub() {
   for arch in "${arches[@]}"
   do
     args+=( --amend "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}" )
+    args+=( --amend "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}-debug" )
   done
   docker manifest create --insecure "$DOCKERTAG" "${args[@]}"
   docker manifest push --insecure "$DOCKERTAG"
@@ -95,6 +97,7 @@ args=()
 for arch in "${arches[@]}"
 do
   args+=( "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}" )
+  args+=( "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}-debug" )
 done
 docker run --rm lumir/remove-dockerhub-tag \
   --user "risingwavelabs" --password "$DOCKER_TOKEN" "${args[@]}"
