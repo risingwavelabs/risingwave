@@ -219,6 +219,39 @@ test_foreground_index_cancel() {
    cargo make kill
 }
 
+test_foreground_sink_cancel() {
+   echo "--- e2e, ci-3streaming-2serving-3fe, test_index_ddl_no_recover"
+   cargo make ci-start ci-1cn-1fe-with-recovery
+
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/create_base_table.slt"
+
+   # Test cancel
+   run_sql "CREATE SINK i FROM t WITH (connector='blackhole');" &
+   sleep 3
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
+   cancel_stream_jobs
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_no_jobs.slt"
+
+   # Test index over recovery
+   run_sql "CREATE SINK i FROM t WITH (connector='blackhole');" &
+   sleep 3
+
+   # Restart
+   cargo make kill
+   cargo make dev ci-1cn-1fe-with-recovery
+
+   # Leave sometime for recovery
+   sleep 5
+
+   # Test after recovery
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_no_jobs.slt"
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/sink/create_sink.slt"
+
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/sink/drop.slt"
+
+   cargo make kill
+}
+
 main() {
   set -euo pipefail
   # test_snapshot_and_upstream_read
@@ -226,8 +259,8 @@ main() {
   # test_background_ddl_cancel
   # test_foreground_ddl_no_recover
   # test_foreground_ddl_cancel
-  test_foreground_index_cancel
-  # test_foreground_sink_cancel
+  # test_foreground_index_cancel
+  test_foreground_sink_cancel
 }
 
 main
