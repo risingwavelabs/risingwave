@@ -156,6 +156,7 @@ impl MonitorService for MonitorServiceImpl {
 
         let file_path_str = Box::leak(file_path.to_string().into_boxed_str());
         let file_path_bytes = unsafe { file_path_str.as_bytes_mut() };
+        let file_path_len = file_path_bytes.len();
         let file_path_ptr = file_path_bytes.as_mut_ptr();
         let response = if let Err(e) = tikv_jemalloc_ctl::prof::dump::write(
             CStr::from_bytes_with_nul(file_path_bytes).unwrap(),
@@ -165,7 +166,8 @@ impl MonitorService for MonitorServiceImpl {
         } else {
             Ok(Response::new(HeapProfilingResponse {}))
         };
-        let _ = unsafe { Box::from_raw(file_path_ptr) };
+        let _ =
+            unsafe { Box::from_raw(std::slice::from_raw_parts_mut(file_path_ptr, file_path_len)) };
         response
     }
 

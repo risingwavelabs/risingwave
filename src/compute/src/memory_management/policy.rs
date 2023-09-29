@@ -124,6 +124,7 @@ impl JemallocMemoryControl {
 
             let file_path_str = Box::leak(file_path.into_boxed_str());
             let file_path_bytes = unsafe { file_path_str.as_bytes_mut() };
+            let file_path_len = file_path_bytes.len();
             let file_path_ptr = file_path_bytes.as_mut_ptr();
             if let Err(e) = self
                 .jemalloc_dump_mib
@@ -133,7 +134,9 @@ impl JemallocMemoryControl {
             } else {
                 tracing::info!("Successfully dumped heap profile to {}", file_name);
             }
-            let _ = unsafe { Box::from_raw(file_path_ptr) };
+            let _ = unsafe {
+                Box::from_raw(std::slice::from_raw_parts_mut(file_path_ptr, file_path_len))
+            };
         }
     }
 }
