@@ -762,12 +762,6 @@ impl CatalogManager {
     ///    2. Not belonging to a background stream job.
     ///    Clean up these hanging tables by the id.
     pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
-        // FIXME: We should list the following separately:
-        // Background Creating tables. Then get their internal table ids.
-        // Prevent those from being purged. All other internal table ids can be purged.
-        // create materialized view, sink, index tables.
-        // Internal tables.
-        // Unspecified just ignore I guess.
         let creating_tables: Vec<Table> = self.list_creating_tables().await;
         let mut reserved_internal_tables = HashSet::new();
         let mut tables_to_clean = vec![];
@@ -889,7 +883,7 @@ impl CatalogManager {
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
     ) -> MetaResult<()> {
-        println!("remove create table with id: {table_id}");
+        eprintln!("remove create table with id: {table_id}");
         let core = &mut self.core.lock().await;
         let table = {
             let database_core = &mut core.database;
