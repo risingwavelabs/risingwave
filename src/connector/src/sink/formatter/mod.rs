@@ -15,7 +15,7 @@
 use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 
-use crate::sink::{Result, SinkError, SINK_TYPE_DEBEZIUM, SINK_TYPE_UPSERT};
+use crate::sink::{Result, SinkError};
 
 mod append_only;
 mod debezium_json;
@@ -26,6 +26,7 @@ pub use debezium_json::{DebeziumAdapterOpts, DebeziumJsonFormatter};
 use risingwave_common::catalog::Schema;
 pub use upsert::UpsertFormatter;
 
+use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 
 /// Transforms a `StreamChunk` into a sequence of key-value pairs according a specific format,
@@ -64,47 +65,52 @@ pub enum SinkFormatterImpl {
 
 impl SinkFormatterImpl {
     pub fn new(
-        formatter_type: &str,
+        format_desc: &SinkFormatDesc,
         schema: Schema,
         pk_indices: Vec<usize>,
-        is_append_only: bool,
         db_name: String,
         sink_from_name: String,
     ) -> Result<Self> {
-        if is_append_only {
-            let key_encoder = JsonEncoder::new(
-                schema.clone(),
-                Some(pk_indices),
-                TimestampHandlingMode::Milli,
-            );
-            let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+        if format_desc.encode != SinkEncode::Json {
+            return Err(SinkError::Config(anyhow!(
+                "sink encode unsupported: {:?}",
+                format_desc.encode,
+            )));
+        }
 
-            let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
-            Ok(SinkFormatterImpl::AppendOnlyJson(formatter))
-        } else if formatter_type == SINK_TYPE_DEBEZIUM {
-            Ok(SinkFormatterImpl::DebeziumJson(DebeziumJsonFormatter::new(
-                schema,
-                pk_indices,
-                db_name,
-                sink_from_name,
-                DebeziumAdapterOpts::default(),
-            )))
-        } else if formatter_type == SINK_TYPE_UPSERT {
-            let key_encoder = JsonEncoder::new(
-                schema.clone(),
-                Some(pk_indices),
-                TimestampHandlingMode::Milli,
-            );
-            let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+        match format_desc.format {
+            SinkFormat::AppendOnly => {
+                let key_encoder = JsonEncoder::new(
+                    schema.clone(),
+                    Some(pk_indices),
+                    TimestampHandlingMode::Milli,
+                );
+                let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
 
-            // Initialize the upsert_stream
-            let formatter = UpsertFormatter::new(key_encoder, val_encoder);
-            Ok(SinkFormatterImpl::UpsertJson(formatter))
-        } else {
-            Err(SinkError::Config(anyhow!(
-                "unsupported upsert sink type {}",
-                formatter_type
-            )))
+                let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
+                Ok(SinkFormatterImpl::AppendOnlyJson(formatter))
+            }
+            SinkFormat::Debezium => {
+                Ok(SinkFormatterImpl::DebeziumJson(DebeziumJsonFormatter::new(
+                    schema,
+                    pk_indices,
+                    db_name,
+                    sink_from_name,
+                    DebeziumAdapterOpts::default(),
+                )))
+            }
+            SinkFormat::Upsert => {
+                let key_encoder = JsonEncoder::new(
+                    schema.clone(),
+                    Some(pk_indices),
+                    TimestampHandlingMode::Milli,
+                );
+                let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+
+                // Initialize the upsert_stream
+                let formatter = UpsertFormatter::new(key_encoder, val_encoder);
+                Ok(SinkFormatterImpl::UpsertJson(formatter))
+            }
         }
     }
 }

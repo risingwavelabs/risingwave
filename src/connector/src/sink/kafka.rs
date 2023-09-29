@@ -31,10 +31,8 @@ use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
 
-use super::{
-    Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
-};
+use super::catalog::{SinkFormat, SinkFormatDesc};
+use super::{Sink, SinkError, SinkParam};
 use crate::common::KafkaCommon;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::writer::{
@@ -63,10 +61,6 @@ const fn _default_retry_backoff() -> Duration {
 }
 
 const fn _default_use_transaction() -> bool {
-    false
-}
-
-const fn _default_force_append_only() -> bool {
     false
 }
 
@@ -185,14 +179,6 @@ pub struct KafkaConfig {
     #[serde(flatten)]
     pub common: KafkaCommon,
 
-    pub r#type: String, // accept "append-only", "debezium", or "upsert"
-
-    #[serde(
-        default = "_default_force_append_only",
-        deserialize_with = "deserialize_bool_from_string"
-    )]
-    pub force_append_only: bool,
-
     #[serde(
         rename = "properties.timeout",
         default = "_default_timeout",
@@ -234,18 +220,6 @@ impl KafkaConfig {
         let config = serde_json::from_value::<KafkaConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
-        if config.r#type != SINK_TYPE_APPEND_ONLY
-            && config.r#type != SINK_TYPE_DEBEZIUM
-            && config.r#type != SINK_TYPE_UPSERT
-        {
-            return Err(SinkError::Config(anyhow!(
-                "`{}` must be {}, {}, or {}",
-                SINK_TYPE_OPTION,
-                SINK_TYPE_APPEND_ONLY,
-                SINK_TYPE_DEBEZIUM,
-                SINK_TYPE_UPSERT
-            )));
-        }
         Ok(config)
     }
 
@@ -277,7 +251,7 @@ pub struct KafkaSink {
     pub config: KafkaConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
-    is_append_only: bool,
+    format_desc: SinkFormatDesc,
     db_name: String,
     sink_from_name: String,
 }
@@ -292,7 +266,9 @@ impl TryFrom<SinkParam> for KafkaSink {
             config,
             schema,
             pk_indices: param.downstream_pk,
-            is_append_only: param.sink_type.is_append_only(),
+            format_desc: param
+                .format_desc
+                .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,
         })
@@ -310,10 +286,9 @@ impl Sink for KafkaSink {
             KafkaSinkWriter::new(
                 self.config.clone(),
                 SinkFormatterImpl::new(
-                    &self.config.r#type,
+                    &self.format_desc,
                     self.schema.clone(),
                     self.pk_indices.clone(),
-                    self.is_append_only,
                     self.db_name.clone(),
                     self.sink_from_name.clone(),
                 )?,
@@ -325,10 +300,10 @@ impl Sink for KafkaSink {
 
     async fn validate(&self) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.
-        if !self.is_append_only && self.pk_indices.is_empty() {
+        if self.format_desc.format != SinkFormat::AppendOnly && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "primary key not defined for {} kafka sink (please define in `primary_key` field)",
-                self.config.r#type
+                "primary key not defined for {:?} kafka sink (please define in `primary_key` field)",
+                self.format_desc.format
             )));
         }
 
@@ -661,8 +636,6 @@ mod test {
         let config = KafkaConfig::from_hashmap(properties).unwrap();
         assert_eq!(config.common.brokers, "localhost:9092");
         assert_eq!(config.common.topic, "test");
-        assert_eq!(config.r#type, "append-only");
-        assert!(config.force_append_only);
         assert!(!config.use_transaction);
         assert_eq!(config.timeout, Duration::from_secs(10));
         assert_eq!(config.max_retry_num, 20);
@@ -676,7 +649,6 @@ mod test {
             "type".to_string() => "upsert".to_string(),
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
-        assert!(!config.force_append_only);
         assert!(!config.use_transaction);
         assert_eq!(config.timeout, Duration::from_secs(5));
         assert_eq!(config.max_retry_num, 3);
@@ -689,16 +661,6 @@ mod test {
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "upsert".to_string(),
             "properties.retry.max".to_string() => "-20".to_string(),  // error!
-        };
-        assert!(KafkaConfig::from_hashmap(properties).is_err());
-
-        // Invalid bool input.
-        let properties: HashMap<String, String> = hashmap! {
-            "connector".to_string() => "kafka".to_string(),
-            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
-            "topic".to_string() => "test".to_string(),
-            "type".to_string() => "upsert".to_string(),
-            "force_append_only".to_string() => "yes".to_string(),  // error!
         };
         assert!(KafkaConfig::from_hashmap(properties).is_err());
 

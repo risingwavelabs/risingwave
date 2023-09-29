@@ -130,6 +130,11 @@ pub enum SinkEncode {
 
 impl SinkFormatDesc {
     pub fn from_legacy_type(connector: &str, r#type: &str) -> Result<Option<Self>, SinkError> {
+        use crate::sink::kafka::KafkaSink;
+        use crate::sink::kinesis::KinesisSink;
+        use crate::sink::pulsar::PulsarSink;
+        use crate::sink::Sink as _;
+
         let format = match r#type {
             SINK_TYPE_APPEND_ONLY => SinkFormat::AppendOnly,
             SINK_TYPE_UPSERT => SinkFormat::Upsert,
@@ -142,7 +147,9 @@ impl SinkFormatDesc {
             }
         };
         let encode = match connector {
-            "kafka" => SinkEncode::Json,
+            KafkaSink::SINK_NAME | KinesisSink::SINK_NAME | PulsarSink::SINK_NAME => {
+                SinkEncode::Json
+            }
             _ => return Ok(None),
         };
         Ok(Some(Self {
