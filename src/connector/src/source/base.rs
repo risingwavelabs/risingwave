@@ -319,6 +319,11 @@ impl ConnectorProperties {
         let connector = props.remove(UPSTREAM_SOURCE_KEY).unwrap();
         match connector.as_str() {
             S3_V2_CONNECTOR => {
+                tracing::info!(
+                    "using new fs source, rewrite connector from '{}' to '{}'",
+                    S3_V2_CONNECTOR,
+                    S3_CONNECTOR
+                );
                 props.insert(UPSTREAM_SOURCE_KEY.to_string(), S3_CONNECTOR.to_string());
             }
             _ => {

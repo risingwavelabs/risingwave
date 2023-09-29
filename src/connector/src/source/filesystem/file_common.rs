@@ -67,6 +67,7 @@ impl FsSplit {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct FsPageItem {
     pub name: String,
     pub size: i64,

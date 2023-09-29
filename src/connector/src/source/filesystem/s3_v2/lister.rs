@@ -21,25 +21,6 @@ use itertools::Itertools;
 use crate::source::filesystem::{FsPageItem, S3SplitEnumerator};
 use crate::source::{FsFilterCtrlCtx, FsListInner};
 
-// impl S3SplitEnumerator {
-//     async fn paginate_inner(mut self) {
-//         let ctx = FsFilterCtrlCtx;
-//         let mut page_num = 0;
-//         loop {
-//             let (fs_page, has_finished) = self.get_next_page::<FsPageItem>().await?;
-//             let matched_items = fs_page
-//                 .into_iter()
-//                 .filter(|item| Self::filter_policy(&ctx, page_num, item))
-//                 .collect_vec();
-//             yield matched_items;
-//             page_num += 1;
-//             if has_finished {
-//                 break;
-//             }
-//         }
-//     }
-// }
-
 #[async_trait]
 impl FsListInner for S3SplitEnumerator {
     async fn get_next_page<T: for<'a> From<&'a Object>>(

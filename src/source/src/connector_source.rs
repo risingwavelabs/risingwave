@@ -192,11 +192,7 @@ async fn build_fs_list_stream(
 
     // controlling whether request for next page
     fn page_ctrl_logic(_ctx: &FsListCtrlContext, has_finished: bool, _page_num: usize) -> bool {
-        if has_finished {
-            false
-        } else {
-            true
-        }
+        !has_finished
     }
 
     loop {
@@ -216,4 +212,10 @@ async fn build_fs_list_stream(
         }
         interval.tick().await;
     }
+}
+
+#[cfg(test)]
+mod test {
+    #[tokio::test]
+    async fn test_consume_fs_list() {}
 }

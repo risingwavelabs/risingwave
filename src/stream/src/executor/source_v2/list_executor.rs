@@ -207,6 +207,8 @@ impl<S: StateStore> Executor for FsListExecutor<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use futures::StreamExt;
     use maplit::{convert_args, hashmap};
     use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
@@ -217,6 +219,7 @@ mod tests {
     use risingwave_source::connector_test_utils::create_source_desc_builder;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
+    use tracing_test::traced_test;
 
     use super::*;
     use crate::executor::ActorContext;
@@ -224,6 +227,7 @@ mod tests {
     const MOCK_SOURCE_NAME: &str = "mock_source";
 
     #[ignore]
+    #[traced_test]
     #[tokio::test]
     async fn test_fs_list_executor() {
         let table_id = TableId::default();
@@ -244,7 +248,7 @@ mod tests {
         let column_ids = vec![0].into_iter().map(ColumnId::from).collect();
 
         let properties: HashMap<String, String> = convert_args!(hashmap!(
-            "connector" => "s3",
+            "connector" => "s3_v2",
             "s3.region_name" => "us-east-1",
             "s3.endpoint_url" => "http://[::1]:9090",
             "s3.bucket_name" => "test",
@@ -300,6 +304,9 @@ mod tests {
         // Consume the second barrier.
         let barrier = Barrier::new_test_barrier(2);
         barrier_tx.send(barrier).unwrap();
+
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+
         let msg = executor.next().await.unwrap().unwrap(); // page chunk
         executor.next().await.unwrap().unwrap(); // barrier
 
