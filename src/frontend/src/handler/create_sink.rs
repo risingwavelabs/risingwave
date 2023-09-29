@@ -19,7 +19,9 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
-use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION};
+use risingwave_connector::sink::{
+    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, EmitMode, ObjectName, Query, Select, SelectItem, SetExpr,
@@ -124,8 +126,12 @@ pub fn gen_sink_plan(
         Some(f) => Some(bind_sink_format_desc(f)?),
         None => match with_options.get(SINK_TYPE_OPTION) {
             // Case B: old syntax `type = '...'`
-            Some(t) => SinkFormatDesc::from_legacy_type(connector, t)?.inspect(|_| {
-                session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.")
+            Some(t) => SinkFormatDesc::from_legacy_type(connector, t)?.map(|mut f| {
+                session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.");
+                if let Some(v) = with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
+                    f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
+                }
+                f
             }),
             // Case C: no format + encode required
             None => None,
