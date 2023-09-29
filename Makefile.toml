@@ -1049,7 +1049,7 @@ cargo run \
   -- \
   --kill \
   --kill-rate=0.5 \
-  ./e2e_test/ddl/\\*\\*/\\*.slt \
+  ./e2e_test/streaming/\\*\\*/\\*.slt \
   "$@"
 """
 
