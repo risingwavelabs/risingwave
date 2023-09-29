@@ -39,7 +39,8 @@ use std::future::Future;
 use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use prometheus::{Histogram, HistogramOpts};
+use prometheus::core::{AtomicU64, GenericCounter};
+use prometheus::{Histogram, HistogramOpts, Opts};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
@@ -213,26 +214,41 @@ impl From<SinkCatalog> for SinkParam {
 #[derive(Clone)]
 pub struct SinkMetrics {
     pub sink_commit_duration_metrics: Histogram,
+    pub connector_sink_rows_received: GenericCounter<AtomicU64>,
 }
 
-impl Default for SinkMetrics {
-    fn default() -> Self {
+impl SinkMetrics {
+    fn for_test() -> Self {
         SinkMetrics {
             sink_commit_duration_metrics: Histogram::with_opts(HistogramOpts::new(
                 "unused", "unused",
             ))
             .unwrap(),
+            connector_sink_rows_received: GenericCounter::with_opts(Opts::new("unused", "unused"))
+                .unwrap(),
         }
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<MetaClient>,
     pub sink_metrics: SinkMetrics,
+}
+
+impl SinkWriterParam {
+    pub fn for_test() -> Self {
+        SinkWriterParam {
+            connector_params: Default::default(),
+            executor_id: Default::default(),
+            vnode_bitmap: Default::default(),
+            meta_client: Default::default(),
+            sink_metrics: SinkMetrics::for_test(),
+        }
+    }
 }
 
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
@@ -367,6 +383,12 @@ pub enum SinkError {
     Pulsar(anyhow::Error),
     #[error("Internal error: {0}")]
     Internal(anyhow::Error),
+}
+
+impl From<icelake::Error> for SinkError {
+    fn from(value: icelake::Error) -> Self {
+        SinkError::Iceberg(anyhow_error!("{}", value))
+    }
 }
 
 impl From<RpcError> for SinkError {

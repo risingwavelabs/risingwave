@@ -27,57 +27,160 @@ use super::expr_in::InExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
-use super::wrapper::Checked;
-use crate::expr::{
-    BoxedExpression, Expression, InputRefExpression, LiteralExpression, TryFromExprNodeBoxed,
-};
+use super::wrapper::{Checked, EvalErrorReport, NonStrict};
+use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use crate::sig::func::FUNC_SIG_MAP;
 use crate::sig::FuncSigDebug;
 use crate::{bail, ExprError, Result};
 
 /// Build an expression from protobuf.
-fn build_from_prost_inner(prost: &ExprNode) -> Result<BoxedExpression> {
-    use PbType as E;
+pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
+    ExprBuilder::new_strict().build(prost)
+}
 
-    let func_call = match prost.get_rex_node()? {
-        RexNode::InputRef(_) => return InputRefExpression::try_from_boxed(prost),
-        RexNode::Constant(_) => return LiteralExpression::try_from_boxed(prost),
-        RexNode::Udf(_) => return UdfExpression::try_from_boxed(prost),
-        RexNode::FuncCall(func_call) => func_call,
-        RexNode::Now(_) => unreachable!("now should not be built at backend"),
-    };
+/// Build an expression from protobuf in non-strict mode.
+pub fn build_non_strict_from_prost(
+    prost: &ExprNode,
+    error_report: impl EvalErrorReport + 'static,
+) -> Result<BoxedExpression> {
+    ExprBuilder::new_non_strict(error_report).build(prost)
+}
 
-    let func_type = prost.function_type();
+/// Build an expression from protobuf with possibly some wrappers attached to each node.
+struct ExprBuilder<R> {
+    /// The error reporting for non-strict mode.
+    ///
+    /// If set, each expression node will be wrapped with a [`NonStrict`] node that reports
+    /// errors to this error reporting.
+    error_report: Option<R>,
+}
 
-    match func_type {
-        // Dedicated types
-        E::All | E::Some => SomeAllExpression::try_from_boxed(prost),
-        E::In => InExpression::try_from_boxed(prost),
-        E::Case => CaseExpression::try_from_boxed(prost),
-        E::Coalesce => CoalesceExpression::try_from_boxed(prost),
-        E::Field => FieldExpression::try_from_boxed(prost),
-        E::Vnode => VnodeExpression::try_from_boxed(prost),
+impl ExprBuilder<!> {
+    /// Create a new builder in strict mode.
+    fn new_strict() -> Self {
+        Self { error_report: None }
+    }
+}
 
-        _ => {
-            let ret_type = DataType::from(prost.get_return_type().unwrap());
-            let children = func_call
-                .get_children()
-                .iter()
-                .map(build_from_prost)
-                .try_collect()?;
+impl<R> ExprBuilder<R>
+where
+    R: EvalErrorReport + 'static,
+{
+    /// Create a new builder in non-strict mode with the given error reporting.
+    fn new_non_strict(error_report: R) -> Self {
+        Self {
+            error_report: Some(error_report),
+        }
+    }
 
-            build_func(func_type, ret_type, children)
+    /// Attach wrappers to an expression.
+    #[expect(clippy::let_and_return)]
+    fn wrap(&self, expr: impl Expression + 'static) -> BoxedExpression {
+        let checked = Checked(expr);
+
+        let may_non_strict = if let Some(error_report) = &self.error_report {
+            NonStrict::new(checked, error_report.clone()).boxed()
+        } else {
+            checked.boxed()
+        };
+
+        may_non_strict
+    }
+
+    /// Build an expression with `build_inner` and attach some wrappers.
+    fn build(&self, prost: &ExprNode) -> Result<BoxedExpression> {
+        let expr = self.build_inner(prost)?;
+        Ok(self.wrap(expr))
+    }
+
+    /// Build an expression from protobuf.
+    fn build_inner(&self, prost: &ExprNode) -> Result<BoxedExpression> {
+        use PbType as E;
+
+        let build_child = |prost: &'_ ExprNode| self.build(prost);
+
+        match prost.get_rex_node()? {
+            RexNode::InputRef(_) => InputRefExpression::build_boxed(prost, build_child),
+            RexNode::Constant(_) => LiteralExpression::build_boxed(prost, build_child),
+            RexNode::Udf(_) => UdfExpression::build_boxed(prost, build_child),
+
+            RexNode::FuncCall(_) => match prost.function_type() {
+                // Dedicated types
+                E::All | E::Some => SomeAllExpression::build_boxed(prost, build_child),
+                E::In => InExpression::build_boxed(prost, build_child),
+                E::Case => CaseExpression::build_boxed(prost, build_child),
+                E::Coalesce => CoalesceExpression::build_boxed(prost, build_child),
+                E::Field => FieldExpression::build_boxed(prost, build_child),
+                E::Vnode => VnodeExpression::build_boxed(prost, build_child),
+
+                // General types, lookup in the function signature map
+                _ => FuncCallBuilder::build_boxed(prost, build_child),
+            },
+
+            RexNode::Now(_) => unreachable!("now should not be built at backend"),
         }
     }
 }
 
-/// Build an expression from protobuf with wrappers.
-pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    let expr = build_from_prost_inner(prost)?;
+/// Manually build the expression `Self` from protobuf.
+pub(crate) trait Build: Expression + Sized {
+    /// Build the expression `Self` from protobuf.
+    ///
+    /// To build children, call `build_child` on each child instead of [`build_from_prost`].
+    fn build(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<Self>;
 
-    let checked = Checked(expr);
+    /// Build the expression `Self` from protobuf for test, where each child is built with
+    /// [`build_from_prost`].
+    fn build_for_test(prost: &ExprNode) -> Result<Self> {
+        Self::build(prost, build_from_prost)
+    }
+}
 
-    Ok(checked.boxed())
+/// Manually build a boxed expression from protobuf.
+pub(crate) trait BuildBoxed: 'static {
+    /// Build a boxed expression from protobuf.
+    fn build_boxed(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<BoxedExpression>;
+}
+
+/// Implement [`BuildBoxed`] for all expressions that implement [`Build`].
+impl<E: Build + 'static> BuildBoxed for E {
+    fn build_boxed(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<BoxedExpression> {
+        Self::build(prost, build_child).map(Expression::boxed)
+    }
+}
+
+/// Build a function call expression from protobuf with [`build_func`].
+struct FuncCallBuilder;
+
+impl BuildBoxed for FuncCallBuilder {
+    fn build_boxed(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<BoxedExpression> {
+        let func_type = prost.function_type();
+        let ret_type = DataType::from(prost.get_return_type().unwrap());
+        let func_call = prost
+            .get_rex_node()?
+            .as_func_call()
+            .expect("not a func call");
+
+        let children = func_call
+            .get_children()
+            .iter()
+            .map(build_child)
+            .try_collect()?;
+
+        build_func(func_type, ret_type, children)
+    }
 }
 
 /// Build an expression in `FuncCall` variant.
@@ -111,7 +214,24 @@ pub fn build_func(
                 }
             ))
         })?;
+
     (desc.build)(ret_type, children)
+}
+
+/// Build an expression in `FuncCall` variant in non-strict mode.
+///
+/// Note: This is a workaround, and only the root node are wrappedin non-strict mode.
+/// Prefer [`build_non_strict_from_prost`] if possible.
+pub fn build_func_non_strict(
+    func: PbType,
+    ret_type: DataType,
+    children: Vec<BoxedExpression>,
+    error_report: impl EvalErrorReport + 'static,
+) -> Result<BoxedExpression> {
+    let expr = build_func(func, ret_type, children)?;
+    let wrapped = ExprBuilder::new_non_strict(error_report).wrap(expr);
+
+    Ok(wrapped)
 }
 
 pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNode], DataType)> {

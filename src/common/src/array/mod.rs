@@ -15,6 +15,7 @@
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
 mod arrow;
+pub use arrow::to_record_batch_with_schema;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;

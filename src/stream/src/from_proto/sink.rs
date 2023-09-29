@@ -113,8 +113,14 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .sink_commit_duration
             .with_label_values(&[identity.as_str(), connector]);
 
+        let connector_sink_rows_received = stream
+            .streaming_metrics
+            .connector_sink_rows_received
+            .with_label_values(&[connector, &sink_param.sink_id.sink_id.to_string()]);
+
         let sink_metrics = SinkMetrics {
             sink_commit_duration_metrics,
+            connector_sink_rows_received,
         };
 
         match node.log_store_type() {

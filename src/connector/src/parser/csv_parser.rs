@@ -21,7 +21,7 @@ use risingwave_common::types::{Date, Datum, Decimal, ScalarImpl, Time, Timestamp
 
 use super::{ByteStreamSourceParser, CsvProperties};
 use crate::only_parse_payload;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::SourceStreamChunkRowWriter;
 use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
 
 macro_rules! to_rust_type {
@@ -107,14 +107,14 @@ impl CsvParser {
         &mut self,
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         let mut fields = self.read_row(&payload)?;
         if let Some(headers) = &mut self.headers {
             if headers.is_empty() {
                 *headers = fields;
                 // Here we want a row, but got nothing. So it's an error for the `parse_inner` but
                 // has no bad impact on the system.
-                return  Err(RwError::from(ProtocolError("This message indicates a header, no row will be inserted. However, internal parser state was updated.".to_string())));
+                return Err(RwError::from(ProtocolError("This message indicates a header, no row will be inserted. However, internal parser state was updated.".to_string())));
             }
             writer.insert(|desc| {
                 if let Some(i) = headers.iter().position(|name| name == &desc.name) {
@@ -157,7 +157,7 @@ impl ByteStreamSourceParser for CsvParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         only_parse_payload!(self, payload, writer)
     }
 }
