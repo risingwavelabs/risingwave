@@ -32,7 +32,7 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
     Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
     StreamJobStatus, Table, View,
@@ -116,6 +116,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
 use risingwave_pb::meta::relation::RelationInfo;
+use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
@@ -750,33 +751,80 @@ impl CatalogManager {
         }
     }
 
-    // TODO: Should we clean Background tables with no corresponding fragments too?
+    /// We clean the following tables:
+    /// 1. Those which belonged to incomplete Foreground jobs.
+    /// 2. Those which did not persist their table fragments, we can't recover these.
+    /// 3. Those which were only initialized, but not actually running yet.
+    /// 4. From 2, since we don't have internal table ids from the fragments,
+    ///    we can detect hanging table ids by just finding all internal ids
+    ///    with:
+    ///    1. `stream_job_status` = CREATING
+    ///    2. Not belonging to a background stream job.
+    ///    Clean up these hanging tables by the id.
     pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
-        let tables: Vec<Table> = self.list_creating_tables().await;
-        let tables = tables
-            .into_iter()
-            .filter(|t| {
-                t.create_type == CreateType::Foreground as i32
-                    || t.create_type == CreateType::Unspecified as i32
-            })
-            .collect_vec();
-
-        let mut table_ids = vec![];
-        let mv_table_ids = tables.iter().map(|t| t.id).collect_vec();
-        println!("Cleaning dirty mv table ids: {mv_table_ids:?}");
-        for table_id in &mv_table_ids {
-            let fragment = fragment_manager
-                .select_table_fragments_by_table_id(&table_id.into())
-                .await?;
-            let internal_table_ids = fragment.internal_table_ids();
-            table_ids.extend(internal_table_ids);
+        // FIXME: We should list the following separately:
+        // Background Creating tables. Then get their internal table ids.
+        // Prevent those from being purged. All other internal table ids can be purged.
+        // create materialized view, sink, index tables.
+        // Internal tables.
+        // Unspecified just ignore I guess.
+        let creating_tables: Vec<Table> = self.list_creating_tables().await;
+        let mut reserved_internal_tables = HashSet::new();
+        let mut tables_to_clean = vec![];
+        let mut internal_tables_to_clean = vec![];
+        for table in creating_tables {
+            // 1. Incomplete Foreground jobs
+            if table.create_type == CreateType::Foreground as i32
+                || table.create_type == CreateType::Unspecified as i32
+            {
+                tables_to_clean.push(table);
+                continue;
+            }
+            if table.table_type == TableType::Internal as i32 {
+                internal_tables_to_clean.push(table);
+                continue;
+            }
+            // 2. No table fragments
+            if table.table_type != TableType::Internal as i32 {
+                match fragment_manager
+                    .select_table_fragments_by_table_id(&table.id.into())
+                    .await
+                {
+                    Err(_) => {
+                        tables_to_clean.push(table);
+                        continue;
+                    }
+                    Ok(fragment) => {
+                        let fragment: TableFragments = fragment;
+                        // 3. For those in initial state (i.e. not running / created),
+                        // we should purge them.
+                        if fragment.state() == State::Initial {
+                            tables_to_clean.push(table);
+                            continue;
+                        } else {
+                            assert_eq!(table.create_type, CreateType::Background as i32);
+                            // 4. Get all the corresponding internal tables, the rest we can purge.
+                            for id in fragment.internal_table_ids() {
+                                reserved_internal_tables.insert(id);
+                            }
+                            continue;
+                        }
+                    }
+                }
+            }
         }
-        table_ids.extend(mv_table_ids);
+        for t in internal_tables_to_clean {
+            if reserved_internal_tables.contains(&t.id) {
+                tables_to_clean.push(t);
+            }
+        }
 
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
-        for table in &tables {
+        // FIXME: Do all tables need to decrease_ref_count?
+        // Perhaps only those with a fragment?
+        for table in &tables_to_clean {
             for relation_id in &table.dependent_relations {
                 database_core.decrease_ref_count(*relation_id);
             }
@@ -785,8 +833,8 @@ impl CatalogManager {
 
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
-        for table_id in table_ids {
-            let table = tables.remove(table_id);
+        for table in tables_to_clean {
+            let table = tables.remove(table.id);
             assert!(table.is_some())
         }
         commit_meta!(self, tables)?;
@@ -2338,7 +2386,12 @@ impl CatalogManager {
         self.core.lock().await.database.list_tables()
     }
 
-    /// NOTE: Doesn't list the internal tables.
+    /// Lists table catalogs for mviews, without their internal tables.
+    pub async fn list_creating_mviews(&self) -> Vec<Table> {
+        self.core.lock().await.database.list_creating_mviews()
+    }
+
+    /// Lists table catalogs for all tables with `stream_job_status=CREATING`.
     pub async fn list_creating_tables(&self) -> Vec<Table> {
         self.core.lock().await.database.list_creating_tables()
     }

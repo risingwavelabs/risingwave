@@ -86,18 +86,11 @@ impl GlobalBarrierManager {
                 !stream_job_ids.contains(&tf.table_id().table_id)
             })
             .await;
-        let fragment_ids = to_drop_table_fragments
-            .iter()
-            .map(|f| f.table_id())
-            .collect_vec();
-        println!("Cleaning dirty fragment ids {fragment_ids:?}");
-
         let to_drop_streaming_ids = to_drop_table_fragments
             .iter()
             .map(|t| t.table_id())
             .collect();
 
-        debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
         self.fragment_manager
             .drop_table_fragments_vec(&to_drop_streaming_ids)
             .await?;

@@ -920,7 +920,7 @@ impl GlobalBarrierManager {
     }
 
     async fn recover_mview_progress(&self) -> MetaResult<()> {
-        let creating_tables = self.catalog_manager.list_creating_tables().await;
+        let creating_tables = self.catalog_manager.list_creating_mviews().await;
         let creating_table_ids = creating_tables
             .iter()
             .map(|t| TableId { table_id: t.id })

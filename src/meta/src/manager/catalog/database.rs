@@ -258,7 +258,7 @@ impl DatabaseManager {
         self.databases.values().cloned().collect_vec()
     }
 
-    pub fn list_creating_tables(&self) -> Vec<Table> {
+    pub fn list_creating_mviews(&self) -> Vec<Table> {
         self.tables
             .values()
             .filter(|&t| {
@@ -267,6 +267,15 @@ impl DatabaseManager {
             })
             .cloned()
             .collect_vec()
+    }
+
+    pub fn list_creating_tables(&self) -> Vec<Table> {
+        self.tables
+            .values()
+            .filter(|&t| t.stream_job_status == PbStreamJobStatus::Creating as i32)
+            .cloned()
+            .collect_vec()
+        // FIXME: Perhaps these are needed still?
         // self.in_progress_creating_tables
         //     .values()
         //     .cloned()
