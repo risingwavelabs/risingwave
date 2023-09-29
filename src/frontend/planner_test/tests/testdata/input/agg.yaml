@@ -929,3 +929,16 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+
+- sql: |
+    CREATE TABLE t (a int, b int);
+    SELECT a, sum((sum(b))) OVER (PARTITION BY a ORDER BY a) FROM t GROUP BY a;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- sql: |
+    CREATE TABLE t (a int, b int);
+    SELECT a, row_number() OVER (PARTITION BY a ORDER BY a DESC) FROM t;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
