@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use async_trait::async_trait;
 use aws_sdk_s3::client::Client;
-use aws_sdk_s3::error::DisplayErrorContext;
-use aws_sdk_s3::types::Object;
 use itertools::Itertools;
 
 use crate::aws_auth::AwsAuthProps;
@@ -60,11 +58,11 @@ pub fn get_prefix(glob: &str) -> String {
 
 #[derive(Debug, Clone)]
 pub struct S3SplitEnumerator {
-    bucket_name: String,
+    pub(crate) bucket_name: String,
     // prefix is used to reduce the number of objects to be listed
-    prefix: Option<String>,
-    matcher: Option<glob::Pattern>,
-    client: Client,
+    pub(crate) prefix: Option<String>,
+    pub(crate) matcher: Option<glob::Pattern>,
+    pub(crate) client: Client,
 
     // token get the next page, used when the current page is truncated
     pub(crate) next_continuation_token: Option<String>,
@@ -111,45 +109,6 @@ impl SplitEnumerator for S3SplitEnumerator {
         }
         self.next_continuation_token = None;
         Ok(objects)
-    }
-}
-
-#[async_trait]
-impl FsListInner for S3SplitEnumerator {
-    async fn get_next_page<T: for<'a> From<&'a Object>>(
-        &mut self,
-    ) -> anyhow::Result<(Vec<T>, bool)> {
-        let mut has_finished = false;
-        let mut req = self
-            .client
-            .list_objects_v2()
-            .bucket(&self.bucket_name)
-            .set_prefix(self.prefix.clone());
-        if let Some(continuation_token) = self.next_continuation_token.take() {
-            req = req.continuation_token(continuation_token);
-        }
-        let mut res = req
-            .send()
-            .await
-            .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
-        if res.is_truncated() {
-            self.next_continuation_token = res.next_continuation_token.clone();
-        } else {
-            has_finished = true;
-        }
-        let objects = res.contents.take().unwrap_or_default();
-        let matched_objs: Vec<T> = objects
-            .iter()
-            .filter(|obj| obj.key().is_some())
-            .filter(|obj| {
-                self.matcher
-                    .as_ref()
-                    .map(|m| m.matches(obj.key().unwrap()))
-                    .unwrap_or(true)
-            })
-            .map(T::from)
-            .collect_vec();
-        Ok((matched_objs, has_finished))
     }
 }
 

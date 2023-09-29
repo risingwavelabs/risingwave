@@ -509,7 +509,7 @@ impl PredicatePushdown for LogicalSource {
 impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
         if self.core.catalog.is_some()
-            && ConnectorProperties::is_new_fs_connector(
+            && ConnectorProperties::is_new_fs_connector_b_tree_map(
                 &self.core.catalog.as_ref().unwrap().properties,
             )
         {
@@ -525,7 +525,7 @@ impl ToStream for LogicalSource {
         let mut plan_prefix: Option<PlanRef> = None;
         let mut plan: PlanRef;
         if self.core.catalog.is_some()
-            && ConnectorProperties::is_new_fs_connector(
+            && ConnectorProperties::is_new_fs_connector_b_tree_map(
                 &self.core.catalog.as_ref().unwrap().properties,
             )
         {

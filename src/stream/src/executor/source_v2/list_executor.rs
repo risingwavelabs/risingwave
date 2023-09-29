@@ -33,6 +33,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::*;
 
+#[allow(dead_code)]
 pub struct FsListExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -95,7 +96,7 @@ impl<S: StateStore> FsListExecutor<S> {
     ) -> StreamExecutorResult<BoxTryStream<StreamChunk>> {
         let stream = source_desc
             .source
-            .source_lister()
+            .get_source_list()
             .await
             .map_err(StreamExecutorError::connector_error)?;
 
@@ -110,18 +111,11 @@ impl<S: StateStore> FsListExecutor<S> {
             .map(|split| {
                 (
                     Op::Insert,
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Utf8(split.name.into_boxed_str())),
-                        Some(ScalarImpl::Timestamp(split.timestamp)),
-                        Some(ScalarImpl::Int64(split.size as i64)),
-                    ]),
+                    OwnedRow::new(vec![Some(ScalarImpl::Utf8(split.name.into_boxed_str()))]),
                 )
             })
             .collect::<Vec<_>>();
-        StreamChunk::from_rows(
-            &rows,
-            &[DataType::Varchar, DataType::Timestamp, DataType::Int64],
-        )
+        StreamChunk::from_rows(&rows, &[DataType::Varchar])
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]

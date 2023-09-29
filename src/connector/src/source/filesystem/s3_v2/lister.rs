@@ -12,51 +12,74 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use aws_sdk_s3::error::DisplayErrorContext;
-use aws_sdk_s3::Client;
-use futures_async_stream::try_stream;
+use aws_sdk_s3::types::Object;
 use itertools::Itertools;
-use risingwave_common::error::RwError;
-use risingwave_common::types::Timestamp;
 
-use crate::aws_auth::AwsAuthProps;
-use crate::aws_utils::{default_conn_config, s3_client};
-use crate::source::filesystem::file_common::FsPage;
-use crate::source::filesystem::{FsPageItem, S3Properties, S3SplitEnumerator};
-use crate::source::{BoxTryStream, FsFilterCtrlCtx, FsListInner, FsSourceList};
+use crate::source::filesystem::{FsPageItem, S3SplitEnumerator};
+use crate::source::{FsFilterCtrlCtx, FsListInner};
+
+// impl S3SplitEnumerator {
+//     async fn paginate_inner(mut self) {
+//         let ctx = FsFilterCtrlCtx;
+//         let mut page_num = 0;
+//         loop {
+//             let (fs_page, has_finished) = self.get_next_page::<FsPageItem>().await?;
+//             let matched_items = fs_page
+//                 .into_iter()
+//                 .filter(|item| Self::filter_policy(&ctx, page_num, item))
+//                 .collect_vec();
+//             yield matched_items;
+//             page_num += 1;
+//             if has_finished {
+//                 break;
+//             }
+//         }
+//     }
+// }
 
 #[async_trait]
-impl FsSourceList for S3SplitEnumerator {
-    fn paginate(self) -> BoxTryStream<FsPage> {
-        self.paginate_inner()
-    }
-
-    fn ctrl_policy(_ctx: FsFilterCtrlCtx, _page_num: usize, _item: &FsPageItem) -> bool {
-        true
-    }
-}
-
-impl S3SplitEnumerator {
-    #[try_stream(boxed, ok = FsPage, error = RwError)]
-    async fn paginate_inner(mut self) {
-        loop {
-            let ctx: FsFilterCtrlCtx;
-            let mut page_num = 0;
-            'inner: loop {
-                let (fs_page, has_finished) = self.get_next_page::<FsPageItem>().await?;
-                let matched_items = fs_page
-                    .into_iter()
-                    .filter(|item| Self::ctrl_policy(&ctx, page_num, item))
-                    .collect_vec();
-                page_num += 1;
-                yield matched_items;
-                if has_finished {
-                    break 'inner;
-                }
-            }
+impl FsListInner for S3SplitEnumerator {
+    async fn get_next_page<T: for<'a> From<&'a Object>>(
+        &mut self,
+    ) -> anyhow::Result<(Vec<T>, bool)> {
+        let mut has_finished = false;
+        let mut req = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket_name)
+            .set_prefix(self.prefix.clone());
+        if let Some(continuation_token) = self.next_continuation_token.take() {
+            req = req.continuation_token(continuation_token);
+        }
+        let mut res = req
+            .send()
+            .await
+            .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
+        if res.is_truncated() {
+            self.next_continuation_token = res.next_continuation_token.clone();
+        } else {
+            has_finished = true;
             self.next_continuation_token = None;
         }
+        let objects = res.contents.take().unwrap_or_default();
+        let matched_objs: Vec<T> = objects
+            .iter()
+            .filter(|obj| obj.key().is_some())
+            .filter(|obj| {
+                self.matcher
+                    .as_ref()
+                    .map(|m| m.matches(obj.key().unwrap()))
+                    .unwrap_or(true)
+            })
+            .map(T::from)
+            .collect_vec();
+        Ok((matched_objs, has_finished))
+    }
+
+    fn filter_policy(&self, _ctx: &FsFilterCtrlCtx, _page_num: usize, _item: &FsPageItem) -> bool {
+        true
     }
 }

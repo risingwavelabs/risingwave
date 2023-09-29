@@ -18,19 +18,23 @@ use std::sync::Arc;
 use futures::future::try_join_all;
 use futures::stream::pending;
 use futures::StreamExt;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
-use risingwave_common::error::{internal_error, Result};
+use risingwave_common::error::{internal_error, Result, RwError};
 use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
-use risingwave_connector::source::filesystem::s3_v2::lister::S3SourceLister;
-use risingwave_connector::source::filesystem::FsPage;
+use risingwave_connector::sink::encoder::SerTo;
+use risingwave_connector::source::filesystem::{FsPage, FsPageItem, S3SplitEnumerator};
 use risingwave_connector::source::{
     create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
-    ConnectorState, FsSourceList, SourceColumnDesc, SourceContext, SplitReader,
+    ConnectorState, FsFilterCtrlCtx, FsFilterCtrlCtxRef, FsListInner, SourceColumnDesc,
+    SourceContext, SourceEnumeratorContext, SplitEnumerator, SplitReader,
 };
+use tokio::time::{Duration, MissedTickBehavior};
+use tokio::{select, time};
 
 #[derive(Clone, Debug)]
 pub struct ConnectorSource {
@@ -39,6 +43,15 @@ pub struct ConnectorSource {
     pub parser_config: SpecificParserConfig,
     pub connector_message_buffer_size: usize,
 }
+
+#[derive(Clone, Debug)]
+pub struct FsListCtrlContext {
+    pub interval: Duration,
+    pub last_tick: Option<time::Instant>,
+
+    pub filter_ctx: FsFilterCtrlCtx,
+}
+pub type FsListCtrlContextRef = Arc<FsListCtrlContext>;
 
 impl ConnectorSource {
     pub fn new(
@@ -76,14 +89,23 @@ impl ConnectorSource {
             .collect::<Result<Vec<SourceColumnDesc>>>()
     }
 
-    pub async fn source_lister(&self) -> Result<BoxTryStream<FsPage>> {
+    pub async fn get_source_list(&self) -> Result<BoxTryStream<FsPage>> {
         let config = self.config.clone();
         let lister = match config {
-            ConnectorProperties::S3(prop) => S3SourceLister::new(*prop).await?,
-            _ => unreachable!(),
+            ConnectorProperties::S3(prop) => {
+                S3SplitEnumerator::new(*prop, Arc::new(SourceEnumeratorContext::default())).await?
+            }
+            other => return Err(internal_error(format!("Unsupported source: {:?}", other))),
         };
 
-        Ok(lister.paginate())
+        Ok(build_fs_list_stream(
+            FsListCtrlContext {
+                interval: Duration::from_secs(60),
+                last_tick: None,
+                filter_ctx: FsFilterCtrlCtx::default(),
+            },
+            lister,
+        ))
     }
 
     pub async fn stream_reader(
@@ -157,5 +179,41 @@ impl ConnectorSource {
 
             Ok(select_all(readers.into_iter().map(|r| r.into_stream())).boxed())
         })
+    }
+}
+
+#[try_stream(boxed, ok = FsPage, error = RwError)]
+async fn build_fs_list_stream(
+    mut ctrl_ctx: FsListCtrlContext,
+    mut list_op: impl FsListInner + Send + 'static,
+) {
+    let mut interval = time::interval(ctrl_ctx.interval);
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+    // controlling whether request for next page
+    fn page_ctrl_logic(_ctx: &FsListCtrlContext, has_finished: bool, _page_num: usize) -> bool {
+        if has_finished {
+            false
+        } else {
+            true
+        }
+    }
+
+    loop {
+        let mut page_num = 0;
+        ctrl_ctx.last_tick = Some(time::Instant::now());
+        'inner: loop {
+            let (fs_page, has_finished) = list_op.get_next_page::<FsPageItem>().await?;
+            let matched_items = fs_page
+                .into_iter()
+                .filter(|item| list_op.filter_policy(&ctrl_ctx.filter_ctx, page_num, item))
+                .collect_vec();
+            yield matched_items;
+            page_num += 1;
+            if !page_ctrl_logic(&ctrl_ctx, has_finished, page_num) {
+                break 'inner;
+            }
+        }
+        interval.tick().await;
     }
 }

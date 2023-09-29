@@ -73,16 +73,6 @@ pub struct FsPageItem {
     pub timestamp: Timestamp,
 }
 
-impl FsPageItem {
-    pub fn new(name: String, size: usize, timestamp: Timestamp) -> Self {
-        Self {
-            name,
-            size,
-            timestamp,
-        }
-    }
-}
-
 pub type FsPage = Vec<FsPageItem>;
 
 impl From<&Object> for FsPageItem {

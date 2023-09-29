@@ -34,7 +34,7 @@ use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
 
 use super::datagen::DatagenMeta;
-use super::filesystem::{FsPage, FsSplit};
+use super::filesystem::FsSplit;
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
@@ -43,6 +43,7 @@ use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::{FsPageItem, S3_V2_CONNECTOR};
 use crate::source::monitor::EnumeratorMetrics;
+use crate::source::S3_CONNECTOR;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
     impl_split, match_source_name_str,
@@ -300,11 +301,30 @@ pub trait SplitReader: Sized + Send {
 for_all_sources!(impl_connector_properties);
 
 impl ConnectorProperties {
-    pub fn is_new_fs_connector(props: &BTreeMap<String, String>) -> bool {
+    pub fn is_new_fs_connector_b_tree_map(props: &BTreeMap<String, String>) -> bool {
         props
             .get(UPSTREAM_SOURCE_KEY)
             .map(|s| s.eq_ignore_ascii_case(S3_V2_CONNECTOR))
             .unwrap_or(false)
+    }
+
+    pub fn is_new_fs_connector_hash_map(props: &HashMap<String, String>) -> bool {
+        props
+            .get(UPSTREAM_SOURCE_KEY)
+            .map(|s| s.eq_ignore_ascii_case(S3_V2_CONNECTOR))
+            .unwrap_or(false)
+    }
+
+    pub fn rewrite_upstream_source_key_hash_map(props: &mut HashMap<String, String>) {
+        let connector = props.remove(UPSTREAM_SOURCE_KEY).unwrap();
+        match connector.as_str() {
+            S3_V2_CONNECTOR => {
+                props.insert(UPSTREAM_SOURCE_KEY.to_string(), S3_CONNECTOR.to_string());
+            }
+            _ => {
+                props.insert(UPSTREAM_SOURCE_KEY.to_string(), connector);
+            }
+        }
     }
 }
 
@@ -510,18 +530,15 @@ pub trait SplitMetaData: Sized {
 /// [`None`] and the created source stream will be a pending stream.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
 
+#[derive(Debug, Clone, Default)]
+pub struct FsFilterCtrlCtx;
+pub type FsFilterCtrlCtxRef = Arc<FsFilterCtrlCtx>;
+
 #[async_trait]
 pub trait FsListInner: Sized {
     // fixme: better to implement as an Iterator, but the last page still have some contents
     async fn get_next_page<T: for<'a> From<&'a Object>>(&mut self) -> Result<(Vec<T>, bool)>;
-}
-
-pub struct FsFilterCtrlCtx;
-
-#[async_trait]
-pub trait FsSourceList: Sized + FsListInner {
-    fn paginate(self) -> BoxTryStream<FsPage>;
-    fn ctrl_policy(ctx: &FsFilterCtrlCtx, page_num: usize, item: &FsPageItem) -> bool;
+    fn filter_policy(&self, ctx: &FsFilterCtrlCtx, page_num: usize, item: &FsPageItem) -> bool;
 }
 
 #[cfg(test)]
