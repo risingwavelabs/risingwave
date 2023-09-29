@@ -302,7 +302,7 @@ impl<'a, F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManagerAddFuture
     }
 
     pub async fn await_one_delivery(&mut self) -> Result<(), F::Error> {
-        for (_, item) in self.0.items.iter_mut() {
+        for (_, item) in &mut self.0.items {
             if let DeliveryFutureManagerItem::Chunk {futures, ..} = item && let Some(mut delivery_future) = futures.pop_front() {
                 self.0.future_count -= 1;
                 return poll_fn(|cx| delivery_future.try_poll_unpin(cx)).await;
@@ -581,7 +581,6 @@ mod tests {
                 .add_future_may_await(to_test_future(rx1_2))
                 .await
                 .unwrap());
-            drop(write_chunk);
             assert_eq!(manager.future_count, 2);
         }
 
