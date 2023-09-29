@@ -180,7 +180,7 @@ impl SinkFormatDesc {
 }
 
 impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
-    type Error = String;
+    type Error = SinkError;
 
     fn try_from(value: PbSinkFormatDesc) -> Result<Self, Self::Error> {
         use risingwave_pb::plan_common::{EncodeType as E, FormatType as F};
@@ -190,7 +190,10 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             F::Upsert => SinkFormat::Upsert,
             F::Debezium => SinkFormat::Debezium,
             f @ (F::Unspecified | F::Native | F::DebeziumMongo | F::Maxwell | F::Canal) => {
-                return Err(format!("sink format unsupported: {}", f.as_str_name()))
+                return Err(SinkError::Config(anyhow!(
+                    "sink format unsupported: {}",
+                    f.as_str_name()
+                )))
             }
         };
         let encode = match value.encode() {
@@ -198,7 +201,10 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Avro => SinkEncode::Avro,
             e @ (E::Unspecified | E::Native | E::Csv | E::Bytes) => {
-                return Err(format!("sink encode unsupported: {}", e.as_str_name()))
+                return Err(SinkError::Config(anyhow!(
+                    "sink encode unsupported: {}",
+                    e.as_str_name()
+                )))
             }
         };
         let options = value.options.into_iter().collect();

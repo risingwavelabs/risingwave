@@ -82,7 +82,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         }?;
         let format_desc = match &sink_desc.format_desc {
             // Case A: new syntax `format ... encode ...`
-            Some(f) => Some(f.clone().try_into().map_err(|e| anyhow!("{e}"))?),
+            Some(f) => Some(f.clone().try_into()?),
             None => match sink_desc.properties.get(SINK_TYPE_OPTION) {
                 // Case B: old syntax `type = '...'`
                 Some(t) => SinkFormatDesc::from_legacy_type(connector, t)?,
