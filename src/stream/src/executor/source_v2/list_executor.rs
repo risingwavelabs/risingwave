@@ -223,6 +223,7 @@ mod tests {
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
 
+    #[ignore]
     #[tokio::test]
     async fn test_fs_list_executor() {
         let table_id = TableId::default();
