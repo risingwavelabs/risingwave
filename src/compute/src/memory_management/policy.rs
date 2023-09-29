@@ -122,7 +122,7 @@ impl JemallocMemoryControl {
                 .unwrap()
                 .to_string();
 
-            // FIXME: file_path_str is leaked
+            // `file_path_str` is leaked because `jemalloc_dump_mib.write` requires static lifetime
             let file_path_str = Box::leak(file_path.into_boxed_str());
             let file_path_bytes = file_path_str.as_bytes();
             if let Err(e) = self

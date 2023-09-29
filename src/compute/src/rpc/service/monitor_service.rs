@@ -154,7 +154,7 @@ impl MonitorService for MonitorServiceImpl {
             .to_str()
             .ok_or_else(|| Status::internal("The file dir is not a UTF-8 String"))?;
 
-        // FIXME: file_path_str is leaked
+        // `file_path_str` is leaked because `prof::dump::write` requires static lifetime
         let file_path_str = Box::leak(file_path.to_string().into_boxed_str());
         let file_path_bytes = file_path_str.as_bytes();
         let response = if let Err(e) = tikv_jemalloc_ctl::prof::dump::write(
