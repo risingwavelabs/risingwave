@@ -805,6 +805,4 @@ message StreamFragmentGraph {
   StreamEnvironment env = 5;
   // If none, default parallelism will be applied.
   Parallelism parallelism = 6;
-
-  repeated uint32 dependent_source_ids = 7;
 }

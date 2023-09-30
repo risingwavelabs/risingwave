@@ -38,7 +38,7 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
     for msg in upstream {
         let mut msg = msg?;
         if let Message::Chunk(chunk) = &mut msg {
-            let mut parsed_chunk = parse_debezium_chunk(&mut parser, chunk, schema).await?;
+            let parsed_chunk = parse_debezium_chunk(&mut parser, chunk, schema).await?;
             let _ = std::mem::replace(chunk, parsed_chunk);
         }
         yield msg;

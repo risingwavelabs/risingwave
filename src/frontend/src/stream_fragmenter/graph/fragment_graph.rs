@@ -110,8 +110,6 @@ impl StreamFragmentGraph {
             dependent_table_ids: vec![],
             table_ids_cnt: 0,
             parallelism: None,
-            // To be filled later
-            dependent_source_ids: vec![],
         }
     }
 

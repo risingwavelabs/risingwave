@@ -17,12 +17,12 @@ use std::rc::Rc;
 use std::sync::LazyLock;
 
 use anyhow::anyhow;
-use fixedbitset::FixedBitSet;
+
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    is_column_ids_dedup, offset_column_desc, ColumnCatalog, ColumnDesc, TableId,
+    is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId,
     DEFAULT_KEY_COLUMN_NAME, INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
@@ -37,7 +37,7 @@ use risingwave_connector::source::cdc::{
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
-use risingwave_connector::source::external::TABLE_NAME_KEY;
+
 use risingwave_connector::source::filesystem::S3_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::{
@@ -65,9 +65,9 @@ use crate::handler::create_table::{
 };
 use crate::handler::util::{get_connector, is_cdc_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{LogicalScan, LogicalSource, ToStream, ToStreamContext};
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
-use crate::optimizer::PlanRoot;
+use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
+
+
 use crate::session::SessionImpl;
 use crate::utils::resolve_connection_in_with_option;
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};

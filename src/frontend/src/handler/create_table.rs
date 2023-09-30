@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::iter::once;
 use std::rc::Rc;
 
 use anyhow::anyhow;
@@ -36,11 +35,9 @@ use risingwave_connector::source::external::{
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, Format, ObjectName, SourceSchemaV2,
     SourceWatermark, TableConstraint,
@@ -51,13 +48,13 @@ use crate::binder::{bind_data_type, bind_struct_field, Clause};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
-use crate::expr::{Expr, ExprImpl, FunctionCall};
+use crate::expr::{Expr, ExprImpl};
 use crate::handler::create_source::{
     bind_source_watermark, check_source_schema, try_bind_columns_from_source,
     validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{LogicalFilter, LogicalScan, LogicalSource};
+use crate::optimizer::plan_node::{LogicalScan, LogicalSource};
 use crate::optimizer::property::{Cardinality, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::{CheckRelationError, SessionImpl};
@@ -881,7 +878,8 @@ fn derive_connect_properties(
                     .strip_prefix(prefix.as_str())
                     .ok_or_else(|| anyhow!("external table name must contain database prefix"))?
             }
-            _POSTGRES_CDC_CONNECTOR => {
+            #[allow(unused_variables, non_snake_case)]
+            POSTGRES_CDC_CONNECTOR => {
                 let schema_name = connect_properties
                     .get(SCHEMA_NAME_KEY)
                     .ok_or_else(|| anyhow!("{} not found in source properties", SCHEMA_NAME_KEY))?;
@@ -934,8 +932,8 @@ pub async fn handle_create_table(
     let (graph, source, table, job_type) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
-        let mut col_id_gen = ColumnIdGenerator::new_initial();
-        let mut properties = context.with_options().inner().clone().into_iter().collect();
+        let col_id_gen = ColumnIdGenerator::new_initial();
+        let properties = context.with_options().inner().clone().into_iter().collect();
 
         let ((plan, source, table), job_type) = match (source_schema, cdc_source.as_ref()) {
             (Some(source_schema), None) => (

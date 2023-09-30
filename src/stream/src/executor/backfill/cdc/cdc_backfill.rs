@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::default::Default;
 use std::pin::{pin, Pin};
 use std::sync::Arc;
 
@@ -20,21 +19,14 @@ use anyhow::anyhow;
 use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
-use futures_async_stream::{for_await, try_stream};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
-use maplit::hashmap;
-use risingwave_common::array::{DataChunk, StreamChunk};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
-use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, JsonbVal, ScalarRefImpl};
-use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::source::external::{CdcOffset, DebeziumOffset, DebeziumSourceOffset};
-use risingwave_connector::source::{
-    SourceColumnDesc, SourceContext, SplitId, SplitImpl, SplitMetaData,
-};
+use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::Schema;
+use risingwave_common::row::OwnedRow;
+use risingwave_connector::source::external::CdcOffset;
+use risingwave_connector::source::SplitMetaData;
 use risingwave_storage::StateStore;
-use serde_json::Value;
 
 use crate::executor::backfill::cdc::state::{CdcStateManageImpl, EmbededStateManage};
 use crate::executor::backfill::cdc::utils::transform_upstream;
@@ -48,8 +40,8 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, MessageStream, Mutation, PkIndices, PkIndicesRef,
-    SourceStateTableHandler, StreamExecutorError, StreamExecutorResult,
+    ExecutorInfo, Message, Mutation, PkIndices, PkIndicesRef, SourceStateTableHandler,
+    StreamExecutorError,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
@@ -154,7 +146,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     },
                     Some(splits) => {
                         assert!(!splits.is_empty());
-                        let split = splits.iter().exactly_one().map_err(|err| {
+                        let split = splits.iter().exactly_one().map_err(|_err| {
                             StreamExecutorError::from(anyhow!(
                                     "expect only one cdc split for table {}",
                                     upstream_table_id
@@ -214,7 +206,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // Keep track of rows from the snapshot.
         #[allow(unused_variables)]
         let mut total_snapshot_processed_rows: u64 = 0;
-        let mut snapshot_read_epoch = init_epoch;
+        let mut snapshot_read_epoch;
 
         let mut last_binlog_offset: Option<CdcOffset>;
 
@@ -506,7 +498,7 @@ mod tests {
         // let payload = r#"{"before": null,"after":{"O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" },"source":{"version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null},"op":"r","ts_ms":1695277757017,"transaction":null}"#.to_string();
         let payload = r#"{ "payload": { "before": null, "after": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null }, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#;
 
-        let mut datums: Vec<Datum> = vec![
+        let datums: Vec<Datum> = vec![
             Some(JsonbVal::from_str(payload).unwrap().into()),
             Some("file: 1.binlog, pos: 100".to_string().into()),
             Some("mydb.orders".to_string().into()),

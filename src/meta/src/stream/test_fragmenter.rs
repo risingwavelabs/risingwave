@@ -37,7 +37,7 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
 };
 
-use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
+use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob, TableJobType};
 use crate::model::TableFragments;
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
@@ -227,6 +227,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
                 output_indices: vec![0, 1, 2],
+                ..Default::default()
             }),
         })),
         fields: vec![
@@ -389,6 +390,7 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
                 r#type: DispatcherType::Simple as i32,
                 dist_key_indices: vec![],
                 output_indices: vec![],
+                ..Default::default()
             }),
             link_id: 4,
             upstream_id: 1,
@@ -399,6 +401,7 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
                 output_indices: vec![],
+                ..Default::default()
             }),
             link_id: 1,
             upstream_id: 2,
@@ -452,7 +455,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
 async fn test_graph_builder() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
-    let job = StreamingJob::Table(None, make_materialize_table(888));
+    let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::Normal);
 
     let graph = make_stream_graph();
     let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;

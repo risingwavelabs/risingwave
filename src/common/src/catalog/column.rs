@@ -21,7 +21,7 @@ use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
 use super::row_id_column_desc;
 use crate::catalog::{
-    offset_column_desc, table_id_column_desc, table_name_column_desc, table_name_column_name,
+    offset_column_desc, table_id_column_desc, table_name_column_desc,
     Field, ROW_ID_COLUMN_ID,
 };
 use crate::error::ErrorCode;

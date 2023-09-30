@@ -25,12 +25,11 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    ChainType, DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
+    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag, NoOpNode,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
 use self::rewrite::build_delta_join_without_arrange;
-use crate::catalog::SourceId;
 use crate::optimizer::plan_node::reorganize_elements_id;
 use crate::optimizer::PlanRef;
 
@@ -53,8 +52,6 @@ pub struct BuildFragmentGraphState {
 
     /// dependent streaming job ids.
     dependent_table_ids: HashSet<TableId>,
-
-    dependent_source_ids: HashSet<SourceId>,
 
     /// operator id to `LocalFragmentId` mapping used by share operator.
     share_mapping: HashMap<u32, LocalFragmentId>,
@@ -127,7 +124,6 @@ pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
         .into_iter()
         .map(|id| id.table_id)
         .collect();
-    fragment_graph.dependent_source_ids = state.dependent_source_ids.into_iter().collect();
     fragment_graph.table_ids_cnt = state.next_table_id;
     fragment_graph
 }
@@ -279,15 +275,8 @@ fn build_fragment(
 
         NodeBody::Chain(node) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
-            // if node.chain_type == ChainType::CdcBackfill as i32 {
-            //     state.dependent_source_ids.insert(node.table_id);
-            // } else {
-            //     // memorize table id for later use
-            //     state
-            //         .dependent_table_ids
-            //         .insert(TableId::new(node.table_id));
-            // }
             // memorize table id for later use
+            // The table id could be a upstream CDC source
             state
                 .dependent_table_ids
                 .insert(TableId::new(node.table_id));
