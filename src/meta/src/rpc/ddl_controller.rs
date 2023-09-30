@@ -417,19 +417,22 @@ impl DdlController {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
-        // NOTE(kwannoel): We commit `Table` to meta here.
-        let fragment_graph = self
-            .prepare_stream_job(&mut stream_job, fragment_graph)
-            .await?;
-
-        // Update the corresponding 'initiated_at' field.
-        stream_job.mark_initialized();
 
         let mut internal_tables = vec![];
         let result = try {
+            // NOTE(kwannoel): We commit `Table` to meta here.
+            let fragment_graph = self
+                .prepare_stream_job(&mut stream_job, fragment_graph)
+                .await?;
+            tracing::info!("Prepared stream job {}", stream_job.id());
+
+            // Update the corresponding 'initiated_at' field.
+            stream_job.mark_initialized();
+
             let (ctx, table_fragments) = self
                 .build_stream_job(env, &stream_job, fragment_graph)
                 .await?;
+            tracing::info!("Built stream job {}", stream_job.id());
 
             internal_tables = ctx.internal_tables();
 
@@ -463,6 +466,7 @@ impl DdlController {
             CreateType::Background => {
                 let ctrl = self.clone();
                 let definition = stream_job.definition();
+                let stream_job_id = stream_job.id();
                 let fut = async move {
                     let result = ctrl
                         .create_streaming_job_inner(
@@ -472,8 +476,11 @@ impl DdlController {
                             internal_tables,
                         )
                         .await;
+                    tracing::info!("created stream job {}", stream_job_id);
                     match result {
-                        Err(e) => tracing::error!(definition, error = ?e, "stream_job_error"),
+                        Err(e) => {
+                            tracing::error!(definition, error = ?e, "create_streaming_job_failed")
+                        }
                         Ok(_) => {
                             tracing::info!(definition, "stream_job_ok")
                         }

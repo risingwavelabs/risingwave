@@ -69,7 +69,7 @@ test_snapshot_and_upstream_read() {
 
 # Test background ddl recovery
 test_background_ddl_recovery() {
-  echo "--- e2e, ci-1cn-1fe-with-recovery, test background ddl"
+  echo "--- e2e, ci-1cn-1fe-with-recovery, test_background_ddl_recovery"
   cargo make ci-start ci-1cn-1fe-with-recovery
 
   # Test before recovery
@@ -77,6 +77,16 @@ test_background_ddl_recovery() {
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/recovery/validate.slt"
 
   OLD_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
+
+  sleep 2
+
+  pushd .risingwave/log
+  for log in *.log
+    do
+      mv -- "$log" "before-restart-$log"
+    done
+  cp .risingwave/log/meta-node*.log .risingwave/log/meta-old.log
+  popd
 
   # Restart
   cargo make kill
@@ -104,7 +114,8 @@ test_background_ddl_recovery() {
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/recovery/drop.slt"
 
   cargo make kill
-}
+
+}}
 
 test_background_ddl_cancel() {
   echo "--- e2e, ci-1cn-1fe-with-recovery, test background ddl"

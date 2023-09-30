@@ -769,8 +769,9 @@ impl CatalogManager {
         for table in creating_tables {
             // 1. Incomplete Foreground jobs
             if table.create_type == CreateType::Foreground as i32
-                || table.create_type == CreateType::Unspecified as i32
+            // || table.create_type == CreateType::Unspecified as i32
             {
+                eprintln!("cleaning table_id for foreground: {:#?}", table.id);
                 tables_to_clean.push(table);
                 continue;
             }
@@ -785,6 +786,7 @@ impl CatalogManager {
                     .await
                 {
                     Err(_) => {
+                        eprintln!("cleaning table_id for no fragments: {:#?}", table.id);
                         tables_to_clean.push(table);
                         continue;
                     }
@@ -793,6 +795,7 @@ impl CatalogManager {
                         // 3. For those in initial state (i.e. not running / created),
                         // we should purge them.
                         if fragment.state() == State::Initial {
+                            eprintln!("cleaning table_id no initial state: {:#?}", table.id);
                             tables_to_clean.push(table);
                             continue;
                         } else {
@@ -808,7 +811,11 @@ impl CatalogManager {
             }
         }
         for t in internal_tables_to_clean {
-            if reserved_internal_tables.contains(&t.id) {
+            if !reserved_internal_tables.contains(&t.id) {
+                eprintln!(
+                    "cleaning table_id for internal tables not reserved: {:#?}",
+                    t.id
+                );
                 tables_to_clean.push(t);
             }
         }
@@ -828,6 +835,7 @@ impl CatalogManager {
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
         for table in tables_to_clean {
+            eprintln!("clean_dirty_table_id: {}", table.id);
             let table = tables.remove(table.id);
             assert!(table.is_some())
         }

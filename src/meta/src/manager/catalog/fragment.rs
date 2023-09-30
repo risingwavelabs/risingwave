@@ -194,7 +194,6 @@ impl FragmentManager {
         for table_id in table_ids {
             if let Some(table_fragments) = map.get(table_id) {
                 let dependent_ids = table_fragments.dependent_table_ids();
-                println!("dependent ids: {:#?}", &dependent_ids);
                 let r = upstream_relation_counts.insert(*table_id, dependent_ids);
                 assert!(r.is_none(), "Each table_id should be unique!")
             } else {
@@ -340,6 +339,10 @@ impl FragmentManager {
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
 
         assert_eq!(table_fragment.state(), State::Initial);
+        eprintln!(
+            "set table_fragment {} to creating",
+            table_fragment.table_id()
+        );
         table_fragment.set_state(State::Creating);
         table_fragment.update_actors_state(ActorState::Running);
         table_fragment.set_actor_splits_by_split_assignment(split_assignment);
