@@ -493,7 +493,7 @@ impl From<PbTable> for TableCatalog {
         let id = tb.id;
         let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
         let table_type = tb.get_table_type().unwrap();
-        let create_type = tb.get_create_type().unwrap();
+        let create_type = tb.get_create_type().unwrap_or(CreateType::Foreground);
         let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
         });
