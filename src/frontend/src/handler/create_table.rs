@@ -876,8 +876,9 @@ fn derive_connect_properties(
                     anyhow!("{} not found in source properties", DATABASE_NAME_KEY)
                 })?;
 
+                let prefix = format!("{}.", db_name.as_str());
                 external_table_name
-                    .strip_prefix(db_name)
+                    .strip_prefix(prefix.as_str())
                     .ok_or_else(|| anyhow!("external table name must contain database prefix"))?
             }
             _POSTGRES_CDC_CONNECTOR => {
@@ -885,8 +886,9 @@ fn derive_connect_properties(
                     .get(SCHEMA_NAME_KEY)
                     .ok_or_else(|| anyhow!("{} not found in source properties", SCHEMA_NAME_KEY))?;
 
+                let prefix = format!("{}.", schema_name.as_str());
                 external_table_name
-                    .strip_prefix(schema_name)
+                    .strip_prefix(prefix.as_str())
                     .ok_or_else(|| anyhow!("external table name must contain schema prefix"))?
             }
         };

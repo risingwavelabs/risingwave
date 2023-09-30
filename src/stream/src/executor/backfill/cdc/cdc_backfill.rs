@@ -177,7 +177,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             upstream.peekable()
         };
 
-        tracing::debug!(?self.actor_ctx.id, ?shared_cdc_source, "start cdc backfill");
+        tracing::debug!(?upstream_table_id, ?self.actor_ctx.id, ?shared_cdc_source, "start cdc backfill");
         state_manage.init_epoch(first_barrier.epoch);
 
         // start from the beginning
@@ -214,6 +214,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // Keep track of rows from the snapshot.
         #[allow(unused_variables)]
         let mut total_snapshot_processed_rows: u64 = 0;
+        let mut snapshot_read_epoch = init_epoch;
 
         let mut last_binlog_offset: Option<CdcOffset>;
 
@@ -326,6 +327,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                     // seal current epoch even though there is no data
                                     state_manage.commit_state(barrier.epoch).await?;
+                                    snapshot_read_epoch = barrier.epoch.prev;
+                                    if let Some(progress) = self.progress.as_mut() {
+                                        progress.update(
+                                            barrier.epoch.curr,
+                                            snapshot_read_epoch,
+                                            total_snapshot_processed_rows,
+                                        );
+                                    }
 
                                     yield Message::Barrier(barrier);
                                     // Break the for loop and start a new snapshot read stream.
@@ -441,6 +450,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 // persist the backfill state if any
                 if let Message::Barrier(barrier) = &msg {
                     state_manage.commit_state(barrier.epoch).await?;
+
+                    // mark backfill progress as finished
+                    if let Some(progress) = self.progress.as_mut() {
+                        progress.finish(barrier.epoch.curr);
+                    }
                 }
                 yield msg;
             }
