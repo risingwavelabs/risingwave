@@ -36,7 +36,9 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
 use crate::manager::cluster::WorkerId;
-use crate::manager::{commit_meta, commit_meta_with_trx, LocalNotification, MetaSrvEnv};
+use crate::manager::{
+    commit_meta, commit_meta_with_trx, LocalNotification, MetaSrvEnv, TableJobType,
+};
 use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
     ValTransaction,
@@ -1095,10 +1097,11 @@ impl FragmentManager {
             .mview_actor_ids())
     }
 
-    /// Get and filter the upstream `Materialize` fragments of the specified relations.
-    pub async fn get_upstream_mview_fragments(
+    /// Get and filter the upstream `Materialize` or `Source` fragments of the specified relations.
+    pub async fn get_upstream_job_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
+        table_job_type: Option<TableJobType>,
     ) -> MetaResult<HashMap<TableId, Fragment>> {
         let map = &self.core.read().await.table_fragments;
         let mut fragments = HashMap::new();
@@ -1107,29 +1110,20 @@ impl FragmentManager {
             let table_fragments = map
                 .get(&table_id)
                 .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
-            if let Some(fragment) = table_fragments.mview_fragment() {
-                fragments.insert(table_id, fragment);
+            match table_job_type.as_ref() {
+                Some(TableJobType::SharedCdcSource) => {
+                    if let Some(fragment) = table_fragments.source_fragment() {
+                        fragments.insert(table_id, fragment);
+                    }
+                }
+                _ => {
+                    if let Some(fragment) = table_fragments.mview_fragment() {
+                        fragments.insert(table_id, fragment);
+                    }
+                }
             }
         }
 
-        Ok(fragments)
-    }
-
-    pub async fn get_upstream_source_fragments(
-        &self,
-        upstream_table_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, Fragment>> {
-        let map = &self.core.read().await.table_fragments;
-        let mut fragments = HashMap::new();
-
-        for &table_id in upstream_table_ids {
-            let table_fragments = map
-                .get(&table_id)
-                .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
-            if let Some(fragment) = table_fragments.source_fragment() {
-                fragments.insert(table_id, fragment);
-            }
-        }
         Ok(fragments)
     }
 

@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VirtualNode;
@@ -603,12 +602,15 @@ impl DdlController {
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
 
-        let upstream_mview_fragments = self
+        let upstream_job_fragments = self
             .fragment_manager
-            .get_upstream_mview_fragments(fragment_graph.dependent_table_ids())
+            .get_upstream_job_fragments(
+                fragment_graph.dependent_table_ids(),
+                stream_job.table_job_type(),
+            )
             .await?;
 
-        let mut upstream_mview_actors: HashMap<_, _> = upstream_mview_fragments
+        let upstream_actors: HashMap<_, _> = upstream_job_fragments
             .iter()
             .map(|(&table_id, fragment)| {
                 (
@@ -618,32 +620,11 @@ impl DdlController {
             })
             .collect();
 
-        let complete_graph = match stream_job.table_sub_type().as_ref() {
-            Some(TableJobType::SharedCdcSource) => {
-                let upstream_source_fragments = self
-                    .fragment_manager
-                    .get_upstream_source_fragments(fragment_graph.dependent_table_ids())
-                    .await?;
-
-                upstream_source_fragments
-                    .iter()
-                    .for_each(|(&table_id, fragment)| {
-                        upstream_mview_actors
-                            .entry(table_id)
-                            .or_insert_with(Vec::new)
-                            .extend(fragment.actors.iter().map(|a| a.actor_id));
-                    });
-                CompleteStreamFragmentGraph::with_upstreams_new(
-                    fragment_graph,
-                    upstream_mview_fragments,
-                    upstream_source_fragments,
-                )?
-            }
-            _ => CompleteStreamFragmentGraph::with_upstreams(
-                fragment_graph,
-                upstream_mview_fragments,
-            )?,
-        };
+        let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
+            fragment_graph,
+            upstream_job_fragments,
+            stream_job.table_job_type(),
+        )?;
 
         // 2. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
@@ -672,7 +653,7 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             dispatchers,
-            upstream_mview_actors,
+            upstream_mview_actors: upstream_actors,
             internal_tables,
             building_locations,
             existing_locations,

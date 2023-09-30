@@ -626,7 +626,7 @@ impl Dispatcher for HashDataDispatcher {
                 // TODO: dispatch based on downstream table name
                 let should_emit = if let Some(row) = row && let Some(full_table_name) = self.downstream_table_name.as_ref() {
                     let table_name_datum = row.datum_at(self.keys[0]).unwrap();
-                    tracing::info!("row: {:#?}, keys: {:?}, uptable: {}, datum: {:?}", row, self.keys, full_table_name, table_name_datum);
+                    tracing::trace!(target: "events::stream::dispatch::hash::cdc", "keys: {:?}, table: {}", self.keys, full_table_name);
                     table_name_datum == ScalarRefImpl::Utf8(full_table_name)
                 } else {
                     true

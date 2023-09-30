@@ -235,7 +235,7 @@ impl StreamingJob {
         }
     }
 
-    pub fn table_sub_type(&self) -> Option<TableJobType> {
+    pub fn table_job_type(&self) -> Option<TableJobType> {
         if let Self::Table(.., sub_type) = self {
             Some(sub_type.clone())
         } else {

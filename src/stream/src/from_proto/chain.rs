@@ -104,10 +104,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                         || ConnectorError::Internal(anyhow!("connect properties not found")),
                     )?)
                     .map_err(|err| {
-                        ConnectorError::Internal(anyhow!(
-                            "invalid connect properties {:?}",
-                            table_desc.connect_properties
-                        ))
+                        ConnectorError::Internal(anyhow!("invalid connect properties {}", err))
                     })?;
                 let table_type = CdcTableType::from_properties(&properties);
                 let table_reader =
