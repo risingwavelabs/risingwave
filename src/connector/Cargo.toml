@@ -70,6 +70,7 @@ mysql_common = { version = "0.30", default-features = false, features = [
 nexmark = { version = "0.2", features = ["serde"] }
 nkeys = "0.3.2"
 num-bigint = "0.4"
+sqlx  = { version = "0.7.2", features = ["mysql"] }
 opendal = "0.39"
 parking_lot = "0.12"
 paste = "1"

@@ -25,7 +25,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
 
-use super::doris_connector::{DorisField, DorisInsert, DorisInsertClient, DORIS_DELETE_SIGN};
+use super::doris_connector::{DorisField, DorisInsert, DORIS_DELETE_SIGN, InserterBuilder, HeaderBuilder};
 use super::utils::doris_rows_to_json;
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::common::DorisCommon;
@@ -189,7 +189,7 @@ pub struct DorisSinkWriter {
     pub config: DorisConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
-    client: DorisInsertClient,
+    builder: InserterBuilder,
     is_append_only: bool,
     insert: Option<DorisInsert>,
     decimal_map: HashMap<String, (u8, u8)>,
@@ -213,28 +213,29 @@ impl DorisSinkWriter {
                 decimal_map.insert(s.name.clone(), v);
             }
         });
-        let mut map = HashMap::new();
-        map.insert("format".to_string(), "json".to_string());
-        map.insert("read_json_by_line".to_string(), "true".to_string());
-        let doris_insert_client = DorisInsertClient::new(
-            config.common.url.clone(),
-            config.common.database.clone(),
-            config.common.table.clone(),
-        )
-        .add_common_header()
+
+        let header = HeaderBuilder::new().add_common_header()
         .set_user_password(config.common.user.clone(), config.common.password.clone())
-        .set_properties(map);
-        let mut doris_insert_client = if !is_append_only {
-            doris_insert_client.add_hidden_column()
+        .add_json_format()
+        .add_read_json_by_line();
+        let header = if !is_append_only {
+            header.add_hidden_column().build()
         } else {
-            doris_insert_client
+            header.build()
         };
-        let insert = Some(doris_insert_client.build().await?);
+
+        let mut doris_insert_builder = InserterBuilder::new(
+                config.common.url.clone(),
+                config.common.database.clone(),
+                config.common.table.clone(),
+                header,
+        );
+        let insert = Some(doris_insert_builder.build_doris().await?);
         Ok(Self {
             config,
             schema,
             pk_indices,
-            client: doris_insert_client,
+            builder:doris_insert_builder,
             is_append_only,
             insert,
             decimal_map,
@@ -323,7 +324,7 @@ impl DorisSinkWriter {
 impl SinkWriter for DorisSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         if self.insert.is_none() {
-            self.insert = Some(self.client.build().await?);
+            self.insert = Some(self.builder.build_doris().await?);
         }
         if self.is_append_only {
             self.append_only(chunk).await
