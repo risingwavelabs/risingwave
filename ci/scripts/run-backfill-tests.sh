@@ -85,7 +85,6 @@ test_background_ddl_recovery() {
     do
       mv -- "$log" "before-restart-$log"
     done
-  cp .risingwave/log/meta-node*.log .risingwave/log/meta-old.log
   popd
 
   # Restart
@@ -115,7 +114,7 @@ test_background_ddl_recovery() {
 
   cargo make kill
 
-}}
+}
 
 test_background_ddl_cancel() {
   echo "--- e2e, ci-1cn-1fe-with-recovery, test background ddl"
