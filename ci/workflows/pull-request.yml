@@ -15,33 +15,33 @@ steps:
                 command: "ci/build-ci-image.sh"
                 label: "ci build images"
   - wait
-
-  - label: "build"
-    command: "ci/scripts/build.sh -p ci-dev"
-    key: "build"
-    plugins:
-      - docker-compose#v4.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-    timeout_in_minutes: 15
-    retry: *auto-retry
-
-  - label: "build other components"
-    command: "ci/scripts/build-other.sh"
-    key: "build-other"
-    plugins:
-      - seek-oss/aws-sm#v2.3.1:
-          env:
-            GITHUB_TOKEN: github-token
-      - docker-compose#v4.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-          environment:
-            - GITHUB_TOKEN
-    timeout_in_minutes: 14
-    retry: *auto-retry
+#
+#  - label: "build"
+#    command: "ci/scripts/build.sh -p ci-dev"
+#    key: "build"
+#    plugins:
+#      - docker-compose#v4.9.0:
+#          run: rw-build-env
+#          config: ci/docker-compose.yml
+#          mount-buildkite-agent: true
+#    timeout_in_minutes: 15
+#    retry: *auto-retry
+#
+#  - label: "build other components"
+#    command: "ci/scripts/build-other.sh"
+#    key: "build-other"
+#    plugins:
+#      - seek-oss/aws-sm#v2.3.1:
+#          env:
+#            GITHUB_TOKEN: github-token
+#      - docker-compose#v4.9.0:
+#          run: rw-build-env
+#          config: ci/docker-compose.yml
+#          mount-buildkite-agent: true
+#          environment:
+#            - GITHUB_TOKEN
+#    timeout_in_minutes: 14
+#    retry: *auto-retry
 
   - label: "build (deterministic simulation)"
     command: "ci/scripts/build-simulation.sh"
