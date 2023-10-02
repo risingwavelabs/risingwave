@@ -835,6 +835,7 @@ impl CatalogManager {
 
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
+        database_core.clear_creating_tables();
         let user_core = &mut core.user;
         // FIXME: Do all tables need to decrease_ref_count?
         // Perhaps only those with a fragment?
