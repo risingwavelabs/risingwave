@@ -719,11 +719,16 @@ impl CatalogManager {
         #[cfg(not(test))]
         user_core.ensure_user_id(table.owner)?;
         let key = (table.database_id, table.schema_id, table.name.clone());
-        database_core.check_relation_name_duplicated(&key)?;
 
         if database_core.has_in_progress_creation(&key) {
             bail!("table is in creating procedure: {}", table.id);
         } else {
+            // NOTE: This MUST be after progress check.
+            // Because we persist tables, even for those in creating progress.
+            // And this will falsely indicate the table is duplicated.
+            // FIXME: Perhaps we should go further to only check against created tables here.
+            database_core.check_relation_name_duplicated(&key)?;
+
             database_core.mark_creating(&key);
             database_core.mark_creating_streaming_job(table.id, key);
             let mut tables = BTreeMapTransaction::new(&mut database_core.tables);

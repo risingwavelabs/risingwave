@@ -1010,7 +1010,6 @@ impl GlobalBarrierManager {
         state: &mut BarrierManagerState,
         checkpoint_control: &mut CheckpointControl,
     ) {
-        self.set_status(BarrierManagerStatus::Recovering).await;
         checkpoint_control.clear_changes();
 
         for node in fail_nodes {
@@ -1026,6 +1025,7 @@ impl GlobalBarrierManager {
         }
 
         if self.enable_recovery {
+            self.set_status(BarrierManagerStatus::Recovering).await;
             let latest_snapshot = self.hummock_manager.latest_snapshot();
             let prev_epoch = TracedEpoch::new(latest_snapshot.committed_epoch.into()); // we can only recovery from the committed epoch
             let span = tracing::info_span!(
