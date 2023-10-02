@@ -434,8 +434,8 @@ impl DatabaseManager {
         self.in_progress_creation_streaming_job.keys().cloned()
     }
 
-    pub fn clear_creating_tables(&mut self) {
-        self.in_progress_creating_tables.clear();
+    pub fn clear_creating_stream_jobs(&mut self) {
+        self.in_progress_creation_streaming_job.clear();
     }
 
     pub fn mark_creating_tables(&mut self, tables: &[Table]) {

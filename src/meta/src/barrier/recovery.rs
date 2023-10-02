@@ -80,6 +80,10 @@ impl GlobalBarrierManager {
         // The dirty tables should have been cleaned,
         // so when we list the stream job ids here, they should be already purged.
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
+        eprintln!(
+            "clean_dirty_table_fragments_all_stream_ids {:#?}",
+            stream_job_ids
+        );
         let to_drop_table_fragments = self
             .fragment_manager
             .list_dirty_table_fragments(|tf| {
