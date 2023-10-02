@@ -20,8 +20,7 @@ use futures_async_stream::try_stream;
 use tracing::{Instrument, Span};
 
 use crate::executor::error::StreamExecutorError;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ExecutorInfo, Message, MessageStream};
+use crate::executor::{ActorContextRef, ExecutorInfo, Message, MessageStream};
 use crate::task::ActorId;
 
 /// Streams wrapped by `trace` will be traced with `tracing` spans and reported to `opentelemetry`.
@@ -29,19 +28,23 @@ use crate::task::ActorId;
 pub async fn trace(
     enable_executor_row_count: bool,
     info: Arc<ExecutorInfo>,
-    _input_pos: usize,
-    actor_id: ActorId,
-    executor_id: u64,
-    metrics: Arc<StreamingMetrics>,
+    actor_ctx: ActorContextRef,
     input: impl MessageStream,
 ) {
-    let actor_id_string = actor_id.to_string();
+    let actor_id_str = actor_ctx.id.to_string();
+    let fragment_id_str = actor_ctx.fragment_id.to_string();
 
-    let span_name = pretty_identity(&info.identity, actor_id, executor_id);
+    let span_name = pretty_identity(&info.identity, actor_ctx.id);
 
     let is_sink_or_mv = info.identity.contains("Materialize") || info.identity.contains("Sink");
 
-    let new_span = || tracing::info_span!("executor", "otel.name" = span_name, actor_id);
+    let new_span = || {
+        tracing::info_span!(
+            "executor",
+            "otel.name" = span_name,
+            "actor_id" = actor_ctx.id
+        )
+    };
     let mut span = new_span();
 
     pin_mut!(input);
@@ -52,9 +55,10 @@ pub async fn trace(
             Message::Chunk(chunk) => {
                 if chunk.cardinality() > 0 {
                     if enable_executor_row_count || is_sink_or_mv {
-                        metrics
+                        actor_ctx
+                            .streaming_metrics
                             .executor_row_count
-                            .with_label_values(&[&actor_id_string, &span_name])
+                            .with_label_values(&[&actor_id_str, &fragment_id_str])
                             .inc_by(chunk.cardinality() as u64);
                     }
                     tracing::trace!(
@@ -100,13 +104,8 @@ pub async fn trace(
     }
 }
 
-fn pretty_identity(identity: &str, actor_id: ActorId, executor_id: u64) -> String {
-    format!(
-        "{} (actor {}, operator {})",
-        identity,
-        actor_id,
-        executor_id as u32 // The lower 32 bit is for the operator id.
-    )
+fn pretty_identity(identity: &str, actor_id: ActorId) -> String {
+    format!("{} (actor {})", identity, actor_id)
 }
 
 /// Streams wrapped by `instrument_await_tree` will be able to print the spans of the
@@ -115,12 +114,11 @@ fn pretty_identity(identity: &str, actor_id: ActorId, executor_id: u64) -> Strin
 pub async fn instrument_await_tree(
     info: Arc<ExecutorInfo>,
     actor_id: ActorId,
-    executor_id: u64,
     input: impl MessageStream,
 ) {
     pin_mut!(input);
 
-    let span: await_tree::Span = pretty_identity(&info.identity, actor_id, executor_id).into();
+    let span: await_tree::Span = pretty_identity(&info.identity, actor_id).into();
 
     while let Some(message) = input
         .next()
