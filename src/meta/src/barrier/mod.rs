@@ -1034,8 +1034,10 @@ impl GlobalBarrierManager {
                 prev_epoch = prev_epoch.value().0
             );
 
+            // No need to clean dirty tables for barrier recovery. It should clean it in the stream job.
+            // (Cancel create table procedure)
             *state = self
-                .recovery(prev_epoch, None, true, false)
+                .recovery(prev_epoch, None, false, false)
                 .instrument(span)
                 .await;
             self.set_status(BarrierManagerStatus::Running).await;

@@ -973,6 +973,7 @@ impl CatalogManager {
         Ok(())
     }
 
+    /// Used by CANCEL JOBS
     pub async fn cancel_create_table_procedure_with_table_fragments(
         &self,
         table_id: TableId,
