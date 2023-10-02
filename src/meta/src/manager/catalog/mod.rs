@@ -768,7 +768,11 @@ impl CatalogManager {
     ///    1. `stream_job_status` = CREATING
     ///    2. Not belonging to a background stream job.
     ///    Clean up these hanging tables by the id.
-    pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
+    pub async fn clean_dirty_tables(
+        &self,
+        fragment_manager: FragmentManagerRef,
+        for_bootstrap: bool,
+    ) -> MetaResult<()> {
         let creating_tables: Vec<Table> = self.list_creating_tables().await;
         eprintln!(
             "creating_tables ids: {:#?}",
@@ -846,15 +850,18 @@ impl CatalogManager {
         // Cancel stream job should decrement it.
         // If rw restarted, and rebuilt the graph from persisted table fragments,
         // we will still need to clean it up though...
-        // let user_core = &mut core.user;
-        // // FIXME: Do all tables need to decrease_ref_count?
-        // // Perhaps only those with a fragment?
-        // for table in &tables_to_clean {
-        //     for relation_id in &table.dependent_relations {
-        //         database_core.decrease_ref_count(*relation_id);
-        //     }
-        //     user_core.decrease_ref(table.owner);
-        // }
+        if for_bootstrap {
+            let user_core = &mut core.user;
+            // // FIXME: Do all tables need to decrease_ref_count?
+            // // Perhaps only those with a fragment?
+            for table in &tables_to_clean {
+                // I don't think this part is recovered typically.
+                // for relation_id in &table.dependent_relations {
+                //     database_core.decrease_ref_count(*relation_id);
+                // }
+                user_core.decrease_ref(table.owner);
+            }
+        }
 
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);

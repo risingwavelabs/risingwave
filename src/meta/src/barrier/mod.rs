@@ -597,7 +597,7 @@ impl GlobalBarrierManager {
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
             let paused_reason = paused.then_some(PausedReason::Manual);
 
-            self.recovery(prev_epoch, paused_reason, true)
+            self.recovery(prev_epoch, paused_reason, true, true)
                 .instrument(span)
                 .await
         };
@@ -1034,7 +1034,10 @@ impl GlobalBarrierManager {
                 prev_epoch = prev_epoch.value().0
             );
 
-            *state = self.recovery(prev_epoch, None, true).instrument(span).await;
+            *state = self
+                .recovery(prev_epoch, None, true, false)
+                .instrument(span)
+                .await;
             self.set_status(BarrierManagerStatus::Running).await;
         } else {
             panic!("failed to execute barrier: {:?}", err);
