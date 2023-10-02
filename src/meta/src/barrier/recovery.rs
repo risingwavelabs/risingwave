@@ -81,7 +81,6 @@ impl GlobalBarrierManager {
         let to_drop_table_fragments = self
             .fragment_manager
             .list_dirty_table_fragments(|tf| {
-                println!("tf: {:#?}", tf);
                 // !stream_job_ids.contains(&tf.table_id().table_id) || !tf.is_created()
                 // FIXME: Is this correct?
                 !stream_job_ids.contains(&tf.table_id().table_id)

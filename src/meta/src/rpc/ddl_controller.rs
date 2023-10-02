@@ -408,6 +408,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         create_type: CreateType,
     ) -> MetaResult<NotificationVersion> {
+        tracing::info!("Creating stream job {}", stream_job.id());
         let _permit = self
             .creating_streaming_job_permits
             .semaphore
@@ -420,7 +421,6 @@ impl DdlController {
 
         let mut internal_tables = vec![];
         let result = try {
-            // NOTE(kwannoel): We commit `Table` to meta here.
             let fragment_graph = self
                 .prepare_stream_job(&mut stream_job, fragment_graph)
                 .await?;
@@ -721,7 +721,7 @@ impl DdlController {
                 let result = self
                     .catalog_manager
                     .cancel_create_table_procedure_with_internal_table_ids(
-                        table.id,
+                        table.clone(),
                         creating_internal_table_ids.clone(),
                     )
                     .await;
@@ -748,7 +748,7 @@ impl DdlController {
                     let result = self
                         .catalog_manager
                         .cancel_create_table_procedure_with_internal_table_ids(
-                            table.id,
+                            table.clone(),
                             creating_internal_table_ids.clone(),
                         )
                         .await;
