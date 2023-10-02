@@ -380,6 +380,7 @@ impl DatabaseManager {
     }
 
     pub fn increase_ref_count(&mut self, relation_id: RelationId) {
+        eprintln!("Increasing ref count for {}", relation_id);
         *self.relation_ref_count.entry(relation_id).or_insert(0) += 1;
     }
 

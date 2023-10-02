@@ -1209,7 +1209,7 @@ impl CatalogManager {
                             match drop_mode {
                                 DropMode::Restrict => {
                                     return Err(MetaError::permission_denied(format!(
-                                        "Fail to delete table `{}` because {} other relation(s) depend on it",
+                                        "Fail to delete index table `{}` because {} other relation(s) depend on it",
                                         index_table.name, ref_count
                                     )));
                                 }
