@@ -467,6 +467,15 @@ script = '''
 #!/usr/bin/env bash
 set -e
 cargo clean
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+cd "${JAVA_DIR}"
+"${MAVEN_PATH}" clean
 '''
 
 [tasks.build-docs]
