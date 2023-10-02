@@ -909,14 +909,15 @@ impl CatalogManager {
         let table_id = table.id;
         eprintln!("remove create table with id: {table_id}");
         let core = &mut self.core.lock().await;
-        // let table = {
-        //     let database_core = &mut core.database;
-        //     let tables = &mut database_core.tables;
-        //     let Some(table) = tables.get(&table_id).cloned() else {
-        //         bail!("Table ID: {table_id} missing when attempting to cancel job")
-        //     };
-        //     table
-        // };
+        // Must get the latest from the database. Otherwise dependent relations may not be correct?
+        let table = {
+            let database_core = &mut core.database;
+            let tables = &mut database_core.tables;
+            let Some(table) = tables.get(&table_id).cloned() else {
+                bail!("Table ID: {table_id} missing when attempting to cancel job")
+            };
+            table
+        };
 
         {
             let user_core = &mut core.user;
