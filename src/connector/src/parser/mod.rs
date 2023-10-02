@@ -46,9 +46,9 @@ use self::util::get_kafka_topic;
 use crate::aws_auth::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
 use crate::source::{
-    BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext, SourceContextRef,
-    SourceEncode, SourceFormat, SourceMeta, SourceStruct, SourceWithStateStream, SplitId,
-    StreamChunkWithState,
+    extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
+    SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceStruct, SourceWithStateStream,
+    SplitId, StreamChunkWithState,
 };
 
 mod avro;
@@ -822,11 +822,8 @@ impl SpecificParserConfig {
     }
 
     // The validity of (format, encode) is ensured by `extract_format_encode`
-    pub fn new(
-        source_struct: SourceStruct,
-        info: &StreamSourceInfo,
-        props: &HashMap<String, String>,
-    ) -> Result<Self> {
+    pub fn new(info: &StreamSourceInfo, props: &HashMap<String, String>) -> Result<Self> {
+        let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;
         let encode = source_struct.encode;
         // this transformation is needed since there may be config for the protocol
@@ -952,21 +949,5 @@ impl SpecificParserConfig {
             encoding_config,
             protocol_config,
         })
-    }
-}
-
-impl ParserConfig {
-    pub fn new(
-        source_struct: SourceStruct,
-        info: &StreamSourceInfo,
-        props: &HashMap<String, String>,
-        rw_columns: &Vec<SourceColumnDesc>,
-    ) -> Result<Self> {
-        let common = CommonParserConfig {
-            rw_columns: rw_columns.to_owned(),
-        };
-        let specific = SpecificParserConfig::new(source_struct, info, props)?;
-
-        Ok(Self { common, specific })
     }
 }
