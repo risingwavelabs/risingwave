@@ -765,6 +765,10 @@ impl CatalogManager {
     ///    Clean up these hanging tables by the id.
     pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
         let creating_tables: Vec<Table> = self.list_creating_tables().await;
+        eprintln!(
+            "creating_tables ids: {:#?}",
+            creating_tables.iter().map(|t| t.id).collect_vec()
+        );
         let mut reserved_internal_tables = HashSet::new();
         let mut tables_to_clean = vec![];
         let mut internal_tables_to_clean = vec![];

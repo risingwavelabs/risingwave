@@ -423,16 +423,16 @@ impl DdlController {
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
+        let fragment_graph = self
+            .prepare_stream_job(&mut stream_job, fragment_graph)
+            .await?;
+        tracing::info!("Prepared stream job {}", stream_job.id());
+
+        // Update the corresponding 'initiated_at' field.
+        stream_job.mark_initialized();
+
         let mut internal_tables = vec![];
         let result = try {
-            let fragment_graph = self
-                .prepare_stream_job(&mut stream_job, fragment_graph)
-                .await?;
-            tracing::info!("Prepared stream job {}", stream_job.id());
-
-            // Update the corresponding 'initiated_at' field.
-            stream_job.mark_initialized();
-
             let (ctx, table_fragments) = self
                 .build_stream_job(env, &stream_job, fragment_graph)
                 .await?;
