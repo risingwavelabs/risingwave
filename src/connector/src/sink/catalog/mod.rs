@@ -46,6 +46,12 @@ impl SinkId {
     }
 }
 
+impl std::fmt::Display for SinkId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.sink_id)
+    }
+}
+
 impl From<u32> for SinkId {
     fn from(id: u32) -> Self {
         Self::new(id)
