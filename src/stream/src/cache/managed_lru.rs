@@ -177,6 +177,14 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         self.inner.get(k)
     }
 
+    pub fn pop<Q>(&mut self, k: &Q) -> Option<V>
+    where
+        KeyRef<K>: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.inner.pop(k)
+    }
+
     pub fn peek_mut(&mut self, k: &K) -> Option<MutGuard<'_, V>> {
         let v = self.inner.peek_mut(k);
         v.map(|inner| {

@@ -323,6 +323,7 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     append_only_optimize: bool,
     chunk_size: usize,
     cnt_rows_received: &'a mut u32,
+    max_cache_entry_size: usize,
 }
 
 impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBuilder<T, SIDE> {
@@ -758,6 +759,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         append_only_optimize: self.append_only_optimize,
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
+                        max_cache_entry_size: self.max_cache_entry_size,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -784,6 +786,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         append_only_optimize: self.append_only_optimize,
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
+                        max_cache_entry_size: self.max_cache_entry_size,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -1001,6 +1004,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             append_only_optimize,
             chunk_size,
             cnt_rows_received,
+            max_cache_entry_size,
             ..
         } = args;
 
@@ -1142,18 +1146,28 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         {
                             yield chunk;
                         }
-                        // Insert back the state taken from ht.
-                        side_match.ht.update_state(key, matched_rows);
-                        for matched_row in matched_rows_to_clean {
-                            if side_match.need_degree_table {
-                                side_match.ht.delete(key, matched_row);
-                            } else {
-                                side_match.ht.delete_row(key, matched_row.row);
+
+                        // If the cache entry (on the match side) is not too large, keep it in memory cache
+                        let cache_the_entry = matched_rows.len() <= max_cache_entry_size;
+                        if cache_the_entry {
+                            // Insert back the state taken from ht.
+                            side_match.ht.update_state(key, matched_rows);
+                            for matched_row in matched_rows_to_clean {
+                                if side_match.need_degree_table {
+                                    side_match.ht.delete(key, matched_row);
+                                } else {
+                                    side_match.ht.delete_row(key, matched_row.row);
+                                }
                             }
+                        } else {
+                            // Don't insert back the state because it's too large.
+                            side_match.ht.remove_empty_state(key);
                         }
 
                         if append_only_optimize && let Some(row) = append_only_matched_row {
-                            side_match.ht.delete(key, row);
+                            if cache_the_entry {
+                                side_match.ht.delete(key, row);
+                            }
                         } else if side_update.need_degree_table {
                             side_update
                                 .ht
@@ -1241,14 +1255,21 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         {
                             yield chunk;
                         }
-                        // Insert back the state taken from ht.
-                        side_match.ht.update_state(key, matched_rows);
-                        for matched_row in matched_rows_to_clean {
-                            if side_match.need_degree_table {
-                                side_match.ht.delete(key, matched_row);
-                            } else {
-                                side_match.ht.delete_row(key, matched_row.row);
+
+                        // If the cache entry (on the match side) is not too large, keep it in memory cache
+                        if matched_rows.len() <= max_cache_entry_size {
+                            // Insert back the state taken from ht.
+                            side_match.ht.update_state(key, matched_rows);
+                            for matched_row in matched_rows_to_clean {
+                                if side_match.need_degree_table {
+                                    side_match.ht.delete(key, matched_row);
+                                } else {
+                                    side_match.ht.delete_row(key, matched_row.row);
+                                }
                             }
+                        } else {
+                            // Don't insert back the state because it's too large.
+                            side_match.ht.remove_empty_state(key);
                         }
 
                         if append_only_optimize {
