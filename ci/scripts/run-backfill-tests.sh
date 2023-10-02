@@ -180,6 +180,13 @@ test_foreground_ddl_no_recover() {
   sleep 3
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/validate.slt"
 
+  pushd .risingwave/log
+  for log in *.log
+    do
+      mv -- "$log" "before-restart-$log"
+    done
+  popd
+
   # Restart
   cargo make kill
   cargo make dev ci-1cn-1fe-with-recovery

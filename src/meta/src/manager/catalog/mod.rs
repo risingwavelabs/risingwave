@@ -855,10 +855,11 @@ impl CatalogManager {
             // // FIXME: Do all tables need to decrease_ref_count?
             // // Perhaps only those with a fragment?
             for table in &tables_to_clean {
-                // I don't think this part is recovered typically.
-                // for relation_id in &table.dependent_relations {
-                //     database_core.decrease_ref_count(*relation_id);
-                // }
+                // Recovered when init database manager.
+                for relation_id in &table.dependent_relations {
+                    database_core.decrease_ref_count(*relation_id);
+                }
+                // Recovered when init user manager.
                 user_core.decrease_ref(table.owner);
             }
         }
@@ -1228,6 +1229,8 @@ impl CatalogManager {
                         database_core.relation_ref_count.get(&table_id).cloned()
                     {
                         if ref_count > index_ids.len() {
+                            eprintln!("ref count {:#?}", ref_count);
+                            eprintln!("index_ids {:#?}", index_ids);
                             // Other relations depend on it.
                             match drop_mode {
                                 DropMode::Restrict => {
