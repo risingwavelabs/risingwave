@@ -775,7 +775,10 @@ impl CatalogManager {
         for table in creating_tables {
             eprintln!(
                 "checking table {} definition: {}, create_type: {:#?}, table_type: {:#?}",
-                table.id, table.definition, table.get_create_type().unwrap_or(CreateType::Foreground), table.get_table_type().unwrap(),
+                table.id,
+                table.definition,
+                table.get_create_type().unwrap_or(CreateType::Foreground),
+                table.get_table_type().unwrap(),
             );
             // 1. Incomplete Foreground jobs
             if table.create_type == CreateType::Foreground as i32

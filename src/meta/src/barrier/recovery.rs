@@ -62,6 +62,8 @@ impl GlobalBarrierManager {
 
     /// Foreground stream jobs with "CREATING" status
     /// should be cleaned
+    /// FIXME: If we call this function while cluster is online,
+    /// perhaps those in the progress tracker will be missed.
     async fn clean_dirty_tables(&self) -> MetaResult<()> {
         let fragment_manager = self.fragment_manager.clone();
         self.catalog_manager
@@ -131,17 +133,19 @@ impl GlobalBarrierManager {
         &self,
         prev_epoch: TracedEpoch,
         paused_reason: Option<PausedReason>,
+        clean_dirty_tables: bool,
     ) -> BarrierManagerState {
-        eprintln!("recovery triggered");
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked("cluster is under recovering")
             .await;
 
         tracing::info!("recovery start!");
-        self.clean_dirty_tables()
-            .await
-            .expect("clean dirty tables should not fail");
+        if clean_dirty_tables {
+            self.clean_dirty_tables()
+                .await
+                .expect("clean dirty tables should not fail");
+        }
         self.clean_dirty_fragments()
             .await
             .expect("clean dirty fragments");
