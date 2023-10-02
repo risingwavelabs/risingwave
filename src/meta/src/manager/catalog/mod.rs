@@ -841,15 +841,20 @@ impl CatalogManager {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         database_core.clear_creating_stream_jobs();
-        let user_core = &mut core.user;
-        // FIXME: Do all tables need to decrease_ref_count?
-        // Perhaps only those with a fragment?
-        for table in &tables_to_clean {
-            for relation_id in &table.dependent_relations {
-                database_core.decrease_ref_count(*relation_id);
-            }
-            user_core.decrease_ref(table.owner);
-        }
+
+        // No need to decrease ref count I think?
+        // Cancel stream job should decrement it.
+        // If rw restarted, and rebuilt the graph from persisted table fragments,
+        // we will still need to clean it up though...
+        // let user_core = &mut core.user;
+        // // FIXME: Do all tables need to decrease_ref_count?
+        // // Perhaps only those with a fragment?
+        // for table in &tables_to_clean {
+        //     for relation_id in &table.dependent_relations {
+        //         database_core.decrease_ref_count(*relation_id);
+        //     }
+        //     user_core.decrease_ref(table.owner);
+        // }
 
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
