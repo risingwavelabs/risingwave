@@ -47,8 +47,8 @@ use crate::aws_auth::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
 use crate::source::{
     extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
-    SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceStruct, SourceWithStateStream,
-    SplitId, StreamChunkWithState,
+    SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceWithStateStream, SplitId,
+    StreamChunkWithState,
 };
 
 mod avro;
@@ -798,29 +798,6 @@ pub enum ProtocolProperties {
 }
 
 impl SpecificParserConfig {
-    pub fn get_source_struct(&self) -> SourceStruct {
-        let format = match self.protocol_config {
-            ProtocolProperties::Debezium => SourceFormat::Debezium,
-            ProtocolProperties::DebeziumMongo => SourceFormat::DebeziumMongo,
-            ProtocolProperties::Maxwell => SourceFormat::Maxwell,
-            ProtocolProperties::Canal => SourceFormat::Canal,
-            ProtocolProperties::Plain => SourceFormat::Plain,
-            ProtocolProperties::Upsert => SourceFormat::Upsert,
-            ProtocolProperties::Native => SourceFormat::Native,
-            ProtocolProperties::Unspecified => unreachable!(),
-        };
-        let encode = match self.encoding_config {
-            EncodingProperties::Avro(_) => SourceEncode::Avro,
-            EncodingProperties::Protobuf(_) => SourceEncode::Protobuf,
-            EncodingProperties::Csv(_) => SourceEncode::Csv,
-            EncodingProperties::Json(_) => SourceEncode::Json,
-            EncodingProperties::Bytes(_) => SourceEncode::Bytes,
-            EncodingProperties::Native => SourceEncode::Native,
-            EncodingProperties::Unspecified => unreachable!(),
-        };
-        SourceStruct { format, encode }
-    }
-
     // The validity of (format, encode) is ensured by `extract_format_encode`
     pub fn new(info: &StreamSourceInfo, props: &HashMap<String, String>) -> Result<Self> {
         let source_struct = extract_source_struct(info)?;
