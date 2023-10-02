@@ -408,7 +408,11 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         create_type: CreateType,
     ) -> MetaResult<NotificationVersion> {
-        tracing::info!("Creating stream job {}", stream_job.id());
+        tracing::info!(
+            "Creating stream job {}, definition: {}",
+            stream_job.id(),
+            stream_job.definition()
+        );
         let _permit = self
             .creating_streaming_job_permits
             .semaphore
