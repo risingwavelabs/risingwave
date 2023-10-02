@@ -769,6 +769,10 @@ impl CatalogManager {
         let mut tables_to_clean = vec![];
         let mut internal_tables_to_clean = vec![];
         for table in creating_tables {
+            eprintln!(
+                "checking table {} definition: {}, create_type: {}, table_type: {}",
+                table.id, table.definition, table.create_type, table.table_type,
+            );
             // 1. Incomplete Foreground jobs
             if table.create_type == CreateType::Foreground as i32
             // || table.create_type == CreateType::Unspecified as i32
