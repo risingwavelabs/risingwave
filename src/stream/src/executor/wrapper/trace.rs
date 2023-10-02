@@ -58,7 +58,7 @@ pub async fn trace(
                         actor_ctx
                             .streaming_metrics
                             .executor_row_count
-                            .with_label_values(&[&actor_id_str, &fragment_id_str])
+                            .with_label_values(&[&actor_id_str, &fragment_id_str, &info.identity])
                             .inc_by(chunk.cardinality() as u64);
                     }
                     tracing::trace!(

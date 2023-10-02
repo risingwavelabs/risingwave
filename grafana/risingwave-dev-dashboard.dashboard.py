@@ -898,8 +898,8 @@ def section_streaming_actors(outer_panels):
                     "When enabled, this metric shows the input throughput of each executor.",
                     [
                         panels.target(
-                            f"rate({metric('stream_executor_row_count')}[$__rate_interval]) > 0",
-                            "actor {{actor_id}}->{{executor_identity}}",
+                            f"rate({metric('stream_executor_row_count')}[$__rate_interval])",
+                            "actor {{actor_id}} ({{executor_identity}}",
                         ),
                     ],
                 ),

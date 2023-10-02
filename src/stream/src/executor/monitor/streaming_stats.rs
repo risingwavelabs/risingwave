@@ -168,7 +168,7 @@ impl StreamingMetrics {
         let executor_row_count = register_int_counter_vec_with_registry!(
             "stream_executor_row_count",
             "Total number of rows that have been output from each executor",
-            &["actor_id", "fragment_id"],
+            &["actor_id", "fragment_id", "executor_identity"],
             registry
         )
         .unwrap();
