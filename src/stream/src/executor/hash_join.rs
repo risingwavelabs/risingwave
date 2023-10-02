@@ -23,6 +23,7 @@ use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DefaultOrd, ToOwnedDatum};
@@ -267,6 +268,9 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
 
     /// watermark column index -> `BufferedWatermarks`
     watermark_buffers: BTreeMap<usize, BufferedWatermarks<SideTypePrimitive>>,
+
+    /// Maximum number of enties in one join cache entry
+    max_cache_entry_size: usize,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
@@ -458,7 +462,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         watermark_epoch: AtomicU64Ref,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
-        chunk_size: usize,
+        config: StreamingConfig,
     ) -> Self {
         let side_l_column_n = input_l.schema().len();
 
@@ -686,9 +690,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             op_info,
             append_only_optimize,
             metrics,
-            chunk_size,
+            chunk_size: config.developer.chunk_size,
             cnt_rows_received: 0,
             watermark_buffers,
+            max_cache_entry_size: config.developer.hash_join_max_cache_entry_size,
         }
     }
 
@@ -1404,7 +1409,7 @@ mod tests {
             Arc::new(AtomicU64::new(0)),
             false,
             Arc::new(StreamingMetrics::unused()),
-            1024,
+            StreamingConfig::default(),
         );
         (tx_l, tx_r, Box::new(executor).execute())
     }
@@ -1486,7 +1491,7 @@ mod tests {
             Arc::new(AtomicU64::new(0)),
             true,
             Arc::new(StreamingMetrics::unused()),
-            1024,
+            StreamingConfig::default(),
         );
         (tx_l, tx_r, Box::new(executor).execute())
     }
