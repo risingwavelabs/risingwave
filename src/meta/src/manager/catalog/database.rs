@@ -435,6 +435,7 @@ impl DatabaseManager {
     }
 
     pub fn clear_creating_stream_jobs(&mut self) {
+        self.in_progress_creation_tracker.clear();
         self.in_progress_creation_streaming_job.clear();
     }
 
