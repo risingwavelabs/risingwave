@@ -36,8 +36,6 @@ pub async fn trace(
 
     let span_name = pretty_identity(&info.identity, actor_ctx.id);
 
-    let is_sink_or_mv = info.identity.contains("Materialize") || info.identity.contains("Sink");
-
     let new_span = || {
         tracing::info_span!(
             "executor",
@@ -54,7 +52,7 @@ pub async fn trace(
         span.in_scope(|| match &message {
             Message::Chunk(chunk) => {
                 if chunk.cardinality() > 0 {
-                    if enable_executor_row_count || is_sink_or_mv {
+                    if enable_executor_row_count {
                         actor_ctx
                             .streaming_metrics
                             .executor_row_count
