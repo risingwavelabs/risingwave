@@ -964,7 +964,6 @@ impl GlobalBarrierManager {
             .collect();
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
-        self.set_status(BarrierManagerStatus::Recovering).await;
         let mut tracker = self.tracker.lock().await;
         *tracker = CreateMviewProgressTracker::recover(
             table_map,
@@ -1011,6 +1010,7 @@ impl GlobalBarrierManager {
         state: &mut BarrierManagerState,
         checkpoint_control: &mut CheckpointControl,
     ) {
+        self.set_status(BarrierManagerStatus::Recovering).await;
         checkpoint_control.clear_changes();
 
         for node in fail_nodes {
