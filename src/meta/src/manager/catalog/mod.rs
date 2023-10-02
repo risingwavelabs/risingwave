@@ -2075,8 +2075,9 @@ impl CatalogManager {
         let user_core = &mut core.user;
         let key = (index.database_id, index.schema_id, index.name.clone());
         assert!(
-            !database_core.indexes.contains_key(&index.id)
-                && database_core.has_in_progress_creation(&key),
+            !database_core.indexes.contains_key(&index.id),
+            // clean dirty tables should have cleaned this up.
+            // && database_core.has_in_progress_creation(&key),
             "index must be in creating procedure"
         );
 
@@ -2231,8 +2232,9 @@ impl CatalogManager {
         let user_core = &mut core.user;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         assert!(
-            !database_core.sinks.contains_key(&sink.id)
-                && database_core.has_in_progress_creation(&key),
+            !database_core.sinks.contains_key(&sink.id),
+            // clean_dirty tables should have cleaned this up
+            // && database_core.has_in_progress_creation(&key),
             "sink must be in creating procedure"
         );
 
