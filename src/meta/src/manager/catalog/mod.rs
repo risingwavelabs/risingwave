@@ -774,8 +774,8 @@ impl CatalogManager {
         let mut internal_tables_to_clean = vec![];
         for table in creating_tables {
             eprintln!(
-                "checking table {} definition: {}, create_type: {}, table_type: {}",
-                table.id, table.definition, table.create_type, table.table_type,
+                "checking table {} definition: {}, create_type: {:#?}, table_type: {:#?}",
+                table.id, table.definition, table.get_create_type().unwrap_or(CreateType::Foreground), table.get_table_type().unwrap(),
             );
             // 1. Incomplete Foreground jobs
             if table.create_type == CreateType::Foreground as i32
