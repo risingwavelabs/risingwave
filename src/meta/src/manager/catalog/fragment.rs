@@ -339,10 +339,6 @@ impl FragmentManager {
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
 
         assert_eq!(table_fragment.state(), State::Initial);
-        eprintln!(
-            "set table_fragment {} to creating",
-            table_fragment.table_id()
-        );
         table_fragment.set_state(State::Creating);
         table_fragment.update_actors_state(ActorState::Running);
         table_fragment.set_actor_splits_by_split_assignment(split_assignment);

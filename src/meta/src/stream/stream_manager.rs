@@ -130,6 +130,10 @@ impl CreatingStreamingJobInfo {
                     tracing::warn!("failed to send canceling state");
                 }
             } else {
+                // If these job ids do not exist in streaming_jobs,
+                // we can infer they either:
+                // 1. are entirely non-existent,
+                // 2. OR they are recovered streaming jobs, and managed by BarrierManager.
                 recovered_job_ids.push(job_id);
             }
         }
@@ -577,6 +581,9 @@ impl GlobalStreamManager {
             }
         });
         let mut cancelled_ids = join_all(futures).await.into_iter().flatten().collect_vec();
+
+        // For recovered stream jobs, we can directly cancel them by running the barrier command.
+        // Barrier manager manages the recovered stream jobs.
         let fragments = self
             .fragment_manager
             .select_table_fragments_by_ids(&recovered_job_ids)
@@ -588,6 +595,7 @@ impl GlobalStreamManager {
                 .await
                 .expect("should be able to cancel recovered stream job");
         }
+
         cancelled_ids.extend(recovered_job_ids);
         cancelled_ids
     }

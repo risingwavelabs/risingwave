@@ -914,6 +914,7 @@ impl GlobalBarrierManager {
             let fail_nodes = complete_nodes
                 .drain(index..)
                 .chain(checkpoint_control.barrier_failed().into_iter());
+            tracing::warn!("Failed to commit epoch {}: {:?}", prev_epoch, err);
             self.failure_recovery(err, fail_nodes, state, checkpoint_control)
                 .await;
         }

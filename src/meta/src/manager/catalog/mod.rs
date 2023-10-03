@@ -923,15 +923,20 @@ impl CatalogManager {
         Ok(version)
     }
 
+    /// Used to cleanup states in stream mgr.
+    /// It is required because failure may not necessarily happen in barrier,
+    /// we need some way to cleanup the state.
+    /// FIXME: We should NOT invoke this if barrier manager has already cleaned up.
     pub async fn cancel_create_table_procedure_with_internal_table_ids(
         &self,
         table: Table,
         internal_table_ids: Vec<TableId>,
     ) -> MetaResult<()> {
         let table_id = table.id;
-        eprintln!("remove create table with id: {table_id}");
+        tracing::trace!("cancel_create_table_procedure for {}", table_id);
         let core = &mut self.core.lock().await;
         // Must get the latest from the database. Otherwise dependent relations may not be correct?
+        // FIXME: This might not be needed..
         let table = {
             let database_core = &mut core.database;
             let tables = &mut database_core.tables;
@@ -974,6 +979,10 @@ impl CatalogManager {
     }
 
     /// Used by CANCEL JOBS
+    /// We only need to call this for tables which are persisted, i.e. background ddl.
+    /// 1. Background ddl in creating process before recovery (managed by stream mgr).
+    /// 2. Background ddl in creating process after recovery (managed by barrier mgr).
+    /// This is because it HAS to happen before fragment clean-up.
     pub async fn cancel_create_table_procedure_with_table_fragments(
         &self,
         table_id: TableId,
@@ -983,10 +992,14 @@ impl CatalogManager {
         let core = &mut self.core.lock().await;
         let table = {
             let database_core = &mut core.database;
+            // FIXME: Does not exist for sink and index yet.
+            // should we persist them?
+            // Figure out what was done in `main`.
             let tables = &mut database_core.tables;
             let Some(table) = tables.get(&table_id).cloned() else {
                 eprintln!("Table ID: {table_id} missing when attempting to cancel job");
-                bail!("Table ID: {table_id} missing when attempting to cancel job")
+                return Ok(());
+                // bail!("Table ID: {table_id} missing when attempting to cancel job")
             };
             table
         };

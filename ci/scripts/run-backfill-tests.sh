@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 
 # Runs backfill tests.
-# NOTE(kwannoel):
-# The following scenario is adapted in madsim's integration tests as well.
-# But this script reproduces it more reliably (I'm not sure why.)
-# Hence keeping it in case we ever need to debug backfill again.
 
 # USAGE:
 # ```sh
@@ -23,6 +19,8 @@ set -euo pipefail
 
 PARENT_PATH=$(dirname "${BASH_SOURCE[0]}")
 TEST_DIR=$PWD/e2e_test
+CLUSTER_PROFILE='ci-1cn-1fe-with-recovery'
+export RUST_LOG="risingwave_meta=trace"
 
 run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
@@ -40,6 +38,17 @@ cancel_stream_jobs() {
   ID=$(run_sql "select ddl_id from rw_catalog.rw_ddl_progress;" | tail -3 | head -1 | grep -E -o "[0-9]*")
   echo "CANCELLING STREAM_JOB: $ID"
   run_sql "CANCEL JOBS $ID;" </dev/null
+}
+
+# Prefix logs, so they don't get overridden after node restart.
+rename_logs_with_prefix() {
+  prefix="$1"
+  pushd .risingwave/log
+  for log in *.log
+    do
+      mv -- "$log" "${prefix}-${log}"
+    done
+  popd
 }
 
 # Test snapshot and upstream read.
@@ -69,8 +78,8 @@ test_snapshot_and_upstream_read() {
 
 # Test background ddl recovery
 test_background_ddl_recovery() {
-  echo "--- e2e, ci-1cn-1fe-with-recovery, test_background_ddl_recovery"
-  cargo make ci-start ci-1cn-1fe-with-recovery
+  echo "--- e2e, $CLUSTER_PROFILE, test_background_ddl_recovery"
+  cargo make ci-start $CLUSTER_PROFILE
 
   # Test before recovery
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/recovery/create.slt"
@@ -80,16 +89,11 @@ test_background_ddl_recovery() {
 
   sleep 2
 
-  pushd .risingwave/log
-  for log in *.log
-    do
-      mv -- "$log" "before-restart-$log"
-    done
-  popd
+  rename_logs_with_prefix "before-restart"
 
   # Restart
   cargo make kill
-  cargo make dev ci-1cn-1fe-with-recovery
+  cargo make dev $CLUSTER_PROFILE
 
   # Test after recovery
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/recovery/validate.slt"
@@ -117,8 +121,8 @@ test_background_ddl_recovery() {
 }
 
 test_background_ddl_cancel() {
-  echo "--- e2e, ci-1cn-1fe-with-recovery, test background ddl"
-  cargo make ci-start ci-1cn-1fe-with-recovery
+  echo "--- e2e, $CLUSTER_PROFILE, test background ddl"
+  cargo make ci-start $CLUSTER_PROFILE
 
   # Test before recovery
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/cancel/create_table.slt"
@@ -131,9 +135,11 @@ test_background_ddl_cancel() {
 
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/cancel/create_mv.slt"
 
+  rename_logs_with_prefix "before-restart"
+
   # Restart
   cargo make kill
-  cargo make dev ci-1cn-1fe-with-recovery
+  cargo make dev $CLUSTER_PROFILE
 
   # Recover
   sleep 3
@@ -151,8 +157,8 @@ test_background_ddl_cancel() {
 
 # Test foreground ddl should not recover
 test_foreground_ddl_cancel() {
-  echo "--- e2e, ci-1cn-1fe-with-recovery, test_foreground_ddl_cancel"
-  cargo make ci-start ci-1cn-1fe-with-recovery
+  echo "--- e2e, $CLUSTER_PROFILE, test_foreground_ddl_cancel"
+  cargo make ci-start $CLUSTER_PROFILE
 
   # Test before recovery
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/create_base_table.slt"
@@ -171,8 +177,8 @@ test_foreground_ddl_cancel() {
 }
 # Test foreground ddl should not recover
 test_foreground_ddl_no_recover() {
-  echo "--- e2e, ci-3streaming-2serving-3fe, test_foreground_ddl_no_recover"
-  cargo make ci-start ci-1cn-1fe-with-recovery
+  echo "--- e2e, $CLUSTER_PROFILE, test_foreground_ddl_no_recover"
+  cargo make ci-start $CLUSTER_PROFILE
 
   # Test before recovery
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/create_base_table.slt"
@@ -180,16 +186,11 @@ test_foreground_ddl_no_recover() {
   sleep 3
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/foreground/validate.slt"
 
-  pushd .risingwave/log
-  for log in *.log
-    do
-      mv -- "$log" "before-restart-$log"
-    done
-  popd
+  rename_logs_with_prefix "before-restart"
 
   # Restart
   cargo make kill
-  cargo make dev ci-1cn-1fe-with-recovery
+  cargo make dev $CLUSTER_PROFILE
 
   # Leave sometime for recovery
   sleep 5
@@ -204,22 +205,24 @@ test_foreground_ddl_no_recover() {
 }
 
 test_foreground_index_cancel() {
-   echo "--- e2e, ci-3streaming-2serving-3fe, test_index_ddl_no_recover"
-   cargo make ci-start ci-1cn-1fe-with-recovery
+   echo "--- e2e, $CLUSTER_PROFILE, test_index_ddl_no_recover"
+   cargo make ci-start $CLUSTER_PROFILE
 
    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/create_base_table.slt"
 
-#   # Test cancel
-#   run_sql "CREATE INDEX i ON t (v1);" &
-#   sleep 3
-#   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
-#   cancel_stream_jobs
-#   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_no_jobs.slt"
+   # Test cancel
+   run_sql "CREATE INDEX i ON t (v1);" &
+   sleep 3
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
+   cancel_stream_jobs
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_no_jobs.slt"
 
    # Test index over recovery
    run_sql "CREATE INDEX i ON t (v1);" &
    sleep 3
    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
+
+   rename_logs_with_prefix "before-restart"
 
    # Restart
    cargo make kill
@@ -238,26 +241,28 @@ test_foreground_index_cancel() {
 }
 
 test_foreground_sink_cancel() {
-   echo "--- e2e, ci-3streaming-2serving-3fe, test_index_ddl_no_recover"
-   cargo make ci-start ci-1cn-1fe-with-recovery
+   echo "--- e2e, $CLUSTER_PROFILE, test_index_ddl_no_recover"
+   cargo make ci-start $CLUSTER_PROFILE
 
    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/create_base_table.slt"
 
-#   # Test cancel
-#   run_sql "CREATE SINK i FROM t WITH (connector='blackhole');" &
-#   sleep 3
-#   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
-#   cancel_stream_jobs
-#   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_no_jobs.slt"
+   # Test cancel
+   run_sql "CREATE SINK i FROM t WITH (connector='blackhole');" &
+   sleep 3
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
+   cancel_stream_jobs
+   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_no_jobs.slt"
 
    # Test index over recovery
    run_sql "CREATE SINK i FROM t WITH (connector='blackhole');" &
    sleep 3
    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/background_ddl/common/validate_one_job.slt"
 
+   rename_logs_with_prefix "before-restart"
+
    # Restart
    cargo make kill
-   cargo make dev ci-1cn-1fe-with-recovery
+   cargo make dev $CLUSTER_PROFILE
 
    # Leave sometime for recovery
    sleep 5
@@ -273,7 +278,7 @@ test_foreground_sink_cancel() {
 
 main() {
   set -euo pipefail
-  # test_snapshot_and_upstream_read
+  test_snapshot_and_upstream_read
   test_background_ddl_recovery
   test_background_ddl_cancel
   test_foreground_ddl_no_recover
