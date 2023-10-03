@@ -32,7 +32,7 @@ use uuid::Uuid;
 use super::TracedEpoch;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
-use crate::barrier::{BarrierManagerStatus, CheckpointControl, Command, GlobalBarrierManager};
+use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
 use crate::model::{BarrierManagerState, MigrationPlan};
 use crate::stream::build_actor_connector_splits;

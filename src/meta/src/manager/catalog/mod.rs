@@ -962,7 +962,7 @@ impl CatalogManager {
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
         for table_id in table_ids {
-            let table = tables.remove(table_id);
+            tables.remove(table_id);
             // Table might not be committed.
             // assert!(table.is_some())
         }
