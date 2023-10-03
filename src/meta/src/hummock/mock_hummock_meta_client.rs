@@ -27,6 +27,8 @@ use risingwave_hummock_sdk::{
     SstObjectIdRange,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTask};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
     compact_task, CompactTask, HummockSnapshot, HummockVersion, SubscribeCompactionEventRequest,
@@ -38,8 +40,8 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use crate::hummock::compaction::{
-    default_level_selector, LevelSelector, SpaceReclaimCompactionSelector,
+use crate::hummock::compaction::selector::{
+    default_compaction_selector, CompactionSelector, SpaceReclaimCompactionSelector,
 };
 use crate::hummock::HummockManager;
 
@@ -81,7 +83,7 @@ impl MockHummockMetaClient {
         self.hummock_manager
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                &mut default_level_selector(),
+                &mut default_compaction_selector(),
             )
             .await
             .unwrap_or(None)
@@ -224,7 +226,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .compactor_manager_ref_for_test()
             .add_compactor(context_id);
 
-        let (request_sender, _request_receiver) =
+        let (request_sender, mut request_receiver) =
             unbounded_channel::<SubscribeCompactionEventRequest>();
 
         self.compact_context_id.store(context_id, Ordering::Release);
@@ -232,6 +234,8 @@ impl HummockMetaClient for MockHummockMetaClient {
         let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let hummock_manager_compact = self.hummock_manager.clone();
+        let mut join_handle_vec = vec![];
+
         let handle = tokio::spawn(async move {
             loop {
                 let group_and_type = hummock_manager_compact
@@ -244,8 +248,8 @@ impl HummockMetaClient for MockHummockMetaClient {
 
                 let (group, task_type) = group_and_type.unwrap();
 
-                let mut selector: Box<dyn LevelSelector> = match task_type {
-                    compact_task::TaskType::Dynamic => default_level_selector(),
+                let mut selector: Box<dyn CompactionSelector> = match task_type {
+                    compact_task::TaskType::Dynamic => default_compaction_selector(),
                     compact_task::TaskType::SpaceReclaim => {
                         Box::<SpaceReclaimCompactionSelector>::default()
                     }
@@ -270,11 +274,44 @@ impl HummockMetaClient for MockHummockMetaClient {
             }
         });
 
+        join_handle_vec.push(handle);
+
+        let hummock_manager_compact = self.hummock_manager.clone();
+        let report_handle = tokio::spawn(async move {
+            tracing::info!("report_handle start");
+
+            loop {
+                if let Some(item) = request_receiver.recv().await {
+                    if let Event::ReportTask(ReportTask {
+                        task_id,
+                        task_status,
+                        sorted_output_ssts,
+                        table_stats_change,
+                    }) = item.event.unwrap()
+                    {
+                        if let Err(e) = hummock_manager_compact
+                            .report_compact_task(
+                                task_id,
+                                TaskStatus::from_i32(task_status).unwrap(),
+                                sorted_output_ssts,
+                                Some(table_stats_change),
+                            )
+                            .await
+                        {
+                            tracing::error!("report compact_tack fail {e:?}");
+                        }
+                    }
+                }
+            }
+        });
+
+        join_handle_vec.push(report_handle);
+
         Ok((
             request_sender,
             Box::pin(CompactionEventItemStream {
                 inner: UnboundedReceiverStream::new(task_rx),
-                _handle: handle,
+                _handle: join_handle_vec,
             }),
         ))
     }
@@ -288,7 +325,7 @@ impl MockHummockMetaClient {
 
 pub struct CompactionEventItemStream {
     inner: UnboundedReceiverStream<CompactionEventItem>,
-    _handle: JoinHandle<()>,
+    _handle: Vec<JoinHandle<()>>,
 }
 
 impl Drop for CompactionEventItemStream {

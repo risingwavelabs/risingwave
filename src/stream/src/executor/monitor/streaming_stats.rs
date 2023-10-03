@@ -120,6 +120,7 @@ pub struct StreamingMetrics {
     pub barrier_manager_progress: IntCounter,
 
     pub sink_commit_duration: HistogramVec,
+    pub connector_sink_rows_received: GenericCounterVec<AtomicU64>,
 
     // Memory management
     // FIXME(yuhao): use u64 here
@@ -127,7 +128,7 @@ pub struct StreamingMetrics {
     pub lru_physical_now_ms: IntGauge,
     pub lru_runtime_loop_count: IntCounter,
     pub lru_watermark_step: IntGauge,
-    pub lru_evicted_watermark_time_diff_ms: GenericGaugeVec<AtomicI64>,
+    pub lru_evicted_watermark_time_ms: GenericGaugeVec<AtomicI64>,
     pub jemalloc_allocated_bytes: IntGauge,
     pub jemalloc_active_bytes: IntGauge,
 
@@ -697,6 +698,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let connector_sink_rows_received = register_int_counter_vec_with_registry!(
+            "connector_sink_rows_received",
+            "Number of rows received by sink",
+            &["connector_type", "sink_id"],
+            registry
+        )
+        .unwrap();
+
         let lru_current_watermark_time_ms = register_int_gauge_with_registry!(
             "lru_current_watermark_time_ms",
             "Current LRU manager watermark time(ms)",
@@ -725,9 +734,9 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let lru_evicted_watermark_time_diff_ms = register_int_gauge_vec_with_registry!(
-            "lru_evicted_watermark_time_diff_ms",
-            "The diff between current watermark and latest evicted watermark time by actors",
+        let lru_evicted_watermark_time_ms = register_int_gauge_vec_with_registry!(
+            "lru_evicted_watermark_time_ms",
+            "The latest evicted watermark time by actors",
             &["table_id", "actor_id", "desc"],
             registry
         )
@@ -860,11 +869,12 @@ impl StreamingMetrics {
             barrier_sync_latency,
             barrier_manager_progress,
             sink_commit_duration,
+            connector_sink_rows_received,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,
             lru_runtime_loop_count,
             lru_watermark_step,
-            lru_evicted_watermark_time_diff_ms,
+            lru_evicted_watermark_time_ms,
             jemalloc_allocated_bytes,
             jemalloc_active_bytes,
             user_compute_error_count,

@@ -107,7 +107,7 @@ impl CompactionStatistics {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TaskConfig {
     pub key_range: KeyRange,
     pub cache_policy: CachePolicy,
@@ -193,6 +193,7 @@ pub async fn generate_splits(
         indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
         let mut splits = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
+
         let worker_num = context.compaction_executor.worker_num();
 
         let parallelism = std::cmp::min(

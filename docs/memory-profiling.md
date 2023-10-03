@@ -158,7 +158,7 @@ cp ./target/release/examples/addr2line <your-path>
 Find a Linux machine and use `docker` command to start an environment with the specific RisingWave version. Here, `-v $(pwd):/dumps` mounts current directory to `/dumps` folder inside the container, so that you don't need to copy the files in and out.
 
 ```bash
-docker run -it --rm --entrypoint /bin/bash -v $(pwd):/dumps  ghcr.io/risingwavelabs/risingwave:v1.0.0
+docker run -it --rm --entrypoint /bin/bash -v $(pwd):/dumps  ghcr.io/risingwavelabs/risingwave:latest
 ```
 
 </details>

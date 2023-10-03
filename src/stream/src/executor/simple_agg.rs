@@ -17,7 +17,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
@@ -169,8 +169,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         // Calculate the row visibility for every agg call.
         let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
         for agg_call in &this.agg_calls {
-            let vis =
-                agg_call_filter_res(&this.actor_ctx, &this.info.identity, agg_call, &chunk).await?;
+            let vis = agg_call_filter_res(agg_call, &chunk).await?;
             call_visibilities.push(vis);
         }
 
@@ -325,7 +324,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
-    use risingwave_expr::agg::AggCall;
+    use risingwave_expr::aggregate::AggCall;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 

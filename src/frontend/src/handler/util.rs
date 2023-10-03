@@ -29,10 +29,9 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::row::Row as _;
-use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_common::types::{DataType, ScalarRefImpl, Timestamptz};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
-use risingwave_expr::vector_op::timestamptz::timestamptz_to_string;
 use risingwave_sqlparser::ast::display_comma_separated;
 
 use crate::catalog::IndexCatalog;
@@ -134,14 +133,13 @@ fn timestamptz_to_string_with_session_data(
     d: ScalarRefImpl<'_>,
     session_data: &StaticSessionData,
 ) -> Bytes {
-    let mut buf = String::new();
-    match d {
-        ScalarRefImpl::<'_>::Timestamptz(tz) => {
-            timestamptz_to_string(tz, &session_data.timezone, &mut buf).unwrap()
-        }
-        _ => panic!("expect timestamptz"),
-    };
-    buf.into()
+    let tz = d.into_timestamptz();
+    let time_zone = Timestamptz::lookup_time_zone(&session_data.timezone).unwrap();
+    let instant_local = tz.to_datetime_in_zone(time_zone);
+    instant_local
+        .format("%Y-%m-%d %H:%M:%S%.f%:z")
+        .to_string()
+        .into()
 }
 
 fn to_pg_rows(

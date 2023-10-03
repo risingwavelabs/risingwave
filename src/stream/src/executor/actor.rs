@@ -78,7 +78,8 @@ impl ActorContext {
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
-        tracing::error!("Compute error: {}, executor: {identity}", err);
+        tracing::error!(identity, %err, "failed to evaluate expression");
+
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
         let mut err_str = err.to_string();
 

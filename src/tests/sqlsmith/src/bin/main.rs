@@ -20,6 +20,8 @@ use risingwave_sqlsmith::print_function_table;
 use risingwave_sqlsmith::runner::{generate, run, run_differential_testing};
 use tokio_postgres::NoTls;
 
+risingwave_expr_impl::enable!();
+
 #[derive(ClapParser, Debug, Clone)]
 #[clap(about, version, author)]
 struct Opt {

@@ -307,7 +307,7 @@ impl GenericPlanNode for Scan {
         Schema { fields }
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         let id_to_op_idx = Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_desc);
         self.table_desc
             .stream_key
@@ -325,7 +325,7 @@ impl GenericPlanNode for Scan {
     }
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
-        let pk_indices = self.logical_pk();
+        let pk_indices = self.stream_key();
         let col_num = self.output_col_idx.len();
         match &pk_indices {
             Some(pk_indices) => FunctionalDependencySet::with_key(col_num, pk_indices),

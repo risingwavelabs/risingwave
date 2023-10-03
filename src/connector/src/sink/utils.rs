@@ -13,14 +13,12 @@
 // limitations under the License.
 
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::Schema;
 use serde_json::Value;
 
-use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use super::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::Result;
 
-pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>> {
-    let encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+pub fn chunk_to_json(chunk: StreamChunk, encoder: &JsonEncoder) -> Result<Vec<String>> {
     let mut records: Vec<String> = Vec::with_capacity(chunk.capacity());
     for (_, row) in chunk.rows() {
         let record = Value::Object(encoder.encode(row)?);

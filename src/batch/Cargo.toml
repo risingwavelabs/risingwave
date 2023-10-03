@@ -64,6 +64,7 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = "0.8"
+risingwave_expr_impl = { workspace = true }
 tempfile = "3"
 
 [target.'cfg(unix)'.dev-dependencies]

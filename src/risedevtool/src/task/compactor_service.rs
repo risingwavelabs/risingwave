@@ -53,9 +53,7 @@ impl CompactorService {
                 config.listen_address, config.exporter_port
             ))
             .arg("--advertise-addr")
-            .arg(format!("{}:{}", config.address, config.port))
-            .arg("--metrics-level")
-            .arg("info");
+            .arg(format!("{}:{}", config.address, config.port));
         if let Some(compaction_worker_threads_number) =
             config.compaction_worker_threads_number.as_ref()
         {
@@ -84,8 +82,6 @@ impl Task for CompactorService {
 
         cmd.env("RUST_BACKTRACE", "1");
 
-        // FIXME: Otherwise, CI will throw log size too large error
-        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
                 "RW_PROFILE_PATH",

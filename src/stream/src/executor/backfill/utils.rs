@@ -308,32 +308,6 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
     Ok(result)
 }
 
-/// All vnodes should be persisted with status finished.
-pub(crate) async fn check_all_vnode_finished<S: StateStore, const IS_REPLICATED: bool>(
-    state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
-) -> StreamExecutorResult<bool> {
-    debug_assert!(!state_table.vnode_bitmap().is_empty());
-    let vnodes = state_table.vnodes().iter_vnodes_scalar();
-    let mut is_finished = true;
-    for vnode in vnodes {
-        let key: &[Datum] = &[Some(vnode.into())];
-        let row = state_table.get_row(key).await?;
-
-        let vnode_is_finished = if let Some(row) = row
-            && let Some(vnode_is_finished) = row.last()
-        {
-            vnode_is_finished.into_bool()
-        } else {
-            false
-        };
-        if !vnode_is_finished {
-            is_finished = false;
-            break;
-        }
-    }
-    Ok(is_finished)
-}
-
 /// Flush the data
 // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
 // TODO: remove `allow` here after the issued is closed.
@@ -382,21 +356,26 @@ pub(crate) fn build_temporary_state_with_vnode(
     is_finished: bool,
     current_pos: &OwnedRow,
 ) {
-    build_temporary_state(row_state, is_finished, current_pos);
+    row_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
+    row_state[current_pos.len() + 1] = Some(is_finished.into());
     row_state[0] = Some(vnode.to_scalar().into());
 }
 
 /// We want to avoid allocating a row for every vnode.
 /// Instead we can just modify a single row, and dispatch it to state table to write.
-/// This builds the `current_pos` segment of the row.
-/// Vnode needs to be filled in as well.
+/// This builds the following segments of the row:
+/// 1. `current_pos`
+/// 2. `backfill_finished`
+/// 3. `row_count`
 pub(crate) fn build_temporary_state(
     row_state: &mut [Datum],
     is_finished: bool,
     current_pos: &OwnedRow,
+    row_count: u64,
 ) {
     row_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
     row_state[current_pos.len() + 1] = Some(is_finished.into());
+    row_state[current_pos.len() + 2] = Some((row_count as i64).into());
 }
 
 /// Update backfill pos by vnode.
@@ -563,12 +542,13 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     is_finished: bool,
     current_pos: &Option<OwnedRow>,
+    row_count: u64,
     old_state: &mut Option<Vec<Datum>>,
     current_state: &mut [Datum],
 ) -> StreamExecutorResult<()> {
     if let Some(current_pos_inner) = current_pos {
         // state w/o vnodes.
-        build_temporary_state(current_state, is_finished, current_pos_inner);
+        build_temporary_state(current_state, is_finished, current_pos_inner, row_count);
         flush_data(table, epoch, is_checkpoint, old_state, current_state).await?;
         *old_state = Some(current_state.into());
     } else {
