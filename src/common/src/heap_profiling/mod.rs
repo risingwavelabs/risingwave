@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub const MANUALLY_DUMP_MID_NAME: &str = "manually-dump.compute.heap";
-pub const AUTO_DUMP_MID_NAME: &str = "auto-dump.compute.heap";
+pub const MANUALLY_DUMP_SUFFIX: &str = "manual.heap";
+pub const AUTO_DUMP_SUFFIX: &str = "auto.heap";
 pub const COLLAPSED_SUFFIX: &str = "collapsed";
 
 pub mod jeprof;
