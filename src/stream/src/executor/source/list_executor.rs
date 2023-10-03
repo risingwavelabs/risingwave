@@ -111,7 +111,11 @@ impl<S: StateStore> FsListExecutor<S> {
             .map(|split| {
                 (
                     Op::Insert,
-                    OwnedRow::new(vec![Some(ScalarImpl::Utf8(split.name.into_boxed_str()))]),
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8(split.name.into_boxed_str())),
+                        Some(ScalarImpl::Timestamp(split.timestamp)),
+                        Some(ScalarImpl::Int64(split.size)),
+                    ]),
                 )
             })
             .collect::<Vec<_>>();

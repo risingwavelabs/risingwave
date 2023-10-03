@@ -162,18 +162,44 @@ impl LogicalSource {
     fn rewrite_new_s3_plan(&self) -> Result<PlanRef> {
         let logical_source = generic::Source {
             catalog: self.core.catalog.clone(),
-            column_catalog: vec![ColumnCatalog {
-                column_desc: ColumnDesc::from_field_with_column_id(
-                    &Field {
-                        name: "filename".to_string(),
-                        data_type: DataType::Varchar,
-                        sub_fields: vec![],
-                        type_name: "".to_string(),
-                    },
-                    0,
-                ),
-                is_hidden: false,
-            }],
+            column_catalog: vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "filename".to_string(),
+                            data_type: DataType::Varchar,
+                            sub_fields: vec![],
+                            type_name: "".to_string(),
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "last_edit_time".to_string(),
+                            data_type: DataType::Timestamp,
+                            sub_fields: vec![],
+                            type_name: "".to_string(),
+                        },
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "file_size".to_string(),
+                            data_type: DataType::Int64,
+                            sub_fields: vec![],
+                            type_name: "".to_string(),
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+            ],
             row_id_index: None,
             gen_row_id: false,
             ..self.core.clone()
@@ -192,7 +218,7 @@ impl LogicalSource {
             logical: logical_source,
         }
         .into();
-        new_s3_plan = RequiredDist::shard_by_key(1, &[0])
+        new_s3_plan = RequiredDist::shard_by_key(3, &[0])
             .enforce_if_not_satisfies(new_s3_plan, &Order::any())?;
         new_s3_plan = StreamDedup::new(generic::Dedup {
             input: new_s3_plan,

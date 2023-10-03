@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{Field, Schema, TableId, ColumnId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_pb::stream_plan::StreamFsFetchNode;
@@ -20,8 +20,9 @@ use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
-use crate::executor::source_v2::fetch_executor::FsFetchExecutor;
-use crate::executor::{BoxedExecutor, Executor, SourceStateTableHandler, StreamSourceCore};
+use crate::executor::{
+    BoxedExecutor, Executor, FsFetchExecutor, SourceStateTableHandler, StreamSourceCore,
+};
 use crate::from_proto::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 

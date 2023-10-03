@@ -27,11 +27,12 @@ use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::sink::encoder::SerTo;
-use risingwave_connector::source::filesystem::{FsPage, FsPageItem, S3SplitEnumerator};
+use risingwave_connector::source::filesystem::s3_v2::reader::S3SourceReader;
+use risingwave_connector::source::filesystem::{FsPage, FsPageItem, FsSplit, S3SplitEnumerator};
 use risingwave_connector::source::{
     create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
     ConnectorState, FsFilterCtrlCtx, FsFilterCtrlCtxRef, FsListInner, SourceColumnDesc,
-    SourceContext, SourceEnumeratorContext, SplitEnumerator, SplitReader,
+    SourceContext, SourceEnumeratorContext, SourceReader, SplitEnumerator, SplitReader,
 };
 use tokio::time::{Duration, MissedTickBehavior};
 use tokio::{select, time};
@@ -108,8 +109,6 @@ impl ConnectorSource {
         ))
     }
 
-    // TODO: reuse stream_reader, and using SourceContext
-    // to discriminate source v1/v2
     pub async fn source_reader(
         &self,
         column_ids: Vec<ColumnId>,

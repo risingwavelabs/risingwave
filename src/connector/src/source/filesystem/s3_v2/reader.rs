@@ -5,12 +5,13 @@ use futures_async_stream::try_stream;
 use risingwave_common::error::RwError;
 
 use crate::aws_auth::AwsAuthProps;
-use crate::aws_utils::{s3_client, default_conn_config};
-use crate::parser::{ParserConfig, ByteStreamSourceParserImpl};
-use crate::source::{BoxSourceWithStateStream, StreamChunkWithState};
+use crate::aws_utils::{default_conn_config, s3_client};
+use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::SplitMetaData;
-use crate::source::filesystem::{FsSplit, S3FileReader, nd_streaming};
-use crate::source::{SourceReader, filesystem::S3Properties, SourceContextRef, Column};
+use crate::source::filesystem::{nd_streaming, FsSplit, S3FileReader, S3Properties};
+use crate::source::{
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceReader, StreamChunkWithState,
+};
 
 pub struct S3SourceReader {
     bucket_name: String,
@@ -29,8 +30,10 @@ impl S3SourceReader {
         split: FsSplit,
     ) {
         let split_id = split.id();
-        let data_stream = S3FileReader::stream_read_object(client_for_s3, bucket_name, split, source_ctx.clone());
-        let parser = ByteStreamSourceParserImpl::create(parser_config.clone(), source_ctx.clone()).await?;
+        let data_stream =
+            S3FileReader::stream_read_object(client_for_s3, bucket_name, split, source_ctx.clone());
+        let parser =
+            ByteStreamSourceParserImpl::create(parser_config.clone(), source_ctx.clone()).await?;
         let msg_stream = if matches!(
             parser,
             ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
@@ -86,7 +89,7 @@ impl SourceReader for S3SourceReader {
             self.bucket_name.clone(),
             self.source_ctx.clone(),
             self.parser_config.clone(),
-            split
+            split,
         )
     }
 }
