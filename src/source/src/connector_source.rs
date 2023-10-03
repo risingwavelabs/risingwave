@@ -108,6 +108,45 @@ impl ConnectorSource {
         ))
     }
 
+    // TODO: reuse stream_reader, and using SourceContext
+    // to discriminate source v1/v2
+    pub async fn source_reader(
+        &self,
+        column_ids: Vec<ColumnId>,
+        source_ctx: Arc<SourceContext>,
+        split: FsSplit,
+    ) -> Result<BoxSourceWithStateStream> {
+        let config = self.config.clone();
+        let columns = self.get_target_columns(column_ids)?;
+
+        let data_gen_columns = Some(
+            columns
+                .iter()
+                .map(|col| Column {
+                    name: col.name.clone(),
+                    data_type: col.data_type.clone(),
+                    is_visible: col.is_visible(),
+                })
+                .collect_vec(),
+        );
+
+        let parser_config = ParserConfig {
+            specific: self.parser_config.clone(),
+            common: CommonParserConfig {
+                rw_columns: columns,
+            },
+        };
+
+        let mut reader = match config {
+            ConnectorProperties::S3(prop) => {
+                S3SourceReader::new(*prop, parser_config, source_ctx, data_gen_columns).await?
+            }
+            _ => unreachable!(),
+        };
+
+        Ok(reader.build_read_stream(split))
+    }
+
     pub async fn stream_reader(
         &self,
         state: ConnectorState,
