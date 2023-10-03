@@ -833,3 +833,27 @@
               └─StreamProject { exprs: [rows.correlated_col, rows.k, rows.v, rows._row_id] }
                 └─StreamFilter { predicate: IsNotNull(rows.correlated_col) }
                   └─StreamTableScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col, rows._row_id], pk: [rows._row_id], dist: UpstreamHashShard(rows._row_id) }
+- name: test hop window subquery 1
+  sql: |
+    create table t1 (k int primary key, ts timestamp);
+    select * from (select 1 as col union select 2) u , lateral(select * from hop(t1, ts, interval '10' minute, interval '30' minute) where col = k);
+  batch_plan: |-
+    BatchHopWindow { time_col: t1.ts, slide: 00:10:00, size: 00:30:00, output: all }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchFilter { predicate: IsNotNull(t1.ts) }
+        └─BatchLookupJoin { type: Inner, predicate: 1:Int32 = t1.k AND IsNotNull(t1.ts), output: all }
+          └─BatchExchange { order: [], dist: UpstreamHashShard(1:Int32) }
+            └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
+              └─BatchExchange { order: [], dist: HashShard(1:Int32) }
+                └─BatchValues { rows: [[1:Int32], [2:Int32]] }
+  stream_plan: |-
+    StreamMaterialize { columns: [col, k, ts, window_start, window_end], stream_key: [col, k, window_start, window_end], pk_columns: [col, k, window_start, window_end], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: Inner, predicate: 1:Int32 = t1.k, output: all }
+      ├─StreamAppendOnlyDedup { dedup_cols: [1:Int32] }
+      │ └─StreamExchange { dist: HashShard(1:Int32) }
+      │   └─StreamProject { exprs: [1:Int32] }
+      │     └─StreamValues { rows: [[1:Int32, 0:Int64], [2:Int32, 1:Int64]] }
+      └─StreamExchange { dist: HashShard(t1.k) }
+        └─StreamHopWindow { time_col: t1.ts, slide: 00:10:00, size: 00:30:00, output: all }
+          └─StreamFilter { predicate: IsNotNull(t1.ts) }
+            └─StreamTableScan { table: t1, columns: [t1.k, t1.ts], pk: [t1.k], dist: UpstreamHashShard(t1.k) }

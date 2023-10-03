@@ -22,7 +22,7 @@ use risingwave_common::row::RowExt;
 use risingwave_common::types::Datum;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::agg::{AggCall, AggKind, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{AggCall, AggKind, BoxedAggregateFunction};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -247,7 +247,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::agg::{build_append_only, AggCall};
+    use risingwave_expr::aggregate::{build_append_only, AggCall};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 

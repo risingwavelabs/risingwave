@@ -1,7 +1,10 @@
 disallowed-methods = [
     { path = "std::iter::Iterator::zip", reason = "Please use Itertools::zip_eq instead." },
-    { path = "risingwave_expr::expr::Expression::eval", reason = "Please use InfallibleExpression::eval_infallible instead." },
-    { path = "risingwave_expr::expr::Expression::eval_row", reason = "Please use InfallibleExpression::eval_row_infallible instead." },
+
+    { path = "risingwave_expr::expr::build_from_prost", reason = "Expressions in streaming must be in non-strict mode. Please use `build_non_strict_from_prost` instead." },
+    { path = "risingwave_expr::expr::build_func", reason = "Expressions in streaming must be in non-strict mode. Please use `build_func_non_strict` instead." },
+    { path = "risingwave_expr::expr::Expression::eval", reason = "Please use `Expression::eval_infallible` instead." },
+    { path = "risingwave_expr::expr::Expression::eval_row", reason = "Please use `Expression::eval_row_infallible` instead." },
 
     { path = "risingwave_common::error::internal_err", reason = "Please use per-crate error type instead." },
     { path = "risingwave_common::error::internal_error", reason = "Please use per-crate error type instead." },

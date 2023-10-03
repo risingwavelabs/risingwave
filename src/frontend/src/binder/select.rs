@@ -20,7 +20,7 @@ use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATAL
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 use risingwave_sqlparser::ast::{
     BinaryOperator, DataType as AstDataType, Distinct, Expr, Ident, Join, JoinConstraint,
     JoinOperator, ObjectName, Select, SelectItem, TableFactor, TableWithJoins,
