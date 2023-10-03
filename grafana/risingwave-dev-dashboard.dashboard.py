@@ -640,11 +640,6 @@ def section_object_storage(outer_panels):
 
 def section_streaming(outer_panels):
     panels = outer_panels.sub_panel()
-    sink_filter = "executor_identity=~\".*SinkExecutor.*\""
-    mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
-    table_type_filter = "table_type=~\"MATERIALIZED_VIEW\""
-    mv_throughput_query = f'sum(rate({metric("stream_executor_row_count", filter=mv_filter)}[$__rate_interval]) * on(actor_id) group_left(materialized_view_id, table_name) (group({metric("table_info", filter=table_type_filter)}) by (actor_id, materialized_view_id, table_name))) by (materialized_view_id, table_name)'
-    sink_throughput_query = f'sum(rate({metric("stream_executor_row_count", filter=sink_filter)}[$__rate_interval]) * on(actor_id) group_left(sink_name) (group({metric("sink_info")}) by (actor_id, sink_name))) by (sink_name)'
     return [
         outer_panels.row_collapsed(
             "Streaming",
@@ -739,22 +734,41 @@ def section_streaming(outer_panels):
             ),
             panels.timeseries_rowsps(
                 "Sink Throughput(rows/s)",
-                "The figure shows the number of rows output by each sink per second.",
+                "The number of rows streamed into each sink per second.",
                 [
                     panels.target(
-                        sink_throughput_query,
-                    "sink {{sink_name}}",
+                        f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)",
+                        "sink {{sink_id}} {{sink_name}}",
                     ),
                 ],
             ),
-
+            panels.timeseries_rowsps(
+                "Sink Throughput(rows/s) per Partition",
+                "The number of rows streamed into each sink per second.",
+                [
+                    panels.target(
+                        f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}",
+                        "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
+                    ),
+                ],
+            ),
             panels.timeseries_rowsps(
                 "Materialized View Throughput(rows/s)",
                 "The figure shows the number of rows written into each materialized view per second.",
                 [
                     panels.target(
-                    mv_throughput_query,
-                    "materialized view {{table_name}} table_id {{materialized_view_id}}",
+                        f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
+                        "mview {{table_id}} {{table_name}}",
+                    ),
+                ],
+            ),
+            panels.timeseries_rowsps(
+                "Materialized View Throughput(rows/s) per Partition",
+                "The figure shows the number of rows written into each materialized view per second.",
+                [
+                    panels.target(
+                        f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (actor_id, table_id) * on(actor_id, table_id) group_left(table_name) {metric('table_info')}",
+                        "mview {{table_id}} {{table_name}} - actor {{actor_id}}",
                     ),
                 ],
             ),
@@ -899,7 +913,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_executor_row_count')}[$__rate_interval])",
-                            "actor {{actor_id}} ({{executor_identity}}",
+                            "{{executor_identity}} actor {{actor_id}}",
                         ),
                     ],
                 ),
