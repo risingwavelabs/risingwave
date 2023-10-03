@@ -327,9 +327,9 @@ dependencies = [
  "bytes",
  "futures",
  "paste",
- "prost",
+ "prost 0.11.9",
  "tokio",
- "tonic",
+ "tonic 0.9.2",
 ]
 
 [[package]]
@@ -1858,9 +1858,9 @@ version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2895653b4d9f1538a83970077cb01dfc77a4810524e51a110944688e916b18e"
 dependencies = [
- "prost",
+ "prost 0.11.9",
  "prost-types",
- "tonic",
+ "tonic 0.9.2",
  "tracing-core",
 ]
 
@@ -1882,7 +1882,7 @@ dependencies = [
  "thread_local",
  "tokio",
  "tokio-stream",
- "tonic",
+ "tonic 0.9.2",
  "tracing",
  "tracing-core",
  "tracing-subscriber",
@@ -2787,10 +2787,10 @@ version = "0.11.1"
 source = "git+https://github.com/risingwavelabs/etcd-client.git?rev=d55550a#d55550a182f2119e39e64858771468e1b26f6777"
 dependencies = [
  "http",
- "prost",
+ "prost 0.11.9",
  "tokio",
  "tokio-stream",
- "tonic",
+ "tonic 0.9.2",
  "tonic-build",
  "tower",
  "tower-service",
@@ -3450,7 +3450,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-retry",
- "tonic",
+ "tonic 0.9.2",
  "tower",
  "tracing",
 ]
@@ -3461,9 +3461,9 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5453af21ac0cc1f3b2cfb5b687c174e701c10ec2d5c286aff7ca8cbbf08d31b4"
 dependencies = [
- "prost",
+ "prost 0.11.9",
  "prost-types",
- "tonic",
+ "tonic 0.9.2",
 ]
 
 [[package]]
@@ -4524,7 +4524,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.7.8",
- "tonic",
+ "tonic 0.9.2",
  "tracing",
 ]
 
@@ -4584,7 +4584,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "madsim",
- "tonic",
+ "tonic 0.9.2",
  "tracing",
 ]
 
@@ -5399,10 +5399,10 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry_api",
  "opentelemetry_sdk",
- "prost",
+ "prost 0.11.9",
  "thiserror",
  "tokio",
- "tonic",
+ "tonic 0.9.2",
 ]
 
 [[package]]
@@ -5413,8 +5413,8 @@ checksum = "b1e3f814aa9f8c905d0ee4bde026afd3b2577a97c10e1699912e3e44f0c4cbeb"
 dependencies = [
  "opentelemetry_api",
  "opentelemetry_sdk",
- "prost",
- "tonic",
+ "prost 0.11.9",
+ "tonic 0.9.2",
 ]
 
 [[package]]
@@ -5718,7 +5718,7 @@ checksum = "bdbb7b706f2afc610f3853550cdbbf6372fd324824a087806bd4480ea4996e24"
 dependencies = [
  "heck 0.4.1",
  "itertools 0.10.5",
- "prost",
+ "prost 0.11.9",
  "prost-types",
 ]
 
@@ -6251,6 +6251,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4fdd22f3b9c31b53c060df4a0613a1c7f062d4115a2b984dd15b1858f7e340d"
+dependencies = [
+ "bytes",
+]
+
+[[package]]
 name = "prost-build"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6264,7 +6273,7 @@ dependencies = [
  "multimap",
  "petgraph",
  "prettyplease",
- "prost",
+ "prost 0.11.9",
  "prost-types",
  "regex",
  "syn 1.0.109",
@@ -6302,7 +6311,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b823de344848e011658ac981009100818b322421676740546f8b52ed5249428"
 dependencies = [
  "once_cell",
- "prost",
+ "prost 0.11.9",
  "prost-types",
 ]
 
@@ -6312,7 +6321,7 @@ version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "213622a1460818959ac1181aaeb2dc9c7f63df720db7d788b3e24eacd1983e13"
 dependencies = [
- "prost",
+ "prost 0.11.9",
 ]
 
 [[package]]
@@ -6396,7 +6405,7 @@ dependencies = [
  "oauth2",
  "openidconnect",
  "pem 1.1.1",
- "prost",
+ "prost 0.11.9",
  "prost-build",
  "prost-derive",
  "rand",
@@ -6794,7 +6803,7 @@ dependencies = [
  "bytes",
  "itertools 0.11.0",
  "parking_lot 0.12.1",
- "prost",
+ "prost 0.11.9",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_object_store",
@@ -6994,7 +7003,7 @@ dependencies = [
  "pretty_assertions",
  "procfs 0.15.1",
  "prometheus",
- "prost",
+ "prost 0.11.9",
  "rand",
  "regex",
  "reqwest",
@@ -7206,7 +7215,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
- "prost",
+ "prost 0.11.9",
  "prost-build",
  "prost-reflect",
  "prost-types",
@@ -7493,7 +7502,7 @@ dependencies = [
  "madsim-tokio",
  "mockall",
  "parking_lot 0.12.1",
- "prost",
+ "prost 0.11.9",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
@@ -7506,7 +7515,7 @@ name = "risingwave_java_binding"
 version = "0.1.0"
 dependencies = [
  "jni",
- "prost",
+ "prost 0.11.9",
  "risingwave_common",
  "risingwave_expr",
  "risingwave_jni_core",
@@ -7526,7 +7535,7 @@ dependencies = [
  "jni",
  "madsim-tokio",
  "paste",
- "prost",
+ "prost 0.11.9",
  "risingwave_common",
  "risingwave_expr",
  "risingwave_hummock_sdk",
@@ -7576,7 +7585,7 @@ dependencies = [
  "parse-display",
  "prometheus",
  "prometheus-http-query",
- "prost",
+ "prost 0.11.9",
  "rand",
  "regex",
  "reqwest",
@@ -7647,7 +7656,7 @@ dependencies = [
  "madsim-tonic-build",
  "pbjson",
  "pbjson-build",
- "prost",
+ "prost 0.11.9",
  "prost-helpers",
  "serde",
  "strum 0.25.0",
@@ -7929,7 +7938,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "procfs 0.15.1",
  "prometheus",
- "prost",
+ "prost 0.11.9",
  "rand",
  "risingwave_backup",
  "risingwave_common",
@@ -7992,7 +8001,7 @@ dependencies = [
  "parse-display",
  "pin-project",
  "prometheus",
- "prost",
+ "prost 0.11.9",
  "rand",
  "risingwave_common",
  "risingwave_connector",
@@ -9981,7 +9990,7 @@ dependencies = [
  "hyper-timeout",
  "percent-encoding",
  "pin-project",
- "prost",
+ "prost 0.11.9",
  "rustls-pemfile",
  "tokio",
  "tokio-rustls 0.24.1",
@@ -9991,6 +10000,38 @@ dependencies = [
  "tower-service",
  "tracing",
  "webpki-roots 0.23.1",
+]
+
+[[package]]
+name = "tonic"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d560933a0de61cf715926b9cac824d4c883c2c43142f787595e48280c40a1d0e"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "axum",
+ "base64 0.21.4",
+ "bytes",
+ "flate2",
+ "h2",
+ "http",
+ "http-body",
+ "hyper",
+ "hyper-timeout",
+ "percent-encoding",
+ "pin-project",
+ "prost 0.12.1",
+ "rustls 0.21.7",
+ "rustls-pemfile",
+ "tokio",
+ "tokio-rustls 0.24.1",
+ "tokio-stream",
+ "tower",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+ "webpki-roots 0.25.2",
 ]
 
 [[package]]
@@ -10855,7 +10896,7 @@ dependencies = [
  "postgres-types",
  "proc-macro2",
  "prometheus",
- "prost",
+ "prost 0.11.9",
  "rand",
  "rand_chacha",
  "rand_core",
@@ -10895,7 +10936,7 @@ dependencies = [
  "tokio-util",
  "toml_datetime",
  "toml_edit",
- "tonic",
+ "tonic 0.10.2",
  "tower",
  "tracing",
  "tracing-core",
