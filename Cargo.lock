@@ -10864,6 +10864,7 @@ dependencies = [
  "reqwest",
  "ring",
  "rust_decimal",
+ "rustls 0.21.7",
  "scopeguard",
  "sea-orm",
  "sea-query",
