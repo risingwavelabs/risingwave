@@ -22,9 +22,10 @@ pub use state_table_handler::*;
 
 pub mod source_executor;
 
+pub mod list_executor;
 pub mod state_table_handler;
-
 use futures_async_stream::try_stream;
+pub use list_executor::*;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::StreamExecutorError;

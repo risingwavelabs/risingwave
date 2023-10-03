@@ -107,7 +107,6 @@ impl SplitEnumerator for S3SplitEnumerator {
                 break;
             }
         }
-        self.next_continuation_token = None;
         Ok(objects)
     }
 }

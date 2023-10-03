@@ -16,7 +16,7 @@ use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::external::{ExternalTableType, SchemaTableName};
-use risingwave_connector::source::{SourceCtrlOpts, S3_V2_CONNECTOR};
+use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts, S3_V2_CONNECTOR};
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;
@@ -24,14 +24,12 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
 use crate::executor::external::ExternalStorageTable;
-use crate::executor::source::StreamSourceCore;
+use crate::executor::source::{FsListExecutor, StreamSourceCore};
 use crate::executor::source_executor::SourceExecutor;
-use crate::executor::source_v2::list_executor::FsListExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
 use crate::executor::{CdcBackfillExecutor, FlowControlExecutor, FsSourceExecutor};
 
 const FS_CONNECTORS: &[&str] = &["s3"];
-const FS_V2_CONNECTORS: &[&str] = &[S3_V2_CONNECTOR];
 pub struct SourceExecutorBuilder;
 
 #[async_trait::async_trait]
@@ -117,7 +115,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     .map(|c| c.to_ascii_lowercase())
                     .unwrap_or_default();
                 let is_fs_connector = FS_CONNECTORS.contains(&connector.as_str());
-                let is_fs_v2_connector = FS_V2_CONNECTORS.contains(&connector.as_str());
+                let is_fs_v2_connector =
+                    ConnectorProperties::is_new_fs_connector_hash_map(&source.properties);
 
                 if is_fs_connector {
                     FsSourceExecutor::new(

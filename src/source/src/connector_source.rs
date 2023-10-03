@@ -213,9 +213,3 @@ async fn build_fs_list_stream(
         interval.tick().await;
     }
 }
-
-#[cfg(test)]
-mod test {
-    #[tokio::test]
-    async fn test_consume_fs_list() {}
-}

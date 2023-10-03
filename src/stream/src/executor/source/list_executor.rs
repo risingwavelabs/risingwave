@@ -158,7 +158,10 @@ impl<S: StateStore> FsListExecutor<S> {
 
         while let Some(msg) = stream.next().await {
             match msg {
-                Err(_) => (),
+                Err(e) => {
+                    tracing::warn!("encountered an error, recovering. {:?}", e);
+                    // todo: rebuild stream here
+                }
                 Ok(msg) => match msg {
                     // Barrier arrives.
                     Either::Left(msg) => match &msg {
