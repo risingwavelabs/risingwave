@@ -31,7 +31,8 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::sink::boxed::{BoxCoordinator, BoxWriter};
 use risingwave_connector::sink::test_sink::registry_build_sink;
-use risingwave_connector::sink::{Sink, SinkWriter, SinkWriterParam};
+use risingwave_connector::sink::writer::SinkWriter;
+use risingwave_connector::sink::{Sink, SinkWriterParam};
 use risingwave_connector::source::test_source::{registry_test_source, BoxSource, TestSourceSplit};
 use risingwave_connector::source::StreamChunkWithState;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
@@ -176,6 +177,7 @@ async fn test_sink_basic() -> Result<()> {
             sleep(Duration::from_millis(10)).await;
         }
     }
+    sleep(Duration::from_millis(10000)).await;
 
     assert_eq!(6, parallelism_counter.load(Relaxed));
     assert_eq!(count, row_counter.load(Relaxed));

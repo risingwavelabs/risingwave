@@ -122,9 +122,9 @@ impl JemallocMemoryControl {
                 .unwrap()
                 .to_string();
 
+            // `file_path_str` is leaked because `jemalloc_dump_mib.write` requires static lifetime
             let file_path_str = Box::leak(file_path.into_boxed_str());
-            let file_path_bytes = unsafe { file_path_str.as_bytes_mut() };
-            let file_path_ptr = file_path_bytes.as_mut_ptr();
+            let file_path_bytes = file_path_str.as_bytes();
             if let Err(e) = self
                 .jemalloc_dump_mib
                 .write(CStr::from_bytes_with_nul(file_path_bytes).unwrap())
@@ -133,7 +133,6 @@ impl JemallocMemoryControl {
             } else {
                 tracing::info!("Successfully dumped heap profile to {}", file_name);
             }
-            let _ = unsafe { Box::from_raw(file_path_ptr) };
         }
     }
 }

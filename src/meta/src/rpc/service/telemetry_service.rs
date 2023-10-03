@@ -14,25 +14,38 @@
 
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
 use risingwave_pb::meta::{GetTelemetryInfoRequest, TelemetryInfoResponse};
+use sea_orm::EntityTrait;
 use tonic::{Request, Response, Status};
 
+use crate::controller::SqlMetaStore;
 use crate::model::ClusterId;
+use crate::model_v2::prelude::Cluster;
 use crate::storage::MetaStoreRef;
+use crate::MetaResult;
 
 pub struct TelemetryInfoServiceImpl {
     meta_store: MetaStoreRef,
+    sql_meta_store: Option<SqlMetaStore>,
 }
 
 impl TelemetryInfoServiceImpl {
-    pub fn new(meta_store: MetaStoreRef) -> Self {
-        Self { meta_store }
+    pub fn new(meta_store: MetaStoreRef, sql_meta_store: Option<SqlMetaStore>) -> Self {
+        Self {
+            meta_store,
+            sql_meta_store,
+        }
     }
 
-    async fn get_tracking_id(&self) -> Option<ClusterId> {
-        ClusterId::from_meta_store(&self.meta_store)
+    async fn get_tracking_id(&self) -> MetaResult<Option<ClusterId>> {
+        if let Some(store) = &self.sql_meta_store {
+            let cluster = Cluster::find().one(&store.conn).await?;
+            return Ok(cluster.map(|c| c.cluster_id.to_string().into()));
+        }
+
+        Ok(ClusterId::from_meta_store(&self.meta_store)
             .await
             .ok()
-            .flatten()
+            .flatten())
     }
 }
 
@@ -42,7 +55,7 @@ impl TelemetryInfoService for TelemetryInfoServiceImpl {
         &self,
         _request: Request<GetTelemetryInfoRequest>,
     ) -> Result<Response<TelemetryInfoResponse>, Status> {
-        match self.get_tracking_id().await {
+        match self.get_tracking_id().await? {
             Some(tracking_id) => Ok(Response::new(TelemetryInfoResponse {
                 tracking_id: Some(tracking_id.into()),
             })),

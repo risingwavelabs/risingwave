@@ -29,9 +29,9 @@ use serde_with::serde_as;
 
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::common::ClickHouseCommon;
+use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
-    Result, Sink, SinkError, SinkParam, SinkWriter, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
+    Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
@@ -209,7 +209,7 @@ impl ClickHouseSink {
 }
 impl Sink for ClickHouseSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = ClickHouseSinkWriter;
+    type LogSinker = LogSinkerOf<ClickHouseSinkWriter>;
 
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
 
@@ -243,14 +243,15 @@ impl Sink for ClickHouseSink {
         Ok(())
     }
 
-    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
-        ClickHouseSinkWriter::new(
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        Ok(ClickHouseSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
         )
-        .await
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 }
 pub struct ClickHouseSinkWriter {

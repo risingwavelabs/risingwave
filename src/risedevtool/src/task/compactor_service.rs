@@ -53,9 +53,7 @@ impl CompactorService {
                 config.listen_address, config.exporter_port
             ))
             .arg("--advertise-addr")
-            .arg(format!("{}:{}", config.address, config.port))
-            .arg("--metrics-level")
-            .arg("info");
+            .arg(format!("{}:{}", config.address, config.port));
         if let Some(compaction_worker_threads_number) =
             config.compaction_worker_threads_number.as_ref()
         {

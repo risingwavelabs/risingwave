@@ -29,6 +29,7 @@ use super::doris_connector::{DorisField, DorisInsert, DorisInsertClient, DORIS_D
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::common::DorisCommon;
 use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriter, SinkWriterParam,
 };
@@ -155,18 +156,19 @@ impl DorisSink {
 
 impl Sink for DorisSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = DorisSinkWriter;
+    type LogSinker = LogSinkerOf<DorisSinkWriter>;
 
     const SINK_NAME: &'static str = DORIS_SINK;
 
-    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
-        DorisSinkWriter::new(
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        Ok(DorisSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
         )
-        .await
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
     async fn validate(&self) -> Result<()> {
