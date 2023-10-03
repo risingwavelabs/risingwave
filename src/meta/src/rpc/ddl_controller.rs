@@ -408,10 +408,10 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         create_type: CreateType,
     ) -> MetaResult<NotificationVersion> {
-        tracing::info!(
-            "Creating stream job {}, definition: {}",
-            stream_job.id(),
-            stream_job.definition()
+        tracing::trace!(
+            id = stream_job.id(),
+            definition = stream_job.definition(),
+            "creating stream job"
         );
         let _permit = self
             .creating_streaming_job_permits
@@ -426,7 +426,7 @@ impl DdlController {
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
-        tracing::info!("Prepared stream job {}", stream_job.id());
+        tracing::trace!("prepared stream job {}", stream_job.id());
 
         // Update the corresponding 'initiated_at' field.
         stream_job.mark_initialized();
@@ -436,7 +436,7 @@ impl DdlController {
             let (ctx, table_fragments) = self
                 .build_stream_job(env, &stream_job, fragment_graph)
                 .await?;
-            tracing::info!("Built stream job {}", stream_job.id());
+            tracing::trace!("built stream job {}", stream_job.id());
 
             internal_tables = ctx.internal_tables();
 
@@ -469,7 +469,6 @@ impl DdlController {
             }
             CreateType::Background => {
                 let ctrl = self.clone();
-                let definition = stream_job.definition();
                 let stream_job_id = stream_job.id();
                 let fut = async move {
                     let result = ctrl
@@ -480,13 +479,12 @@ impl DdlController {
                             internal_tables,
                         )
                         .await;
-                    tracing::info!("created stream job {}", stream_job_id);
                     match result {
                         Err(e) => {
-                            tracing::error!(definition, error = ?e, "create_streaming_job_failed")
+                            tracing::error!(stream_job_id, error = ?e, "finish stream job failed")
                         }
                         Ok(_) => {
-                            tracing::info!(definition, "stream_job_ok")
+                            tracing::info!(stream_job_id, "finish stream job succeeded")
                         }
                     }
                 };
@@ -710,7 +708,8 @@ impl DdlController {
         Ok((ctx, table_fragments))
     }
 
-    /// `cancel_stream_job` cancels a stream job and clean some states.
+    /// This is NOT used by `CANCEL JOBS`.
+    /// It is used internally by `DdlController` to cancel and cleanup stream job.
     async fn cancel_stream_job(
         &self,
         stream_job: &StreamingJob,
