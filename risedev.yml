@@ -137,6 +137,7 @@ profile:
       - use: frontend
         user-managed: true
       - use: compactor
+        user-managed: true
       - use: prometheus
       - use: grafana
       - use: zookeeper
@@ -145,7 +146,7 @@ profile:
         persist-data: true
       - use: connector-node
 
-  standalone-minio-etcd-compactor:
+  standalone-minio-etcd:
     steps:
       - use: minio
       - use: etcd
@@ -156,23 +157,7 @@ profile:
       - use: frontend
         user-managed: true
       - use: compactor
-
-  standalone-full-peripherals-without-kafka:
-    steps:
-      - use: minio
-      - use: etcd
-      - use: meta-node
         user-managed: true
-      - use: compute-node
-        user-managed: true
-      - use: frontend
-        user-managed: true
-      - use: compactor
-      - use: prometheus
-      - use: grafana
-      - use: zookeeper
-        persist-data: true
-      - use: connector-node
 
   hdfs:
     steps:

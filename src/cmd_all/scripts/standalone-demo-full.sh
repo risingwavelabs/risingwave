@@ -41,7 +41,12 @@ start_standalone() {
                    --advertise-addr 127.0.0.1:4566 \
                    --prometheus-listener-addr 127.0.0.1:2222 \
                    --health-check-listener-addr 127.0.0.1:6786 \
-                   --meta-addr http://127.0.0.1:5690"
+                   --meta-addr http://127.0.0.1:5690" \
+                 --compactor-opts=" \
+                   --listen-addr 127.0.0.1:6660 \
+                   --prometheus-listener-addr 127.0.0.1:1260 \
+                   --advertise-addr 127.0.0.1:6660 \
+                   --meta-address http://127.0.0.1:5690"
 }
 
 start_standalone
