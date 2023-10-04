@@ -714,6 +714,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
         let actor_id_str = self.ctx.id.to_string();
+        let fragment_id_str = self.ctx.fragment_id.to_string();
         let mut start_time = Instant::now();
 
         while let Some(msg) = aligned_stream
@@ -723,7 +724,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         {
             self.metrics
                 .join_actor_input_waiting_duration_ns
-                .with_label_values(&[&actor_id_str])
+                .with_label_values(&[&actor_id_str, &fragment_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             match msg? {
                 AlignedMessage::WatermarkLeft(watermark) => {

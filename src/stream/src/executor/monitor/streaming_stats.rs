@@ -361,7 +361,7 @@ impl StreamingMetrics {
         let join_actor_input_waiting_duration_ns = register_int_counter_vec_with_registry!(
             "stream_join_actor_input_waiting_duration_ns",
             "Total waiting duration (ns) of input buffer of join actor",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap();
