@@ -98,7 +98,7 @@ if [[ "$mode" == "standalone" ]]; then
 
   echo "test standalone without compactor"
   start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
-  cargo make ci-start standalone-minio-etcd
+  cargo make ci-start standalone-minio-etcd-embedded-compactor
   sleep 15
   if compactor_is_online
   then

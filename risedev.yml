@@ -159,6 +159,18 @@ profile:
       - use: compactor
         user-managed: true
 
+  # CN will have its own embedded compactor.
+  standalone-minio-etcd-embedded-compactor:
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+        user-managed: true
+      - use: compute-node
+        user-managed: true
+      - use: frontend
+        user-managed: true
+
   hdfs:
     steps:
       # - use: etcd
