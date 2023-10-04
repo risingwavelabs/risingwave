@@ -410,6 +410,7 @@ where
                     total_snapshot_processed_rows,
                 );
 
+                // Persist state on barrier
                 Self::persist_state(
                     barrier.epoch,
                     &mut self.state_table,

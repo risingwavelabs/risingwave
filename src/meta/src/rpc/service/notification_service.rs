@@ -144,7 +144,7 @@ impl NotificationServiceImpl {
             (databases, schemas, tables, sources, sinks, indexes, views, functions, connections),
             users,
             catalog_version,
-        ) = self.get_catalog_snapshot().await; // RETURN status::CREATED here, make them vis in FE.
+        ) = self.get_catalog_snapshot().await;
         let (parallel_unit_mappings, parallel_unit_mapping_version) =
             self.get_parallel_unit_mapping_snapshot().await;
         let serving_parallel_unit_mappings = self.get_serving_vnode_mappings();

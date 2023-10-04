@@ -665,6 +665,7 @@ impl CommandContext {
 
             Command::CancelStreamingJob(table_fragments) => {
                 let node_actors = table_fragments.worker_actor_ids();
+                // FIXME: Should invoke this in job managers (StreamManager and BarrierManager)?
                 self.clean_up(node_actors).await?;
                 // Both table and fragment will be cleaned up externally.
                 self.catalog_manager
