@@ -6,6 +6,8 @@ export RW_PREFIX=$PWD/.risingwave
 export PREFIX_BIN=$RW_PREFIX/bin
 export PREFIX_LOG=$RW_PREFIX/log
 
+# NOTE(kwannoel): Compared to start_standalone below, we omitted the compactor-opts,
+# so it should not start.
 start_standalone_without_compactor() {
   RUST_BACKTRACE=1 \
   "$PREFIX_BIN"/risingwave/standalone \
