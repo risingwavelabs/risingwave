@@ -658,13 +658,13 @@ target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave standalone $@
 [tasks.standalone-demo-dev]
 category = "RiseDev - Start/Stop"
 description = "🌟 Start a RisingWave standalone demo."
-dependencies = ["build"]
+dependencies = ["pre-start-playground"]
 script = "./src/cmd_all/scripts/standalone-demo-dev.sh"
 
 [tasks.standalone-demo-full]
 category = "RiseDev - Start/Stop"
 description = "🌟 Start a RisingWave standalone demo."
-dependencies = ["build"]
+dependencies = ["pre-start-playground"]
 script = "./src/cmd_all/scripts/standalone-demo-full.sh"
 
 [tasks.d]

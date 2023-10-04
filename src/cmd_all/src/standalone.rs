@@ -33,7 +33,7 @@ pub struct StandaloneOpts {
     /// Frontend node options
     frontend_opts: String,
 
-    #[clap(short, long, env = "STANDALONE_COMPACTOR_OPTS", default_value = "")]
+    #[clap(long, env = "STANDALONE_COMPACTOR_OPTS", default_value = "")]
     /// Frontend node options
     compactor_opts: String,
 }
