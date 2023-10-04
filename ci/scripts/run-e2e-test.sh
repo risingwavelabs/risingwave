@@ -180,6 +180,9 @@ if [[ "$mode" == "standalone" ]]; then
   run_sql() {
     psql -h localhost -p 4566 -d dev -U root -c "$@"
   }
+  compactor_is_online() {
+    grep -q "risingwave_compactor: Server listening at" "${PREFIX_LOG}/standalone.log"
+  }
 
   echo "--- e2e, standalone, cluster-persistence-test"
   cluster_start
@@ -209,6 +212,35 @@ if [[ "$mode" == "standalone" ]]; then
 
   echo "--- Kill cluster"
   cluster_stop
+
+  # Test that we can optionally include nodes in standalone mode.
+  echo "--- e2e, standalone, cluster-opts-test"
+
+  echo "test standalone without compactor"
+  start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
+  cargo make ci-start standalone-minio-etcd
+  sleep 5
+  if compactor_is_online
+  then
+    echo "ERROR: Compactor should not be online."
+    exit 1
+  fi
+
+  cluster_stop
+  echo "test standalone with compactor [TEST PASSED]"
+
+  echo "test standalone with compactor"
+  start_standalone "$PREFIX_LOG"/standalone.log &
+  cargo make ci-start standalone-minio-etcd
+  sleep 5
+  if ! compactor_is_online
+  then
+    echo "ERROR: Compactor should be online."
+    exit 1
+  fi
+
+  cluster_stop
+  echo "test standalone without compactor [TEST PASSED]"
 
   # Make sure any remaining background task exits.
   wait
