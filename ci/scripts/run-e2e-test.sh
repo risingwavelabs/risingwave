@@ -59,88 +59,6 @@ mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/rising
 
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 
-if [[ "$mode" == "standalone" ]]; then
-  run_sql() {
-    psql -h localhost -p 4566 -d dev -U root -c "$@"
-  }
-  compactor_is_online() {
-    set +e
-    grep -q "risingwave_compactor: Server listening at" "${PREFIX_LOG}/standalone.log"
-    local EXIT_CODE=$?
-    set -e
-    return $EXIT_CODE
-  }
-
-  echo "--- e2e, standalone, cluster-persistence-test"
-  cluster_start
-  run_sql "CREATE TABLE t (v1 int);
-  INSERT INTO t VALUES (1);
-  INSERT INTO t VALUES (2);
-  INSERT INTO t VALUES (3);
-  INSERT INTO t VALUES (4);
-  INSERT INTO t VALUES (5);
-  flush;"
-
-  EXPECTED=$(run_sql "SELECT * FROM t ORDER BY v1;")
-  echo -e "Expected:\n$EXPECTED"
-
-  echo "Restarting standalone"
-  restart_standalone
-
-  ACTUAL=$(run_sql "SELECT * FROM t ORDER BY v1;")
-  echo -e "Actual:\n$ACTUAL"
-
-  if [[ "$EXPECTED" != "$ACTUAL" ]]; then
-    echo "ERROR: Expected did not match Actual."
-    exit 1
-  else
-    echo "PASSED"
-  fi
-
-  echo "--- Kill cluster"
-  cluster_stop
-
-  wait
-
-  # Test that we can optionally include nodes in standalone mode.
-  echo "--- e2e, standalone, cluster-opts-test"
-
-  echo "test standalone without compactor"
-  mkdir -p "$PREFIX_LOG"
-  cargo make clean-data
-  cargo make pre-start-dev
-  start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
-  cargo make dev standalone-minio-etcd-compactor
-  wait_standalone
-  if compactor_is_online
-  then
-    echo "ERROR: Compactor should not be online."
-    exit 1
-  fi
-  cluster_stop
-  echo "test standalone without compactor [TEST PASSED]"
-
-  wait
-
-  echo "test standalone with compactor"
-  mkdir -p "$PREFIX_LOG"
-  cargo make clean-data
-  cargo make pre-start-dev
-  start_standalone "$PREFIX_LOG"/standalone.log &
-  cargo make dev standalone-minio-etcd
-  wait_standalone
-  if ! compactor_is_online
-  then
-    echo "ERROR: Compactor should be online."
-    exit 1
-  fi
-  cluster_stop
-  echo "test standalone without compactor [TEST PASSED]"
-
-  # Make sure any remaining background task exits.
-  wait
-fi
-
 echo "--- e2e, $mode, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cluster_start
@@ -263,4 +181,86 @@ if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     bash "${test_root}/run_all.sh"
     echo "--- Kill cluster"
     cargo make kill
+fi
+
+if [[ "$mode" == "standalone" ]]; then
+  run_sql() {
+    psql -h localhost -p 4566 -d dev -U root -c "$@"
+  }
+  compactor_is_online() {
+    set +e
+    grep -q "risingwave_compactor: Server listening at" "${PREFIX_LOG}/standalone.log"
+    local EXIT_CODE=$?
+    set -e
+    return $EXIT_CODE
+  }
+
+  echo "--- e2e, standalone, cluster-persistence-test"
+  cluster_start
+  run_sql "CREATE TABLE t (v1 int);
+  INSERT INTO t VALUES (1);
+  INSERT INTO t VALUES (2);
+  INSERT INTO t VALUES (3);
+  INSERT INTO t VALUES (4);
+  INSERT INTO t VALUES (5);
+  flush;"
+
+  EXPECTED=$(run_sql "SELECT * FROM t ORDER BY v1;")
+  echo -e "Expected:\n$EXPECTED"
+
+  echo "Restarting standalone"
+  restart_standalone
+
+  ACTUAL=$(run_sql "SELECT * FROM t ORDER BY v1;")
+  echo -e "Actual:\n$ACTUAL"
+
+  if [[ "$EXPECTED" != "$ACTUAL" ]]; then
+    echo "ERROR: Expected did not match Actual."
+    exit 1
+  else
+    echo "PASSED"
+  fi
+
+  echo "--- Kill cluster"
+  cluster_stop
+
+  wait
+
+  # Test that we can optionally include nodes in standalone mode.
+  echo "--- e2e, standalone, cluster-opts-test"
+
+  echo "test standalone without compactor"
+  mkdir -p "$PREFIX_LOG"
+  cargo make clean-data
+  cargo make pre-start-dev
+  start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
+  cargo make dev standalone-minio-etcd-compactor
+  wait_standalone
+  if compactor_is_online
+  then
+    echo "ERROR: Compactor should not be online."
+    exit 1
+  fi
+  cluster_stop
+  echo "test standalone without compactor [TEST PASSED]"
+
+  wait
+
+  echo "test standalone with compactor"
+  mkdir -p "$PREFIX_LOG"
+  cargo make clean-data
+  cargo make pre-start-dev
+  start_standalone "$PREFIX_LOG"/standalone.log &
+  cargo make dev standalone-minio-etcd
+  wait_standalone
+  if ! compactor_is_online
+  then
+    echo "ERROR: Compactor should be online."
+    exit 1
+  fi
+  cluster_stop
+  echo "test standalone without compactor [TEST PASSED]"
+
+  # Make sure any remaining background task exits.
+  wait
 fi
