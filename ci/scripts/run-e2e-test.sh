@@ -28,6 +28,7 @@ fi
 
 cluster_start() {
   if [[ $mode == "standalone" ]]; then
+    mkdir -p "$PREFIX_LOG"
     start_standalone "$PREFIX_LOG"/standalone.log &
     cargo make ci-start standalone-minio-etcd
   else
@@ -97,6 +98,7 @@ if [[ "$mode" == "standalone" ]]; then
   echo "--- e2e, standalone, cluster-opts-test"
 
   echo "test standalone without compactor"
+  mkdir -p "$PREFIX_LOG"
   start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
   cargo make ci-start standalone-minio-etcd-compactor
   sleep 15
@@ -105,11 +107,11 @@ if [[ "$mode" == "standalone" ]]; then
     echo "ERROR: Compactor should not be online."
     exit 1
   fi
-
   cluster_stop
   echo "test standalone with compactor [TEST PASSED]"
 
   echo "test standalone with compactor"
+  mkdir -p "$PREFIX_LOG"
   start_standalone "$PREFIX_LOG"/standalone.log &
   cargo make ci-start standalone-minio-etcd
   sleep 15
@@ -118,7 +120,6 @@ if [[ "$mode" == "standalone" ]]; then
     echo "ERROR: Compactor should be online."
     exit 1
   fi
-
   cluster_stop
   echo "test standalone without compactor [TEST PASSED]"
 
