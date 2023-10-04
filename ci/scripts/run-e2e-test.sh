@@ -94,15 +94,16 @@ if [[ "$mode" == "standalone" ]]; then
   echo "--- Kill cluster"
   cluster_stop
 
+  wait
+
   # Test that we can optionally include nodes in standalone mode.
   echo "--- e2e, standalone, cluster-opts-test"
 
   echo "test standalone without compactor"
   mkdir -p "$PREFIX_LOG"
-  start_standalone_without_compactor "$PREFIX_LOG"/standalone.log
   start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
   cargo make ci-start standalone-minio-etcd-compactor
-  sleep 15
+  wait_standalone
   if compactor_is_online
   then
     echo "ERROR: Compactor should not be online."
@@ -111,11 +112,13 @@ if [[ "$mode" == "standalone" ]]; then
   cluster_stop
   echo "test standalone with compactor [TEST PASSED]"
 
+  wait
+
   echo "test standalone with compactor"
   mkdir -p "$PREFIX_LOG"
   start_standalone "$PREFIX_LOG"/standalone.log &
   cargo make ci-start standalone-minio-etcd
-  sleep 15
+  wait_standalone
   if ! compactor_is_online
   then
     echo "ERROR: Compactor should be online."
