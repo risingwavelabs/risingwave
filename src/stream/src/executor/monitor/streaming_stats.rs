@@ -369,7 +369,7 @@ impl StreamingMetrics {
         let join_match_duration_ns = register_int_counter_vec_with_registry!(
             "stream_join_match_duration_ns",
             "Matching duration for each side",
-            &["actor_id", "side"],
+            &["actor_id", "fragment_id", "side"],
             registry
         )
         .unwrap();

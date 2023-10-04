@@ -764,7 +764,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     left_time += left_start_time.elapsed();
                     self.metrics
                         .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, "left"])
+                        .with_label_values(&[&actor_id_str, &fragment_id_str, "left"])
                         .inc_by(left_time.as_nanos() as u64);
                 }
                 AlignedMessage::Right(chunk) => {
@@ -790,7 +790,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     right_time += right_start_time.elapsed();
                     self.metrics
                         .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, "right"])
+                        .with_label_values(&[&actor_id_str, &fragment_id_str, "right"])
                         .inc_by(right_time.as_nanos() as u64);
                 }
                 AlignedMessage::Barrier(barrier) => {
@@ -830,7 +830,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
                     self.metrics
                         .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, "barrier"])
+                        .with_label_values(&[&actor_id_str, &fragment_id_str, "barrier"])
                         .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                     yield Message::Barrier(barrier);
                 }
