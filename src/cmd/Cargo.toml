@@ -29,6 +29,9 @@ risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_meta = { workspace = true }
 risingwave_rt = { workspace = true }
+tikv-jemallocator = { workspace = true, features = [
+    "unprefixed_malloc_on_supported_platforms",
+] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -42,9 +45,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 
 workspace-config = { path = "../utils/workspace-config" }
 workspace-hack = { path = "../workspace-hack" }
-tikv-jemallocator = { workspace = true, features = [
-    "unprefixed_malloc_on_supported_platforms",
-] }
 
 [target.'cfg(enable_task_local_alloc)'.dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
