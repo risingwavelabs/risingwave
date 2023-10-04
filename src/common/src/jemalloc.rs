@@ -14,15 +14,16 @@
 
 /// If <https://github.com/tikv/jemallocator/issues/22> is resolved, we may inline this
 #[macro_export]
-macro_rules! enable_jemalloc_on_unix {
+macro_rules! enable_jemalloc {
     () => {
+        #[cfg(unix)]
         #[global_allocator]
         static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
     };
 }
 
 #[macro_export]
-macro_rules! enable_task_local_jemalloc_on_unix {
+macro_rules! enable_task_local_jemalloc {
     () => {
         #[global_allocator]
         static GLOBAL: task_stats_alloc::TaskLocalAlloc<tikv_jemallocator::Jemalloc> =
