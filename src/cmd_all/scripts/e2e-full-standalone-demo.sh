@@ -62,14 +62,14 @@ echo "--- Starting standalone cluster"
 ./risedev standalone-demo-full >"$LOG_PREFIX"/standalone.log 2>&1 &
 STANDALONE_PID=$!
 
+sleep 15
+
+# FIXME: Integrate standalone into risedev, so we can reuse risedev-env functionality here.
 cat << EOF > "$RW_PREFIX"/config/risedev-env
 RW_META_ADDR="http://0.0.0.0:5690"
 RW_FRONTEND_LISTEN_ADDRESS="0.0.0.0"
 RW_FRONTEND_PORT="4566"
 EOF
-
-# FIXME: Integrate standalone into risedev, so we can reuse risedev-env functionality here.
-sleep 15
 
 echo "--- Setting up table"
 ./risedev psql -c "
