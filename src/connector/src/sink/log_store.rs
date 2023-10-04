@@ -442,6 +442,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_empty() {
+        let mut manager = DeliveryFutureManager::<TestFuture>::new(2);
+        let mut future = pin!(manager.next_truncate_offset());
+        assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+            .await
+            .is_pending());
+    }
+
+    #[tokio::test]
     async fn test_future_delivery_manager_basic() {
         let mut manager = DeliveryFutureManager::new(2);
         let epoch1 = 233;

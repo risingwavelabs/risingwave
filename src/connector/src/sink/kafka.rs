@@ -347,31 +347,6 @@ impl Sink for KafkaSink {
     }
 }
 
-fn map_future_result(delivery_future_result: <DeliveryFuture as Future>::Output) -> Result<()> {
-    match delivery_future_result {
-        // Successfully sent the record
-        // Will return the partition and offset of the message (i32, i64)
-        // Note that `Vec<()>` won't cause memory allocation
-        Ok(Ok(_)) => Ok(()),
-        // If the message failed to be delivered. (i.e., flush)
-        // The error & the copy of the original message will be returned
-        // i.e., (KafkaError, OwnedMessage)
-        // We will just stop the loop, and return the error
-        // The sink executor will back to the latest checkpoint
-        Ok(Err((k_err, _msg))) => Err(k_err.into()),
-        // This represents the producer is dropped
-        // before the delivery status is received
-        // Return `KafkaError::Canceled`
-        Err(_) => Err(KafkaError::Canceled.into()),
-    }
-}
-
-type KafkaSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
-
-fn map_delivery_future(future: DeliveryFuture) -> KafkaSinkDeliveryFuture {
-    future.map(map_future_result)
-}
-
 /// When the `DeliveryFuture` the current `future_delivery_buffer`
 /// is buffering is greater than `queue_buffering_max_messages` * `KAFKA_WRITER_MAX_QUEUE_SIZE_RATIO`,
 /// then enforcing commit once
@@ -386,6 +361,8 @@ struct KafkaPayloadWriter<'a> {
     add_future: DeliveryFutureManagerAddFuture<'a, KafkaSinkDeliveryFuture>,
     config: &'a KafkaConfig,
 }
+
+type KafkaSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
 
 pub struct KafkaLogSinker {
     formatter: SinkFormatterImpl,
@@ -455,7 +432,7 @@ impl<'w> KafkaPayloadWriter<'w> {
                 Ok(delivery_future) => {
                     if self
                         .add_future
-                        .add_future_may_await(map_delivery_future(delivery_future))
+                        .add_future_may_await(Self::map_delivery_future(delivery_future))
                         .await?
                     {
                         tracing::warn!(
@@ -522,6 +499,29 @@ impl<'w> KafkaPayloadWriter<'w> {
         // Will join all `DeliveryFuture` during commit
         self.send_result(record).await?;
         Ok(())
+    }
+
+    fn map_future_result(delivery_future_result: <DeliveryFuture as Future>::Output) -> Result<()> {
+        match delivery_future_result {
+            // Successfully sent the record
+            // Will return the partition and offset of the message (i32, i64)
+            // Note that `Vec<()>` won't cause memory allocation
+            Ok(Ok(_)) => Ok(()),
+            // If the message failed to be delivered. (i.e., flush)
+            // The error & the copy of the original message will be returned
+            // i.e., (KafkaError, OwnedMessage)
+            // We will just stop the loop, and return the error
+            // The sink executor will back to the latest checkpoint
+            Ok(Err((k_err, _msg))) => Err(k_err.into()),
+            // This represents the producer is dropped
+            // before the delivery status is received
+            // Return `KafkaError::Canceled`
+            Err(_) => Err(KafkaError::Canceled.into()),
+        }
+    }
+
+    fn map_delivery_future(future: DeliveryFuture) -> KafkaSinkDeliveryFuture {
+        future.map(KafkaPayloadWriter::<'static>::map_future_result)
     }
 }
 
