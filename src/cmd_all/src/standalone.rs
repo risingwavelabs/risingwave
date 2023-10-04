@@ -32,21 +32,45 @@ pub struct StandaloneOpts {
     #[clap(short, long, env = "STANDALONE_FRONTEND_OPTS", default_value = "")]
     /// Frontend node options
     frontend_opts: String,
+
+    #[clap(short, long, env = "STANDALONE_COMPACTOR_OPTS", default_value = "")]
+    /// Frontend node options
+    compactor_opts: String,
 }
 
-fn parse_opt_args(opts: &StandaloneOpts) -> (Vec<String>, Vec<String>, Vec<String>) {
+#[derive(Debug)]
+pub struct ParsedStandaloneOpts {
+    pub meta_opts: Vec<String>,
+    pub compute_opts: Vec<String>,
+    pub frontend_opts: Vec<String>,
+    pub compactor_opts: Vec<String>,
+}
+
+fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
     let meta_opts = split(&opts.meta_opts).unwrap();
     let compute_opts = split(&opts.compute_opts).unwrap();
     let frontend_opts = split(&opts.frontend_opts).unwrap();
-    (meta_opts, compute_opts, frontend_opts)
+    let compactor_opts = split(&opts.compactor_opts).unwrap();
+    ParsedStandaloneOpts {
+        meta_opts,
+        compute_opts,
+        frontend_opts,
+        compactor_opts,
+    }
 }
 
 fn get_services(opts: &StandaloneOpts) -> Vec<RisingWaveService> {
-    let (meta_opts, compute_opts, frontend_opts) = parse_opt_args(opts);
+    let ParsedStandaloneOpts {
+        meta_opts,
+        compute_opts,
+        frontend_opts,
+        compactor_opts,
+    } = parse_opt_args(opts);
     let services = vec![
         RisingWaveService::Meta(osstrs(meta_opts)),
         RisingWaveService::Compute(osstrs(compute_opts)),
         RisingWaveService::Frontend(osstrs(frontend_opts)),
+        RisingWaveService::Compactor(osstrs(compactor_opts)),
     ];
     services
 }
@@ -83,8 +107,12 @@ pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
                 let _frontend_handle =
                     tokio::spawn(async move { risingwave_frontend::start(opts).await });
             }
-            RisingWaveService::Compactor(_) => {
-                panic!("Compactor node unsupported in Risingwave standalone mode.");
+            RisingWaveService::Compactor(mut opts) => {
+                opts.insert(0, "compactor-node".into());
+                tracing::info!("starting compactor-node thread with cli args: {:?}", opts);
+                let opts = risingwave_compactor::CompactorOpts::parse_from(opts);
+                let _compactor_handle =
+                    tokio::spawn(async move { risingwave_compactor::start(opts).await });
             }
             RisingWaveService::ConnectorNode(_) => {
                 panic!("Connector node unsupported in Risingwave standalone mode.");
@@ -126,28 +154,32 @@ mod test {
             compute_opts: "--listen-address 127.0.0.1 --port 8000".into(),
             meta_opts: "--data-dir \"some path with spaces\" --port 8001".into(),
             frontend_opts: "--some-option".into(),
+            compactor_opts: "--some-other-option".into(),
         };
         let actual = parse_opt_args(&opts);
         check(
             actual,
             expect![[r#"
-            (
-                [
-                    "--data-dir",
-                    "some path with spaces",
-                    "--port",
-                    "8001",
-                ],
-                [
-                    "--listen-address",
-                    "127.0.0.1",
-                    "--port",
-                    "8000",
-                ],
-                [
-                    "--some-option",
-                ],
-            )"#]],
+                ParsedStandaloneOpts {
+                    meta_opts: [
+                        "--data-dir",
+                        "some path with spaces",
+                        "--port",
+                        "8001",
+                    ],
+                    compute_opts: [
+                        "--listen-address",
+                        "127.0.0.1",
+                        "--port",
+                        "8000",
+                    ],
+                    frontend_opts: [
+                        "--some-option",
+                    ],
+                    compactor_opts: [
+                        "--some-other-option",
+                    ],
+                }"#]],
         );
     }
 }
