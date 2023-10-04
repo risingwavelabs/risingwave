@@ -102,7 +102,7 @@ if [[ "$mode" == "standalone" ]]; then
   echo "test standalone without compactor"
   mkdir -p "$PREFIX_LOG"
   start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
-  cargo make ci-start standalone-minio-etcd-compactor
+  cargo make dev standalone-minio-etcd-compactor
   wait_standalone
   if compactor_is_online
   then
@@ -110,14 +110,14 @@ if [[ "$mode" == "standalone" ]]; then
     exit 1
   fi
   cluster_stop
-  echo "test standalone with compactor [TEST PASSED]"
+  echo "test standalone without compactor [TEST PASSED]"
 
   wait
 
   echo "test standalone with compactor"
   mkdir -p "$PREFIX_LOG"
   start_standalone "$PREFIX_LOG"/standalone.log &
-  cargo make ci-start standalone-minio-etcd
+  cargo make dev standalone-minio-etcd
   wait_standalone
   if ! compactor_is_online
   then
