@@ -106,7 +106,7 @@ create sink si_kafka_debezium from t_kafka with (
     primary_key = 'id',
 );
 
-statement error primary key not defined for debezium kafka sink
+statement error primary key not defined
 create sink debezium_without_pk from t_kafka with (
     connector = 'kafka',
     properties.bootstrap.server = '127.0.0.1:29092',

@@ -27,10 +27,8 @@ use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
-use super::{
-    Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam, SINK_TYPE_APPEND_ONLY,
-    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
-};
+use super::catalog::{SinkFormat, SinkFormatDesc};
+use super::{Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam};
 use crate::common::PulsarCommon;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::writer::{FormattedSink, LogSinkerOf, SinkWriterExt};
@@ -115,8 +113,6 @@ pub struct PulsarConfig {
 
     #[serde(flatten)]
     pub producer_properties: PulsarPropertiesProducer,
-
-    pub r#type: String, // accept "append-only" or "upsert"
 }
 
 impl PulsarConfig {
@@ -124,14 +120,6 @@ impl PulsarConfig {
         let config = serde_json::from_value::<PulsarConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
-        if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
-            return Err(SinkError::Config(anyhow!(
-                "`{}` must be {}, or {}",
-                SINK_TYPE_OPTION,
-                SINK_TYPE_APPEND_ONLY,
-                SINK_TYPE_UPSERT
-            )));
-        }
         Ok(config)
     }
 }
@@ -141,7 +129,7 @@ pub struct PulsarSink {
     pub config: PulsarConfig,
     schema: Schema,
     downstream_pk: Vec<usize>,
-    is_append_only: bool,
+    format_desc: SinkFormatDesc,
     db_name: String,
     sink_from_name: String,
 }
@@ -156,7 +144,9 @@ impl TryFrom<SinkParam> for PulsarSink {
             config,
             schema,
             downstream_pk: param.downstream_pk,
-            is_append_only: param.sink_type.is_append_only(),
+            format_desc: param
+                .format_desc
+                .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,
         })
@@ -174,7 +164,7 @@ impl Sink for PulsarSink {
             self.config.clone(),
             self.schema.clone(),
             self.downstream_pk.clone(),
-            self.is_append_only,
+            &self.format_desc,
             self.db_name.clone(),
             self.sink_from_name.clone(),
         )
@@ -184,10 +174,10 @@ impl Sink for PulsarSink {
 
     async fn validate(&self) -> Result<()> {
         // For upsert Pulsar sink, the primary key must be defined.
-        if !self.is_append_only && self.downstream_pk.is_empty() {
+        if self.format_desc.format != SinkFormat::AppendOnly && self.downstream_pk.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "primary key not defined for {} pulsar sink (please define in `primary_key` field)",
-                self.config.r#type
+                "primary key not defined for {:?} pulsar sink (please define in `primary_key` field)",
+                self.format_desc.format
             )));
         }
 
@@ -216,18 +206,12 @@ impl PulsarSinkWriter {
         config: PulsarConfig,
         schema: Schema,
         downstream_pk: Vec<usize>,
-        is_append_only: bool,
+        format_desc: &SinkFormatDesc,
         db_name: String,
         sink_from_name: String,
     ) -> Result<Self> {
-        let formatter = SinkFormatterImpl::new(
-            &config.r#type,
-            schema,
-            downstream_pk,
-            is_append_only,
-            db_name,
-            sink_from_name,
-        )?;
+        let formatter =
+            SinkFormatterImpl::new(format_desc, schema, downstream_pk, db_name, sink_from_name)?;
         let pulsar = config.common.build_client().await?;
         let producer = build_pulsar_producer(&pulsar, &config).await?;
         Ok(Self {

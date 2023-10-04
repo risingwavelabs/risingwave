@@ -408,6 +408,7 @@ mod test {
                 .collect(),
             downstream_pk: pk.clone(),
             sink_type: SinkType::ForceAppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -529,6 +530,7 @@ mod test {
                 .collect(),
             downstream_pk: vec![0],
             sink_type: SinkType::Upsert,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -647,6 +649,7 @@ mod test {
                 .collect(),
             downstream_pk: pk.clone(),
             sink_type: SinkType::ForceAppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
