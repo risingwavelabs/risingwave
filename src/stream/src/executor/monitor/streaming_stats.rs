@@ -321,7 +321,7 @@ impl StreamingMetrics {
         let actor_sampled_deserialize_duration_ns = register_int_counter_vec_with_registry!(
             "actor_sampled_deserialize_duration_ns",
             "Duration (ns) of sampled chunk deserialization",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap();
