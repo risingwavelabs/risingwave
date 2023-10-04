@@ -29,8 +29,10 @@ fi
 cluster_start() {
   if [[ $mode == "standalone" ]]; then
     mkdir -p "$PREFIX_LOG"
+    cargo make clean-data
+    cargo make pre-start-dev
     start_standalone "$PREFIX_LOG"/standalone.log &
-    cargo make ci-start standalone-minio-etcd
+    cargo make dev standalone-minio-etcd
   else
     cargo make ci-start "$mode"
   fi
@@ -101,6 +103,8 @@ if [[ "$mode" == "standalone" ]]; then
 
   echo "test standalone without compactor"
   mkdir -p "$PREFIX_LOG"
+  cargo make clean-data
+  cargo make pre-start-dev
   start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
   cargo make dev standalone-minio-etcd-compactor
   wait_standalone
@@ -116,6 +120,8 @@ if [[ "$mode" == "standalone" ]]; then
 
   echo "test standalone with compactor"
   mkdir -p "$PREFIX_LOG"
+  cargo make clean-data
+  cargo make pre-start-dev
   start_standalone "$PREFIX_LOG"/standalone.log &
   cargo make dev standalone-minio-etcd
   wait_standalone
