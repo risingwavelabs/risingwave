@@ -925,8 +925,10 @@ impl CatalogManager {
 
     /// Used to cleanup states in stream mgr.
     /// It is required because failure may not necessarily happen in barrier,
+    /// e.g. when cordon nodes.
     /// we need some way to cleanup the state.
     /// FIXME: We should NOT invoke this if barrier manager has already cleaned up.
+    /// In other cases, barrier man
     pub async fn cancel_create_table_procedure_with_internal_table_ids(
         &self,
         table: Table,

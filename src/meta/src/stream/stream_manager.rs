@@ -582,21 +582,32 @@ impl GlobalStreamManager {
         });
         let mut cancelled_ids = join_all(futures).await.into_iter().flatten().collect_vec();
 
-        // For recovered stream jobs, we can directly cancel them by running the barrier command.
-        // Barrier manager manages the recovered stream jobs.
-        let fragments = self
-            .fragment_manager
-            .select_table_fragments_by_ids(&recovered_job_ids)
-            .await
-            .expect("recovered table should have fragment");
-        for fragment in fragments {
-            self.barrier_scheduler
-                .run_command(Command::CancelStreamingJob(fragment))
-                .await
-                .expect("should be able to cancel recovered stream job");
-        }
+        // NOTE(kwannoel): For recovered stream jobs, we can directly cancel them by running the barrier command,
+        // since Barrier manager manages the recovered stream jobs.
+        let futures = recovered_job_ids.into_iter().map(|id| async move {
+            let result: MetaResult<()> = try {
+                let fragment = self
+                    .fragment_manager
+                    .select_table_fragments_by_table_id(&id)
+                    .await?;
+                self.barrier_scheduler
+                    .run_command(Command::CancelStreamingJob(fragment))
+                    .await?;
+            };
+            match result {
+                Ok(_) => {
+                    tracing::info!("cancelled recovered streaming job {id}");
+                    Some(id)
+                },
+                Err(_) => {
+                    tracing::error!("failed to cancel recovered streaming job {id}, does {id} correspond to any jobs in `SHOW JOBS`?");
+                    None
+                },
+            }
+        });
+        let cancelled_recovered_ids = join_all(futures).await.into_iter().flatten().collect_vec();
 
-        cancelled_ids.extend(recovered_job_ids);
+        cancelled_ids.extend(cancelled_recovered_ids);
         cancelled_ids
     }
 }

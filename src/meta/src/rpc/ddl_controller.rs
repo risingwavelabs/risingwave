@@ -501,6 +501,7 @@ impl DdlController {
         ctx: CreateStreamingJobContext,
         internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
+        // We persist table fragments at this step.
         let result = self
             .stream_manager
             .create_streaming_job(table_fragments, ctx)

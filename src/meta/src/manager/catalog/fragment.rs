@@ -274,7 +274,7 @@ impl FragmentManager {
         Ok(map
             .get(table_id)
             .cloned()
-            .with_context(|| format!("table_fragment not exist: id={}", table_id))?)
+            .with_context(|| format!("table_fragment does not exist: id={}", table_id))?)
     }
 
     pub async fn select_table_fragments_by_ids(
@@ -287,7 +287,7 @@ impl FragmentManager {
             table_fragments.push(
                 map.get(table_id)
                     .cloned()
-                    .with_context(|| format!("table_fragment not exist: id={}", table_id))?,
+                    .with_context(|| format!("table_fragment does not exist: id={}", table_id))?,
             );
         }
         Ok(table_fragments)
