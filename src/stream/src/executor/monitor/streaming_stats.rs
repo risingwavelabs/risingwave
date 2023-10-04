@@ -44,10 +44,12 @@ pub struct StreamingMetrics {
     pub actor_poll_cnt: GenericGaugeVec<AtomicI64>,
     pub actor_idle_duration: GenericGaugeVec<AtomicF64>,
     pub actor_idle_cnt: GenericGaugeVec<AtomicI64>,
+
     pub actor_memory_usage: GenericGaugeVec<AtomicI64>,
     pub actor_in_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
+
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
     pub source_split_change_count: GenericCounterVec<AtomicU64>,
@@ -327,7 +329,7 @@ impl StreamingMetrics {
         let actor_memory_usage = register_int_gauge_vec_with_registry!(
             "actor_memory_usage",
             "Memory usage (bytes)",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry,
         )
         .unwrap();
