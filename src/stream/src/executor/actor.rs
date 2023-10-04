@@ -37,9 +37,11 @@ pub struct ActorContext {
     pub id: ActorId,
     pub fragment_id: u32,
 
+    // TODO(eric): these seem to be useless now?
     last_mem_val: Arc<AtomicUsize>,
     cur_mem_val: Arc<AtomicUsize>,
     total_mem_val: Arc<TrAdder<i64>>,
+
     pub streaming_metrics: Arc<StreamingMetrics>,
     pub error_suppressor: Arc<Mutex<ErrorSuppressor>>,
 }
