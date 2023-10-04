@@ -1,5 +1,0 @@
-statement ok
-DROP SINK i;
-
-statement ok
-DROP TABLE t;

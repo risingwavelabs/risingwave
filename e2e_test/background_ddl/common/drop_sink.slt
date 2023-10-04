@@ -1,2 +1,2 @@
 statement ok
-DROP TABLE t;
+DROP SINK i;
