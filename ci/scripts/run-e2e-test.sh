@@ -39,10 +39,14 @@ cluster_start() {
 }
 
 cluster_stop() {
-  if [[ $mode == "standalone" ]]; then
+  if [[ $mode == "standalone" ]]
+  then
     stop_standalone
+    # Don't check standalone logs, they will exceed the limit.
+    cargo make kill
+  else
+    cargo make ci-kill
   fi
-  cargo make ci-kill
 }
 
 download_and_prepare_rw "$profile" common
