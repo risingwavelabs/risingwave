@@ -159,8 +159,7 @@ profile:
       - use: compactor
         user-managed: true
 
-  # CN will have its own embedded compactor.
-  standalone-minio-etcd-embedded-compactor:
+  standalone-minio-etcd-compactor:
     steps:
       - use: minio
       - use: etcd
@@ -170,6 +169,7 @@ profile:
         user-managed: true
       - use: frontend
         user-managed: true
+      - use: compactor
 
   hdfs:
     steps:
