@@ -305,7 +305,7 @@ impl StreamingMetrics {
         let actor_in_record_cnt = register_int_counter_vec_with_registry!(
             "stream_actor_in_record_cnt",
             "Total number of rows actor received",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap();
