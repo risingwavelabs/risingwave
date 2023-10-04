@@ -777,6 +777,7 @@ impl TestCase {
                 options.insert("connector".to_string(), "blackhole".to_string());
                 options.insert("type".to_string(), "append-only".to_string());
                 let options = WithOptions::new(options);
+                let format_desc = (&options).try_into().unwrap();
                 match logical_plan.gen_sink_plan(
                     sink_name.to_string(),
                     format!("CREATE SINK {sink_name} AS {}", stmt),
@@ -784,6 +785,7 @@ impl TestCase {
                     false,
                     "test_db".into(),
                     "test_table".into(),
+                    format_desc,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));

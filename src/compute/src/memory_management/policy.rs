@@ -20,7 +20,7 @@ use std::sync::Arc;
 use chrono;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::config::HeapProfilingConfig;
-use risingwave_common::heap_profiling::AUTO_DUMP_MID_NAME;
+use risingwave_common::heap_profiling::AUTO_DUMP_SUFFIX;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::task::LocalStreamManager;
 use tikv_jemalloc_ctl::{
@@ -43,7 +43,6 @@ pub struct JemallocMemoryControl {
     jemalloc_active_mib: jemalloc_stats::active_mib,
     jemalloc_dump_mib: jemalloc_prof::dump_mib,
 
-    dump_seq: u64,
     heap_profiling_config: HeapProfilingConfig,
 }
 
@@ -73,7 +72,6 @@ impl JemallocMemoryControl {
             jemalloc_allocated_mib,
             jemalloc_active_mib,
             jemalloc_dump_mib,
-            dump_seq: 0,
             heap_profiling_config,
         }
     }
@@ -114,7 +112,7 @@ impl JemallocMemoryControl {
             }
 
             let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-            let file_name = format!("{}.{}.{}\0", time_prefix, AUTO_DUMP_MID_NAME, self.dump_seq,);
+            let file_name = format!("{}.{}\0", time_prefix, AUTO_DUMP_SUFFIX);
 
             let file_path = Path::new(&self.heap_profiling_config.dir)
                 .join(Path::new(&file_name))

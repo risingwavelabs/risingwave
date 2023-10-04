@@ -20,7 +20,7 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_common::config::ServerConfig;
 use risingwave_common::heap_profiling::{
-    self, AUTO_DUMP_MID_NAME, COLLAPSED_SUFFIX, MANUALLY_DUMP_MID_NAME,
+    self, AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX,
 };
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
@@ -140,7 +140,7 @@ impl MonitorService for MonitorServiceImpl {
         }
 
         let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-        let file_name = format!("{}.{}\0", time_prefix, MANUALLY_DUMP_MID_NAME);
+        let file_name = format!("{}.{}\0", time_prefix, MANUALLY_DUMP_SUFFIX);
         let arg_dir = request.into_inner().get_dir().clone();
         let dir = PathBuf::from(if arg_dir.is_empty() {
             &self.server_config.heap_profiling.dir
@@ -181,7 +181,7 @@ impl MonitorService for MonitorServiceImpl {
             })
             .filter(|name| {
                 if let Ok(name) = name {
-                    name.contains(AUTO_DUMP_MID_NAME) && !name.ends_with(COLLAPSED_SUFFIX)
+                    name.contains(AUTO_DUMP_SUFFIX) && !name.ends_with(COLLAPSED_SUFFIX)
                 } else {
                     true
                 }
@@ -194,7 +194,7 @@ impl MonitorService for MonitorServiceImpl {
             })
             .filter(|name| {
                 if let Ok(name) = name {
-                    name.contains(MANUALLY_DUMP_MID_NAME) && !name.ends_with(COLLAPSED_SUFFIX)
+                    name.contains(MANUALLY_DUMP_SUFFIX) && !name.ends_with(COLLAPSED_SUFFIX)
                 } else {
                     true
                 }
