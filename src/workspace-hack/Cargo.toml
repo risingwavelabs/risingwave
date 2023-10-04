@@ -116,6 +116,8 @@ sqlx-postgres = { version = "0.7", default-features = false, features = ["any", 
 sqlx-sqlite = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline", "time", "uuid"] }
 strum = { version = "0.25", features = ["derive"] }
 subtle = { version = "2" }
+tikv-jemalloc-sys = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
 tokio = { version = "1", features = ["full", "stats", "tracing"] }
