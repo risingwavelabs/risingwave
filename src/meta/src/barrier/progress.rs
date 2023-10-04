@@ -155,27 +155,13 @@ pub(super) struct TrackingCommand {
 /// called on registered notifiers.
 ///
 /// Tracking is done as follows:
-/// Several `ActorIds` constitute a `StreamJob`.
-/// A `StreamJob` is `IDead` by the Epoch of its initial barrier,
-/// i.e. `CreateMviewEpoch`.
-/// We can ID it that way because the initial barrier should ONLY
-/// be used for exactly one `StreamJob`.
-/// We don't allow multiple stream jobs scheduled on the same barrier.
-///
-/// With `actor_map` we can use any `ActorId` to find the ID of the `StreamJob`,
-/// and with `progress_map` we can use the ID of the `StreamJob`
-/// to view its progress.
-///
-/// We track the progress of each `ActorId` in a `StreamJob`,
-/// because ALL of their progress constitutes the progress of the `StreamJob`.
+/// 1. We identify a `StreamJob` by its `TableId` of its `Materialized` table.
+/// 2. For each stream job, there are several actors which run its tasks.
+/// 3. With `progress_map` we can use the ID of the `StreamJob` to view its progress.
+///    `StreamJobOrigin` just indicates whether it was
+/// 4. With `actor_map` we can use an actor's `ActorId` to find the ID of the `StreamJob`.
 pub(super) struct CreateMviewProgressTracker {
-    // TODO(kwannoel): The real purpose of `CreateMviewEpoch`
-    // Is to serve as a unique identifier for a stream job.
-    // We should create a new type for this purpose
-    // to make that clear.
-    // Additionally if are to allow concurrent mview creation in the
-    // future, CreateMViewEpoch will not be a good candidate for this.
-    /// Progress of the create-mview DDL indicated by the epoch.
+    /// Progress of the create-mview DDL indicated by the TableId.
     progress_map: HashMap<TableId, (Progress, StreamJobOrigin)>,
 
     /// Find the epoch of the create-mview DDL by the actor containing the chain node.
@@ -183,57 +169,24 @@ pub(super) struct CreateMviewProgressTracker {
 }
 
 impl CreateMviewProgressTracker {
-    /// Backfill progress and `tracking_commands` are the only dynamic parts of the state.
-    /// For `BackfillProgress`, it can also be derived from `state_table`.
-    /// However, this requires the stream graph to init BEFORE meta
-    /// recovers fully.
-    /// To support that meta needs to recover in 2 parts:
-    /// 1. Initial recovery, not all state is recovered yet, just send some initial barriers
-    ///    to collect state.
-    /// 2. Full recovery, all state is recovered.
-    /// That shifts complexity to Meta node.
-    /// Only AFTER initial barrier
+    /// This step recovers state from the meta side:
+    /// 1. `Tables`.
+    /// 2. `TableFragments`.
     ///
-    /// Tracking Commands seems to be required to be initialized elsewhere first.
-    /// Then we can use the tracking commands to initialize the progress map.
-    ///
-    /// The `actor_map` contains the mapping from actor to its stream job identifier
-    /// (the epoch where it was created).
-    ///
-    /// Just use `TableId` to stream id.
-    /// Report the status to local barrier manager.
-    ///
-    /// Need to add some extra fields in initialize barrier to include
-    /// the actor ids which needs to report.
-    ///
-    /// For chain executors,
-    /// it will need to report the progress.
+    /// Other state are persisted by the `BackfillExecutor`, such as:
+    /// 1. `CreateMviewProgress`.
+    /// 2. `Backfill` position.
     pub fn recover(
-        // Add a status for the catalog proto.
-        // CREATE a TABLE
-        // 1. Set status to CREATING
-        // 2. Deal with barriers.
-        // 3. Build actors.
-        // 4. Recovery happens.
-        // 5. Query the catalog manager for all the CREATING statuses.
-        //    TableId first.
-        // Then Find the actors from the fragment manager.
-        // Then we have the mappings.
         table_map: HashMap<TableId, Vec<ActorId>>,
-
-        // Get from table fragments, no need to store it as is.
         mut upstream_mv_counts: HashMap<TableId, HashMap<TableId, usize>>,
-
-        // Get from Catalog Manager.
         mut definitions: HashMap<TableId, String>,
-
         version_stats: HummockVersionStats,
-
         mut finished_notifiers: HashMap<TableId, Notifier>,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
         for (creating_table_id, actors) in table_map {
+            // 1. Recover `ChainState` in the tracker.
             let mut states = HashMap::new();
             for actor in actors {
                 actor_map.insert(actor, creating_table_id);
