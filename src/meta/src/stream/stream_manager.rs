@@ -563,6 +563,11 @@ impl GlobalStreamManager {
     }
 
     /// Cancel streaming jobs and return the canceled table ids.
+    /// 1. Send cancel message to stream jobs (via `cancel_jobs`).
+    /// 2. Send cancel message to recovered stream jobs (via `barrier_scheduler`).
+    /// Cleanup of their state will be cleaned up by their respective managers:
+    /// 1. For stream jobs it will be stream manager.
+    /// 2. For recovered stream jobs it will be barrier manager.
     pub async fn cancel_streaming_jobs(&self, table_ids: Vec<TableId>) -> Vec<TableId> {
         if table_ids.is_empty() {
             return vec![];
