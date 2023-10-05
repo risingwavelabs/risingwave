@@ -569,7 +569,7 @@ impl StreamingMetrics {
         let temporal_join_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_temporal_join_cache_miss_count",
             "Temporal join executor cache miss count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -577,7 +577,7 @@ impl StreamingMetrics {
         let temporal_join_total_query_cache_count = register_int_counter_vec_with_registry!(
             "stream_temporal_join_total_query_cache_count",
             "Temporal join executor query cache total count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -585,7 +585,7 @@ impl StreamingMetrics {
         let temporal_join_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_temporal_join_cached_entry_count",
             "Total entry count in temporal join executor cache",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
