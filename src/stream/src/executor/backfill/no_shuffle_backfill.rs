@@ -362,8 +362,8 @@ where
                     let chunk_cardinality = chunk.cardinality() as u64;
                     let ops = vec![Op::Insert; chunk.capacity()];
                     let chunk = StreamChunk::from_parts(ops, chunk);
-                    current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
 
+                    current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
                     total_snapshot_processed_rows += chunk_cardinality;
                     yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
@@ -433,6 +433,38 @@ where
 
                 // We will switch snapshot at the start of the next iteration of the backfill loop.
             }
+        }
+
+        // Make sure to consume snapshot rows left in builder,
+        // We stop backfill when snapshot read is empty, not on barrier,
+        // so the buffered chunks may still be there.
+        let chunk = builder.consume_all();
+        if let Some(chunk) = chunk {
+            let chunk_cardinality = chunk.cardinality() as u64;
+            let ops = vec![Op::Insert; chunk.capacity()];
+            let chunk = StreamChunk::from_parts(ops, chunk);
+
+            current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
+            total_snapshot_processed_rows += chunk_cardinality;
+            yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+
+            self.metrics
+                .backfill_snapshot_read_row_count
+                .with_label_values(&[
+                    upstream_table_id.to_string().as_str(),
+                    self.actor_id.to_string().as_str(),
+                ])
+                .inc_by(chunk_cardinality);
+
+            self.metrics
+                .backfill_upstream_output_row_count
+                .with_label_values(&[
+                    upstream_table_id.to_string().as_str(),
+                    self.actor_id.to_string().as_str(),
+                ])
+                .inc_by(chunk_cardinality);
+
+            // State will be persisted on the next barrier.
         }
 
         tracing::trace!("Backfill has finished, waiting for barrier");
