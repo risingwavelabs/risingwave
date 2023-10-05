@@ -405,15 +405,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
             // Update the metrics.
             let actor_id_str = this.actor_ctx.id.to_string();
+            let fragment_id_str = this.actor_ctx.fragment_id.to_string();
             let table_id_str = this.intermediate_state_table.table_id().to_string();
-            let metric_dirty_count = this
-                .metrics
-                .agg_dirty_group_count
-                .with_label_values(&[&table_id_str, &actor_id_str]);
+            let metric_dirty_count = this.metrics.agg_dirty_group_count.with_label_values(&[
+                &table_id_str,
+                &actor_id_str,
+                &fragment_id_str,
+            ]);
             let metric_dirty_heap_size = this
                 .metrics
                 .agg_dirty_group_heap_size
-                .with_label_values(&[&table_id_str, &actor_id_str]);
+                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str]);
             let new_group_size = agg_group.estimated_size();
             if let Some(old_group_size) = old_group_size {
                 match new_group_size.cmp(&old_group_size) {
