@@ -105,10 +105,11 @@ test_background_ddl_recovery() {
 
   NEW_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
 
-  if [[ $OLD_PROGRESS < $NEW_PROGRESS ]]; then
+  if [[ ${OLD_PROGRESS%.*} -lt ${NEW_PROGRESS%.*} ]]; then
     echo "OK: $OLD_PROGRESS smaller than $NEW_PROGRESS"
   else
     echo "FAILED: $OLD_PROGRESS larger or equal to $NEW_PROGRESS"
+    exit 1
   fi
 
   sleep 60
@@ -210,7 +211,7 @@ test_foreground_ddl_no_recover() {
 }
 
 test_foreground_index_cancel() {
-   echo "--- e2e, $CLUSTER_PROFILE, test_index_ddl_no_recover"
+   echo "--- e2e, $CLUSTER_PROFILE, test_foreground_index_cancel"
    cargo make ci-start $CLUSTER_PROFILE
 
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
@@ -247,7 +248,7 @@ test_foreground_index_cancel() {
 }
 
 test_foreground_sink_cancel() {
-   echo "--- e2e, $CLUSTER_PROFILE, test_index_ddl_no_recover"
+   echo "--- e2e, $CLUSTER_PROFILE, test_foreground_sink_ddl_cancel"
    cargo make ci-start $CLUSTER_PROFILE
 
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
