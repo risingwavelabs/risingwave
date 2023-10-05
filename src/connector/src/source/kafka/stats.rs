@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
-use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericGaugeVec};
 use prometheus::{opts, register_int_gauge_vec_with_registry, IntGaugeVec, Registry};
 use rdkafka::statistics::{Broker, ConsumerGroup, Partition, Topic, Window};
@@ -363,26 +360,13 @@ impl TopicStats {
         }
     }
 
-    pub fn report(
-        &self,
-        id: &str,
-        client_id: &str,
-        mapping: &HashMap<(String, i32), String>,
-        stats: &Statistics,
-    ) {
+    pub fn report(&self, id: &str, client_id: &str, stats: &Statistics) {
         for (topic, topic_stats) in &stats.topics {
-            self.report_inner(id, client_id, topic, mapping, topic_stats);
+            self.report_inner(id, client_id, topic, topic_stats);
         }
     }
 
-    fn report_inner(
-        &self,
-        id: &str,
-        client_id: &str,
-        topic: &str,
-        mapping: &HashMap<(String, i32), String>,
-        stats: &Topic,
-    ) {
+    fn report_inner(&self, id: &str, client_id: &str, topic: &str, stats: &Topic) {
         self.metadata_age
             .with_label_values(&[id, client_id, topic])
             .set(stats.metadata_age);
@@ -390,7 +374,7 @@ impl TopicStats {
             .report(id, client_id, "", topic, &stats.batchsize);
         self.batch_cnt
             .report(id, client_id, "", topic, &stats.batchcnt);
-        self.partitions.report(id, client_id, topic, mapping, stats)
+        self.partitions.report(id, client_id, topic, stats)
     }
 }
 
@@ -431,182 +415,182 @@ impl PartitionStats {
         let msgq_cnt = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_msgq_cnt",
             "Number of messages in the producer queue",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let msgq_bytes = register_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_msgq_bytes",
             "Size of messages in the producer queue",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let xmit_msgq_cnt = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_xmit_msgq_cnt",
             "Number of messages in the transmit queue",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let xmit_msgq_bytes = register_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_xmit_msgq_bytes",
             "Size of messages in the transmit queue",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let fetchq_cnt = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_fetchq_cnt",
             "Number of messages in the fetch queue",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let fetchq_size = register_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_fetchq_size",
             "Size of messages in the fetch queue",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let query_offset = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_query_offset",
             "Current query offset",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let next_offset = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_next_offset",
             "Next offset to query",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let app_offset = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_app_offset",
             "Last acknowledged offset",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let stored_offset = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_stored_offset",
             "Last stored offset",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let committed_offset = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_committed_offset",
             "Last committed offset",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let eof_offset = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_eof_offset",
             "Last offset in broker log",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let lo_offset = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_lo_offset",
             "Low offset",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let hi_offset = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_hi_offset",
             "High offset",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let consumer_lag = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_consumer_lag",
             "Consumer lag",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let consumer_lag_store = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_consumer_lag_store",
             "Consumer lag stored",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let txmsgs = register_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_txmsgs",
             "Number of transmitted messages",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let txbytes = register_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_txbytes",
             "Number of transmitted bytes",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let rxmsgs = register_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_rxmsgs",
             "Number of received messages",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let rxbytes = register_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_rxbytes",
             "Number of received bytes",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let msgs = register_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_msgs",
             "Number of messages in partition",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let rx_ver_drops = register_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_rx_ver_drops",
             "Number of received messages dropped due to version mismatch",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let msgs_inflight = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_msgs_inflight",
             "Number of messages in-flight",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let next_ack_seq = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_next_ack_seq",
             "Next ack sequence number",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let next_err_seq = register_int_gauge_vec_with_registry!(
             "rdkafka_topic_partition_next_err_seq",
             "Next error sequence number",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
         let acked_msgid = register_uint_gauge_vec_with_registry!(
             "rdkafka_topic_partition_acked_msgid",
             "Acknowledged message ID",
-            &["id", "client_id", "broker", "topic", "partition"],
+            &["id", "client_id", "topic", "partition"],
             registry
         )
         .unwrap();
@@ -642,47 +626,14 @@ impl PartitionStats {
         }
     }
 
-    pub fn report(
-        &self,
-        id: &str,
-        client_id: &str,
-        topic: &str,
-        broker_mapping: &HashMap<(String, i32), String>,
-        stats: &Topic,
-    ) {
+    pub fn report(&self, id: &str, client_id: &str, topic: &str, stats: &Topic) {
         for partition_stats in stats.partitions.values() {
-            self.report_inner(id, client_id, topic, broker_mapping, partition_stats);
+            self.report_inner(id, client_id, topic, partition_stats);
         }
     }
 
-    fn report_inner(
-        &self,
-        id: &str,
-        client_id: &str,
-        topic: &str,
-        broker_mapping: &HashMap<(String, i32), String>,
-        stats: &Partition,
-    ) {
-        let broker_name = match broker_mapping.get(&(topic.to_string(), stats.partition)) {
-            Some(broker_name) => broker_name.as_str(),
-            None => {
-                tracing::warn!(
-                    "Cannot find broker name for topic {} partition {}, id {}, client_id {}",
-                    topic,
-                    stats.partition,
-                    id,
-                    client_id
-                );
-                return;
-            }
-        };
-        let labels = [
-            id,
-            client_id,
-            broker_name,
-            topic,
-            &stats.partition.to_string(),
-        ];
+    fn report_inner(&self, id: &str, client_id: &str, topic: &str, stats: &Partition) {
+        let labels = [id, client_id, topic, &stats.partition.to_string()];
 
         self.msgq_cnt.with_label_values(&labels).set(stats.msgq_cnt);
         self.msgq_bytes
@@ -914,8 +865,6 @@ impl RdKafkaStats {
     }
 
     pub fn report(&self, id: &str, stats: &Statistics) {
-        let topic_partition_to_broker_mapping = get_topic_partition_to_broker_mapping(stats);
-
         let client_id = stats.name.as_str();
         self.ts.with_label_values(&[id, client_id]).set(stats.ts);
         self.time
@@ -965,32 +914,11 @@ impl RdKafkaStats {
             .set(stats.metadata_cache_cnt);
 
         self.broker_stats.report(id, client_id, stats);
-        self.topic_stats
-            .report(id, client_id, &topic_partition_to_broker_mapping, stats);
+        self.topic_stats.report(id, client_id, stats);
         if let Some(cgrp) = &stats.cgrp {
             self.cgrp.report(id, client_id, cgrp)
         }
     }
-}
-
-#[inline]
-fn get_topic_partition_to_broker_mapping(stats: &Statistics) -> HashMap<(String, i32), String> {
-    let topic_partition_to_broker_mapping = stats
-        .brokers
-        .values()
-        .flat_map(|broker| {
-            let broker_name = &broker.name;
-            broker
-                .toppars
-                .iter()
-                .map(|(topic, partition)| {
-                    ((topic.clone(), partition.partition), broker_name.clone())
-                })
-                .collect_vec()
-        })
-        .collect::<HashMap<_, _>>();
-
-    topic_partition_to_broker_mapping
 }
 
 impl BrokerStats {
