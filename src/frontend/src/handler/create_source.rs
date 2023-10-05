@@ -924,8 +924,9 @@ pub fn validate_compatibility(
         .get(&connector)
         .ok_or_else(|| {
             RwError::from(ProtocolError(format!(
-                "connector {} is not supported",
-                connector
+                "connector {:?} is not supported, accept {:?}",
+                connector,
+                CONNECTORS_COMPATIBLE_FORMATS.keys()
             )))
         })?;
     if connector != KAFKA_CONNECTOR {

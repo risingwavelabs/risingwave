@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use aws_sdk_s3::client as s3_client;
 use futures_async_stream::try_stream;
 use risingwave_common::error::RwError;
+use tokio::sync::mpsc::Receiver;
 
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::{default_conn_config, s3_client};
@@ -10,7 +11,7 @@ use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::SplitMetaData;
 use crate::source::filesystem::{nd_streaming, FsSplit, S3FileReader, S3Properties};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceReader, StreamChunkWithState,
+    BoxSourceWithStateStream, Column, FsFileReader, SourceContextRef, StreamChunkWithState,
 };
 
 pub struct S3SourceReader {
@@ -27,39 +28,46 @@ impl S3SourceReader {
         bucket_name: String,
         source_ctx: SourceContextRef,
         parser_config: ParserConfig,
-        split: FsSplit,
+        mut split_channel: Receiver<FsSplit>,
     ) {
-        let split_id = split.id();
-        let data_stream =
-            S3FileReader::stream_read_object(client_for_s3, bucket_name, split, source_ctx.clone());
-        let parser =
-            ByteStreamSourceParserImpl::create(parser_config.clone(), source_ctx.clone()).await?;
-        let msg_stream = if matches!(
-            parser,
-            ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
-        ) {
-            parser.into_stream(nd_streaming::split_stream(data_stream))
-        } else {
-            parser.into_stream(data_stream)
-        };
+        while let Some(split) = split_channel.recv().await {
+            let split_id = split.id();
+            let data_stream = S3FileReader::stream_read_object(
+                client_for_s3.clone(),
+                bucket_name.clone(),
+                split,
+                source_ctx.clone(),
+            );
+            let parser =
+                ByteStreamSourceParserImpl::create(parser_config.clone(), source_ctx.clone())
+                    .await?;
+            let msg_stream = if matches!(
+                parser,
+                ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
+            ) {
+                parser.into_stream(nd_streaming::split_stream(data_stream))
+            } else {
+                parser.into_stream(data_stream)
+            };
 
-        let actor_id = source_ctx.source_info.actor_id.to_string();
-        let source_id = source_ctx.source_info.source_id.to_string();
-        #[for_await]
-        for msg in msg_stream {
-            let msg = msg?;
-            source_ctx
-                .metrics
-                .partition_input_count
-                .with_label_values(&[&actor_id, &source_id, &split_id])
-                .inc_by(msg.chunk.cardinality() as u64);
-            yield msg;
+            let actor_id = source_ctx.source_info.actor_id.to_string();
+            let source_id = source_ctx.source_info.source_id.to_string();
+            #[for_await]
+            for msg in msg_stream {
+                let msg = msg?;
+                source_ctx
+                    .metrics
+                    .partition_input_count
+                    .with_label_values(&[&actor_id, &source_id, &split_id])
+                    .inc_by(msg.chunk.cardinality() as u64);
+                yield msg;
+            }
         }
     }
 }
 
 #[async_trait]
-impl SourceReader for S3SourceReader {
+impl FsFileReader for S3SourceReader {
     type Properties = S3Properties;
 
     async fn new(
@@ -83,13 +91,13 @@ impl SourceReader for S3SourceReader {
         })
     }
 
-    fn build_read_stream(&mut self, split: FsSplit) -> BoxSourceWithStateStream {
+    fn build_read_stream(&mut self, split_channel: Receiver<FsSplit>) -> BoxSourceWithStateStream {
         Self::build_read_stream_inner(
             self.s3_client.clone(),
             self.bucket_name.clone(),
             self.source_ctx.clone(),
             self.parser_config.clone(),
-            split,
+            split_channel,
         )
     }
 }

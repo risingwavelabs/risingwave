@@ -14,15 +14,19 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::ops::Bound;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use bytes::Bytes;
 use either::Either;
 use futures::stream::{self, StreamExt};
-use futures_async_stream::try_stream;
+use futures_async_stream::{for_await, try_stream};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::Row;
-use risingwave_common::types::{ScalarRef, ScalarRefImpl};
+use risingwave_common::types::{ScalarRef, ScalarRefImpl, ToDatumRef};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_connector::source::filesystem::FsSplit;
@@ -33,9 +37,12 @@ use risingwave_connector::source::{
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::table::KeyedRow;
 use risingwave_storage::StateStore;
+use tokio::sync::mpsc::Receiver;
+use tokio::task::JoinHandle;
 
-use crate::common::table::state_table::KeyedRowStream;
+use crate::common::table::state_table::{KeyedRowStream, StateTable};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
@@ -88,60 +95,60 @@ impl<S: StateStore> FsFetchExecutor<S> {
         }
     }
 
-    async fn try_replace_with_new_reader<'a, const BIASED: bool>(
-        is_datastream_empty: &mut bool,
-        _state_store_handler: &'a SourceStateTableHandler<S>,
-        state_cache: &mut HashMap<SplitId, SplitImpl>,
-        column_ids: Vec<ColumnId>,
-        source_ctx: SourceContext,
-        source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
-        store_iter: &mut Pin<Box<KeyedRowStream<'a, S, BasicSerde>>>,
-    ) -> StreamExecutorResult<()> {
-        let fs_split = if let Some(item) = store_iter.next().await {
-            // Find the next assignment in state store.
-            let row = item?;
-            let split_id = match row.datum_at(0) {
-                Some(ScalarRefImpl::Utf8(split_id)) => split_id,
-                _ => unreachable!(),
-            };
-            let fs_split = match row.datum_at(1) {
-                Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                    SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?
-                        .as_fs()
-                        .unwrap()
-                        .to_owned()
-                }
-                _ => unreachable!(),
-            };
-
-            // Cache the assignment retrieved from state store.
-            state_cache.insert(split_id.into(), fs_split.clone().into());
-            Some(fs_split)
-        } else {
-            // Find uncompleted assignment in state cache.
-            state_cache
-                .iter()
-                .find(|(_, split)| {
-                    let fs_split = split.as_fs().unwrap();
-                    fs_split.offset < fs_split.size
-                })
-                .map(|(_, split)| split.as_fs().unwrap().to_owned())
-        };
-
-        if let Some(fs_split) = fs_split {
-            stream.replace_data_stream(
-                Self::build_stream_source_reader(column_ids, source_ctx, source_desc, fs_split)
-                    .await?,
-            );
-            *is_datastream_empty = false;
-        } else {
-            stream.replace_data_stream(stream::pending().boxed());
-            *is_datastream_empty = true;
-        };
-
-        Ok(())
-    }
+    // async fn try_replace_with_new_reader<'a, const BIASED: bool>(
+    //     is_datastream_empty: &mut bool,
+    //     _state_store_handler: &'a SourceStateTableHandler<S>,
+    //     state_cache: &mut HashMap<SplitId, SplitImpl>,
+    //     column_ids: Vec<ColumnId>,
+    //     source_ctx: SourceContext,
+    //     source_desc: &SourceDesc,
+    //     stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+    //     store_iter: &mut Pin<Box<KeyedRowStream<'a, S, BasicSerde>>>,
+    // ) -> StreamExecutorResult<()> {
+    //     let fs_split = if let Some(item) = store_iter.next().await {
+    //         // Find the next assignment in state store.
+    //         let row = item?;
+    //         let split_id = match row.datum_at(0) {
+    //             Some(ScalarRefImpl::Utf8(split_id)) => split_id,
+    //             _ => unreachable!(),
+    //         };
+    //         let fs_split = match row.datum_at(1) {
+    //             Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+    //                 SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?
+    //                     .as_fs()
+    //                     .unwrap()
+    //                     .to_owned()
+    //             }
+    //             _ => unreachable!(),
+    //         };
+    //
+    //         // Cache the assignment retrieved from state store.
+    //         state_cache.insert(split_id.into(), fs_split.clone().into());
+    //         Some(fs_split)
+    //     } else {
+    //         // Find uncompleted assignment in state cache.
+    //         state_cache
+    //             .iter()
+    //             .find(|(_, split)| {
+    //                 let fs_split = split.as_fs().unwrap();
+    //                 fs_split.offset < fs_split.size
+    //             })
+    //             .map(|(_, split)| split.as_fs().unwrap().to_owned())
+    //     };
+    //
+    //     if let Some(fs_split) = fs_split {
+    //         stream.replace_data_stream(
+    //             Self::build_stream_source_reader(column_ids, source_ctx, source_desc, fs_split)
+    //                 .await?,
+    //         );
+    //         *is_datastream_empty = false;
+    //     } else {
+    //         stream.replace_data_stream(stream::pending().boxed());
+    //         *is_datastream_empty = true;
+    //     };
+    //
+    //     Ok(())
+    // }
 
     async fn take_snapshot_and_flush(
         state_store_handler: &mut SourceStateTableHandler<S>,
@@ -172,11 +179,11 @@ impl<S: StateStore> FsFetchExecutor<S> {
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
-        split: FsSplit,
+        split_channel: Receiver<FsSplit>,
     ) -> StreamExecutorResult<BoxSourceWithStateStream> {
         source_desc
             .source
-            .source_reader(column_ids, Arc::new(source_ctx), split)
+            .fs_stream_reader(column_ids, Arc::new(source_ctx), split_channel)
             .await
             .map_err(StreamExecutorError::connector_error)
     }
@@ -201,6 +208,8 @@ impl<S: StateStore> FsFetchExecutor<S> {
         let mut core = self.stream_source_core.take().unwrap();
         let mut state_store_handler = core.split_state_store;
         let mut state_cache = core.state_cache;
+        let mut fs_split_sender_handle: JoinHandle<StreamExecutorResult<()>>;
+        let need_rebuild_stream = Arc::new(AtomicBool::new(false));
 
         // Build source description from the builder.
         let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
@@ -212,37 +221,64 @@ impl<S: StateStore> FsFetchExecutor<S> {
         // Initialize state store.
         state_store_handler.init_epoch(barrier.epoch);
 
-        let mut is_datastream_empty = true;
-        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
-            upstream,
-            stream::pending().boxed(),
-        );
+        let build_filename_stream =
+            |state_table: &StateTable<S>,
+             need_rebuild: Arc<AtomicBool>|
+             -> (JoinHandle<StreamExecutorResult<()>>, Receiver<FsSplit>) {
+                let (producer, receiver) = tokio::sync::mpsc::channel(0);
+                let handle = tokio::spawn(async move {
+                    // iter rows in state table according to vnode mapping
+                    for vnode in state_table.vnodes().iter_vnodes() {
+                        while let Some(row) = state_table
+                            .iter_row_with_pk_range(
+                                &(Bound::Unbounded, Bound::Unbounded),
+                                vnode,
+                                PrefetchOptions::new_for_exhaust_iter(),
+                            )
+                            .await?
+                        {
+                            let fs_split = match row.datum_at(1) {
+                                Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                                    SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?
+                                        .as_fs()
+                                        .unwrap()
+                                        .to_owned()
+                                }
+                                _ => unreachable!(),
+                            };
+                            tracing::trace!("send split {:?} to pipe", fs_split);
+                            producer.send(fs_split).await.unwrap()
+                        }
+                    }
+                    // read to the end means require for another iter
+                    need_rebuild.store(true, Ordering::Relaxed);
+                    Ok(())
+                });
+                (handle, receiver)
+            };
+
+        let new_reader_stream = || async {
+            let (fs_stream_handle, fs_split_recv) = build_filename_stream(
+                &state_store_handler.state_store,
+                need_rebuild_stream.clone(),
+            );
+            let reader_stream = Self::build_stream_source_reader(
+                core.column_ids.clone(),
+                self.build_source_ctx(&source_desc, core.source_id),
+                &source_desc,
+                fs_split_recv,
+            )
+            .await?;
+            (reader_stream, fs_stream_handle)
+        };
+        let (reader_stream, fs_stream_handle) = new_reader_stream().await;
+        fs_split_sender_handle = fs_stream_handle;
+        let mut stream =
+            StreamReaderWithPause::<true, StreamChunkWithState>::new(upstream, reader_stream);
 
         if barrier.is_pause_on_startup() {
             stream.pause_stream();
         }
-
-        let mut store_iter = Box::pin(
-            state_store_handler
-                .state_store
-                .iter_row(PrefetchOptions::new_with_exhaust_iter(false))
-                .await?,
-        );
-
-        // If it is a recovery startup,
-        // there can be file assignments in state store.
-        // Hence we try to build a reader first.
-        Self::try_replace_with_new_reader(
-            &mut is_datastream_empty,
-            &state_store_handler,
-            &mut state_cache,
-            core.column_ids.clone(),
-            self.build_source_ctx(&source_desc, core.source_id),
-            &source_desc,
-            &mut stream,
-            &mut store_iter,
-        )
-        .await?;
 
         yield Message::Barrier(barrier);
 
@@ -263,8 +299,6 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                         _ => (),
                                     }
                                 }
-
-                                drop(store_iter);
                                 Self::take_snapshot_and_flush(
                                     &mut state_store_handler,
                                     &mut state_cache,
@@ -272,13 +306,17 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                 )
                                 .await?;
 
-                                // Rebuild state store iterator.
-                                store_iter = Box::pin(
-                                    state_store_handler
+                                if let Some(new_bitmap) =
+                                    barrier.as_update_vnode_bitmap(self.actor_ctx.id)
+                                {
+                                    let (_, is_updated) = state_store_handler
                                         .state_store
-                                        .iter_row(PrefetchOptions::new_with_exhaust_iter(false))
-                                        .await?,
-                                );
+                                        .update_vnode_bitmap(new_bitmap);
+                                    need_rebuild_stream.store(is_updated, Ordering::Relaxed);
+                                }
+                                if need_rebuild_stream.load(Ordering::Relaxed) {
+                                    // Rebuild state store iterator.
+                                }
 
                                 // Propagate the barrier.
                                 yield msg;
@@ -294,25 +332,10 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                         FsSplit::new(filename.to_owned(), 0, size as usize).into(),
                                     )
                                 });
+                                // Writing to state store is enough here.
+                                // Once reaching the end of state table, it will rebuild the stream
+                                // when the next barrier comes.
                                 state_cache.extend(file_assignment);
-
-                                // When both of state cache and state store are empty,
-                                // the right arm of stream is a pending stream,
-                                // and is_datastream_empty is set to true.
-                                // The new
-                                if is_datastream_empty {
-                                    Self::try_replace_with_new_reader(
-                                        &mut is_datastream_empty,
-                                        &state_store_handler,
-                                        &mut state_cache,
-                                        core.column_ids.clone(),
-                                        self.build_source_ctx(&source_desc, core.source_id),
-                                        &source_desc,
-                                        &mut stream,
-                                        &mut store_iter,
-                                    )
-                                    .await?;
-                                }
                             }
                             _ => unreachable!(),
                         },
@@ -340,22 +363,6 @@ impl<S: StateStore> FsFetchExecutor<S> {
                             let fs_split_size = fs_split.size;
                             fs_split.offset = offset;
                             cache_entry.insert(fs_split.into());
-
-                            // The file is read out, build a new reader.
-                            if fs_split_size <= offset {
-                                debug_assert_eq!(fs_split_size, offset);
-                                Self::try_replace_with_new_reader(
-                                    &mut is_datastream_empty,
-                                    &state_store_handler,
-                                    &mut state_cache,
-                                    core.column_ids.clone(),
-                                    self.build_source_ctx(&source_desc, core.source_id),
-                                    &source_desc,
-                                    &mut stream,
-                                    &mut store_iter,
-                                )
-                                .await?;
-                            }
 
                             yield Message::Chunk(chunk);
                         }

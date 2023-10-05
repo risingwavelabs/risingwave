@@ -32,6 +32,7 @@ use risingwave_pb::catalog::PbSource;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
+use tokio::sync::mpsc::Receiver;
 
 use super::datagen::DatagenMeta;
 use super::filesystem::FsSplit;
@@ -41,7 +42,7 @@ use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
-use crate::source::filesystem::{FsPageItem, S3_V2_CONNECTOR};
+use crate::source::filesystem::{FsPageItem, S3Properties, S3_V2_CONNECTOR};
 use crate::source::monitor::EnumeratorMetrics;
 use crate::source::S3_CONNECTOR;
 use crate::{
@@ -335,6 +336,15 @@ impl ConnectorProperties {
 
 impl ConnectorProperties {
     pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
+        if Self::is_new_fs_connector_hash_map(&props) {
+            _ = props
+                .remove(UPSTREAM_SOURCE_KEY)
+                .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
+            return Ok(ConnectorProperties::S3(Box::new(
+                S3Properties::try_from_hashmap(props)?,
+            )));
+        }
+
         let connector = props
             .remove(UPSTREAM_SOURCE_KEY)
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
@@ -547,7 +557,7 @@ pub trait FsListInner: Sized {
 }
 
 #[async_trait]
-pub trait SourceReader: Sized + Send {
+pub trait FsFileReader: Sized + Send {
     type Properties;
 
     async fn new(
@@ -557,7 +567,7 @@ pub trait SourceReader: Sized + Send {
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 
-    fn build_read_stream(&mut self, split: FsSplit) -> BoxSourceWithStateStream;
+    fn build_read_stream(&mut self, split_channel: Receiver<FsSplit>) -> BoxSourceWithStateStream;
 }
 
 #[cfg(test)]

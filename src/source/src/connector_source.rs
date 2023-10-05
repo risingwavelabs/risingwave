@@ -31,9 +31,10 @@ use risingwave_connector::source::filesystem::s3_v2::reader::S3SourceReader;
 use risingwave_connector::source::filesystem::{FsPage, FsPageItem, FsSplit, S3SplitEnumerator};
 use risingwave_connector::source::{
     create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
-    ConnectorState, FsFilterCtrlCtx, FsFilterCtrlCtxRef, FsListInner, SourceColumnDesc,
-    SourceContext, SourceEnumeratorContext, SourceReader, SplitEnumerator, SplitReader,
+    ConnectorState, FsFileReader, FsFilterCtrlCtx, FsFilterCtrlCtxRef, FsListInner,
+    SourceColumnDesc, SourceContext, SourceEnumeratorContext, SplitEnumerator, SplitReader,
 };
+use tokio::sync::mpsc::Receiver;
 use tokio::time::{Duration, MissedTickBehavior};
 use tokio::{select, time};
 
@@ -109,11 +110,11 @@ impl ConnectorSource {
         ))
     }
 
-    pub async fn source_reader(
+    pub async fn fs_stream_reader(
         &self,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-        split: FsSplit,
+        split: Receiver<FsSplit>,
     ) -> Result<BoxSourceWithStateStream> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;

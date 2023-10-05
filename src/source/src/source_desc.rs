@@ -34,7 +34,7 @@ use crate::fs_connector_source::FsConnectorSource;
 pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 
 /// `SourceDesc` describes a stream source.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourceDesc {
     pub source: ConnectorSource,
     pub source_struct: SourceStruct,
