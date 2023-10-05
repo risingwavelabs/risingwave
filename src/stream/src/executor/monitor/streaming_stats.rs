@@ -496,7 +496,7 @@ impl StreamingMetrics {
         let group_top_n_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_group_top_n_cache_miss_count",
             "Group top n executor cache miss count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -504,7 +504,7 @@ impl StreamingMetrics {
         let group_top_n_total_query_cache_count = register_int_counter_vec_with_registry!(
             "stream_group_top_n_total_query_cache_count",
             "Group top n executor query cache total count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -512,7 +512,7 @@ impl StreamingMetrics {
         let group_top_n_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_group_top_n_cached_entry_count",
             "Total entry counts in group top n executor cache",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -520,7 +520,7 @@ impl StreamingMetrics {
         let group_top_n_appendonly_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_group_top_n_appendonly_cache_miss_count",
             "Group top n appendonly executor cache miss count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -529,7 +529,7 @@ impl StreamingMetrics {
             register_int_counter_vec_with_registry!(
                 "stream_group_top_n_appendonly_total_query_cache_count",
                 "Group top n appendonly executor total cache count",
-                &["table_id", "actor_id"],
+                &["table_id", "actor_id", "fragment_id"],
                 registry
             )
             .unwrap();
@@ -537,7 +537,7 @@ impl StreamingMetrics {
         let group_top_n_appendonly_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_group_top_n_appendonly_cached_entry_count",
             "Total entry counts in group top n appendonly executor cache",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
