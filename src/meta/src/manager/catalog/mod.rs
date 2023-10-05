@@ -640,7 +640,8 @@ impl CatalogManager {
             }
             StreamingJob::Sink(sink) => self.start_create_sink_procedure(sink).await,
             StreamingJob::Index(index, index_table) => {
-                self.start_create_index_procedure(index, index_table).await
+                self.start_create_index_procedure(index, index_table, internal_tables)
+                    .await
             }
             StreamingJob::Table(source, table) => {
                 if let Some(source) = source {
@@ -2074,6 +2075,7 @@ impl CatalogManager {
         &self,
         index: &Index,
         index_table: &Table,
+        internal_tables: Vec<Table>,
     ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -2096,9 +2098,30 @@ impl CatalogManager {
         } else {
             database_core.mark_creating(&key);
             database_core.mark_creating_streaming_job(index_table.id, key);
+
+            let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+            let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+            assert!(
+                !tables.contains_key(&index_table.id),
+                "table must not already exist in meta"
+            );
+            assert!(
+                !indexes.contains_key(&index.id),
+                "index must not already exist in meta"
+            );
+
+            indexes.insert(index.id, index.clone());
+
+            for table in internal_tables {
+                tables.insert(table.id, table);
+            }
+            tables.insert(index_table.id, index_table.clone());
+            commit_meta!(self, indexes, tables)?;
+
             for &dependent_relation_id in &index_table.dependent_relations {
                 database_core.increase_ref_count(dependent_relation_id);
             }
+
             // index table and index.
             user_core.increase_ref_count(index.owner, 2);
             Ok(())

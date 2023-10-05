@@ -332,6 +332,9 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
         let index = req.get_index()?.clone();
         let index_table = req.get_index_table()?.clone();
+        let create_type = index_table
+            .get_create_type()
+            .unwrap_or(CreateType::Foreground);
         let fragment_graph = req.get_fragment_graph()?.clone();
 
         let mut stream_job = StreamingJob::Index(index, index_table);
@@ -343,7 +346,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::CreateStreamingJob(
                 stream_job,
                 fragment_graph,
-                CreateType::Foreground,
+                create_type,
             ))
             .await?;
 

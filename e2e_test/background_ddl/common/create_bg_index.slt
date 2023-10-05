@@ -1,0 +1,5 @@
+statement ok
+SET BACKGROUND_DDL=true;
+
+statement ok
+CREATE INDEX i on t (v1);

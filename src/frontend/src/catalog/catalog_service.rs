@@ -213,8 +213,12 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
+        let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let (_, version) = self.meta_client.create_index(index, table, graph).await?;
-        self.wait_version(version).await
+        if matches!(create_type, PbCreateType::Foreground) {
+            self.wait_version(version).await?
+        }
+        Ok(())
     }
 
     async fn create_table(
