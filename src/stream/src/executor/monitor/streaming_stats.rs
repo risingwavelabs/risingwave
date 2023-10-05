@@ -440,7 +440,7 @@ impl StreamingMetrics {
         let agg_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_agg_lookup_miss_count",
             "Aggregation executor lookup miss duration",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -448,7 +448,7 @@ impl StreamingMetrics {
         let agg_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_agg_lookup_total_count",
             "Aggregation executor lookup total operation",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -456,7 +456,7 @@ impl StreamingMetrics {
         let agg_distinct_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_agg_distinct_cache_miss_count",
             "Aggregation executor dinsinct miss duration",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -464,7 +464,7 @@ impl StreamingMetrics {
         let agg_distinct_total_cache_count = register_int_counter_vec_with_registry!(
             "stream_agg_distinct_total_cache_count",
             "Aggregation executor distinct total operation",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -472,7 +472,7 @@ impl StreamingMetrics {
         let agg_distinct_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_agg_distinct_cached_entry_count",
             "Total entry counts in distinct aggregation executor cache",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -480,7 +480,7 @@ impl StreamingMetrics {
         let agg_dirty_group_count = register_int_gauge_vec_with_registry!(
             "stream_agg_dirty_group_count",
             "Total dirty group counts in aggregation executor",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -488,7 +488,7 @@ impl StreamingMetrics {
         let agg_dirty_group_heap_size = register_int_gauge_vec_with_registry!(
             "stream_agg_dirty_group_heap_size",
             "Total dirty group heap size in aggregation executor",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
