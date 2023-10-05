@@ -14,9 +14,11 @@
 
 use std::sync::Arc;
 
+use prometheus::IntCounter;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_connector::sink::log_store::LogStoreFactory;
+use risingwave_connector::sink::{SinkParam, SinkWriterParam};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::store::NewLocalOptions;
 use risingwave_storage::StateStore;
@@ -25,6 +27,7 @@ use crate::common::log_store_impl::kv_log_store::buffer::new_log_store_buffer;
 use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store_impl::kv_log_store::writer::KvLogStoreWriter;
+use crate::executor::monitor::StreamingMetrics;
 
 mod buffer;
 mod reader;
@@ -42,6 +45,128 @@ const FIRST_SEQ_ID: SeqIdType = 0;
 /// None `SeqIdType` means that the whole epoch is truncated.
 type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
+#[derive(Clone)]
+pub(crate) struct KvLogStoreReadMetrics {
+    pub storage_read_count: IntCounter,
+    pub storage_read_size: IntCounter,
+}
+
+impl KvLogStoreReadMetrics {
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self {
+            storage_read_count: IntCounter::new("unused", "unused").unwrap(),
+            storage_read_size: IntCounter::new("unused", "unused").unwrap(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct KvLogStoreMetrics {
+    pub storage_write_count: IntCounter,
+    pub storage_write_size: IntCounter,
+    pub persistent_log_read_metrics: KvLogStoreReadMetrics,
+    pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
+}
+
+impl KvLogStoreMetrics {
+    pub(crate) fn new(
+        metrics: &StreamingMetrics,
+        writer_param: &SinkWriterParam,
+        sink_param: &SinkParam,
+        connector: &'static str,
+    ) -> Self {
+        let executor_id = format!("{}", writer_param.executor_id);
+        let sink_id = format!("{}", sink_param.sink_id.sink_id);
+        let storage_write_size = metrics.kv_log_store_storage_write_size.with_label_values(&[
+            executor_id.as_str(),
+            connector,
+            sink_id.as_str(),
+        ]);
+        let storage_write_count = metrics
+            .kv_log_store_storage_write_count
+            .with_label_values(&[executor_id.as_str(), connector, sink_id.as_str()]);
+
+        const READ_PERSISTENT_LOG: &str = "persistent_log";
+        const READ_FLUSHED_BUFFER: &str = "flushed_buffer";
+
+        let persistent_log_read_size = metrics.kv_log_store_storage_read_size.with_label_values(&[
+            executor_id.as_str(),
+            connector,
+            sink_id.as_str(),
+            READ_PERSISTENT_LOG,
+        ]);
+        let persistent_log_read_count =
+            metrics.kv_log_store_storage_read_count.with_label_values(&[
+                executor_id.as_str(),
+                connector,
+                sink_id.as_str(),
+                READ_PERSISTENT_LOG,
+            ]);
+
+        let flushed_buffer_read_size = metrics.kv_log_store_storage_read_size.with_label_values(&[
+            executor_id.as_str(),
+            connector,
+            sink_id.as_str(),
+            READ_FLUSHED_BUFFER,
+        ]);
+        let flushed_buffer_read_count =
+            metrics.kv_log_store_storage_read_count.with_label_values(&[
+                executor_id.as_str(),
+                connector,
+                sink_id.as_str(),
+                READ_FLUSHED_BUFFER,
+            ]);
+
+        Self {
+            storage_write_size,
+            storage_write_count,
+            persistent_log_read_metrics: KvLogStoreReadMetrics {
+                storage_read_size: persistent_log_read_size,
+                storage_read_count: persistent_log_read_count,
+            },
+            flushed_buffer_read_metrics: KvLogStoreReadMetrics {
+                storage_read_count: flushed_buffer_read_count,
+                storage_read_size: flushed_buffer_read_size,
+            },
+        }
+    }
+
+    #[cfg(test)]
+    fn for_test() -> Self {
+        KvLogStoreMetrics {
+            storage_write_count: IntCounter::new("unused", "unused").unwrap(),
+            storage_write_size: IntCounter::new("unused", "unused").unwrap(),
+            persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
+            flushed_buffer_read_metrics: KvLogStoreReadMetrics::for_test(),
+        }
+    }
+}
+
+pub(crate) struct FlushInfo {
+    pub(crate) flush_size: usize,
+    pub(crate) flush_count: usize,
+}
+
+impl FlushInfo {
+    pub(crate) fn new() -> Self {
+        FlushInfo {
+            flush_count: 0,
+            flush_size: 0,
+        }
+    }
+
+    pub(crate) fn flush_one(&mut self, size: usize) {
+        self.flush_size += size;
+        self.flush_count += 1;
+    }
+
+    pub(crate) fn report(self, metrics: &KvLogStoreMetrics) {
+        metrics.storage_write_count.inc_by(self.flush_count as _);
+        metrics.storage_write_size.inc_by(self.flush_size as _);
+    }
+}
+
 pub struct KvLogStoreFactory<S: StateStore> {
     state_store: S,
 
@@ -50,20 +175,24 @@ pub struct KvLogStoreFactory<S: StateStore> {
     vnodes: Option<Arc<Bitmap>>,
 
     max_stream_chunk_count: usize,
+
+    metrics: KvLogStoreMetrics,
 }
 
 impl<S: StateStore> KvLogStoreFactory<S> {
-    pub fn new(
+    pub(crate) fn new(
         state_store: S,
         table_catalog: Table,
         vnodes: Option<Arc<Bitmap>>,
         max_stream_chunk_count: usize,
+        metrics: KvLogStoreMetrics,
     ) -> Self {
         Self {
             state_store,
             table_catalog,
             vnodes,
             max_stream_chunk_count,
+            metrics,
         }
     }
 }
@@ -91,9 +220,15 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
         let (tx, rx) = new_log_store_buffer(self.max_stream_chunk_count);
 
-        let reader = KvLogStoreReader::new(table_id, self.state_store, serde.clone(), rx);
+        let reader = KvLogStoreReader::new(
+            table_id,
+            self.state_store,
+            serde.clone(),
+            rx,
+            self.metrics.clone(),
+        );
 
-        let writer = KvLogStoreWriter::new(table_id, local_state_store, serde, tx);
+        let writer = KvLogStoreWriter::new(table_id, local_state_store, serde, tx, self.metrics);
 
         (reader, writer)
     }
@@ -113,7 +248,7 @@ mod tests {
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         gen_stream_chunk, gen_test_log_store_table,
     };
-    use crate::common::log_store_impl::kv_log_store::KvLogStoreFactory;
+    use crate::common::log_store_impl::kv_log_store::{KvLogStoreFactory, KvLogStoreMetrics};
 
     #[tokio::test]
     async fn test_basic() {
@@ -134,6 +269,7 @@ mod tests {
             table.clone(),
             None,
             max_stream_chunk_count,
+            KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -224,6 +360,7 @@ mod tests {
             table.clone(),
             None,
             max_stream_chunk_count,
+            KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -312,6 +449,7 @@ mod tests {
             table.clone(),
             None,
             max_stream_chunk_count,
+            KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
         writer
@@ -380,6 +518,7 @@ mod tests {
             table.clone(),
             None,
             max_stream_chunk_count,
+            KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -493,6 +632,7 @@ mod tests {
             table.clone(),
             None,
             max_stream_chunk_count,
+            KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
 

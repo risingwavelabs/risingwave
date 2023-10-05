@@ -39,7 +39,7 @@ use std::future::Future;
 use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use prometheus::{Histogram, HistogramOpts};
+use prometheus::{Histogram, HistogramOpts, IntCounter, IntGauge, Opts};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
@@ -198,6 +198,10 @@ impl From<SinkCatalog> for SinkParam {
 #[derive(Clone)]
 pub struct SinkMetrics {
     pub sink_commit_duration_metrics: Histogram,
+    pub log_store_first_write_epoch: IntGauge,
+    pub log_store_latest_write_epoch: IntGauge,
+    pub log_store_write_rows: IntCounter,
+    pub log_store_latest_read_epoch: IntGauge,
 }
 
 impl Default for SinkMetrics {
@@ -207,6 +211,13 @@ impl Default for SinkMetrics {
                 "unused", "unused",
             ))
             .unwrap(),
+            log_store_first_write_epoch: IntGauge::with_opts(Opts::new("unused", "unused"))
+                .unwrap(),
+            log_store_latest_write_epoch: IntGauge::with_opts(Opts::new("unused", "unused"))
+                .unwrap(),
+            log_store_latest_read_epoch: IntGauge::with_opts(Opts::new("unused", "unused"))
+                .unwrap(),
+            log_store_write_rows: IntCounter::with_opts(Opts::new("unused", "unused")).unwrap(),
         }
     }
 }

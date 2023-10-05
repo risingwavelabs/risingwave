@@ -29,6 +29,7 @@ use risingwave_common::constants::log_store::{
     EPOCH_COLUMN_INDEX, EPOCH_COLUMN_TYPE, KV_LOG_STORE_PREDEFINED_COLUMNS, PK_TYPES,
     ROW_OP_COLUMN_INDEX, SEQ_ID_COLUMN_INDEX,
 };
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -39,7 +40,7 @@ use risingwave_common::util::value_encoding::{
     BasicSerde, ValueRowDeserializer, ValueRowSerializer,
 };
 use risingwave_connector::sink::log_store::LogStoreResult;
-use risingwave_hummock_sdk::key::{next_key, TableKey};
+use risingwave_hummock_sdk::key::{next_key, FullKey, TableKey};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
@@ -47,7 +48,7 @@ use risingwave_storage::store::StateStoreReadIterStream;
 use risingwave_storage::table::{compute_vnode, Distribution};
 
 use crate::common::log_store_impl::kv_log_store::{
-    ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,
+    KvLogStoreReadMetrics, ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,
 };
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
@@ -56,6 +57,32 @@ const UPDATE_INSERT_OP_CODE: RowOpCodeType = 3;
 const UPDATE_DELETE_OP_CODE: RowOpCodeType = 4;
 const BARRIER_OP_CODE: RowOpCodeType = 5;
 const CHECKPOINT_BARRIER_OP_CODE: RowOpCodeType = 6;
+
+struct ReadInfo {
+    read_size: usize,
+    read_count: usize,
+}
+
+impl ReadInfo {
+    fn new() -> Self {
+        Self {
+            read_count: 0,
+            read_size: 0,
+        }
+    }
+
+    fn read_one_row(&mut self, size: usize) {
+        self.read_count += 1;
+        self.read_size += size;
+    }
+
+    fn report(&mut self, metrics: &KvLogStoreReadMetrics) {
+        metrics.storage_read_size.inc_by(self.read_size as _);
+        metrics.storage_read_count.inc_by(self.read_count as _);
+        self.read_size = 0;
+        self.read_count = 0;
+    }
+}
 
 #[derive(Eq, PartialEq, Debug)]
 enum LogStoreRowOp {
@@ -303,13 +330,17 @@ impl LogStoreRowSerde {
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
         expected_epoch: u64,
+        metrics: &KvLogStoreReadMetrics,
     ) -> LogStoreResult<StreamChunk> {
         pin_mut!(stream);
         let size_bound = (end_seq_id - start_seq_id + 1) as usize;
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.payload_schema.clone(), size_bound + 1);
         let mut ops = Vec::with_capacity(size_bound);
-        while let Some((_, value)) = stream.try_next().await? {
+        let mut read_info = ReadInfo::new();
+        while let Some((key, value)) = stream.try_next().await? {
+            read_info
+                .read_one_row(key.user_key.table_key.estimated_size() + value.estimated_size());
             match self.deserialize(value)? {
                 (epoch, LogStoreRowOp::Row { op, row }) => {
                     if epoch != expected_epoch {
@@ -341,6 +372,7 @@ impl LogStoreRowSerde {
                 end_seq_id)
             );
         }
+        read_info.report(metrics);
         Ok(StreamChunk::from_parts(
             ops,
             data_chunk_builder
@@ -381,10 +413,16 @@ struct LogStoreRowOpStream<S: StateStoreReadIterStream> {
     barrier_streams: Vec<Pin<Box<S>>>,
 
     stream_state: StreamState,
+
+    metrics: KvLogStoreReadMetrics,
 }
 
 impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
-    pub(crate) fn new(streams: Vec<S>, serde: LogStoreRowSerde) -> Self {
+    pub(crate) fn new(
+        streams: Vec<S>,
+        serde: LogStoreRowSerde,
+        metrics: KvLogStoreReadMetrics,
+    ) -> Self {
         assert!(!streams.is_empty());
         Self {
             serde,
@@ -394,6 +432,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
                 .map(|s| Box::pin(s).into_future())
                 .collect(),
             stream_state: StreamState::Uninitialized,
+            metrics,
         }
     }
 
@@ -456,12 +495,15 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
         let this = self;
         pin_mut!(this);
 
-        while let Some((epoch, row_op)) = this.next_op().await? {
+        while let Some((epoch, row_op, row_read_size)) = this.next_op().await? {
+            let mut read_info = ReadInfo::new();
+            read_info.read_one_row(row_read_size);
             match row_op {
                 LogStoreRowOp::Row { op, row } => {
                     ops.push(op);
                     if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                         let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
+                        read_info.report(&this.metrics);
                         yield (
                             epoch,
                             KvLogStoreItem::StreamChunk(StreamChunk::from_parts(ops, chunk)),
@@ -469,6 +511,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
                     }
                 }
                 LogStoreRowOp::Barrier { is_checkpoint } => {
+                    read_info.report(&this.metrics);
                     if let Some(chunk) = data_chunk_builder.consume_all() {
                         let ops = replace(&mut ops, Vec::with_capacity(chunk_size));
                         yield (
@@ -488,12 +531,13 @@ pub(crate) fn new_log_store_item_stream<S: StateStoreReadIterStream>(
     streams: Vec<S>,
     serde: LogStoreRowSerde,
     chunk_size: usize,
+    metrics: KvLogStoreReadMetrics,
 ) -> LogStoreItemStream<S> {
-    LogStoreRowOpStream::new(streams, serde).into_log_store_item_stream(chunk_size)
+    LogStoreRowOpStream::new(streams, serde, metrics).into_log_store_item_stream(chunk_size)
 }
 
 impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
-    async fn next_op(&mut self) -> LogStoreResult<Option<(u64, LogStoreRowOp)>> {
+    async fn next_op(&mut self) -> LogStoreResult<Option<(u64, LogStoreRowOp, usize)>> {
         assert!(!self.row_streams.is_empty());
         while let (Some(result), stream) = self
             .row_streams
@@ -501,7 +545,8 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
             .await
             .expect("row stream should not be empty when polled")
         {
-            let (_key, value): (_, Bytes) = result?;
+            let (key, value): (FullKey<_>, Bytes) = result?;
+            let read_size = key.user_key.table_key.estimated_size() + value.estimated_size();
             let (decoded_epoch, op) = self.serde.deserialize(value)?;
             self.check_epoch(decoded_epoch)?;
             match op {
@@ -515,7 +560,11 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
                         _ => {}
                     };
                     self.row_streams.push(stream.into_future());
-                    return Ok(Some((decoded_epoch, LogStoreRowOp::Row { op, row })));
+                    return Ok(Some((
+                        decoded_epoch,
+                        LogStoreRowOp::Row { op, row },
+                        read_size,
+                    )));
                 }
                 LogStoreRowOp::Barrier { is_checkpoint } => {
                     self.check_is_checkpoint(is_checkpoint)?;
@@ -532,6 +581,7 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
                         return Ok(Some((
                             decoded_epoch,
                             LogStoreRowOp::Barrier { is_checkpoint },
+                            read_size,
                         )));
                     } else {
                         self.stream_state = StreamState::BarrierAligning {
@@ -598,7 +648,7 @@ mod tests {
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         gen_test_data, gen_test_log_store_table, TEST_TABLE_ID,
     };
-    use crate::common::log_store_impl::kv_log_store::SeqIdType;
+    use crate::common::log_store_impl::kv_log_store::{KvLogStoreReadMetrics, SeqIdType};
 
     const EPOCH1: u64 = 233;
     const EPOCH2: u64 = EPOCH1 + 1;
@@ -745,7 +795,13 @@ mod tests {
         let end_seq_id = seq_id - 1;
         tx.send(()).unwrap();
         let chunk = serde
-            .deserialize_stream_chunk(stream, start_seq_id, end_seq_id, EPOCH1)
+            .deserialize_stream_chunk(
+                stream,
+                start_seq_id,
+                end_seq_id,
+                EPOCH1,
+                &KvLogStoreReadMetrics::for_test(),
+            )
             .await
             .unwrap();
         for (i, (op, row)) in chunk.rows().enumerate() {
@@ -832,7 +888,7 @@ mod tests {
             tx2.push(Some(t2));
         }
 
-        let stream = LogStoreRowOpStream::new(streams, serde);
+        let stream = LogStoreRowOpStream::new(streams, serde, KvLogStoreReadMetrics::for_test());
 
         let mut ops = Vec::new();
         let mut rows = Vec::new();
@@ -864,6 +920,7 @@ mod tests {
         for i in index {
             tx1[i].take().unwrap().send(()).unwrap();
             for j in 0..ops[i].len() {
+                let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
                 assert_eq!(
                     (
                         EPOCH1,
@@ -872,10 +929,12 @@ mod tests {
                             row: rows[i][j].clone(),
                         }
                     ),
-                    stream.next_op().await.unwrap().unwrap()
+                    (epoch, op)
                 );
             }
         }
+
+        let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
 
         assert_eq!(
             (
@@ -884,7 +943,7 @@ mod tests {
                     is_checkpoint: false
                 }
             ),
-            stream.next_op().await.unwrap().unwrap()
+            (epoch, op)
         );
 
         let mut index = (0..MERGE_SIZE).collect_vec();
@@ -893,6 +952,7 @@ mod tests {
         for i in index {
             tx2[i].take().unwrap().send(()).unwrap();
             for j in 0..ops[i].len() {
+                let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
                 assert_eq!(
                     (
                         EPOCH2,
@@ -901,11 +961,12 @@ mod tests {
                             row: rows[i][j].clone(),
                         }
                     ),
-                    stream.next_op().await.unwrap().unwrap()
+                    (epoch, op)
                 );
             }
         }
 
+        let (epoch, op, _) = stream.next_op().await.unwrap().unwrap();
         assert_eq!(
             (
                 EPOCH2,
@@ -913,7 +974,7 @@ mod tests {
                     is_checkpoint: true,
                 }
             ),
-            stream.next_op().await.unwrap().unwrap()
+            (epoch, op)
         );
 
         assert!(stream.next_op().await.unwrap().is_none());
@@ -931,7 +992,12 @@ mod tests {
 
         const CHUNK_SIZE: usize = 3;
 
-        let stream = new_log_store_item_stream(vec![stream], serde, CHUNK_SIZE);
+        let stream = new_log_store_item_stream(
+            vec![stream],
+            serde,
+            CHUNK_SIZE,
+            KvLogStoreReadMetrics::for_test(),
+        );
 
         pin_mut!(stream);
 
@@ -1028,7 +1094,12 @@ mod tests {
 
         const CHUNK_SIZE: usize = 3;
 
-        let stream = new_log_store_item_stream(vec![empty(), empty()], serde, CHUNK_SIZE);
+        let stream = new_log_store_item_stream(
+            vec![empty(), empty()],
+            serde,
+            CHUNK_SIZE,
+            KvLogStoreReadMetrics::for_test(),
+        );
 
         pin_mut!(stream);
 
