@@ -766,7 +766,7 @@ impl StreamingMetrics {
         .unwrap();
 
         let kv_log_store_storage_write_size = register_int_counter_vec_with_registry!(
-            "kv_lot_store_storage_write_size",
+            "kv_log_store_storage_write_size",
             "Write size throughput of kv log store",
             &["executor_id", "connector", "sink_id"],
             registry
@@ -774,7 +774,7 @@ impl StreamingMetrics {
         .unwrap();
 
         let kv_log_store_storage_read_count = register_int_counter_vec_with_registry!(
-            "kv_log_store_storage_write_count",
+            "kv_log_store_storage_read_count",
             "Write row count throughput of kv log store",
             &["executor_id", "connector", "sink_id", "read_type"],
             registry
@@ -782,7 +782,7 @@ impl StreamingMetrics {
         .unwrap();
 
         let kv_log_store_storage_read_size = register_int_counter_vec_with_registry!(
-            "kv_lot_store_storage_write_size",
+            "kv_log_store_storage_read_size",
             "Write size throughput of kv log store",
             &["executor_id", "connector", "sink_id", "read_type"],
             registry

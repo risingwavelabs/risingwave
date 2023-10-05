@@ -154,7 +154,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                         state_store,
                         node.table.as_ref().unwrap().clone(),
                         params.vnode_bitmap.clone().map(Arc::new),
-                        0,
+                        32,
                         metrics,
                     );
 
