@@ -165,9 +165,6 @@ impl GlobalBarrierManager {
         let state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<_> = try {
-                    tracing::info!("recovering mview progress");
-                    self.recover_mview_progress().await?;
-                    tracing::info!("recovered mview progress");
 
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
@@ -210,7 +207,6 @@ impl GlobalBarrierManager {
                     // Inject the `Initial` barrier to initialize all executors.
                     let command_ctx = Arc::new(CommandContext::new(
                         self.fragment_manager.clone(),
-                        self.catalog_manager.clone(),
                         self.env.stream_client_pool_ref(),
                         info,
                         prev_epoch.clone(),
@@ -252,6 +248,10 @@ impl GlobalBarrierManager {
                         }
                     };
                     let (new_epoch, _) = res?;
+
+                    tracing::info!("recovering mview progress");
+                    self.recover_mview_progress().await?;
+                    tracing::info!("recovered mview progress");
 
                     BarrierManagerState::new(new_epoch, command_ctx.next_paused_reason())
                 };
