@@ -396,7 +396,7 @@ impl StreamingMetrics {
         let join_cached_entries = register_int_gauge_vec_with_registry!(
             "stream_join_cached_entries",
             "Number of cached entries in streaming join operators",
-            &["actor_id", "side"],
+            &["actor_id", "fragment_id", "side"],
             registry
         )
         .unwrap();
@@ -404,7 +404,7 @@ impl StreamingMetrics {
         let join_cached_rows = register_int_gauge_vec_with_registry!(
             "stream_join_cached_rows",
             "Number of cached rows in streaming join operators",
-            &["actor_id", "side"],
+            &["actor_id", "fragment_id", "side"],
             registry
         )
         .unwrap();
@@ -412,7 +412,7 @@ impl StreamingMetrics {
         let join_cached_estimated_size = register_int_gauge_vec_with_registry!(
             "stream_join_cached_estimated_size",
             "Estimated size of all cached entries in streaming join operators",
-            &["actor_id", "side"],
+            &["actor_id", "fragment_id", "side"],
             registry
         )
         .unwrap();
