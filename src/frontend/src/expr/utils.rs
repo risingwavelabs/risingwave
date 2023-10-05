@@ -535,10 +535,10 @@ impl WatermarkAnalyzer {
                     ExprImpl::Literal(lit) => lit.get_data().as_ref().map(|s| s.as_utf8()),
                     _ => return WatermarkDerivation::None,
                 };
-                let interval = match &func_call.inputs()[1] {
-                    ExprImpl::Literal(lit) => lit.get_data().as_ref().map(|s| s.as_interval()),
-                    _ => return WatermarkDerivation::None,
+                let Some(Ok(interval)) = &func_call.inputs()[1].try_fold_const() else {
+                    return WatermarkDerivation::None;
                 };
+                let interval = interval.as_ref().map(|s| s.as_interval());
                 // null zone or null interval is treated same as const `interval '1' second`, to be
                 // consistent with other match arms.
                 let zone_without_dst = time_zone.map_or(true, |s| s.eq_ignore_ascii_case("UTC"));
