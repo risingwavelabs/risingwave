@@ -105,10 +105,11 @@ test_background_ddl_recovery() {
 
   NEW_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
 
-  if [[ $OLD_PROGRESS < $NEW_PROGRESS ]]; then
+  if [[ ${OLD_PROGRESS%.*} -lt ${NEW_PROGRESS%.*} ]]; then
     echo "OK: $OLD_PROGRESS smaller than $NEW_PROGRESS"
   else
     echo "FAILED: $OLD_PROGRESS larger or equal to $NEW_PROGRESS"
+    exit 1
   fi
 
   sleep 60
