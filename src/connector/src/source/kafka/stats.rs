@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
-use itertools::{partition, Itertools};
 use prometheus::core::{AtomicU64, GenericGaugeVec};
 use prometheus::{opts, register_int_gauge_vec_with_registry, IntGaugeVec, Registry};
 use rdkafka::statistics::{Broker, ConsumerGroup, Partition, Topic, Window};
