@@ -189,7 +189,7 @@ if [[ "$mode" == "standalone" ]]; then
   }
   compactor_is_online() {
     set +e
-    grep -q "risingwave_compactor: Server listening at" "${PREFIX_LOG}/standalone.log"
+    grep -q "risingwave_cmd_all::standalone: starting compactor-node thread" "${PREFIX_LOG}/standalone.log"
     local EXIT_CODE=$?
     set -e
     return $EXIT_CODE
@@ -259,7 +259,7 @@ if [[ "$mode" == "standalone" ]]; then
     exit 1
   fi
   cluster_stop
-  echo "test standalone without compactor [TEST PASSED]"
+  echo "test standalone with compactor [TEST PASSED]"
 
   # Make sure any remaining background task exits.
   wait

@@ -19,21 +19,21 @@ use tokio::signal;
 
 use crate::common::{osstrs, RisingWaveService};
 
-#[derive(Debug, Clone, Parser)]
+#[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
 pub struct StandaloneOpts {
     /// Compute node options
-    #[clap(short, long, env = "STANDALONE_COMPUTE_OPTS", default_value = "")]
+    #[clap(short, long, env = "STANDALONE_COMPUTE_OPTS")]
     compute_opts: Option<String>,
 
-    #[clap(short, long, env = "STANDALONE_META_OPTS", default_value = "")]
+    #[clap(short, long, env = "STANDALONE_META_OPTS")]
     /// Meta node options
     meta_opts: Option<String>,
 
-    #[clap(short, long, env = "STANDALONE_FRONTEND_OPTS", default_value = "")]
+    #[clap(short, long, env = "STANDALONE_FRONTEND_OPTS")]
     /// Frontend node options
     frontend_opts: Option<String>,
 
-    #[clap(long, env = "STANDALONE_COMPACTOR_OPTS", default_value = "")]
+    #[clap(long, env = "STANDALONE_COMPACTOR_OPTS")]
     /// Frontend node options
     compactor_opts: Option<String>,
 }
@@ -157,12 +157,22 @@ mod test {
 
     #[test]
     fn test_parse_opt_args() {
+        // Test parsing into standalone-level opts.
+        let raw_opts = "
+--compute-opts=--listen-address 127.0.0.1 --port 8000
+--meta-opts=--data-dir \"some path with spaces\" --port 8001
+--frontend-opts=--some-option
+";
+        let actual = StandaloneOpts::parse_from(raw_opts.lines());
         let opts = StandaloneOpts {
             compute_opts: Some("--listen-address 127.0.0.1 --port 8000".into()),
             meta_opts: Some("--data-dir \"some path with spaces\" --port 8001".into()),
             frontend_opts: Some("--some-option".into()),
-            compactor_opts: Some("--some-other-option".into()),
+            compactor_opts: None,
         };
+        assert_eq!(actual, opts);
+
+        // Test parsing into node-level opts.
         let actual = parse_opt_args(&opts);
         check(
             actual,
@@ -189,11 +199,7 @@ mod test {
                             "--some-option",
                         ],
                     ),
-                    compactor_opts: Some(
-                        [
-                            "--some-other-option",
-                        ],
-                    ),
+                    compactor_opts: None,
                 }"#]],
         );
     }
