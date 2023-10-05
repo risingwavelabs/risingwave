@@ -36,7 +36,7 @@ use uuid::Uuid;
 use super::info::BarrierActorInfo;
 use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
-use crate::manager::{CatalogManagerRef, FragmentManagerRef, WorkerId};
+use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
 use crate::MetaResult;
@@ -217,8 +217,6 @@ impl Command {
 /// [`Command`].
 pub struct CommandContext {
     fragment_manager: FragmentManagerRef,
-    catalog_manager: CatalogManagerRef,
-
     client_pool: StreamClientPoolRef,
 
     /// Resolved info in this barrier loop.
@@ -248,7 +246,6 @@ impl CommandContext {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         fragment_manager: FragmentManagerRef,
-        catalog_manager: CatalogManagerRef,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
         prev_epoch: TracedEpoch,
@@ -261,7 +258,6 @@ impl CommandContext {
     ) -> Self {
         Self {
             fragment_manager,
-            catalog_manager,
             client_pool,
             info: Arc::new(info),
             prev_epoch,
@@ -668,12 +664,12 @@ impl CommandContext {
                 // FIXME: Should invoke this in job managers (StreamManager and BarrierManager)?
                 self.clean_up(node_actors).await?;
                 // Both table and fragment will be cleaned up externally.
-                self.catalog_manager
-                    .cancel_create_table_procedure_with_table_fragments(
-                        table_fragments.table_id().table_id,
-                        table_fragments,
-                    )
-                    .await?;
+                // self.catalog_manager
+                //     .cancel_create_table_procedure_with_table_fragments(
+                //         table_fragments.table_id().table_id,
+                //         table_fragments,
+                //     )
+                //     .await?;
                 // Drop fragment info in meta store.
                 self.fragment_manager
                     .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(

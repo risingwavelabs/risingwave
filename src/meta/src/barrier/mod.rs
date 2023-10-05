@@ -696,7 +696,6 @@ impl GlobalBarrierManager {
 
         let command_ctx = Arc::new(CommandContext::new(
             self.fragment_manager.clone(),
-            self.catalog_manager.clone(),
             self.env.stream_client_pool_ref(),
             info,
             prev_epoch.clone(),
@@ -978,6 +977,7 @@ impl GlobalBarrierManager {
             let catalog_manager = self.catalog_manager.clone();
             let _fragment_manager = self.fragment_manager.clone();
             tokio::spawn(async move {
+                let internal_table_ids = internal_tables.iter().map(|t| t.id).collect_vec();
                 let res: MetaResult<()> = try {
                     finished
                         .await
@@ -992,6 +992,15 @@ impl GlobalBarrierManager {
                 };
                 if let Err(e) = res.as_ref() {
                     tracing::error!("Failed to finish stream job: {e:?}");
+                    if let Err(e) = catalog_manager
+                        .cancel_create_table_procedure_with_internal_table_ids(
+                            table,
+                            internal_table_ids,
+                        )
+                        .await
+                    {
+                        tracing::error!("Failed to cancel recovered create table procedure: {e:?}");
+                    }
                     // catalog_manager
                     //     .cancel_create_table_procedure(&table, fragment_manager)
                     //     .await
