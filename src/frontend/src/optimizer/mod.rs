@@ -97,6 +97,10 @@ impl PlanRoot {
         assert_eq!(input_schema.fields().len(), out_fields.len());
         assert_eq!(out_fields.count_ones(..), out_names.len());
 
+        // Inline session timezone at the very beginning so that (const) exprs can be evaluated.
+        let ctx = plan.ctx();
+        let plan = inline_session_timezone_in_exprs(ctx.clone(), plan);
+
         Self {
             plan,
             required_dist,
@@ -177,8 +181,6 @@ impl PlanRoot {
         }
 
         let ctx = plan.ctx();
-        // Inline session timezone mainly for rewriting now()
-        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
@@ -193,8 +195,8 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ));
 
-        // Inline session timezone
-        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
+        // Inline session timezone near the end so that exprs inserted by optimizer are handled.
+        plan = inline_session_timezone_in_exprs(ctx.clone(), plan);
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Session Timezone:");
@@ -314,8 +316,8 @@ impl PlanRoot {
             ));
         }
 
-        // Inline session timezone
-        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
+        // Inline session timezone near the end so that exprs inserted by optimizer are handled.
+        plan = inline_session_timezone_in_exprs(ctx.clone(), plan);
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline session timezone:");
@@ -488,7 +490,8 @@ impl PlanRoot {
             RequiredDist::ShardByKey(bitset)
         };
 
-        let stream_plan = inline_session_timezone_in_exprs(context, stream_plan)?;
+        // Inline session timezone near the end so that exprs inserted by optimizer are handled.
+        let stream_plan = inline_session_timezone_in_exprs(context, stream_plan);
 
         StreamMaterialize::create_for_table(
             stream_plan,
@@ -593,9 +596,8 @@ fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
     Ok(plan)
 }
 
-fn inline_session_timezone_in_exprs(ctx: OptimizerContextRef, plan: PlanRef) -> Result<PlanRef> {
-    let plan = plan.rewrite_exprs_recursive(ctx.session_timezone().deref_mut());
-    Ok(plan)
+fn inline_session_timezone_in_exprs(ctx: OptimizerContextRef, plan: PlanRef) -> PlanRef {
+    plan.rewrite_exprs_recursive(ctx.session_timezone().deref_mut())
 }
 
 fn exist_and_no_exchange_before(plan: &PlanRef, is_candidate: fn(&PlanRef) -> bool) -> bool {

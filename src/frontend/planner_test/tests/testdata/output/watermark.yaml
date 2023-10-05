@@ -4,7 +4,7 @@
     create source t (v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '1' SECOND) with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
     select t.v1 - INTERVAL '2' SECOND as v1 from t;
   logical_plan: |-
-    LogicalProject { exprs: [(v1 - '00:00:02':Interval) as $expr1] }
+    LogicalProject { exprs: [SubtractWithTimeZone(v1, '00:00:02':Interval, 'UTC':Varchar) as $expr1] }
     └─LogicalSource { source: t, columns: [v1, _row_id], time_range: (Unbounded, Unbounded) }
   stream_plan: |-
     StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
@@ -103,7 +103,7 @@
     select t1.ts as t1_ts, t1.v1 as t1_v1, t1.v2 as t1_v2, t2.ts as t2_ts, t2.v1 as t2_v1, t2.v2 as t2_v2 from t1 left outer join t2 on (t1.v1 = t2.v1 and (t1.ts >= t2.ts + INTERVAL '1' SECOND) and (t2.ts >= t1.ts + INTERVAL '1' SECOND));
   logical_plan: |-
     LogicalProject { exprs: [t1.ts, t1.v1, t1.v2, t2.ts, t2.v1, t2.v2] }
-    └─LogicalJoin { type: LeftOuter, on: (t1.v1 = t2.v1) AND (t1.ts >= (t2.ts + '00:00:01':Interval)) AND (t2.ts >= (t1.ts + '00:00:01':Interval)), output: all }
+    └─LogicalJoin { type: LeftOuter, on: (t1.v1 = t2.v1) AND (t1.ts >= AddWithTimeZone(t2.ts, '00:00:01':Interval, 'UTC':Varchar)) AND (t2.ts >= AddWithTimeZone(t1.ts, '00:00:01':Interval, 'UTC':Varchar)), output: all }
       ├─LogicalScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id] }
       └─LogicalScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id] }
   stream_plan: |-
@@ -122,7 +122,7 @@
     select t1.ts as t1_ts, t1.v1 as t1_v1, t1.v2 as t1_v2, t2.ts as t2_ts, t2.v1 as t2_v1, t2.v2 as t2_v2 from t1 join t2 on (t1.v1 = t2.v1 and (t1.ts >= t2.ts + INTERVAL '1' SECOND) and (t2.ts >= t1.ts + INTERVAL '1' SECOND));
   logical_plan: |-
     LogicalProject { exprs: [t1.ts, t1.v1, t1.v2, t2.ts, t2.v1, t2.v2] }
-    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v1) AND (t1.ts >= (t2.ts + '00:00:01':Interval)) AND (t2.ts >= (t1.ts + '00:00:01':Interval)), output: all }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v1) AND (t1.ts >= AddWithTimeZone(t2.ts, '00:00:01':Interval, 'UTC':Varchar)) AND (t2.ts >= AddWithTimeZone(t1.ts, '00:00:01':Interval, 'UTC':Varchar)), output: all }
       ├─LogicalScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id] }
       └─LogicalScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id] }
   stream_plan: |-

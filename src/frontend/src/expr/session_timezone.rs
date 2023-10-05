@@ -21,6 +21,8 @@ use crate::expr::{Expr, ExprImpl};
 
 /// `SessionTimezone` will be used to resolve session
 /// timezone-dependent casts, comparisons or arithmetic.
+///
+/// This rewrite is idempotent as required by [`crate::optimizer::plan_node::ExprRewritable`].
 pub struct SessionTimezone {
     timezone: String,
     /// Whether or not the session timezone was used
@@ -242,6 +244,8 @@ impl SessionTimezone {
                 new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
                 Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
             }
+            // When adding new rules, make sure to match arity and types of all args
+            // so that the rewrite is idempotent.
             _ => None,
         }
     }

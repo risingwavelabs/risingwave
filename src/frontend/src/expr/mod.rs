@@ -789,10 +789,15 @@ impl ExprImpl {
         if let ExprImpl::Now(_) = self {
             true
         } else if let ExprImpl::FunctionCall(f) = self {
+            // TODO: `now() + interval '1' month` shall not be accepted as const offset
             match f.func_type() {
                 ExprType::Add | ExprType::Subtract => {
                     let (_, lhs, rhs) = f.clone().decompose_as_binary();
                     lhs.is_now_offset() && rhs.is_const()
+                }
+                ExprType::AddWithTimeZone | ExprType::SubtractWithTimeZone => {
+                    let args = f.inputs();
+                    args[0].is_now_offset() && args[1].is_const()
                 }
                 _ => false,
             }
