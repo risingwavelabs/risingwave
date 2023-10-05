@@ -127,6 +127,7 @@ pub struct StreamingMetrics {
     pub log_store_latest_write_epoch: IntGaugeVec,
     pub log_store_write_rows: IntCounterVec,
     pub log_store_latest_read_epoch: IntGaugeVec,
+    pub log_store_read_rows: IntCounterVec,
     pub kv_log_store_storage_write_count: IntCounterVec,
     pub kv_log_store_storage_write_size: IntCounterVec,
     pub kv_log_store_storage_read_count: IntCounterVec,
@@ -711,7 +712,7 @@ impl StreamingMetrics {
         let connector_sink_rows_received = register_int_counter_vec_with_registry!(
             "connector_sink_rows_received",
             "Number of rows received by sink",
-            &["executor_id", "connector_type", "sink_id"],
+            &["connector_type", "sink_id"],
             registry
         )
         .unwrap();
@@ -743,6 +744,14 @@ impl StreamingMetrics {
         let log_store_latest_read_epoch = register_int_gauge_vec_with_registry!(
             "log_store_latest_read_epoch",
             "The latest read epoch of log store",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_read_rows = register_int_counter_vec_with_registry!(
+            "log_store_read_rows",
+            "The read rate of rows",
             &["executor_id", "connector", "sink_id"],
             registry
         )
@@ -948,6 +957,7 @@ impl StreamingMetrics {
             log_store_latest_write_epoch,
             log_store_write_rows,
             log_store_latest_read_epoch,
+            log_store_read_rows,
             kv_log_store_storage_write_count,
             kv_log_store_storage_write_size,
             kv_log_store_storage_read_count,
@@ -980,6 +990,9 @@ impl StreamingMetrics {
     ) -> SinkMetrics {
         let label_list = [identity, connector, sink_id_str];
         let sink_commit_duration_metrics = self.sink_commit_duration.with_label_values(&label_list);
+        let connector_sink_rows_received = self
+            .connector_sink_rows_received
+            .with_label_values(&[connector, sink_id_str]);
 
         let log_store_latest_read_epoch = self
             .log_store_latest_read_epoch
@@ -993,11 +1006,8 @@ impl StreamingMetrics {
             .log_store_first_write_epoch
             .with_label_values(&label_list);
 
-        let connector_sink_rows_received = self
-            .connector_sink_rows_received
-            .with_label_values(&label_list);
-
         let log_store_write_rows = self.log_store_write_rows.with_label_values(&label_list);
+        let log_store_read_rows = self.log_store_read_rows.with_label_values(&label_list);
 
         SinkMetrics {
             sink_commit_duration_metrics,
@@ -1006,6 +1016,7 @@ impl StreamingMetrics {
             log_store_latest_write_epoch,
             log_store_write_rows,
             log_store_latest_read_epoch,
+            log_store_read_rows,
         }
     }
 }

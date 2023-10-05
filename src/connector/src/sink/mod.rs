@@ -219,6 +219,7 @@ pub struct SinkMetrics {
     pub log_store_latest_write_epoch: IntGauge,
     pub log_store_write_rows: IntCounter,
     pub log_store_latest_read_epoch: IntGauge,
+    pub log_store_read_rows: IntCounter,
 }
 
 impl SinkMetrics {
@@ -237,6 +238,7 @@ impl SinkMetrics {
             log_store_latest_read_epoch: IntGauge::with_opts(Opts::new("unused", "unused"))
                 .unwrap(),
             log_store_write_rows: IntCounter::with_opts(Opts::new("unused", "unused")).unwrap(),
+            log_store_read_rows: IntCounter::with_opts(Opts::new("unused", "unused")).unwrap(),
         }
     }
 }

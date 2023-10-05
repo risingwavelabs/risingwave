@@ -200,7 +200,7 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
             }
             if let LogStoreReadItem::StreamChunk { chunk, .. } = item {
                 self.metrics
-                    .connector_sink_rows_received
+                    .log_store_read_rows
                     .inc_by(chunk.cardinality() as _);
             }
         })
