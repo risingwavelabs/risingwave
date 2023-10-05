@@ -25,7 +25,7 @@ futures-async-stream = { workspace = true }
 hyper = "0.14"
 itertools = "0.11"
 maplit = "1.0.2"
-pprof = { version = "0.12", features = ["flamegraph"] }
+pprof = { version = "0.13", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
@@ -39,6 +39,7 @@ risingwave_storage = { workspace = true }
 risingwave_stream = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tikv-jemalloc-ctl = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -52,9 +53,6 @@ tokio-stream = "0.1"
 tonic = { workspace = true }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
-
-[target.'cfg(unix)'.dependencies]
-tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

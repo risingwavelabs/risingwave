@@ -422,6 +422,7 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -595,6 +596,7 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -633,6 +635,7 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -715,6 +718,7 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };

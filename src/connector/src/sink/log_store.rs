@@ -193,10 +193,15 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
     }
 
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
-        self.inner.next_item().await.inspect(|(epoch, _)| {
+        self.inner.next_item().await.inspect(|(epoch, item)| {
             if self.read_epoch != *epoch {
                 self.read_epoch = *epoch;
                 self.metrics.log_store_latest_read_epoch.set(*epoch as _);
+            }
+            if let LogStoreReadItem::StreamChunk { chunk, .. } = item {
+                self.metrics
+                    .connector_sink_rows_received
+                    .inc_by(chunk.cardinality() as _);
             }
         })
     }

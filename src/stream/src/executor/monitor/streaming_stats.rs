@@ -122,6 +122,7 @@ pub struct StreamingMetrics {
 
     // Sink related metrics
     pub sink_commit_duration: HistogramVec,
+    pub connector_sink_rows_received: GenericCounterVec<AtomicU64>,
     pub log_store_first_write_epoch: IntGaugeVec,
     pub log_store_latest_write_epoch: IntGaugeVec,
     pub log_store_write_rows: IntCounterVec,
@@ -707,6 +708,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let connector_sink_rows_received = register_int_counter_vec_with_registry!(
+            "connector_sink_rows_received",
+            "Number of rows received by sink",
+            &["executor_id", "connector_type", "sink_id"],
+            registry
+        )
+        .unwrap();
+
         let log_store_first_write_epoch = register_int_gauge_vec_with_registry!(
             "log_store_first_write_epoch",
             "The first write epoch of log store",
@@ -934,6 +943,7 @@ impl StreamingMetrics {
             barrier_sync_latency,
             barrier_manager_progress,
             sink_commit_duration,
+            connector_sink_rows_received,
             log_store_first_write_epoch,
             log_store_latest_write_epoch,
             log_store_write_rows,
@@ -983,10 +993,15 @@ impl StreamingMetrics {
             .log_store_first_write_epoch
             .with_label_values(&label_list);
 
+        let connector_sink_rows_received = self
+            .connector_sink_rows_received
+            .with_label_values(&label_list);
+
         let log_store_write_rows = self.log_store_write_rows.with_label_values(&label_list);
 
         SinkMetrics {
             sink_commit_duration_metrics,
+            connector_sink_rows_received,
             log_store_first_write_epoch,
             log_store_latest_write_epoch,
             log_store_write_rows,

@@ -17,8 +17,10 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::match_sink_name_str;
-use risingwave_connector::sink::catalog::SinkType;
-use risingwave_connector::sink::{SinkError, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY};
+use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
+use risingwave_connector::sink::{
+    SinkError, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
+};
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
 use risingwave_storage::dispatch_state_store;
 
@@ -78,6 +80,16 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 }
             )
         }?;
+        let format_desc = match &sink_desc.format_desc {
+            // Case A: new syntax `format ... encode ...`
+            Some(f) => Some(f.clone().try_into()?),
+            None => match sink_desc.properties.get(SINK_TYPE_OPTION) {
+                // Case B: old syntax `type = '...'`
+                Some(t) => SinkFormatDesc::from_legacy_type(connector, t)?,
+                // Case C: no format + encode required
+                None => None,
+            },
+        };
 
         let sink_param = SinkParam {
             sink_id,
@@ -89,6 +101,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 .collect(),
             downstream_pk,
             sink_type,
+            format_desc,
             db_name,
             sink_from_name,
         };

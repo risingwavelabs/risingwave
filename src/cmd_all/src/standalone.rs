@@ -19,35 +19,66 @@ use tokio::signal;
 
 use crate::common::{osstrs, RisingWaveService};
 
-#[derive(Debug, Clone, Parser)]
+#[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
 pub struct StandaloneOpts {
     /// Compute node options
-    #[clap(short, long, env = "STANDALONE_COMPUTE_OPTS", default_value = "")]
-    compute_opts: String,
+    #[clap(short, long, env = "STANDALONE_COMPUTE_OPTS")]
+    compute_opts: Option<String>,
 
-    #[clap(short, long, env = "STANDALONE_META_OPTS", default_value = "")]
+    #[clap(short, long, env = "STANDALONE_META_OPTS")]
     /// Meta node options
-    meta_opts: String,
+    meta_opts: Option<String>,
 
-    #[clap(short, long, env = "STANDALONE_FRONTEND_OPTS", default_value = "")]
+    #[clap(short, long, env = "STANDALONE_FRONTEND_OPTS")]
     /// Frontend node options
-    frontend_opts: String,
+    frontend_opts: Option<String>,
+
+    #[clap(long, env = "STANDALONE_COMPACTOR_OPTS")]
+    /// Frontend node options
+    compactor_opts: Option<String>,
 }
 
-fn parse_opt_args(opts: &StandaloneOpts) -> (Vec<String>, Vec<String>, Vec<String>) {
-    let meta_opts = split(&opts.meta_opts).unwrap();
-    let compute_opts = split(&opts.compute_opts).unwrap();
-    let frontend_opts = split(&opts.frontend_opts).unwrap();
-    (meta_opts, compute_opts, frontend_opts)
+#[derive(Debug)]
+pub struct ParsedStandaloneOpts {
+    pub meta_opts: Option<Vec<String>>,
+    pub compute_opts: Option<Vec<String>>,
+    pub frontend_opts: Option<Vec<String>>,
+    pub compactor_opts: Option<Vec<String>>,
+}
+
+fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
+    let meta_opts = opts.meta_opts.as_ref().map(|s| split(s).unwrap());
+    let compute_opts = opts.compute_opts.as_ref().map(|s| split(s).unwrap());
+    let frontend_opts = opts.frontend_opts.as_ref().map(|s| split(s).unwrap());
+    let compactor_opts = opts.compactor_opts.as_ref().map(|s| split(s).unwrap());
+    ParsedStandaloneOpts {
+        meta_opts,
+        compute_opts,
+        frontend_opts,
+        compactor_opts,
+    }
 }
 
 fn get_services(opts: &StandaloneOpts) -> Vec<RisingWaveService> {
-    let (meta_opts, compute_opts, frontend_opts) = parse_opt_args(opts);
-    let services = vec![
-        RisingWaveService::Meta(osstrs(meta_opts)),
-        RisingWaveService::Compute(osstrs(compute_opts)),
-        RisingWaveService::Frontend(osstrs(frontend_opts)),
-    ];
+    let ParsedStandaloneOpts {
+        meta_opts,
+        compute_opts,
+        frontend_opts,
+        compactor_opts,
+    } = parse_opt_args(opts);
+    let mut services = vec![];
+    if let Some(meta_opts) = meta_opts {
+        services.push(RisingWaveService::Meta(osstrs(meta_opts)));
+    }
+    if let Some(compute_opts) = compute_opts {
+        services.push(RisingWaveService::Compute(osstrs(compute_opts)));
+    }
+    if let Some(frontend_opts) = frontend_opts {
+        services.push(RisingWaveService::Frontend(osstrs(frontend_opts)));
+    }
+    if let Some(compactor_opts) = compactor_opts {
+        services.push(RisingWaveService::Compactor(osstrs(compactor_opts)));
+    }
     services
 }
 
@@ -83,8 +114,12 @@ pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
                 let _frontend_handle =
                     tokio::spawn(async move { risingwave_frontend::start(opts).await });
             }
-            RisingWaveService::Compactor(_) => {
-                panic!("Compactor node unsupported in Risingwave standalone mode.");
+            RisingWaveService::Compactor(mut opts) => {
+                opts.insert(0, "compactor-node".into());
+                tracing::info!("starting compactor-node thread with cli args: {:?}", opts);
+                let opts = risingwave_compactor::CompactorOpts::parse_from(opts);
+                let _compactor_handle =
+                    tokio::spawn(async move { risingwave_compactor::start(opts).await });
             }
             RisingWaveService::ConnectorNode(_) => {
                 panic!("Connector node unsupported in Risingwave standalone mode.");
@@ -122,32 +157,50 @@ mod test {
 
     #[test]
     fn test_parse_opt_args() {
+        // Test parsing into standalone-level opts.
+        let raw_opts = "
+--compute-opts=--listen-address 127.0.0.1 --port 8000
+--meta-opts=--data-dir \"some path with spaces\" --port 8001
+--frontend-opts=--some-option
+";
+        let actual = StandaloneOpts::parse_from(raw_opts.lines());
         let opts = StandaloneOpts {
-            compute_opts: "--listen-address 127.0.0.1 --port 8000".into(),
-            meta_opts: "--data-dir \"some path with spaces\" --port 8001".into(),
-            frontend_opts: "--some-option".into(),
+            compute_opts: Some("--listen-address 127.0.0.1 --port 8000".into()),
+            meta_opts: Some("--data-dir \"some path with spaces\" --port 8001".into()),
+            frontend_opts: Some("--some-option".into()),
+            compactor_opts: None,
         };
+        assert_eq!(actual, opts);
+
+        // Test parsing into node-level opts.
         let actual = parse_opt_args(&opts);
         check(
             actual,
             expect![[r#"
-            (
-                [
-                    "--data-dir",
-                    "some path with spaces",
-                    "--port",
-                    "8001",
-                ],
-                [
-                    "--listen-address",
-                    "127.0.0.1",
-                    "--port",
-                    "8000",
-                ],
-                [
-                    "--some-option",
-                ],
-            )"#]],
+                ParsedStandaloneOpts {
+                    meta_opts: Some(
+                        [
+                            "--data-dir",
+                            "some path with spaces",
+                            "--port",
+                            "8001",
+                        ],
+                    ),
+                    compute_opts: Some(
+                        [
+                            "--listen-address",
+                            "127.0.0.1",
+                            "--port",
+                            "8000",
+                        ],
+                    ),
+                    frontend_opts: Some(
+                        [
+                            "--some-option",
+                        ],
+                    ),
+                    compactor_opts: None,
+                }"#]],
         );
     }
 }
