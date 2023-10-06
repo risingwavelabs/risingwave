@@ -113,7 +113,10 @@ struct SnapshotControl {
 }
 
 impl SnapshotControl {
-    fn new(snapshot_read_interval: usize) -> Self {
+    fn new(mut snapshot_read_interval: usize) -> Self {
+        if snapshot_read_interval == 0 {
+            snapshot_read_interval = 1;
+        }
         Self {
             snapshot_read_interval,
             intervals: 0,
