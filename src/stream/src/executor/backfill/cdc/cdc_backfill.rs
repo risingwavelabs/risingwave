@@ -431,6 +431,27 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             "CdcBackfill has already finished and forward messages directly to the downstream"
         );
 
+        // Wait for first barrier to come after backfill is finished.
+        // So we can update our progress + persist the status.
+        while let Some(Ok(msg)) = upstream.next().await {
+            if let Some(msg) = mapping_message(msg, &self.output_indices) {
+                // If not finished then we need to update state, otherwise no need.
+                if let Message::Barrier(barrier) = &msg {
+                    // persist the backfill state
+                    state_manage.commit_state(barrier.epoch).await?;
+
+                    // mark progress as finished
+                    if let Some(progress) = self.progress.as_mut() {
+                        progress.finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                    }
+                    yield msg;
+                    // break after the state have been saved
+                    break;
+                }
+                yield msg;
+            }
+        }
+
         // After backfill progress finished
         // we can forward messages directly to the downstream,
         // as backfill is finished.
@@ -439,14 +460,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             // upstream offsets will be removed from the message before forwarding to
             // downstream
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
-                // persist the backfill state if any
                 if let Message::Barrier(barrier) = &msg {
+                    // commit state just to bump the epoch of state table
                     state_manage.commit_state(barrier.epoch).await?;
-
-                    // mark backfill progress as finished
-                    if let Some(progress) = self.progress.as_mut() {
-                        progress.finish(barrier.epoch.curr);
-                    }
                 }
                 yield msg;
             }

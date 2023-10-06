@@ -207,7 +207,11 @@ impl DdlService for DdlServiceImpl {
 
                 let version = self
                     .ddl_controller
-                    .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
+                    .run_command(DdlCommand::CreateStreamingJob(
+                        stream_job,
+                        fragment_graph,
+                        CreateType::Foreground,
+                    ))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
                     status: None,
