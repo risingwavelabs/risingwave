@@ -122,7 +122,12 @@ impl SnapshotControl {
 
     fn try_read(&mut self) -> bool {
         let should_read = self.intervals == 0;
-        self.intervals += 1 % self.snapshot_read_interval;
+        if should_read {
+            tracing::info!("backfill should snapshot read, interval={}", self.intervals);
+        } else {
+            tracing::info!("backfill should not snapshot read, interval={}", self.intervals);
+        }
+        self.intervals = (self.intervals + 1) % self.snapshot_read_interval;
         should_read
     }
 }
