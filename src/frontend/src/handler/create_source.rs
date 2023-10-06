@@ -1182,7 +1182,7 @@ pub async fn handle_create_source(
         &pk_column_ids,
     )?;
 
-    check_source_schema(&with_properties, row_id_index.clone(), &columns)?;
+    check_source_schema(&with_properties, row_id_index, &columns)?;
 
     // let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
@@ -1222,7 +1222,7 @@ pub async fn handle_create_source(
             let source_node = LogicalSource::new(
                 Some(Rc::new(SourceCatalog::from(&source))),
                 columns.clone(),
-                row_id_index.map(|idx| idx),
+                row_id_index,
                 true,
                 false,
                 context.into(),

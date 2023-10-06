@@ -100,20 +100,16 @@ impl SchemaTableName {
 
     pub fn from_properties(properties: &HashMap<String, String>) -> Self {
         let table_type = CdcTableType::from_properties(properties);
-        let table_name = properties
-            .get(TABLE_NAME_KEY)
-            .map(|c| c.clone())
-            .unwrap_or_default();
+        let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();
 
         let schema_name = match table_type {
             CdcTableType::MySql => properties
                 .get(DATABASE_NAME_KEY)
-                .map(|c| c.clone())
+                .cloned()
                 .unwrap_or_default(),
-            CdcTableType::Postgres | CdcTableType::Citus => properties
-                .get(SCHEMA_NAME_KEY)
-                .map(|c| c.clone())
-                .unwrap_or_default(),
+            CdcTableType::Postgres | CdcTableType::Citus => {
+                properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
+            }
             _ => {
                 unreachable!("invalid external table type: {:?}", table_type);
             }

@@ -442,13 +442,13 @@ impl DdlController {
         let mut internal_tables = vec![];
         let result = try {
             let (ctx, table_fragments) = self
-                .build_stream_job(env, &mut stream_job, fragment_graph)
+                .build_stream_job(env, &stream_job, fragment_graph)
                 .await?;
 
             internal_tables = ctx.internal_tables();
 
             match stream_job {
-                StreamingJob::Table(Some(ref source), _, ..) => {
+                StreamingJob::Table(Some(ref source), ..) => {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
                 }

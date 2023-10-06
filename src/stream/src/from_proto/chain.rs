@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::sync::Arc;
 
 use anyhow::anyhow;
-
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::error::ConnectorError;

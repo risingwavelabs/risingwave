@@ -31,7 +31,7 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
         Arc::new(SourceContext::default()),
     )
     .await
-    .map_err(|err| StreamExecutorError::connector_error(err))?;
+    .map_err(StreamExecutorError::connector_error)?;
 
     pin_mut!(upstream);
     #[for_await]

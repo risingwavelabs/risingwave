@@ -134,31 +134,29 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // if not, we should bypass the backfill directly.
         let mut state_manage = if shared_cdc_source {
             CdcStateManageImpl::Undefined
-        } else {
-            if let Some(mutation) = first_barrier.mutation.as_ref() &&
-                let Mutation::Add{splits, ..} = mutation.as_ref()
-            {
-                tracing::info!(?mutation, ?shared_cdc_source, "got first barrier");
-                // We can assume for cdc table, the parallism of the fragment must be 1
-                match splits.get(&self.actor_ctx.id) {
-                    None => {
-                        unreachable!("expect to receive the cdc split, please check the parallelism of the fragment")
-                    },
-                    Some(splits) => {
-                        assert!(!splits.is_empty());
-                        let split = splits.iter().exactly_one().map_err(|_err| {
-                            StreamExecutorError::from(anyhow!(
-                                    "expect only one cdc split for table {}",
-                                    upstream_table_id
-                                ))
-                        })?;
-                        CdcStateManageImpl::Embeded(EmbededStateManage::new(self.source_state_handler, upstream_table_id, split.id(), split.clone()))
-                    }
+        } else if let Some(mutation) = first_barrier.mutation.as_ref() &&
+            let Mutation::Add{splits, ..} = mutation.as_ref()
+        {
+            tracing::info!(?mutation, ?shared_cdc_source, "got first barrier");
+            // We can assume for cdc table, the parallism of the fragment must be 1
+            match splits.get(&self.actor_ctx.id) {
+                None => {
+                    unreachable!("expect to receive the cdc split, please check the parallelism of the fragment")
+                },
+                Some(splits) => {
+                    assert!(!splits.is_empty());
+                    let split = splits.iter().exactly_one().map_err(|_err| {
+                        StreamExecutorError::from(anyhow!(
+                                "expect only one cdc split for table {}",
+                                upstream_table_id
+                            ))
+                    })?;
+                    CdcStateManageImpl::Embeded(EmbededStateManage::new(self.source_state_handler, upstream_table_id, split.id(), split.clone()))
                 }
             }
-            else {
-                unreachable!("embeded cdc backfill init fail")
-            }
+        }
+        else {
+            unreachable!("embeded cdc backfill init fail")
         };
 
         let mut upstream = if shared_cdc_source {
@@ -493,7 +491,7 @@ mod tests {
     use std::str::FromStr;
 
     use futures::{pin_mut, StreamExt};
-    use risingwave_common::array::{DataChunk, Op, StreamChunk, Vis};
+    use risingwave_common::array::{DataChunk, Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, Datum, JsonbVal};
     use risingwave_common::util::iter_util::ZipEqFast;
@@ -532,8 +530,7 @@ mod tests {
             .collect();
 
         // one row chunk
-        let chunk =
-            StreamChunk::from_parts(vec![Op::Insert], DataChunk::new(columns, Vis::Compact(1)));
+        let chunk = StreamChunk::from_parts(vec![Op::Insert], DataChunk::new(columns, 1));
 
         tx.push_chunk(chunk);
         let upstream = Box::new(source).execute();
