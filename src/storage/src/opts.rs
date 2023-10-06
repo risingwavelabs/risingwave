@@ -119,6 +119,9 @@ pub struct StorageOpts {
     pub compactor_max_sst_size: u64,
     /// enable FastCompactorRunner.
     pub enable_fast_compaction: bool,
+    /// false: enable block-level prefetch when `PrefetchOptions` is set
+    /// true: disable block-level prefetch
+    pub disable_iter_prefetch: bool,
 }
 
 impl Default for StorageOpts {
@@ -216,6 +219,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
             compactor_max_sst_size: c.storage.compactor_max_sst_size,
             enable_fast_compaction: c.storage.enable_fast_compaction,
+            disable_iter_prefetch: c.storage.disable_iter_prefetch,
         }
     }
 }

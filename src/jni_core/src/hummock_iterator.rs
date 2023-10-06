@@ -86,8 +86,12 @@ impl HummockJavaBindingIterator {
             FileCache::none(),
             FileCache::none(),
         ));
-        let reader =
-            HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
+        let disable_iter_prefetch = false;
+        let reader = HummockVersionReader::new(
+            sstable_store,
+            Arc::new(HummockStateStoreMetrics::unused()),
+            disable_iter_prefetch,
+        );
 
         let mut streams = Vec::with_capacity(read_plan.vnode_ids.len());
         let key_range = read_plan.key_range.unwrap();

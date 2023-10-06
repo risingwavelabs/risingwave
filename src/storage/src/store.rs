@@ -347,6 +347,12 @@ impl From<ReadOptions> for TracedReadOptions {
     }
 }
 
+impl ReadOptions {
+    pub fn disable_prefetch(&mut self) {
+        self.prefetch_options.exhaust_iter = false;
+    }
+}
+
 pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
     let base_epoch = Epoch(base_epoch);
     match retention_seconds {

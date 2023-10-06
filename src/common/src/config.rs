@@ -582,6 +582,8 @@ pub struct StorageConfig {
     pub enable_fast_compaction: bool,
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+    #[serde(default = "default::storage::disable_iter_prefetch")]
+    pub disable_iter_prefetch: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
@@ -1061,6 +1063,10 @@ pub mod default {
 
         pub fn enable_fast_compaction() -> bool {
             true
+        }
+
+        pub fn disable_iter_prefetch() -> bool {
+            false
         }
     }
 

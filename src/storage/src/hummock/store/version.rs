@@ -53,6 +53,7 @@ use crate::mem_table::{ImmId, ImmutableMemtable};
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
 };
+use crate::opts::StorageOpts;
 use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIter};
 
 // TODO: use a custom data structure to allow in-place update instead of proto
@@ -514,6 +515,8 @@ pub struct HummockVersionReader {
 
     /// Statistics
     state_store_metrics: Arc<HummockStateStoreMetrics>,
+
+    disable_iter_prefetch: bool,
 }
 
 /// use `HummockVersionReader` to reuse `get` and `iter` implement for both `batch_query` and
@@ -522,10 +525,12 @@ impl HummockVersionReader {
     pub fn new(
         sstable_store: SstableStoreRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
+        disable_iter_prefetch: bool,
     ) -> Self {
         Self {
             sstable_store,
             state_store_metrics,
+            disable_iter_prefetch,
         }
     }
 
@@ -684,9 +689,12 @@ impl HummockVersionReader {
         &self,
         table_key_range: TableKeyRange,
         epoch: u64,
-        read_options: ReadOptions,
+        mut read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
+        if self.disable_iter_prefetch {
+            read_options.disable_prefetch();
+        }
         let table_id_string = read_options.table_id.to_string();
         let table_id_label = table_id_string.as_str();
         let (imms, uncommitted_ssts, committed) = read_version_tuple;
