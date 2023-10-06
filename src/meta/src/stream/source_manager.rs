@@ -23,13 +23,13 @@ use std::time::Duration;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::Source;
-use risingwave_pb::connector_service::PbTableSchema;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_rpc_client::ConnectorClient;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -53,6 +53,7 @@ pub struct SourceManager {
     barrier_scheduler: BarrierScheduler,
     core: Mutex<SourceManagerCore>,
     metrics: Arc<MetaMetrics>,
+    runtime: Arc<BackgroundShutdownRuntime>,
 }
 
 const MAX_FAIL_CNT: u32 = 10;
@@ -77,30 +78,7 @@ struct ConnectorSourceWorker<P: SourceProperties> {
 
 fn extract_prop_from_source(source: &Source) -> MetaResult<ConnectorProperties> {
     let mut properties = ConnectorProperties::extract(source.properties.clone())?;
-    if properties.is_cdc_connector() {
-        let pk_indices = source
-            .pk_column_ids
-            .iter()
-            .map(|&id| {
-                source
-                    .columns
-                    .iter()
-                    .position(|col| col.column_desc.as_ref().unwrap().column_id == id)
-                    .unwrap() as u32
-            })
-            .collect_vec();
-
-        let table_schema = PbTableSchema {
-            columns: source
-                .columns
-                .iter()
-                .flat_map(|col| &col.column_desc)
-                .cloned()
-                .collect(),
-            pk_indices,
-        };
-        properties.init_cdc_properties(table_schema);
-    }
+    properties.init_from_pb_source(source);
     Ok(properties)
 }
 
@@ -520,11 +498,20 @@ impl SourceManager {
         fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .thread_name("risingwave-source-manager")
+            .enable_all()
+            .build()
+            .map_err(|e| anyhow!(e))?;
+
+        let runtime: Arc<BackgroundShutdownRuntime> = Arc::new(runtime.into());
+
         let mut managed_sources = HashMap::new();
         {
             let sources = catalog_manager.list_sources().await;
             for source in sources {
                 Self::create_source_worker_async(
+                    runtime.clone(),
                     env.connector_client(),
                     source,
                     &mut managed_sources,
@@ -558,6 +545,7 @@ impl SourceManager {
             core,
             paused: Mutex::new(()),
             metrics,
+            runtime,
         })
     }
 
@@ -699,6 +687,7 @@ impl SourceManager {
             tracing::warn!("source {} already registered", source.get_id());
         } else {
             Self::create_source_worker(
+                self.runtime.clone(),
                 self.env.connector_client(),
                 source,
                 &mut core.managed_sources,
@@ -711,6 +700,7 @@ impl SourceManager {
     }
 
     fn create_source_worker_async(
+        runtime: Arc<BackgroundShutdownRuntime>,
         connector_client: Option<ConnectorClient>,
         source: Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
@@ -725,8 +715,7 @@ impl SourceManager {
         let source_id = source.id;
 
         let connector_properties = extract_prop_from_source(&source)?;
-
-        let handle = tokio::spawn(async move {
+        let handle = runtime.spawn(async move {
             let mut ticker = time::interval(Self::DEFAULT_SOURCE_TICK_INTERVAL);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -769,6 +758,7 @@ impl SourceManager {
     }
 
     async fn create_source_worker(
+        runtime: Arc<BackgroundShutdownRuntime>,
         connector_client: Option<ConnectorClient>,
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
@@ -809,7 +799,7 @@ impl SourceManager {
                     })??;
             }
 
-            tokio::spawn(async move { worker.run(sync_call_rx).await })
+            runtime.spawn(async move { worker.run(sync_call_rx).await })
         });
 
         managed_sources.insert(
@@ -935,6 +925,10 @@ mod tests {
 
         fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
             serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+        }
+
+        fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
+            Ok(())
         }
     }
 

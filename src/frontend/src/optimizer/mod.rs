@@ -42,6 +42,7 @@ use risingwave_common::catalog::{ColumnCatalog, ColumnId, ConflictBehavior, Fiel
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_connector::sink::catalog::SinkFormatDesc;
 use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
@@ -560,6 +561,7 @@ impl PlanRoot {
         emit_on_window_close: bool,
         db_name: String,
         sink_from_table_name: String,
+        format_desc: Option<SinkFormatDesc>,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
@@ -574,6 +576,7 @@ impl PlanRoot {
             self.out_names.clone(),
             definition,
             properties,
+            format_desc,
         )
     }
 

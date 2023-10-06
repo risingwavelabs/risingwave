@@ -17,7 +17,9 @@ use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::{build_from_prost, build_func, BoxedExpression, InputRefExpression};
+use risingwave_expr::expr::{
+    build_func_non_strict, build_non_strict_from_prost, BoxedExpression, InputRefExpression,
+};
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::HashJoinNode;
@@ -80,7 +82,10 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
 
         let condition = match node.get_condition() {
-            Ok(cond_prost) => Some(build_from_prost(cond_prost)?),
+            Ok(cond_prost) => Some(build_non_strict_from_prost(
+                cond_prost,
+                params.eval_error_report.clone(),
+            )?),
             Err(_) => None,
         };
         trace!("Join non-equi condition: {:?}", condition);
@@ -96,13 +101,17 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                     let data_type = source_l.schema().fields
                         [min(key_required_larger, key_required_smaller)]
                     .data_type();
-                    Some(build_func(
+                    Some(build_func_non_strict(
                         delta_expression.delta_type(),
                         data_type.clone(),
                         vec![
                             Box::new(InputRefExpression::new(data_type, 0)),
-                            build_from_prost(delta_expression.delta.as_ref().unwrap())?,
+                            build_non_strict_from_prost(
+                                delta_expression.delta.as_ref().unwrap(),
+                                params.eval_error_report.clone(),
+                            )?,
                         ],
+                        params.eval_error_report.clone(),
                     )?)
                 } else {
                     None

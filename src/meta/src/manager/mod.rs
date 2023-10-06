@@ -33,3 +33,5 @@ pub(crate) use notification::*;
 pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef};
 pub(crate) use streaming_job::*;
 pub(crate) use system_param::*;
+
+pub use super::model_v2::prelude;

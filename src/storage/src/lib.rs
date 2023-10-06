@@ -58,7 +58,6 @@ pub mod error;
 pub mod opts;
 pub mod store_impl;
 pub mod table;
-pub mod write_batch;
 
 pub mod filter_key_extractor;
 pub mod mem_table;

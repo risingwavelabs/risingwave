@@ -24,7 +24,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
 use risingwave_pb::catalog::{
-    connection, Connection, Database, Function, Schema, Source, Table, View,
+    connection, Connection, CreateType, Database, Function, Schema, Source, Table, View,
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -38,6 +38,7 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
     IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
     SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId,
+    IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
@@ -93,7 +94,7 @@ pub enum DdlCommand {
     DropFunction(FunctionId),
     CreateView(View),
     DropView(ViewId, DropMode),
-    CreateStreamingJob(StreamingJob, StreamFragmentGraphProto),
+    CreateStreamingJob(StreamingJob, StreamFragmentGraphProto, CreateType),
     DropStreamingJob(StreamingJobId, DropMode),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
@@ -236,8 +237,9 @@ impl DdlController {
                 DdlCommand::DropView(view_id, drop_mode) => {
                     ctrl.drop_view(view_id, drop_mode).await
                 }
-                DdlCommand::CreateStreamingJob(stream_job, fragment_graph) => {
-                    ctrl.create_streaming_job(stream_job, fragment_graph).await
+                DdlCommand::CreateStreamingJob(stream_job, fragment_graph, create_type) => {
+                    ctrl.create_streaming_job(stream_job, fragment_graph, create_type)
+                        .await
                 }
                 DdlCommand::DropStreamingJob(job_id, drop_mode) => {
                     ctrl.drop_streaming_job(job_id, drop_mode).await
@@ -419,6 +421,7 @@ impl DdlController {
         &self,
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
+        create_type: CreateType,
     ) -> MetaResult<NotificationVersion> {
         let _permit = self
             .creating_streaming_job_permits
@@ -444,34 +447,78 @@ impl DdlController {
 
             internal_tables = ctx.internal_tables();
 
-            match &mut stream_job {
-                StreamingJob::Table(Some(source), _, _) => {
+            match stream_job {
+                StreamingJob::Table(Some(ref source), _, ..) => {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
                 }
-                StreamingJob::Sink(sink) => {
+                StreamingJob::Sink(ref sink) => {
                     // Validate the sink on the connector node.
-                    validate_sink(sink, self.env.connector_client()).await?;
+                    validate_sink(sink).await?;
                 }
-                StreamingJob::Source(source) => {
+                StreamingJob::Source(ref source) => {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
                 }
                 _ => {}
             }
-
-            self.stream_manager
-                .create_streaming_job(table_fragments, ctx)
-                .await?;
+            (ctx, table_fragments)
         };
 
-        match result {
-            Ok(_) => self.finish_stream_job(stream_job, internal_tables).await,
-            Err(err) => {
+        let (ctx, table_fragments) = match result {
+            Ok(r) => r,
+            Err(e) => {
                 self.cancel_stream_job(&stream_job, internal_tables).await;
-                Err(err)
+                return Err(e);
+            }
+        };
+
+        match create_type {
+            CreateType::Foreground | CreateType::Unspecified => {
+                self.create_streaming_job_inner(stream_job, table_fragments, ctx, internal_tables)
+                    .await
+            }
+            CreateType::Background => {
+                let ctrl = self.clone();
+                let definition = stream_job.definition();
+                let fut = async move {
+                    let result = ctrl
+                        .create_streaming_job_inner(
+                            stream_job,
+                            table_fragments,
+                            ctx,
+                            internal_tables,
+                        )
+                        .await;
+                    match result {
+                        Err(e) => tracing::error!(definition, error = ?e, "stream_job_error"),
+                        Ok(_) => {
+                            tracing::info!(definition, "stream_job_ok")
+                        }
+                    }
+                };
+                tokio::spawn(fut);
+                Ok(IGNORED_NOTIFICATION_VERSION)
             }
         }
+    }
+
+    async fn create_streaming_job_inner(
+        &self,
+        stream_job: StreamingJob,
+        table_fragments: TableFragments,
+        ctx: CreateStreamingJobContext,
+        internal_tables: Vec<Table>,
+    ) -> MetaResult<NotificationVersion> {
+        let result = self
+            .stream_manager
+            .create_streaming_job(table_fragments, ctx)
+            .await;
+        if let Err(e) = result {
+            self.cancel_stream_job(&stream_job, internal_tables).await;
+            return Err(e);
+        };
+        self.finish_stream_job(stream_job, internal_tables).await
     }
 
     async fn drop_streaming_job(

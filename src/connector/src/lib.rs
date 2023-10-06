@@ -30,6 +30,8 @@
 #![feature(async_fn_in_trait)]
 #![feature(associated_type_defaults)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(iter_from_generator)]
+#![feature(if_let_guard)]
 
 use std::time::Duration;
 
@@ -48,6 +50,8 @@ pub mod sink;
 pub mod source;
 
 pub mod common;
+
+pub use paste::paste;
 
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {

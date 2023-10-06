@@ -19,7 +19,7 @@ use crate::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder};
 use crate::buffer::Bitmap;
 
 pub fn gen_legal_stream_chunk(
-    bitmap: Option<&Bitmap>,
+    bitmap: &Bitmap,
     chunk_size: usize,
     append_only: bool,
     seed: u64,
@@ -28,34 +28,9 @@ pub fn gen_legal_stream_chunk(
     let mut ops: Vec<Op> = vec![];
     let mut cur_data: Vec<i64> = vec![];
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    if let Some(bitmap) = bitmap {
-        for i in 0..chunk_size {
-            // SAFETY(value_at_unchecked): the idx is always in bound.
-            unsafe {
-                if bitmap.is_set_unchecked(i) {
-                    let op = if append_only || cur_data.is_empty() || rng.gen() {
-                        Op::Insert
-                    } else {
-                        Op::Delete
-                    };
-                    ops.push(op);
-                    if op == Op::Insert {
-                        let value = rng.gen::<i32>() as i64;
-                        data_builder.append(Some(value));
-                        cur_data.push(value);
-                    } else {
-                        let idx = rng.gen_range(0..cur_data.len());
-                        data_builder.append(Some(cur_data[idx]));
-                        cur_data.remove(idx);
-                    }
-                } else {
-                    ops.push(Op::Insert);
-                    data_builder.append(Some(1234567890));
-                }
-            }
-        }
-    } else {
-        for _ in 0..chunk_size {
+    for i in 0..chunk_size {
+        // SAFETY(value_at_unchecked): the idx is always in bound.
+        if unsafe { bitmap.is_set_unchecked(i) } {
             let op = if append_only || cur_data.is_empty() || rng.gen() {
                 Op::Insert
             } else {
@@ -71,6 +46,9 @@ pub fn gen_legal_stream_chunk(
                 data_builder.append(Some(cur_data[idx]));
                 cur_data.remove(idx);
             }
+        } else {
+            ops.push(Op::Insert);
+            data_builder.append(Some(1234567890));
         }
     }
     (ops, data_builder.finish().into())

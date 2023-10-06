@@ -18,8 +18,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::{ArrayRef, Op, Vis, VisRef};
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::array::{ArrayRef, Op};
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -55,7 +55,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         &mut self,
         ops: &[Op],
         column: &ArrayRef,
-        mut visibilities: Vec<&mut Vis>,
+        mut visibilities: Vec<&mut Bitmap>,
         dedup_table: &mut StateTable<S>,
         group_key: Option<&GroupKey>,
         ctx: ActorContextRef,
@@ -173,11 +173,8 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             });
 
         for (vis, vis_mask_inv) in visibilities.iter_mut().zip_eq(vis_masks_inv.into_iter()) {
-            let mask = !vis_mask_inv.finish();
-            if !mask.all() {
-                // update visibility if needed
-                **vis = vis.as_ref() & VisRef::from(&mask);
-            }
+            // update visibility
+            **vis &= !vis_mask_inv.finish();
         }
 
         // if we determine to flush to the table when processing every chunk instead of barrier
@@ -259,11 +256,11 @@ impl<S: StateStore> DistinctDeduplicater<S> {
         &mut self,
         ops: &[Op],
         columns: &[ArrayRef],
-        mut visibilities: Vec<Vis>,
+        mut visibilities: Vec<Bitmap>,
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
         group_key: Option<&GroupKey>,
         ctx: ActorContextRef,
-    ) -> StreamExecutorResult<Vec<Vis>> {
+    ) -> StreamExecutorResult<Vec<Bitmap>> {
         for (distinct_col, (ref call_indices, deduplicater)) in &mut self.deduplicaters {
             let column = &columns[*distinct_col];
             let dedup_table = dedup_tables.get_mut(distinct_col).unwrap();

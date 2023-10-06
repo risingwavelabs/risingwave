@@ -17,13 +17,12 @@ use std::rc::Rc;
 use std::sync::LazyLock;
 
 use anyhow::anyhow;
-
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId,
-    DEFAULT_KEY_COLUMN_NAME, INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
+    is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, DEFAULT_KEY_COLUMN_NAME,
+    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -37,9 +36,9 @@ use risingwave_connector::source::cdc::{
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
-
 use risingwave_connector::source::filesystem::S3_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
+use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
     SourceEncode, SourceFormat, SourceStruct, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR,
@@ -66,11 +65,9 @@ use crate::handler::create_table::{
 use crate::handler::util::{get_connector, is_cdc_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
-
-
 use crate::session::SessionImpl;
-use crate::utils::resolve_connection_in_with_option;
-use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
+use crate::utils::resolve_privatelink_in_with_option;
+use crate::{bind_data_type, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
@@ -951,6 +948,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 NATS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json],
                 ),
+                TEST_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Json],
+                )
         ))
     });
 
@@ -1112,7 +1112,10 @@ pub async fn handle_create_source(
         )));
     }
 
-    let source_schema = stmt.source_schema.into_source_schema_v2();
+    let (source_schema, notice) = stmt.source_schema.into_source_schema_v2();
+    if let Some(notice) = notice {
+        session.notice_to_user(notice)
+    };
 
     let mut with_properties = handler_args
         .with_options
@@ -1184,10 +1187,10 @@ pub async fn handle_create_source(
     // let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 
-    // resolve privatelink connection for Kafka source
     let mut with_options = WithOptions::new(with_properties);
+    // resolve privatelink connection for Kafka source
     let connection_id =
-        resolve_connection_in_with_option(&mut with_options, &schema_name, &session)?;
+        resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
     let definition = handler_args.normalized_sql.clone();
 
     let source = PbSource {

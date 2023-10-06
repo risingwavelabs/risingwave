@@ -76,6 +76,8 @@ pub struct StreamingMetrics {
     pub agg_distinct_cache_miss_count: GenericCounterVec<AtomicU64>,
     pub agg_distinct_total_cache_count: GenericCounterVec<AtomicU64>,
     pub agg_distinct_cached_entry_count: GenericGaugeVec<AtomicI64>,
+    pub agg_dirty_group_count: GenericGaugeVec<AtomicI64>,
+    pub agg_dirty_group_heap_size: GenericGaugeVec<AtomicI64>,
 
     // Streaming TopN
     pub group_top_n_cache_miss_count: GenericCounterVec<AtomicU64>,
@@ -118,6 +120,7 @@ pub struct StreamingMetrics {
     pub barrier_manager_progress: IntCounter,
 
     pub sink_commit_duration: HistogramVec,
+    pub connector_sink_rows_received: GenericCounterVec<AtomicU64>,
 
     // Memory management
     // FIXME(yuhao): use u64 here
@@ -125,7 +128,7 @@ pub struct StreamingMetrics {
     pub lru_physical_now_ms: IntGauge,
     pub lru_runtime_loop_count: IntCounter,
     pub lru_watermark_step: IntGauge,
-    pub lru_evicted_watermark_time_diff_ms: GenericGaugeVec<AtomicI64>,
+    pub lru_evicted_watermark_time_ms: GenericGaugeVec<AtomicI64>,
     pub jemalloc_allocated_bytes: IntGauge,
     pub jemalloc_active_bytes: IntGauge,
 
@@ -196,7 +199,7 @@ impl StreamingMetrics {
         let actor_output_buffer_blocking_duration_ns = register_int_counter_vec_with_registry!(
             "stream_actor_output_buffer_blocking_duration_ns",
             "Total blocking duration (ns) of output buffer",
-            &["actor_id"],
+            &["actor_id", "fragment_id", "downstream_fragment_id"],
             registry
         )
         .unwrap();
@@ -204,7 +207,7 @@ impl StreamingMetrics {
         let actor_input_buffer_blocking_duration_ns = register_int_counter_vec_with_registry!(
             "stream_actor_input_buffer_blocking_duration_ns",
             "Total blocking duration (ns) of input buffer",
-            &["actor_id", "upstream_fragment_id"],
+            &["actor_id", "fragment_id", "upstream_fragment_id"],
             registry
         )
         .unwrap();
@@ -308,7 +311,7 @@ impl StreamingMetrics {
         let actor_out_record_cnt = register_int_counter_vec_with_registry!(
             "stream_actor_out_record_cnt",
             "Total number of rows actor sent",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -467,6 +470,22 @@ impl StreamingMetrics {
         let agg_distinct_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_agg_distinct_cached_entry_count",
             "Total entry counts in distinct aggregation executor cache",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_dirty_group_count = register_int_gauge_vec_with_registry!(
+            "stream_agg_dirty_group_count",
+            "Total dirty group counts in aggregation executor",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_dirty_group_heap_size = register_int_gauge_vec_with_registry!(
+            "stream_agg_dirty_group_heap_size",
+            "Total dirty group heap size in aggregation executor",
             &["table_id", "actor_id"],
             registry
         )
@@ -679,6 +698,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let connector_sink_rows_received = register_int_counter_vec_with_registry!(
+            "connector_sink_rows_received",
+            "Number of rows received by sink",
+            &["connector_type", "sink_id"],
+            registry
+        )
+        .unwrap();
+
         let lru_current_watermark_time_ms = register_int_gauge_with_registry!(
             "lru_current_watermark_time_ms",
             "Current LRU manager watermark time(ms)",
@@ -707,9 +734,9 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let lru_evicted_watermark_time_diff_ms = register_int_gauge_vec_with_registry!(
-            "lru_evicted_watermark_time_diff_ms",
-            "The diff between current watermark and latest evicted watermark time by actors",
+        let lru_evicted_watermark_time_ms = register_int_gauge_vec_with_registry!(
+            "lru_evicted_watermark_time_ms",
+            "The latest evicted watermark time by actors",
             &["table_id", "actor_id", "desc"],
             registry
         )
@@ -817,6 +844,8 @@ impl StreamingMetrics {
             agg_distinct_cache_miss_count,
             agg_distinct_total_cache_count,
             agg_distinct_cached_entry_count,
+            agg_dirty_group_count,
+            agg_dirty_group_heap_size,
             group_top_n_cache_miss_count,
             group_top_n_total_query_cache_count,
             group_top_n_cached_entry_count,
@@ -840,11 +869,12 @@ impl StreamingMetrics {
             barrier_sync_latency,
             barrier_manager_progress,
             sink_commit_duration,
+            connector_sink_rows_received,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,
             lru_runtime_loop_count,
             lru_watermark_step,
-            lru_evicted_watermark_time_diff_ms,
+            lru_evicted_watermark_time_ms,
             jemalloc_allocated_bytes,
             jemalloc_active_bytes,
             user_compute_error_count,

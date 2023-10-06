@@ -82,7 +82,8 @@ pub async fn cpu_profile(context: &CtlContext, sleep_s: u64) -> anyhow::Result<(
     Ok(())
 }
 
-pub async fn heap_profile(context: &CtlContext, dir: String) -> anyhow::Result<()> {
+pub async fn heap_profile(context: &CtlContext, dir: Option<String>) -> anyhow::Result<()> {
+    let dir = dir.unwrap_or_default();
     let meta_client = context.meta_client().await?;
 
     let workers = meta_client.get_cluster_info().await?.worker_nodes;

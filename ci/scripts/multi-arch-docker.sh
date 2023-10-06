@@ -14,13 +14,27 @@ date="$(date +%Y%m%d)"
 ghcraddr="ghcr.io/risingwavelabs/risingwave"
 dockerhubaddr="risingwavelabs/risingwave"
 
+
+arches=()
+
+if [ "${SKIP_TARGET_AMD64:-false}" != "true" ]; then
+  arches+=("x86_64")
+fi
+
+if [ "${SKIP_TARGET_AARCH64:-false}" != "true" ]; then
+  arches+=("aarch64")
+fi
+
 # push images to gchr
 function pushGchr() {
   GHCRTAG="${ghcraddr}:$1"
   echo "push to gchr, image tag: ${GHCRTAG}"
-  docker manifest create --insecure "$GHCRTAG" \
-    --amend "${ghcraddr}:${BUILDKITE_COMMIT}-x86_64" \
-    --amend "${ghcraddr}:${BUILDKITE_COMMIT}-aarch64"
+  args=()
+  for arch in "${arches[@]}"
+  do
+    args+=( --amend "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" )
+  done
+  docker manifest create --insecure "$GHCRTAG" "${args[@]}"
   docker manifest push --insecure "$GHCRTAG"
 }
 
@@ -28,9 +42,12 @@ function pushGchr() {
 function pushDockerhub() {
   DOCKERTAG="${dockerhubaddr}:$1"
   echo "push to dockerhub, image tag: ${DOCKERTAG}"
-  docker manifest create --insecure "$DOCKERTAG" \
-    --amend "${dockerhubaddr}:${BUILDKITE_COMMIT}-x86_64" \
-    --amend "${dockerhubaddr}:${BUILDKITE_COMMIT}-aarch64"
+  args=()
+  for arch in "${arches[@]}"
+  do
+    args+=( --amend "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}" )
+  done
+  docker manifest create --insecure "$DOCKERTAG" "${args[@]}"
   docker manifest push --insecure "$DOCKERTAG"
 }
 
@@ -74,7 +91,10 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
 fi
 
 echo "--- delete the manifest images from dockerhub"
+args=()
+for arch in "${arches[@]}"
+do
+  args+=( "${dockerhubaddr}:${BUILDKITE_COMMIT}-${arch}" )
+done
 docker run --rm lumir/remove-dockerhub-tag \
-  --user "risingwavelabs" --password "$DOCKER_TOKEN" \
-  "${dockerhubaddr}:${BUILDKITE_COMMIT}-x86_64" \
-  "${dockerhubaddr}:${BUILDKITE_COMMIT}-aarch64"
+  --user "risingwavelabs" --password "$DOCKER_TOKEN" "${args[@]}"

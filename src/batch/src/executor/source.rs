@@ -174,7 +174,7 @@ impl SourceExecutor {
 
 fn covert_stream_chunk_to_batch_chunk(chunk: StreamChunk) -> Result<DataChunk> {
     // chunk read from source must be compact
-    assert!(chunk.data_chunk().visibility().is_none());
+    assert!(chunk.data_chunk().is_compacted());
 
     if chunk.ops().iter().any(|op| *op != Op::Insert) {
         return Err(RwError::from(BatchError::Internal(anyhow!(

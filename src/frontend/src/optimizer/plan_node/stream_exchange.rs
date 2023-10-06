@@ -37,7 +37,7 @@ impl StreamExchange {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            input.logical_pk().to_vec(),
+            input.stream_key().to_vec(),
             input.functional_dependency().clone(),
             dist,
             input.append_only(),
@@ -53,7 +53,7 @@ impl StreamExchange {
 
     pub fn new_no_shuffle(input: PlanRef) -> Self {
         let ctx = input.ctx();
-        let pk_indices = input.logical_pk().to_vec();
+        let pk_indices = input.stream_key().to_vec();
         // Dispatch executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,

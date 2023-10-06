@@ -27,42 +27,47 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorSuppressor, RwError};
 use risingwave_common::types::{JsonbVal, Scalar};
+use risingwave_pb::catalog::PbSource;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
+use serde::de::DeserializeOwned;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
-use super::filesystem::{FsSplit, S3Properties, S3_CONNECTOR};
+use super::filesystem::FsSplit;
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use crate::parser::ParserConfig;
-use crate::source::cdc::{
-    CdcProperties, Citus, DebeziumCdcSplit, Mysql, Postgres, CITUS_CDC_CONNECTOR,
-    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
-};
 pub(crate) use crate::source::common::CommonSplitReader;
-use crate::source::datagen::{DatagenProperties, DatagenSplit, DATAGEN_CONNECTOR};
-use crate::source::google_pubsub::{PubsubProperties, PubsubSplit, GOOGLE_PUBSUB_CONNECTOR};
-use crate::source::kafka::{KafkaProperties, KafkaSplit, KAFKA_CONNECTOR};
-use crate::source::kinesis::split::KinesisSplit;
-use crate::source::kinesis::{KinesisProperties, KINESIS_CONNECTOR};
 use crate::source::monitor::EnumeratorMetrics;
-use crate::source::nats::source::NatsSplit;
-use crate::source::nats::{NatsProperties, NATS_CONNECTOR};
-use crate::source::nexmark::{NexmarkProperties, NexmarkSplit, NEXMARK_CONNECTOR};
-use crate::source::pulsar::{PulsarProperties, PulsarSplit, PULSAR_CONNECTOR};
-use crate::{impl_connector_properties, impl_split};
+use crate::{
+    dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
+    impl_split, match_source_name_str,
+};
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
 
-pub trait SourceProperties: Clone {
+pub trait TryFromHashmap: Sized {
+    fn try_from_hashmap(props: HashMap<String, String>) -> Result<Self>;
+}
+
+pub trait SourceProperties: TryFromHashmap + Clone {
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData + TryFrom<SplitImpl, Error = anyhow::Error> + Into<SplitImpl>;
     type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;
     type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
+
+    fn init_from_pb_source(&mut self, _source: &PbSource) {}
+}
+
+impl<P: DeserializeOwned> TryFromHashmap for P {
+    fn try_from_hashmap(props: HashMap<String, String>) -> Result<Self> {
+        let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
+        serde_json::from_value::<P>(json_value).map_err(|e| anyhow!(e.to_string()))
+    }
 }
 
 pub async fn create_split_reader<P: SourceProperties>(
@@ -290,61 +295,60 @@ pub trait SplitReader: Sized + Send {
     fn into_stream(self) -> BoxSourceWithStateStream;
 }
 
-#[derive(Clone, Debug)]
-pub enum ConnectorProperties {
-    Kafka(Box<KafkaProperties>),
-    Pulsar(Box<PulsarProperties>),
-    Kinesis(Box<KinesisProperties>),
-    Nexmark(Box<NexmarkProperties>),
-    Datagen(Box<DatagenProperties>),
-    S3(Box<S3Properties>),
-    MysqlCdc(Box<CdcProperties<Mysql>>),
-    PostgresCdc(Box<CdcProperties<Postgres>>),
-    CitusCdc(Box<CdcProperties<Citus>>),
-    GooglePubsub(Box<PubsubProperties>),
-    Nats(Box<NatsProperties>),
-}
-
-#[macro_export]
-macro_rules! dispatch_source_prop {
-    ($impl:expr, $source_prop:ident, $body:tt) => {{
-        use $crate::source::base::ConnectorProperties;
-
-        match $impl {
-            ConnectorProperties::Kafka($source_prop) => $body,
-            ConnectorProperties::Pulsar($source_prop) => $body,
-            ConnectorProperties::Kinesis($source_prop) => $body,
-            ConnectorProperties::Nexmark($source_prop) => $body,
-            ConnectorProperties::Datagen($source_prop) => $body,
-            ConnectorProperties::S3($source_prop) => $body,
-            ConnectorProperties::MysqlCdc($source_prop) => $body,
-            ConnectorProperties::PostgresCdc($source_prop) => $body,
-            ConnectorProperties::CitusCdc($source_prop) => $body,
-            ConnectorProperties::GooglePubsub($source_prop) => $body,
-            ConnectorProperties::Nats($source_prop) => $body,
-        }
-    }};
-}
+for_all_sources!(impl_connector_properties);
 
 impl ConnectorProperties {
+    pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
+        const UPSTREAM_SOURCE_KEY: &str = "connector";
+        let connector = props
+            .remove(UPSTREAM_SOURCE_KEY)
+            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
+        match_source_name_str!(
+            connector.to_lowercase().as_str(),
+            PropType,
+            PropType::try_from_hashmap(props).map(ConnectorProperties::from),
+            |other| Err(anyhow!("connector '{}' is not supported", other))
+        )
+    }
+
+    pub fn init_from_pb_source(&mut self, source: &PbSource) {
+        dispatch_source_prop!(self, prop, prop.init_from_pb_source(source))
+    }
+
     pub fn support_multiple_splits(&self) -> bool {
         matches!(self, ConnectorProperties::Kafka(_))
     }
 }
 
-#[derive(Debug, Clone, EnumAsInner, PartialEq, Hash)]
-pub enum SplitImpl {
-    Kafka(KafkaSplit),
-    Pulsar(PulsarSplit),
-    Kinesis(KinesisSplit),
-    Nexmark(NexmarkSplit),
-    Datagen(DatagenSplit),
-    GooglePubsub(PubsubSplit),
-    MysqlCdc(DebeziumCdcSplit<Mysql>),
-    PostgresCdc(DebeziumCdcSplit<Postgres>),
-    CitusCdc(DebeziumCdcSplit<Citus>),
-    Nats(NatsSplit),
-    S3(FsSplit),
+for_all_sources!(impl_split);
+
+impl From<&SplitImpl> for ConnectorSplit {
+    fn from(split: &SplitImpl) -> Self {
+        dispatch_split_impl!(split, inner, SourcePropType, {
+            ConnectorSplit {
+                split_type: String::from(SourcePropType::SOURCE_NAME),
+                encoded_split: inner.encode_to_bytes().to_vec(),
+            }
+        })
+    }
+}
+
+impl TryFrom<&ConnectorSplit> for SplitImpl {
+    type Error = anyhow::Error;
+
+    fn try_from(split: &ConnectorSplit) -> std::result::Result<Self, Self::Error> {
+        match_source_name_str!(
+            split.split_type.to_lowercase().as_str(),
+            PropType,
+            {
+                <PropType as SourceProperties>::Split::restore_from_bytes(
+                    split.encoded_split.as_ref(),
+                )
+                .map(Into::into)
+            },
+            |other| Err(anyhow!("connector '{}' is not supported", other))
+        )
+    }
 }
 
 // for the `FsSourceExecutor`
@@ -365,29 +369,68 @@ impl SplitImpl {
     }
 }
 
-impl_connector_properties! {
-    { Kafka, KAFKA_CONNECTOR },
-    { Pulsar, PULSAR_CONNECTOR },
-    { Kinesis, KINESIS_CONNECTOR },
-    { Nexmark, NEXMARK_CONNECTOR },
-    { Datagen, DATAGEN_CONNECTOR },
-    { S3, S3_CONNECTOR },
-    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR},
-    { Nats, NATS_CONNECTOR }
+impl SplitImpl {
+    fn restore_from_json_inner(split_type: &str, value: JsonbVal) -> Result<Self> {
+        match_source_name_str!(
+            split_type.to_lowercase().as_str(),
+            PropType,
+            <PropType as SourceProperties>::Split::restore_from_json(value).map(Into::into),
+            |other| Err(anyhow!("connector '{}' is not supported", other))
+        )
+    }
 }
 
-impl_split! {
-    { Kafka, KAFKA_CONNECTOR, KafkaSplit },
-    { Pulsar, PULSAR_CONNECTOR, PulsarSplit },
-    { Kinesis, KINESIS_CONNECTOR, KinesisSplit },
-    { Nexmark, NEXMARK_CONNECTOR, NexmarkSplit },
-    { Datagen, DATAGEN_CONNECTOR, DatagenSplit },
-    { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit },
-    { MysqlCdc, MYSQL_CDC_CONNECTOR, DebeziumCdcSplit<Mysql> },
-    { PostgresCdc, POSTGRES_CDC_CONNECTOR, DebeziumCdcSplit<Postgres> },
-    { CitusCdc, CITUS_CDC_CONNECTOR, DebeziumCdcSplit<Citus> },
-    { S3, S3_CONNECTOR, FsSplit },
-    { Nats, NATS_CONNECTOR, NatsSplit }
+impl SplitMetaData for SplitImpl {
+    fn id(&self) -> SplitId {
+        dispatch_split_impl!(self, inner, IgnoreType, inner.id())
+    }
+
+    fn encode_to_json(&self) -> JsonbVal {
+        use serde_json::json;
+        let inner = self.encode_to_json_inner().take();
+        json!({ SPLIT_TYPE_FIELD: self.get_type(), SPLIT_INFO_FIELD: inner}).into()
+    }
+
+    fn restore_from_json(value: JsonbVal) -> Result<Self> {
+        let mut value = value.take();
+        let json_obj = value.as_object_mut().unwrap();
+        let split_type = json_obj
+            .remove(SPLIT_TYPE_FIELD)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string();
+        let inner_value = json_obj.remove(SPLIT_INFO_FIELD).unwrap();
+        Self::restore_from_json_inner(&split_type, inner_value.into())
+    }
+
+    fn update_with_offset(&mut self, start_offset: String) -> Result<()> {
+        dispatch_split_impl!(
+            self,
+            inner,
+            IgnoreType,
+            inner.update_with_offset(start_offset)
+        )
+    }
+}
+
+impl SplitImpl {
+    pub fn get_type(&self) -> String {
+        dispatch_split_impl!(self, _ignored, PropType, {
+            PropType::SOURCE_NAME.to_string()
+        })
+    }
+
+    pub fn update_in_place(&mut self, start_offset: String) -> Result<()> {
+        dispatch_split_impl!(self, inner, IgnoreType, {
+            inner.update_with_offset(start_offset)?
+        });
+        Ok(())
+    }
+
+    pub fn encode_to_json_inner(&self) -> JsonbVal {
+        dispatch_split_impl!(self, inner, IgnoreType, inner.encode_to_json())
+    }
 }
 
 pub type DataType = risingwave_common::types::DataType;
@@ -449,6 +492,7 @@ pub trait SplitMetaData: Sized {
 
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()>;
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,
@@ -463,7 +507,8 @@ mod tests {
     use nexmark::event::EventType;
 
     use super::*;
-    use crate::source::cdc::MySqlCdcSplit;
+    use crate::source::cdc::{DebeziumCdcSplit, MySqlCdcSplit};
+    use crate::source::kafka::KafkaSplit;
 
     #[test]
     fn test_split_impl_get_fn() -> Result<()> {

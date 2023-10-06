@@ -14,7 +14,7 @@
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
-use risingwave_expr::function::window::WindowFuncKind;
+use risingwave_expr::window_function::WindowFuncKind;
 
 use super::Rule;
 use crate::expr::{collect_input_refs, ExprImpl, ExprType};
