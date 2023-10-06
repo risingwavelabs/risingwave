@@ -10843,7 +10843,6 @@ dependencies = [
  "madsim-tokio",
  "md-5",
  "mio",
- "multimap 0.9.0",
  "nom",
  "num-bigint",
  "num-integer",
