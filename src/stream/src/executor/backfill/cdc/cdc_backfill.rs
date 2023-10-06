@@ -28,7 +28,7 @@ use risingwave_connector::source::external::CdcOffset;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_storage::StateStore;
 
-use crate::executor::backfill::cdc::state::{CdcStateManageImpl, EmbededStateManage};
+use crate::executor::backfill::cdc::state::{CdcBackfillStateImpl, SingleTableState};
 use crate::executor::backfill::cdc::utils::transform_upstream;
 use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::upstream_table::snapshot::{
@@ -132,8 +132,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
-        let mut state_manage = if shared_cdc_source {
-            CdcStateManageImpl::Undefined
+        let mut state_impl = if shared_cdc_source {
+            CdcBackfillStateImpl::Undefined
         } else if let Some(mutation) = first_barrier.mutation.as_ref() &&
             let Mutation::Add{splits, ..} = mutation.as_ref()
         {
@@ -151,12 +151,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 upstream_table_id
                             ))
                     })?;
-                    CdcStateManageImpl::Embeded(EmbededStateManage::new(self.source_state_handler, upstream_table_id, split.id(), split.clone()))
+                    CdcBackfillStateImpl::SingleTable(SingleTableState::new(self.source_state_handler, upstream_table_id, split.id(), split.clone()))
                 }
             }
         }
         else {
-            unreachable!("embeded cdc backfill init fail")
+            unreachable!("backfilled cdc source init fail")
         };
 
         let mut upstream = if shared_cdc_source {
@@ -168,7 +168,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         };
 
         tracing::debug!(?upstream_table_id, ?self.actor_ctx.id, ?shared_cdc_source, "start cdc backfill");
-        state_manage.init_epoch(first_barrier.epoch);
+        state_impl.init_epoch(first_barrier.epoch);
 
         // start from the beginning
         // TODO(siyuan): restore backfill offset from state store
@@ -177,7 +177,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         current_pk_pos = backfill_offset;
 
         // restore backfill done flag from state store
-        let is_finished = state_manage.check_finished().await?;
+        let is_finished = state_impl.check_finished().await?;
 
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
@@ -316,7 +316,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     }
 
                                     // seal current epoch even though there is no data
-                                    state_manage.commit_state(barrier.epoch).await?;
+                                    state_impl.commit_state(barrier.epoch).await?;
                                     snapshot_read_epoch = barrier.epoch.prev;
                                     if let Some(progress) = self.progress.as_mut() {
                                         progress.update(
@@ -390,9 +390,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         ));
                                     }
 
-                                    state_manage
-                                        .mutate_state(last_binlog_offset.clone())
-                                        .await?;
+                                    state_impl.mutate_state(last_binlog_offset.clone()).await?;
                                     break 'backfill_loop;
                                 }
                                 Some(chunk) => {
@@ -421,7 +419,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             }
         } else {
             // The snapshot is empty, just set backfill to finished
-            state_manage.mutate_state(None).await?;
+            state_impl.mutate_state(None).await?;
         }
 
         tracing::debug!(
@@ -436,7 +434,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg {
                     // persist the backfill state
-                    state_manage.commit_state(barrier.epoch).await?;
+                    state_impl.commit_state(barrier.epoch).await?;
 
                     // mark progress as finished
                     if let Some(progress) = self.progress.as_mut() {
@@ -460,7 +458,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
                 if let Message::Barrier(barrier) = &msg {
                     // commit state just to bump the epoch of state table
-                    state_manage.commit_state(barrier.epoch).await?;
+                    state_impl.commit_state(barrier.epoch).await?;
                 }
                 yield msg;
             }

@@ -582,7 +582,6 @@ pub(crate) fn gen_create_table_plan(
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
     let properties = context.with_options().inner().clone().into_iter().collect();
-    // TOOD: add chain node to the query plan
     gen_create_table_plan_without_bind(
         context,
         table_name,
@@ -756,9 +755,6 @@ fn gen_create_table_plan_for_cdc_source(
     external_table_name: String,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    // mut columns: Vec<ColumnCatalog>, // columns defined in the create table from DDL
-    // pk_column_ids: Vec<ColumnId>, // will used to derive pk column indices
-    // definition: String,
     mut col_id_gen: ColumnIdGenerator,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let session = context.session_ctx().clone();
@@ -773,11 +769,6 @@ fn gen_create_table_plan_for_cdc_source(
     let source = session.get_source_by_name(schema_name, &source_name)?;
 
     let mut columns = bind_sql_columns(&column_defs)?;
-
-    // Add `_rw_offset` hidden column for storing upstream cdc offset
-    // TODO: do we need to add this column for cdc table?
-    // let offset_column_idx = columns.len();
-    // columns.push(ColumnCatalog::offset_column());
 
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
@@ -824,7 +815,7 @@ fn gen_create_table_plan_for_cdc_source(
         table_name: Some(external_table_name),
     };
 
-    tracing::debug!(target: "cdc_table", ?external_table_desc, "create table");
+    tracing::debug!(?external_table_desc, "create cdc table");
 
     let logical_scan = LogicalScan::create(
         source_name,

@@ -20,9 +20,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
 use super::row_id_column_desc;
-use crate::catalog::{
-    offset_column_desc, table_id_column_desc, table_name_column_desc, Field, ROW_ID_COLUMN_ID,
-};
+use crate::catalog::{offset_column_desc, table_name_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::error::ErrorCode;
 use crate::types::DataType;
 
@@ -346,13 +344,6 @@ impl ColumnCatalog {
     pub fn offset_column() -> Self {
         Self {
             column_desc: offset_column_desc(),
-            is_hidden: true,
-        }
-    }
-
-    pub fn table_id_column() -> Self {
-        Self {
-            column_desc: table_id_column_desc(),
             is_hidden: true,
         }
     }

@@ -107,6 +107,15 @@ impl LocalFrontend {
         self.session_ref().run_statement(sql.as_str(), vec![]).await
     }
 
+    pub async fn run_sql_with_session(
+        &self,
+        session_ref: Arc<SessionImpl>,
+        sql: impl Into<String>,
+    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let sql = sql.into();
+        session_ref.run_statement(sql.as_str(), vec![]).await
+    }
+
     pub async fn run_user_sql(
         &self,
         sql: impl Into<String>,
@@ -282,10 +291,10 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn create_source_with_graph(
         &self,
-        _source: PbSource,
+        source: PbSource,
         _graph: StreamFragmentGraph,
     ) -> Result<()> {
-        unreachable!()
+        self.create_source_inner(source).map(|_| ())
     }
 
     async fn create_sink(&self, sink: PbSink, graph: StreamFragmentGraph) -> Result<()> {

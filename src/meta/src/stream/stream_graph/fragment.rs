@@ -586,7 +586,6 @@ impl CompleteStreamFragmentGraph {
                                     upstream_table_id,
                                     downstream_fragment_id: id,
                                 },
-                                // TODO: add the downstream table name into the DispatchStrategy
                                 dispatch_strategy: DispatchStrategy {
                                     r#type: DispatcherType::Hash as _, /* there may have multiple downstream table jobs, so we use `Hash` here */
                                     dist_key_indices: vec![rw_table_name_index as _], /* index to `_rw_table_name` column */

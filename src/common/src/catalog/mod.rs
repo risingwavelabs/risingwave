@@ -119,11 +119,6 @@ pub fn offset_column_name() -> String {
     OFFSET_COLUMN_NAME.to_string()
 }
 
-pub const TABLE_ID_COLUMN_NAME: &str = "_rw_table_id";
-pub fn table_id_column_name() -> String {
-    TABLE_ID_COLUMN_NAME.to_string()
-}
-
 pub const CDC_SOURCE_COLUMN_NUM: u32 = 4;
 pub const TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
 pub fn table_name_column_name() -> String {
@@ -139,17 +134,6 @@ pub fn offset_column_desc() -> ColumnDesc {
         data_type: DataType::Varchar,
         column_id: ColumnId::placeholder(),
         name: offset_column_name(),
-        field_descs: vec![],
-        type_name: "".to_string(),
-        generated_or_default_column: None,
-    }
-}
-
-pub fn table_id_column_desc() -> ColumnDesc {
-    ColumnDesc {
-        data_type: DataType::Int32,
-        column_id: ColumnId::placeholder(),
-        name: table_id_column_name(),
         field_descs: vec![],
         type_name: "".to_string(),
         generated_or_default_column: None,

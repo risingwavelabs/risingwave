@@ -23,23 +23,23 @@ use serde_json::Value;
 
 use crate::executor::{SourceStateTableHandler, StreamExecutorResult};
 
-pub enum CdcStateManageImpl<S: StateStore> {
+pub enum CdcBackfillStateImpl<S: StateStore> {
     Undefined,
-    Embeded(EmbededStateManage<S>),
+    SingleTable(SingleTableState<S>),
 }
 
-impl<S: StateStore> CdcStateManageImpl<S> {
+impl<S: StateStore> CdcBackfillStateImpl<S> {
     pub fn init_epoch(&mut self, epoch: EpochPair) {
         match self {
-            CdcStateManageImpl::Undefined => {}
-            CdcStateManageImpl::Embeded(embeded) => embeded.init_epoch(epoch),
+            CdcBackfillStateImpl::Undefined => {}
+            CdcBackfillStateImpl::SingleTable(state) => state.init_epoch(epoch),
         }
     }
 
     pub async fn check_finished(&self) -> StreamExecutorResult<bool> {
         match self {
-            CdcStateManageImpl::Undefined => Ok(false),
-            CdcStateManageImpl::Embeded(embeded) => embeded.check_finished().await,
+            CdcBackfillStateImpl::Undefined => Ok(false),
+            CdcBackfillStateImpl::SingleTable(state) => state.check_finished().await,
         }
     }
 
@@ -48,22 +48,25 @@ impl<S: StateStore> CdcStateManageImpl<S> {
         last_binlog_offset: Option<CdcOffset>,
     ) -> StreamExecutorResult<()> {
         match self {
-            CdcStateManageImpl::Undefined => Ok(()),
-            CdcStateManageImpl::Embeded(embeded) => embeded.mutate_state(last_binlog_offset).await,
+            CdcBackfillStateImpl::Undefined => Ok(()),
+            CdcBackfillStateImpl::SingleTable(state) => {
+                state.mutate_state(last_binlog_offset).await
+            }
         }
     }
 
     pub async fn commit_state(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
         match self {
-            CdcStateManageImpl::Undefined => Ok(()),
-            CdcStateManageImpl::Embeded(embeded) => embeded.commit_state(new_epoch).await,
+            CdcBackfillStateImpl::Undefined => Ok(()),
+            CdcBackfillStateImpl::SingleTable(state) => state.commit_state(new_epoch).await,
         }
     }
 }
 
 const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
 
-pub struct EmbededStateManage<S: StateStore> {
+/// The state manager for single cdc table
+pub struct SingleTableState<S: StateStore> {
     /// Stores the backfill done flag
     source_state_handler: SourceStateTableHandler<S>,
     cdc_table_id: u32,
@@ -71,9 +74,9 @@ pub struct EmbededStateManage<S: StateStore> {
     cdc_split: SplitImpl,
 }
 
-impl<S: StateStore> EmbededStateManage<S> {}
+impl<S: StateStore> SingleTableState<S> {}
 
-impl<S: StateStore> EmbededStateManage<S> {
+impl<S: StateStore> SingleTableState<S> {
     pub fn new(
         source_state_handler: SourceStateTableHandler<S>,
         cdc_table_id: u32,

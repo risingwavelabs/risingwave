@@ -408,7 +408,6 @@ impl PlanRoot {
             ctx.trace("To Stream Plan:");
             ctx.trace(plan.explain_to_string());
         }
-        tracing::info!("To Stream Plan: {}", plan.explain_to_string());
         Ok(plan)
     }
 

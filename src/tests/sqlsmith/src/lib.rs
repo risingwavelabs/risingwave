@@ -275,6 +275,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_source_name: None,
+                            external_table_name: None,
                         },
                         CreateTable {
                             or_replace: false,
@@ -318,6 +320,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_source_name: None,
+                            external_table_name: None,
                         },
                         CreateTable {
                             or_replace: false,
@@ -372,6 +376,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_source_name: None,
+                            external_table_name: None,
                         },
                     ],
                 )"#]],
@@ -502,6 +508,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_source_name: None,
+                            external_table_name: None,
                         },
                         CreateTable {
                             or_replace: false,
@@ -552,6 +560,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_source_name: None,
+                            external_table_name: None,
                         },
                         CreateTable {
                             or_replace: false,
@@ -609,6 +619,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_source_name: None,
+                            external_table_name: None,
                         },
                         CreateTable {
                             or_replace: false,
@@ -684,6 +696,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             source_watermarks: [],
                             append_only: false,
                             query: None,
+                            cdc_source_name: None,
+                            external_table_name: None,
                         },
                     ],
                 )"#]],

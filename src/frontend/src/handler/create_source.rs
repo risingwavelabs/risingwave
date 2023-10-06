@@ -1128,8 +1128,9 @@ pub async fn handle_create_source(
     ensure_table_constraints_supported(&stmt.constraints)?;
     let pk_names = bind_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    // TODO: gated the feature with a session variable
-    let create_cdc_source_job = is_cdc_connector(&with_properties); // && session.config().get_cdc_backfill();
+    // gated the feature with a session variable
+    let create_cdc_source_job =
+        is_cdc_connector(&with_properties) && session.config().get_cdc_backfill();
     let (columns_from_resolve_source, pk_names, source_info) = try_bind_columns_from_source(
         &source_schema,
         pk_names,
@@ -1216,6 +1217,7 @@ pub async fn handle_create_source(
     let catalog_writer = session.catalog_writer()?;
 
     if create_cdc_source_job {
+        // create a streaming job for the cdc source
         let graph = {
             let context = OptimizerContext::from_handler_args(handler_args);
             // cdc source is an append-only source in plain json format
@@ -1227,18 +1229,7 @@ pub async fn handle_create_source(
                 false,
                 context.into(),
             )?;
-            // .into();
 
-            // let required_cols = FixedBitSet::with_capacity(columns.len());
-            // let mut plan = PlanRoot::new(
-            //     source_node,
-            //     RequiredDist::PhysicalDist(Distribution::HashShard(vec![row_id_index.unwrap()])),
-            //     Order::any(),
-            //     required_cols,
-            //     vec![],
-            // );
-            //
-            // let stream_plan = plan.gen_optimized_stream_plan(false)?;
             // generate stream graph for cdc source job
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
             let mut graph = build_graph(stream_plan);
@@ -1262,7 +1253,8 @@ pub mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{
-        row_id_column_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+        offset_column_name, row_id_column_name, table_name_column_name, DEFAULT_DATABASE_NAME,
+        DEFAULT_SCHEMA_NAME,
     };
     use risingwave_common::types::DataType;
 
@@ -1320,9 +1312,15 @@ pub mod tests {
         let sql =
             format!(r#"CREATE SOURCE t2 WITH (connector = 'mysql-cdc') FORMAT PLAIN ENCODE JSON"#,);
         let frontend = LocalFrontend::new(Default::default()).await;
-        frontend.run_sql(sql).await.unwrap();
-
         let session = frontend.session_ref();
+        session
+            .set_config("cdc_backfill", vec!["true".to_string()])
+            .unwrap();
+
+        frontend
+            .run_sql_with_session(session.clone(), sql)
+            .await
+            .unwrap();
         let catalog_reader = session.env().catalog_reader().read_guard();
         let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
@@ -1339,14 +1337,13 @@ pub mod tests {
             .collect::<HashMap<&str, DataType>>();
 
         let row_id_col_name = row_id_column_name();
+        let offset_col_name = offset_column_name();
+        let table_name_col_name = table_name_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Serial,
-            "before" => DataType::Jsonb,
-            "after" => DataType::Jsonb,
-            "source" => DataType::Jsonb,
-            "op" => DataType::Varchar,
-            "ts_ms" => DataType::Int64,
-            "transaction" => DataType::Jsonb,
+            "payload" => DataType::Jsonb,
+            offset_col_name.as_str() => DataType::Varchar,
+            table_name_col_name.as_str() => DataType::Varchar,
         };
         assert_eq!(columns, expected_columns);
     }
