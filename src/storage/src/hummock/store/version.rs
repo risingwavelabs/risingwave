@@ -53,7 +53,6 @@ use crate::mem_table::{ImmId, ImmutableMemtable};
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
 };
-use crate::opts::StorageOpts;
 use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIter};
 
 // TODO: use a custom data structure to allow in-place update instead of proto
