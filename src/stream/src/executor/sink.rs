@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::mem;
-use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::stream::select;
@@ -25,7 +24,7 @@ use risingwave_common::array::{merge_chunk_row, Op, StreamChunk, StreamChunkComp
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::catalog::SinkType;
+use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::log_store::{
     LogReader, LogStoreFactory, LogStoreTransformChunkLogReader, LogWriter,
 };
@@ -35,12 +34,10 @@ use risingwave_connector::sink::{
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message, PkIndices};
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
 
 pub struct SinkExecutor<F: LogStoreFactory> {
     input: BoxedExecutor,
-    _metrics: Arc<StreamingMetrics>,
     sink: SinkImpl,
     identity: String,
     pk_indices: PkIndices,
@@ -83,7 +80,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         input: BoxedExecutor,
-        metrics: Arc<StreamingMetrics>,
         sink_writer_param: SinkWriterParam,
         sink_param: SinkParam,
         columns: Vec<ColumnCatalog>,
@@ -100,7 +96,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .collect();
         Ok(Self {
             input,
-            _metrics: metrics,
             sink,
             identity: format!("SinkExecutor {:X?}", sink_writer_param.executor_id),
             pk_indices,
@@ -127,6 +122,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.input,
             stream_key,
             self.log_writer,
+            self.sink_param.sink_id,
             self.sink_param.sink_type,
             self.actor_context,
             stream_key_sink_pk_mismatch,
@@ -148,6 +144,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input: BoxedExecutor,
         stream_key: PkIndices,
         mut log_writer: impl LogWriter,
+        sink_id: SinkId,
         sink_type: SinkType,
         actor_context: ActorContextRef,
         stream_key_sink_pk_mismatch: bool,
@@ -164,6 +161,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         // Propagate the first barrier
         yield Message::Barrier(barrier);
+
+        // for metrics
+        let sink_id_str = sink_id.to_string();
+        let actor_id_str = actor_context.id.to_string();
+        let fragment_id_str = actor_context.fragment_id.to_string();
 
         // When stream key is different from the user defined primary key columns for sinks. The operations could be out of order
         // stream key: a,b
@@ -203,6 +205,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 match msg? {
                     Message::Watermark(w) => watermark = Some(w),
                     Message::Chunk(c) => {
+                        actor_context
+                            .streaming_metrics
+                            .sink_input_row_count
+                            .with_label_values(&[&sink_id_str, &actor_id_str, &fragment_id_str])
+                            .inc_by(c.capacity() as u64);
+
                         chunk_buffer.push_chunk(c);
                     }
                     Message::Barrier(barrier) => {
@@ -415,7 +423,6 @@ mod test {
 
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
-            Arc::new(StreamingMetrics::unused()),
             SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
@@ -537,7 +544,6 @@ mod test {
 
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
-            Arc::new(StreamingMetrics::unused()),
             SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
@@ -656,7 +662,6 @@ mod test {
 
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
-            Arc::new(StreamingMetrics::unused()),
             SinkWriterParam::for_test(),
             sink_param,
             columns,
