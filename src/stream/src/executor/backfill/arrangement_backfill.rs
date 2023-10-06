@@ -588,12 +588,18 @@ where
             let vnode_chunk_iter =
                 iter_chunks(vnode_row_iter, builder).map_ok(move |chunk| (vnode, chunk));
             // TODO: Is there some way to avoid double-pin
-            streams.push(Box::pin(vnode_chunk_iter));
+
+
+            // NOTE(kwannoel): We iterate serially instead.
+            for chunk in vnode_chunk_iter {
+                yield Some(chunk?);
+            }
+            // streams.push(Box::pin(vnode_chunk_iter));
         }
-        #[for_await]
-        for chunk in select_all(streams) {
-            yield Some(chunk?);
-        }
+        // #[for_await]
+        // for chunk in select_all(streams) {
+        //     yield Some(chunk?);
+        // }
         yield None;
         return Ok(());
     }

@@ -279,11 +279,12 @@ message Table {
   // Used to filter created / creating tables in meta.
   StreamJobStatus stream_job_status = 31;
 
+  CreateType create_type = 32;
+
   // This field is introduced in v1.2.0.
   // It is only used if the state table is replicated.
   // If replicated, only columns with index in `output_indices` will be read.
-  repeated int32 output_indices = 32;
-  CreateType create_type = 33;
+  repeated int32 output_indices = 33;
 
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.
