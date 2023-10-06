@@ -293,7 +293,7 @@ where
 
                                         // FIXME
                                         // Consume snapshot rows left in builder
-                                        // let chunk = builder.consume_all();
+                                        let _chunk = builder.consume_all();
                                         // if let Some(chunk) = chunk {
                                         //     let chunk_cardinality = chunk.cardinality() as u64;
                                         //     let ops = vec![Op::Insert; chunk.capacity()];
@@ -446,7 +446,7 @@ where
 
                 // FIXME: Should we consume snapshot rows left in builder?
                 // Consume snapshot rows left in builder
-                // let chunk = builder.consume_all();
+                let _chunk = builder.consume_all();
                 // if let Some(chunk) = chunk {
                 //     let chunk_cardinality = chunk.cardinality() as u64;
                 //     let ops = vec![Op::Insert; chunk.capacity()];
