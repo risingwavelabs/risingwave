@@ -28,7 +28,6 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::select_all;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::StateStore;
 
@@ -589,8 +588,8 @@ where
                 iter_chunks(vnode_row_iter, builder).map_ok(move |chunk| (vnode, chunk));
             // TODO: Is there some way to avoid double-pin
 
-
             // NOTE(kwannoel): We iterate serially instead.
+            #[for_await]
             for chunk in vnode_chunk_iter {
                 yield Some(chunk?);
             }
