@@ -275,7 +275,6 @@ message Table {
   // In older versions we can just initialize without it.
   bool cleaned_by_watermark = 30;
 
-
   // Used to filter created / creating tables in meta.
   StreamJobStatus stream_job_status = 31;
 
