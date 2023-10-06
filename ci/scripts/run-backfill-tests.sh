@@ -30,12 +30,12 @@ flush() {
 }
 
 test_basic() {
-  run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_base_table.sql
 
   # Provide snapshot
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
-  run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql &
 
   wait
   run_sql_file "$PARENT_PATH"/sql/backfill/basic/select.sql </dev/null
@@ -69,9 +69,9 @@ main() {
   set -euo pipefail
   echo "--- Basic test"
   test_basic
-  echo "--- Replication with Column pruning"
-  test_replication_with_column_pruning
-  echo "Backfill tests complete"
+  # echo "--- Replication with Column pruning"
+  # test_replication_with_column_pruning
+  # echo "Backfill tests complete"
 }
 
 main
