@@ -557,7 +557,6 @@ where
         backfill_state: BackfillState,
         builders: &'a mut [DataChunkBuilder],
     ) {
-        let mut streams = Vec::with_capacity(upstream_table.vnodes().len());
         for (vnode, builder) in upstream_table
             .vnodes()
             .iter_vnodes()
