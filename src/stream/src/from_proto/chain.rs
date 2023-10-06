@@ -191,6 +191,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                         params.pk_indices,
                         stream.streaming_metrics.clone(),
                         params.env.config().developer.chunk_size,
+                        params.executor_id,
                     )
                     .boxed()
                 } else {
@@ -216,6 +217,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                                 params.pk_indices,
                                 stream.streaming_metrics.clone(),
                                 params.env.config().developer.chunk_size,
+                                params.executor_id,
                             )
                             .boxed()
                         }};

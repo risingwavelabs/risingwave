@@ -368,12 +368,12 @@ mod utils;
 /// | name        | SQL type           | owned type    | reference type     | primitive? |
 /// | ----------- | ------------------ | ------------- | ------------------ | ---------- |
 /// | boolean     | `boolean`          | `bool`        | `bool`             | yes        |
-/// | int16       | `smallint`         | `i16`         | `i16`              | yes        |
-/// | int32       | `integer`          | `i32`         | `i32`              | yes        |
-/// | int64       | `bigint`           | `i64`         | `i64`              | yes        |
+/// | int2        | `smallint`         | `i16`         | `i16`              | yes        |
+/// | int4        | `integer`          | `i32`         | `i32`              | yes        |
+/// | int8        | `bigint`           | `i64`         | `i64`              | yes        |
 /// | int256      | `rw_int256`        | `Int256`      | `Int256Ref<'_>`    | no         |
-/// | float32     | `real`             | `F32`         | `F32`              | yes        |
-/// | float64     | `double precision` | `F64`         | `F64`              | yes        |
+/// | float4      | `real`             | `F32`         | `F32`              | yes        |
+/// | float8      | `double precision` | `F64`         | `F64`              | yes        |
 /// | decimal     | `numeric`          | `Decimal`     | `Decimal`          | yes        |
 /// | serial      | `serial`           | `Serial`      | `Serial`           | yes        |
 /// | date        | `date`             | `Date`        | `Date`             | yes        |

@@ -20,7 +20,7 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_common::config::ServerConfig;
 use risingwave_common::heap_profiling::{
-    self, AUTO_DUMP_MID_NAME, COLLAPSED_SUFFIX, MANUALLY_DUMP_MID_NAME,
+    self, AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX,
 };
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
@@ -140,7 +140,7 @@ impl MonitorService for MonitorServiceImpl {
         }
 
         let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-        let file_name = format!("{}.{}\0", time_prefix, MANUALLY_DUMP_MID_NAME);
+        let file_name = format!("{}.{}\0", time_prefix, MANUALLY_DUMP_SUFFIX);
         let arg_dir = request.into_inner().get_dir().clone();
         let dir = PathBuf::from(if arg_dir.is_empty() {
             &self.server_config.heap_profiling.dir
@@ -154,18 +154,18 @@ impl MonitorService for MonitorServiceImpl {
             .to_str()
             .ok_or_else(|| Status::internal("The file dir is not a UTF-8 String"))?;
 
+        // `file_path_str` is leaked because `prof::dump::write` requires static lifetime
         let file_path_str = Box::leak(file_path.to_string().into_boxed_str());
-        let file_path_bytes = unsafe { file_path_str.as_bytes_mut() };
-        let file_path_ptr = file_path_bytes.as_mut_ptr();
+        let file_path_bytes = file_path_str.as_bytes();
         let response = if let Err(e) = tikv_jemalloc_ctl::prof::dump::write(
             CStr::from_bytes_with_nul(file_path_bytes).unwrap(),
         ) {
             tracing::warn!("Manually Jemalloc dump heap file failed! {:?}", e);
             Err(Status::internal(e.to_string()))
         } else {
+            tracing::info!("Manually Jemalloc dump heap file created: {}", &file_path);
             Ok(Response::new(HeapProfilingResponse {}))
         };
-        let _ = unsafe { Box::from_raw(file_path_ptr) };
         response
     }
 
@@ -182,7 +182,7 @@ impl MonitorService for MonitorServiceImpl {
             })
             .filter(|name| {
                 if let Ok(name) = name {
-                    name.contains(AUTO_DUMP_MID_NAME) && !name.ends_with(COLLAPSED_SUFFIX)
+                    name.contains(AUTO_DUMP_SUFFIX) && !name.ends_with(COLLAPSED_SUFFIX)
                 } else {
                     true
                 }
@@ -195,7 +195,7 @@ impl MonitorService for MonitorServiceImpl {
             })
             .filter(|name| {
                 if let Ok(name) = name {
-                    name.contains(MANUALLY_DUMP_MID_NAME) && !name.ends_with(COLLAPSED_SUFFIX)
+                    name.contains(MANUALLY_DUMP_SUFFIX) && !name.ends_with(COLLAPSED_SUFFIX)
                 } else {
                     true
                 }

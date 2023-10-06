@@ -22,7 +22,7 @@ insert into t values ('2023-05-06 16:56:01', 1);
 
 # FIXME(kwannoel): Seems like this is flaky
 skipif in-memory
-sleep 5s
+sleep 10s
 
 skipif in-memory
 query TI

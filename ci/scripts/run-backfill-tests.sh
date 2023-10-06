@@ -7,9 +7,8 @@
 # Hence keeping it in case we ever need to debug backfill again.
 
 # USAGE:
-# Start a rw cluster then run this script.
 # ```sh
-# ./risedev d
+# cargo make ci-start ci-backfill
 # ./ci/scripts/run-backfill-tests.sh
 # ```
 

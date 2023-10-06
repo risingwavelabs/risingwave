@@ -97,16 +97,9 @@ message DropSinkResponse {
   uint64 version = 2;
 }
 
-enum StreamJobExecutionMode {
-  STREAM_JOB_EXECUTION_MODE_UNSPECIFIED = 0;
-  BACKGROUND = 1;
-  FOREGROUND = 2;
-}
-
 message CreateMaterializedViewRequest {
   catalog.Table materialized_view = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
-  StreamJobExecutionMode stream_job_execution_mode = 3;
 }
 
 message CreateMaterializedViewResponse {

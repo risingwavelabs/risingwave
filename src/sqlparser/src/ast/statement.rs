@@ -497,6 +497,30 @@ impl Parser {
             Ok(parse_source_schema(self)?)
         }
     }
+
+    /// Parse `FORMAT ... ENCODE ... (...)` in `CREATE SINK`.
+    ///
+    /// TODO: After [`SourceSchemaV2`] and [`SinkSchema`] merge, call this in [`parse_source_schema`].
+    pub fn parse_schema(&mut self) -> Result<Option<SinkSchema>, ParserError> {
+        if !self.parse_keyword(Keyword::FORMAT) {
+            return Ok(None);
+        }
+
+        let id = self.parse_identifier()?;
+        let s = id.value.to_ascii_uppercase();
+        let format = Format::from_keyword(&s)?;
+        self.expect_keyword(Keyword::ENCODE)?;
+        let id = self.parse_identifier()?;
+        let s = id.value.to_ascii_uppercase();
+        let row_encode = Encode::from_keyword(&s)?;
+        let row_options = self.parse_options()?;
+
+        Ok(Some(SinkSchema {
+            format,
+            row_encode,
+            row_options,
+        }))
+    }
 }
 
 impl SourceSchemaV2 {
@@ -798,6 +822,27 @@ impl fmt::Display for CreateSink {
     }
 }
 
+/// Same as [`SourceSchemaV2`]. Will be merged in a dedicated rename PR.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct SinkSchema {
+    pub format: Format,
+    pub row_encode: Encode,
+    pub row_options: Vec<SqlOption>,
+}
+
+impl fmt::Display for SinkSchema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "FORMAT {} ENCODE {}", self.format, self.row_encode)?;
+
+        if !self.row_options.is_empty() {
+            write!(f, " ({})", display_comma_separated(&self.row_options))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 // sql_grammar!(CreateSinkStatement {
 //     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
 //     sink_name: Ident,
@@ -814,6 +859,7 @@ pub struct CreateSinkStatement {
     pub sink_from: CreateSink,
     pub columns: Vec<Ident>,
     pub emit_mode: Option<EmitMode>,
+    pub sink_schema: Option<SinkSchema>,
 }
 
 impl ParseTo for CreateSinkStatement {
@@ -842,6 +888,8 @@ impl ParseTo for CreateSinkStatement {
             ));
         }
 
+        let sink_schema = p.parse_schema()?;
+
         Ok(Self {
             if_not_exists,
             sink_name,
@@ -849,6 +897,7 @@ impl ParseTo for CreateSinkStatement {
             sink_from,
             columns,
             emit_mode,
+            sink_schema,
         })
     }
 }
@@ -863,6 +912,9 @@ impl fmt::Display for CreateSinkStatement {
             v.push(format!("EMIT {}", emit_mode));
         }
         impl_fmt_display!(with_properties, v, self);
+        if let Some(schema) = &self.sink_schema {
+            v.push(format!("{}", schema));
+        }
         v.iter().join(" ").fmt(f)
     }
 }
