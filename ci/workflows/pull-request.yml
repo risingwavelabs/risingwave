@@ -489,7 +489,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "fuzz test"
