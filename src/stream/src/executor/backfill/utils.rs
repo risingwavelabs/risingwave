@@ -533,7 +533,8 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
             {
                 continue;
             } else {
-                debug_assert!(old_state[0] == Some((*vnode).to_scalar().into()));
+                assert_eq!(old_state[0] == Some((*vnode).to_scalar().into()));
+                assert_eq!(old_state.len(), temporary_state.len());
                 // There's some progress, update the state.
                 table.write_record(Record::Update {
                     old_row: &old_state[..],
