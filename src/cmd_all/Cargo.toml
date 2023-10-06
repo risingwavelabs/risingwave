@@ -37,6 +37,9 @@ shell-words = "1.1.0"
 strum = "0.25"
 strum_macros = "0.25"
 tempfile = "3"
+tikv-jemallocator = { workspace = true, features = [
+    "unprefixed_malloc_on_supported_platforms",
+] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -62,11 +65,6 @@ vergen = { version = "8", default-features = false, features = [
 
 [target.'cfg(enable_task_local_alloc)'.dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
-
-[target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { workspace = true, features = [
-    "unprefixed_malloc_on_supported_platforms",
-] }
 
 [[bin]]
 name = "risingwave"

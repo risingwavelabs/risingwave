@@ -131,7 +131,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 Ok(Box::new(
                     SinkExecutor::new(
                         input_executor,
-                        stream.streaming_metrics.clone(),
                         SinkWriterParam {
                             connector_params: params.env.connector_params(),
                             executor_id: params.executor_id,
@@ -160,7 +159,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     Ok(Box::new(
                         SinkExecutor::new(
                             input_executor,
-                            stream.streaming_metrics.clone(),
                             SinkWriterParam {
                                 connector_params: params.env.connector_params(),
                                 executor_id: params.executor_id,

@@ -73,17 +73,10 @@ pub fn build_memory_control_policy(
 ) -> MemoryControlRef {
     use self::policy::JemallocMemoryControl;
 
-    if cfg!(target_os = "linux") {
-        Box::new(JemallocMemoryControl::new(
-            total_memory_bytes,
-            heap_profiling_config,
-        ))
-    } else {
-        // We disable memory control on operating systems other than Linux now because jemalloc
-        // stats do not work well.
-        tracing::warn!("memory control is only enabled on Linux now");
-        Box::new(DummyPolicy)
-    }
+    Box::new(JemallocMemoryControl::new(
+        total_memory_bytes,
+        heap_profiling_config,
+    ))
 }
 
 /// `DummyPolicy` is used for operarting systems other than Linux. It does nothing as memory control
