@@ -33,7 +33,7 @@ pub struct StreamingMetrics {
     // Executor metrics (disabled by default)
     pub executor_row_count: GenericCounterVec<AtomicU64>,
 
-    // Actor metrics
+    // Streaming actor metrics from tokio (disabled by default)
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
     pub actor_output_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
     pub actor_input_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
@@ -48,6 +48,7 @@ pub struct StreamingMetrics {
     pub actor_idle_duration: GenericGaugeVec<AtomicF64>,
     pub actor_idle_cnt: GenericGaugeVec<AtomicI64>,
 
+    // Streaming actor
     pub actor_memory_usage: GenericGaugeVec<AtomicI64>,
     pub actor_in_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
@@ -97,7 +98,7 @@ pub struct StreamingMetrics {
     pub group_top_n_appendonly_total_query_cache_count: GenericCounterVec<AtomicU64>,
     pub group_top_n_appendonly_cached_entry_count: GenericGaugeVec<AtomicI64>,
 
-    // look up
+    // Lookup executor
     pub lookup_cache_miss_count: GenericCounterVec<AtomicU64>,
     pub lookup_total_query_cache_count: GenericCounterVec<AtomicU64>,
     pub lookup_cached_entry_count: GenericGaugeVec<AtomicI64>,
