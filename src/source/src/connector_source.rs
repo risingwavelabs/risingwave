@@ -114,7 +114,7 @@ impl ConnectorSource {
         &self,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-        split: Receiver<FsSplit>,
+        split: FsSplit,
     ) -> Result<BoxSourceWithStateStream> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;

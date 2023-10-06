@@ -119,7 +119,10 @@ impl<S: StateStore> FsListExecutor<S> {
                 )
             })
             .collect::<Vec<_>>();
-        StreamChunk::from_rows(&rows, &[DataType::Varchar])
+        StreamChunk::from_rows(
+            &rows,
+            &[DataType::Varchar, DataType::Timestamp, DataType::Int64],
+        )
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]

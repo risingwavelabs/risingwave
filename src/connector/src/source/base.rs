@@ -567,7 +567,7 @@ pub trait FsFileReader: Sized + Send {
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 
-    fn build_read_stream(&mut self, split_channel: Receiver<FsSplit>) -> BoxSourceWithStateStream;
+    fn build_read_stream(&mut self, split: FsSplit) -> BoxSourceWithStateStream;
 }
 
 #[cfg(test)]
