@@ -163,6 +163,7 @@ impl MonitorService for MonitorServiceImpl {
             tracing::warn!("Manually Jemalloc dump heap file failed! {:?}", e);
             Err(Status::internal(e.to_string()))
         } else {
+            tracing::info!("Manually Jemalloc dump heap file created: {}", &file_path);
             Ok(Response::new(HeapProfilingResponse {}))
         };
         response

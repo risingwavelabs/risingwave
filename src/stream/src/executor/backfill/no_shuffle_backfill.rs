@@ -101,6 +101,41 @@ pub struct BackfillExecutor<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
 
     chunk_size: usize,
+
+    // By default we read every barrier.
+    // With this we read every N barriers.
+    snapshot_read_interval: usize,
+}
+
+struct SnapshotControl {
+    snapshot_read_interval: usize,
+    intervals: usize,
+}
+
+impl SnapshotControl {
+    fn new(mut snapshot_read_interval: usize) -> Self {
+        if snapshot_read_interval == 0 {
+            snapshot_read_interval = 1;
+        }
+        Self {
+            snapshot_read_interval,
+            intervals: 0,
+        }
+    }
+
+    fn try_read(&mut self) -> bool {
+        let should_read = self.intervals == 0;
+        if should_read {
+            tracing::trace!("backfill should snapshot_read, interval={}", self.intervals);
+        } else {
+            tracing::trace!(
+                "backfill should not snapshot_read, interval={}",
+                self.intervals
+            );
+        }
+        self.intervals = (self.intervals + 1) % self.snapshot_read_interval;
+        should_read
+    }
 }
 
 impl<S> BackfillExecutor<S>
@@ -119,6 +154,7 @@ where
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         executor_id: u64,
+        snapshot_read_interval: usize,
     ) -> Self {
         Self {
             info: ExecutorInfo {
@@ -134,12 +170,15 @@ where
             progress,
             metrics,
             chunk_size,
+            snapshot_read_interval,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
+        let mut snapshot_control = SnapshotControl::new(self.snapshot_read_interval);
+
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
 
         let state_len = pk_in_output_indices.len() + METADATA_STATE_LEN;
@@ -289,8 +328,82 @@ where
                                         // to flush remaining chunks from the chunk builder
                                         // on barrier.
                                         // Hence we break here and process it after this block.
-                                        pending_barrier = Some(barrier);
-                                        break;
+                                        if snapshot_control.try_read() {
+                                            pending_barrier = Some(barrier);
+                                            break;
+                                        } else {
+                                            // Process barrier:
+                                            // - consume upstream buffer chunk
+                                            // - switch snapshot
+
+                                            // Consume upstream buffer chunk
+                                            // If no current_pos, means we did not process any snapshot
+                                            // yet. In that case
+                                            // we can just ignore the upstream buffer chunk, but still need to clean it.
+                                            if let Some(current_pos) = &current_pos {
+                                                for chunk in upstream_chunk_buffer.drain(..) {
+                                                    cur_barrier_upstream_processed_rows +=
+                                                        chunk.cardinality() as u64;
+                                                    yield Message::Chunk(mapping_chunk(
+                                                        mark_chunk(
+                                                            chunk,
+                                                            current_pos,
+                                                            &pk_in_output_indices,
+                                                            pk_order,
+                                                        ),
+                                                        &self.output_indices,
+                                                    ));
+                                                }
+                                            } else {
+                                                upstream_chunk_buffer.clear()
+                                            }
+
+                                            self.metrics
+                                                .backfill_snapshot_read_row_count
+                                                .with_label_values(&[
+                                                    upstream_table_id.to_string().as_str(),
+                                                    self.actor_id.to_string().as_str(),
+                                                ])
+                                                .inc_by(cur_barrier_snapshot_processed_rows);
+
+                                            self.metrics
+                                                .backfill_upstream_output_row_count
+                                                .with_label_values(&[
+                                                    upstream_table_id.to_string().as_str(),
+                                                    self.actor_id.to_string().as_str(),
+                                                ])
+                                                .inc_by(cur_barrier_upstream_processed_rows);
+
+                                            // Update snapshot read epoch.
+                                            snapshot_read_epoch = barrier.epoch.prev;
+
+                                            self.progress.update(
+                                                barrier.epoch.curr,
+                                                snapshot_read_epoch,
+                                                total_snapshot_processed_rows,
+                                            );
+
+                                            // Persist state on barrier
+                                            Self::persist_state(
+                                                barrier.epoch,
+                                                &mut self.state_table,
+                                                false,
+                                                &current_pos,
+                                                total_snapshot_processed_rows,
+                                                &mut old_state,
+                                                &mut current_state,
+                                            )
+                                            .await?;
+
+                                            tracing::trace!(
+                                                epoch = ?barrier.epoch,
+                                                ?current_pos,
+                                                total_snapshot_processed_rows,
+                                                "Backfill state persisted"
+                                            );
+
+                                            yield Message::Barrier(barrier);
+                                        }
                                     }
                                     Message::Chunk(chunk) => {
                                         // Buffer the upstream chunk.
@@ -584,6 +697,7 @@ where
         ordered: bool,
         builder: &'a mut DataChunkBuilder,
     ) {
+        tracing::trace!("new snapshot_read, epoch={}", epoch);
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
         let range_bounds = match range_bounds {
             None => {

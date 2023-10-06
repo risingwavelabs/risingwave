@@ -159,6 +159,18 @@ profile:
       - use: compactor
         user-managed: true
 
+  standalone-minio-etcd-compactor:
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+        user-managed: true
+      - use: compute-node
+        user-managed: true
+      - use: frontend
+        user-managed: true
+      - use: compactor
+
   hdfs:
     steps:
       # - use: etcd

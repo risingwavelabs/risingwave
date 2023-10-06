@@ -115,6 +115,7 @@ arrow-buffer = "46"
 arrow-flight = "46"
 arrow-select = "46"
 arrow-ord = "46"
+tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",
   "stats",

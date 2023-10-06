@@ -30,7 +30,10 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 pub struct StreamingMetrics {
     pub level: MetricLevel,
 
+    // Executor metrics (disabled by default)
     pub executor_row_count: GenericCounterVec<AtomicU64>,
+
+    // Actor metrics
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
     pub actor_output_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
     pub actor_input_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
@@ -48,9 +51,15 @@ pub struct StreamingMetrics {
     pub actor_in_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
+
+    // Source
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
     pub source_split_change_count: GenericCounterVec<AtomicU64>,
+
+    // Sink & materialized view
+    pub sink_input_row_count: GenericCounterVec<AtomicU64>,
+    pub mview_input_row_count: GenericCounterVec<AtomicU64>,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
@@ -159,7 +168,7 @@ impl StreamingMetrics {
         let executor_row_count = register_int_counter_vec_with_registry!(
             "stream_executor_row_count",
             "Total number of rows that have been output from each executor",
-            &["actor_id", "executor_identity"],
+            &["actor_id", "fragment_id", "executor_identity"],
             registry
         )
         .unwrap();
@@ -184,6 +193,22 @@ impl StreamingMetrics {
             "stream_source_split_change_event_count",
             "Total number of split change events that have been operated by source",
             &["source_id", "source_name", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let sink_input_row_count = register_int_counter_vec_with_registry!(
+            "stream_sink_input_row_count",
+            "Total number of rows streamed into sink executors",
+            &["sink_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let mview_input_row_count = register_int_counter_vec_with_registry!(
+            "stream_mview_input_row_count",
+            "Total number of rows streamed into materialize executors",
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -825,6 +850,8 @@ impl StreamingMetrics {
             source_output_row_count,
             source_row_per_barrier,
             source_split_change_count,
+            sink_input_row_count,
+            mview_input_row_count,
             exchange_frag_recv_size,
             join_lookup_miss_count,
             join_total_lookup_count,
