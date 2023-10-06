@@ -123,10 +123,10 @@ impl SnapshotControl {
     fn try_read(&mut self) -> bool {
         let should_read = self.intervals == 0;
         if should_read {
-            tracing::trace!("backfill should snapshot read, interval={}", self.intervals);
+            tracing::trace!("backfill should snapshot_read, interval={}", self.intervals);
         } else {
             tracing::trace!(
-                "backfill should not snapshot read, interval={}",
+                "backfill should not snapshot_read, interval={}",
                 self.intervals
             );
         }
@@ -694,6 +694,7 @@ where
         ordered: bool,
         builder: &'a mut DataChunkBuilder,
     ) {
+        tracing::trace!("new snapshot_read, epoch={}", epoch);
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
         let range_bounds = match range_bounds {
             None => {
