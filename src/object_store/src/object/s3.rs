@@ -617,11 +617,11 @@ impl S3ObjectStore {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
         let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
-        let endpoint_prefix = if rest.contains("https") {
-            rest = &rest[8..];
+        let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
+            rest = rest_stripped;
             "https://"
-        } else if rest.contains("http") {
-            rest = &rest[7..];
+        } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
+            rest = rest_stripped;
             "http://"
         } else {
             "http://"
