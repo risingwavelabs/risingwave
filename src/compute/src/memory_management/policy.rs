@@ -20,7 +20,7 @@ use std::sync::Arc;
 use chrono;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::config::HeapProfilingConfig;
-use risingwave_common::heap_profiling::AUTO_DUMP_MID_NAME;
+use risingwave_common::heap_profiling::AUTO_DUMP_SUFFIX;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::task::LocalStreamManager;
 use tikv_jemalloc_ctl::{
@@ -43,7 +43,6 @@ pub struct JemallocMemoryControl {
     jemalloc_active_mib: jemalloc_stats::active_mib,
     jemalloc_dump_mib: jemalloc_prof::dump_mib,
 
-    dump_seq: u64,
     heap_profiling_config: HeapProfilingConfig,
 }
 
@@ -73,7 +72,6 @@ impl JemallocMemoryControl {
             jemalloc_allocated_mib,
             jemalloc_active_mib,
             jemalloc_dump_mib,
-            dump_seq: 0,
             heap_profiling_config,
         }
     }
@@ -114,7 +112,7 @@ impl JemallocMemoryControl {
             }
 
             let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-            let file_name = format!("{}.{}.{}\0", time_prefix, AUTO_DUMP_MID_NAME, self.dump_seq,);
+            let file_name = format!("{}.{}\0", time_prefix, AUTO_DUMP_SUFFIX);
 
             let file_path = Path::new(&self.heap_profiling_config.dir)
                 .join(Path::new(&file_name))
@@ -122,9 +120,9 @@ impl JemallocMemoryControl {
                 .unwrap()
                 .to_string();
 
+            // `file_path_str` is leaked because `jemalloc_dump_mib.write` requires static lifetime
             let file_path_str = Box::leak(file_path.into_boxed_str());
-            let file_path_bytes = unsafe { file_path_str.as_bytes_mut() };
-            let file_path_ptr = file_path_bytes.as_mut_ptr();
+            let file_path_bytes = file_path_str.as_bytes();
             if let Err(e) = self
                 .jemalloc_dump_mib
                 .write(CStr::from_bytes_with_nul(file_path_bytes).unwrap())
@@ -133,7 +131,6 @@ impl JemallocMemoryControl {
             } else {
                 tracing::info!("Successfully dumped heap profile to {}", file_name);
             }
-            let _ = unsafe { Box::from_raw(file_path_ptr) };
         }
     }
 }

@@ -61,6 +61,10 @@ impl WithOptions {
         }
     }
 
+    pub fn from_inner(inner: BTreeMap<String, String>) -> Self {
+        Self { inner }
+    }
+
     /// Get the reference of the inner map.
     pub fn inner(&self) -> &BTreeMap<String, String> {
         &self.inner

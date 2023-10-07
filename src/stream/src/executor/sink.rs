@@ -285,6 +285,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         columns: Vec<ColumnCatalog>,
         sink_writer_param: SinkWriterParam,
     ) -> StreamExecutorResult<Message> {
+        let sink_metrics = sink_writer_param.sink_metrics.clone();
         let log_sinker = sink.new_log_sinker(sink_writer_param).await?;
 
         let visible_columns = columns
@@ -294,6 +295,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .collect_vec();
 
         let log_reader = log_reader.transform_chunk(move |chunk| {
+            sink_metrics
+                .connector_sink_rows_received
+                .inc_by(chunk.cardinality() as u64);
             if visible_columns.len() != columns.len() {
                 // Do projection here because we may have columns that aren't visible to
                 // the downstream.
@@ -404,6 +408,7 @@ mod test {
                 .collect(),
             downstream_pk: pk.clone(),
             sink_type: SinkType::ForceAppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -411,7 +416,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
-            SinkWriterParam::default(),
+            SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
             ActorContext::create(0),
@@ -525,6 +530,7 @@ mod test {
                 .collect(),
             downstream_pk: vec![0],
             sink_type: SinkType::Upsert,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -532,7 +538,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
-            SinkWriterParam::default(),
+            SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
             ActorContext::create(0),
@@ -643,6 +649,7 @@ mod test {
                 .collect(),
             downstream_pk: pk.clone(),
             sink_type: SinkType::ForceAppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -650,7 +657,7 @@ mod test {
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
-            SinkWriterParam::default(),
+            SinkWriterParam::for_test(),
             sink_param,
             columns,
             ActorContext::create(0),

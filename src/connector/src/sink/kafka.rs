@@ -33,10 +33,8 @@ use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
 use tonic::codegen::futures_core::TryFuture;
 
-use super::{
-    Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
-};
+use super::catalog::{SinkFormat, SinkFormatDesc};
+use super::{Sink, SinkError, SinkParam};
 use crate::common::KafkaCommon;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::{
@@ -47,15 +45,10 @@ use crate::sink::{DummySinkCommitCoordinator, LogSinker, Result, SinkWriterParam
 use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkProducerContext};
 use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
-    deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
-    dispatch_sink_formatter_impl,
+    deserialize_duration_from_string, deserialize_u32_from_string, dispatch_sink_formatter_impl,
 };
 
 pub const KAFKA_SINK: &str = "kafka";
-
-const fn _default_timeout() -> Duration {
-    Duration::from_secs(5)
-}
 
 const fn _default_max_retries() -> u32 {
     3
@@ -65,12 +58,12 @@ const fn _default_retry_backoff() -> Duration {
     Duration::from_millis(100)
 }
 
-const fn _default_use_transaction() -> bool {
-    false
+const fn _default_message_timeout_ms() -> usize {
+    5000
 }
 
-const fn _default_force_append_only() -> bool {
-    false
+const fn _default_max_in_flight_requests_per_connection() -> usize {
+    5
 }
 
 #[derive(Debug, Clone, PartialEq, Display, Serialize, Deserialize, EnumString)]
@@ -83,6 +76,8 @@ enum CompressionCodec {
     Zstd,
 }
 
+/// See <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
+/// for the detailed meaning of these librdkafka producer properties
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RdKafkaPropertiesProducer {
@@ -143,6 +138,24 @@ pub struct RdKafkaPropertiesProducer {
     #[serde(rename = "properties.compression.codec")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     compression_codec: Option<CompressionCodec>,
+
+    /// Produce message timeout.
+    /// This value is used to limits the time a produced message waits for
+    /// successful delivery (including retries).
+    #[serde(
+        rename = "properties.message.timeout.ms",
+        default = "_default_message_timeout_ms"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    message_timeout_ms: usize,
+
+    /// The maximum number of unacknowledged requests the client will send on a single connection before blocking.
+    #[serde(
+        rename = "properties.max.in.flight.requests.per.connection",
+        default = "_default_max_in_flight_requests_per_connection"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    max_in_flight_requests_per_connection: usize,
 }
 
 impl RdKafkaPropertiesProducer {
@@ -174,6 +187,11 @@ impl RdKafkaPropertiesProducer {
         if let Some(v) = &self.compression_codec {
             c.set("compression.codec", v.to_string());
         }
+        c.set("message.timeout.ms", self.message_timeout_ms.to_string());
+        c.set(
+            "max.in.flight.requests.per.connection",
+            self.max_in_flight_requests_per_connection.to_string(),
+        );
     }
 }
 
@@ -187,21 +205,6 @@ pub struct KafkaConfig {
     // pub connection: String,
     #[serde(flatten)]
     pub common: KafkaCommon,
-
-    pub r#type: String, // accept "append-only", "debezium", or "upsert"
-
-    #[serde(
-        default = "_default_force_append_only",
-        deserialize_with = "deserialize_bool_from_string"
-    )]
-    pub force_append_only: bool,
-
-    #[serde(
-        rename = "properties.timeout",
-        default = "_default_timeout",
-        deserialize_with = "deserialize_duration_from_string"
-    )]
-    pub timeout: Duration,
 
     #[serde(
         rename = "properties.retry.max",
@@ -217,12 +220,6 @@ pub struct KafkaConfig {
     )]
     pub retry_interval: Duration,
 
-    #[serde(
-        default = "_default_use_transaction",
-        deserialize_with = "deserialize_bool_from_string"
-    )]
-    pub use_transaction: bool,
-
     /// We have parsed the primary key for an upsert kafka sink into a `usize` vector representing
     /// the indices of the pk columns in the frontend, so we simply store the primary key here
     /// as a string.
@@ -237,18 +234,6 @@ impl KafkaConfig {
         let config = serde_json::from_value::<KafkaConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
-        if config.r#type != SINK_TYPE_APPEND_ONLY
-            && config.r#type != SINK_TYPE_DEBEZIUM
-            && config.r#type != SINK_TYPE_UPSERT
-        {
-            return Err(SinkError::Config(anyhow!(
-                "`{}` must be {}, {}, or {}",
-                SINK_TYPE_OPTION,
-                SINK_TYPE_APPEND_ONLY,
-                SINK_TYPE_DEBEZIUM,
-                SINK_TYPE_UPSERT
-            )));
-        }
         Ok(config)
     }
 
@@ -280,7 +265,7 @@ pub struct KafkaSink {
     pub config: KafkaConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
-    is_append_only: bool,
+    format_desc: SinkFormatDesc,
     db_name: String,
     sink_from_name: String,
 }
@@ -295,7 +280,9 @@ impl TryFrom<SinkParam> for KafkaSink {
             config,
             schema,
             pk_indices: param.downstream_pk,
-            is_append_only: param.sink_type.is_append_only(),
+            format_desc: param
+                .format_desc
+                .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,
         })
@@ -310,10 +297,9 @@ impl Sink for KafkaSink {
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let formatter = SinkFormatterImpl::new(
-            &self.config.r#type,
+            &self.format_desc,
             self.schema.clone(),
             self.pk_indices.clone(),
-            self.is_append_only,
             self.db_name.clone(),
             self.sink_from_name.clone(),
         )?;
@@ -322,10 +308,10 @@ impl Sink for KafkaSink {
 
     async fn validate(&self) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.
-        if !self.is_append_only && self.pk_indices.is_empty() {
+        if self.format_desc.format != SinkFormat::AppendOnly && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "primary key not defined for {} kafka sink (please define in `primary_key` field)",
-                self.config.r#type
+                "primary key not defined for {:?} kafka sink (please define in `primary_key` field)",
+                self.format_desc.format
             )));
         }
 
@@ -372,7 +358,7 @@ pub struct KafkaLogSinker {
 }
 
 impl KafkaLogSinker {
-    async fn new(mut config: KafkaConfig, formatter: SinkFormatterImpl) -> Result<Self> {
+    async fn new(config: KafkaConfig, formatter: SinkFormatterImpl) -> Result<Self> {
         let inner: FutureProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
 
@@ -381,10 +367,7 @@ impl KafkaLogSinker {
             config.set_client(&mut c);
 
             // ClientConfig configuration
-            c.set("bootstrap.servers", &config.common.brokers)
-                .set("message.timeout.ms", "5000");
-            // Note that we will not use transaction during sinking, thus set it to false
-            config.use_transaction = false;
+            c.set("bootstrap.servers", &config.common.brokers);
 
             // Create the producer context, will be used to create the producer
             let producer_ctx = PrivateLinkProducerContext::new(
@@ -609,6 +592,8 @@ mod test {
             "properties.batch.num.messages".to_string() => "114514".to_string(),
             "properties.batch.size".to_string() => "114514".to_string(),
             "properties.compression.codec".to_string() => "zstd".to_string(),
+            "properties.message.timeout.ms".to_string() => "114514".to_string(),
+            "properties.max.in.flight.requests.per.connection".to_string() => "114514".to_string(),
         };
         let c = KafkaConfig::from_hashmap(props).unwrap();
         assert_eq!(
@@ -618,6 +603,11 @@ mod test {
         assert_eq!(
             c.rdkafka_properties.compression_codec,
             Some(CompressionCodec::Zstd)
+        );
+        assert_eq!(c.rdkafka_properties.message_timeout_ms, 114514);
+        assert_eq!(
+            c.rdkafka_properties.max_in_flight_requests_per_connection,
+            114514
         );
 
         let props: HashMap<String, String> = hashmap! {
@@ -660,22 +650,16 @@ mod test {
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "append-only".to_string(),
             "force_append_only".to_string() => "true".to_string(),
-            "use_transaction".to_string() => "False".to_string(),
             "properties.security.protocol".to_string() => "SASL".to_string(),
             "properties.sasl.mechanism".to_string() => "SASL".to_string(),
             "properties.sasl.username".to_string() => "test".to_string(),
             "properties.sasl.password".to_string() => "test".to_string(),
-            "properties.timeout".to_string() => "10s".to_string(),
             "properties.retry.max".to_string() => "20".to_string(),
             "properties.retry.interval".to_string() => "500ms".to_string(),
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
         assert_eq!(config.common.brokers, "localhost:9092");
         assert_eq!(config.common.topic, "test");
-        assert_eq!(config.r#type, "append-only");
-        assert!(config.force_append_only);
-        assert!(!config.use_transaction);
-        assert_eq!(config.timeout, Duration::from_secs(10));
         assert_eq!(config.max_retry_num, 20);
         assert_eq!(config.retry_interval, Duration::from_millis(500));
 
@@ -687,9 +671,6 @@ mod test {
             "type".to_string() => "upsert".to_string(),
         };
         let config = KafkaConfig::from_hashmap(properties).unwrap();
-        assert!(!config.force_append_only);
-        assert!(!config.use_transaction);
-        assert_eq!(config.timeout, Duration::from_secs(5));
         assert_eq!(config.max_retry_num, 3);
         assert_eq!(config.retry_interval, Duration::from_millis(100));
 
@@ -700,16 +681,6 @@ mod test {
             "topic".to_string() => "test".to_string(),
             "type".to_string() => "upsert".to_string(),
             "properties.retry.max".to_string() => "-20".to_string(),  // error!
-        };
-        assert!(KafkaConfig::from_hashmap(properties).is_err());
-
-        // Invalid bool input.
-        let properties: HashMap<String, String> = hashmap! {
-            "connector".to_string() => "kafka".to_string(),
-            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
-            "topic".to_string() => "test".to_string(),
-            "type".to_string() => "upsert".to_string(),
-            "force_append_only".to_string() => "yes".to_string(),  // error!
         };
         assert!(KafkaConfig::from_hashmap(properties).is_err());
 
