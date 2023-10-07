@@ -22,10 +22,10 @@ use bytes::{Buf, BufMut, Bytes};
 use foyer::common::code::{Key, Value};
 use foyer::storage::admission::rated_random::RatedRandomAdmissionPolicy;
 use foyer::storage::admission::AdmissionPolicy;
-use foyer::storage::event::EventListener;
 pub use foyer::storage::metrics::set_metrics_registry as set_foyer_metrics_registry;
-use foyer::storage::store::FetchValueFuture;
-use foyer::storage::LfuFsStoreConfig;
+use foyer::storage::reinsertion::ReinsertionPolicy;
+use foyer::storage::storage::{FetchValueFuture, ForceStorageExt, Storage, StorageExt};
+use foyer::storage::store::LfuFsStoreConfig;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 
@@ -50,7 +50,7 @@ pub type Result<T> = core::result::Result<T, FileCacheError>;
 pub type EvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
 pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 
-pub type FoyerStore<K, V> = foyer::storage::LfuFsStore<K, V>;
+pub type FoyerStore<K, V> = foyer::storage::lazy::LazyStore<K, V>;
 pub type FoyerStoreResult<T> = foyer::storage::error::Result<T>;
 pub type FoyerStoreError = foyer::storage::error::Error;
 
@@ -74,8 +74,11 @@ where
     pub lfu_window_to_cache_size_ratio: usize,
     pub lfu_tiny_lru_capacity_ratio: f64,
     pub rated_random_rate: usize,
-    pub event_listener: Vec<Arc<dyn EventListener<K = K, V = V>>>,
     pub enable_filter: bool,
+    pub allocator_bits: usize,
+    pub allocation_timeout: Duration,
+    pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
+    pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
 }
 
 pub struct FoyerRuntimeConfig<K, V>
@@ -155,7 +158,7 @@ where
     None,
     FoyerRuntime {
         runtime: Arc<BackgroundShutdownRuntime>,
-        store: Arc<FoyerStore<K, V>>,
+        store: FoyerStore<K, V>,
         enable_filter: bool,
     },
 }
@@ -169,7 +172,7 @@ where
         Self::None
     }
 
-    pub async fn foyer(config: FoyerRuntimeConfig<K, V>) -> Result<Self> {
+    pub fn foyer(config: FoyerRuntimeConfig<K, V>) -> Result<Self> {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         if let Some(runtime_worker_threads) = config.runtime_worker_threads {
             builder.worker_threads(runtime_worker_threads);
@@ -182,54 +185,51 @@ where
 
         let enable_filter = config.foyer_store_config.enable_filter;
 
-        let store = runtime
-            .spawn(async move {
-                let foyer_store_config = config.foyer_store_config;
+        let foyer_store_config = config.foyer_store_config;
 
-                let file_capacity = foyer_store_config.file_capacity;
-                let capacity = foyer_store_config.capacity;
-                let capacity = capacity - (capacity % file_capacity);
+        let file_capacity = foyer_store_config.file_capacity;
+        let capacity = foyer_store_config.capacity;
+        let capacity = capacity - (capacity % file_capacity);
 
-                let mut admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>> = vec![];
-                if foyer_store_config.rated_random_rate > 0 {
-                    let rr = RatedRandomAdmissionPolicy::new(
-                        foyer_store_config.rated_random_rate,
-                        Duration::from_millis(100),
-                    );
-                    admissions.push(Arc::new(rr));
-                }
+        let mut admissions = foyer_store_config.admissions;
+        if foyer_store_config.rated_random_rate > 0 {
+            let rr = RatedRandomAdmissionPolicy::new(
+                foyer_store_config.rated_random_rate,
+                Duration::from_millis(100),
+            );
+            admissions.push(Arc::new(rr));
+        }
 
-                let c = LfuFsStoreConfig {
-                    name: foyer_store_config.name,
-                    eviction_config: EvictionConfig {
-                        window_to_cache_size_ratio: foyer_store_config
-                            .lfu_window_to_cache_size_ratio,
-                        tiny_lru_capacity_ratio: foyer_store_config.lfu_tiny_lru_capacity_ratio,
-                    },
-                    device_config: DeviceConfig {
-                        dir: foyer_store_config.dir.clone(),
-                        capacity,
-                        file_capacity,
-                        align: foyer_store_config.device_align,
-                        io_size: foyer_store_config.device_io_size,
-                    },
-                    admissions,
-                    reinsertions: vec![],
-                    buffer_pool_size: foyer_store_config.buffer_pool_size,
-                    flushers: foyer_store_config.flushers,
-                    flush_rate_limit: foyer_store_config.flush_rate_limit,
-                    reclaimers: foyer_store_config.reclaimers,
-                    reclaim_rate_limit: foyer_store_config.reclaim_rate_limit,
-                    recover_concurrency: foyer_store_config.recover_concurrency,
-                    event_listeners: foyer_store_config.event_listener,
-                    clean_region_threshold: foyer_store_config.reclaimers
-                        + foyer_store_config.reclaimers / 2,
-                };
+        let reinsertions = foyer_store_config.reinsertions;
 
-                FoyerStore::open(c).await.map_err(FileCacheError::foyer)
-            })
-            .await
-            .unwrap()?;
+        let c = LfuFsStoreConfig {
+            name: foyer_store_config.name,
+            eviction_config: EvictionConfig {
+                window_to_cache_size_ratio: foyer_store_config.lfu_window_to_cache_size_ratio,
+                tiny_lru_capacity_ratio: foyer_store_config.lfu_tiny_lru_capacity_ratio,
+            },
+            device_config: DeviceConfig {
+                dir: foyer_store_config.dir.clone(),
+                capacity,
+                file_capacity,
+                align: foyer_store_config.device_align,
+                io_size: foyer_store_config.device_io_size,
+            },
+            admissions,
+            reinsertions,
+            buffer_pool_size: foyer_store_config.buffer_pool_size,
+            flushers: foyer_store_config.flushers,
+            flush_rate_limit: foyer_store_config.flush_rate_limit,
+            reclaimers: foyer_store_config.reclaimers,
+            reclaim_rate_limit: foyer_store_config.reclaim_rate_limit,
+            recover_concurrency: foyer_store_config.recover_concurrency,
+            clean_region_threshold: foyer_store_config.reclaimers
+                + foyer_store_config.reclaimers / 2,
+            allocator_bits: foyer_store_config.allocator_bits,
+            allocation_timeout: foyer_store_config.allocation_timeout,
+        };
+
+        let store = FoyerStore::lazy(c.into());
 
         Ok(Self::FoyerRuntime {
             runtime: Arc::new(runtime.into()),
@@ -314,56 +314,20 @@ where
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn remove(&self, key: &K) -> Result<bool> {
+    pub fn remove(&self, key: &K) -> Result<bool> {
         match self {
             FileCache::None => Ok(false),
-            FileCache::FoyerRuntime { runtime, store, .. } => {
-                let store = store.clone();
-                let key = *key;
-                runtime
-                    .spawn(async move { store.remove(&key).await })
-                    .await
-                    .unwrap()
-                    .map_err(FileCacheError::foyer)
+            FileCache::FoyerRuntime { store, .. } => {
+                store.remove(key).map_err(FileCacheError::foyer)
             }
         }
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn remove_without_wait(&self, key: &K) {
-        match self {
-            FileCache::None => {}
-            FileCache::FoyerRuntime { runtime, store, .. } => {
-                let store = store.clone();
-                let key = *key;
-                runtime.spawn(async move { store.remove(&key).await });
-            }
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub async fn clear(&self) -> Result<()> {
+    pub fn clear(&self) -> Result<()> {
         match self {
             FileCache::None => Ok(()),
-            FileCache::FoyerRuntime { runtime, store, .. } => {
-                let store = store.clone();
-                runtime
-                    .spawn(async move { store.clear().await })
-                    .await
-                    .unwrap()
-                    .map_err(FileCacheError::foyer)
-            }
-        }
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub fn clear_without_wait(&self) {
-        match self {
-            FileCache::None => {}
-            FileCache::FoyerRuntime { runtime, store, .. } => {
-                let store = store.clone();
-                runtime.spawn(async move { store.clear().await });
-            }
+            FileCache::FoyerRuntime { store, .. } => store.clear().map_err(FileCacheError::foyer),
         }
     }
 

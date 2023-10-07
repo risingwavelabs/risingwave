@@ -125,6 +125,8 @@ lfu_tiny_lru_capacity_ratio = 0.01
 rated_random_rate_mb = 0
 flush_rate_limit_mb = 0
 reclaim_rate_limit_mb = 0
+allocation_bits = 4
+allocation_timeout_ms = 10
 
 [storage.meta_file_cache]
 dir = ""
@@ -140,6 +142,8 @@ lfu_tiny_lru_capacity_ratio = 0.01
 rated_random_rate_mb = 0
 flush_rate_limit_mb = 0
 reclaim_rate_limit_mb = 0
+allocation_bits = 4
+allocation_timeout_ms = 10
 
 [storage.cache_refill]
 data_refill_levels = []

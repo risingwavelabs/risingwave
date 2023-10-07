@@ -15,6 +15,7 @@
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -546,16 +547,19 @@ impl StateStoreImpl {
                 flush_rate_limit: opts.data_file_cache_flush_rate_limit_mb * MB,
                 reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
-                event_listener: vec![],
                 enable_filter: !opts.cache_refill_data_refill_levels.is_empty(),
+                allocator_bits: opts.data_file_cache_allocation_bits,
+                allocation_timeout: Duration::from_millis(
+                    opts.data_file_cache_allocation_timeout_ms as u64,
+                ),
+                admissions: vec![],
+                reinsertions: vec![],
             };
             let config = FoyerRuntimeConfig {
                 foyer_store_config,
                 runtime_worker_threads: None,
             };
-            FileCache::foyer(config)
-                .await
-                .map_err(HummockError::file_cache)?
+            FileCache::foyer(config).map_err(HummockError::file_cache)?
         };
 
         let meta_file_cache = if opts.meta_file_cache_dir.is_empty() {
@@ -579,16 +583,19 @@ impl StateStoreImpl {
                 flush_rate_limit: opts.meta_file_cache_flush_rate_limit_mb * MB,
                 reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
-                event_listener: vec![],
                 enable_filter: false,
+                allocator_bits: opts.meta_file_cache_allocation_bits,
+                allocation_timeout: Duration::from_millis(
+                    opts.meta_file_cache_allocation_timeout_ms as u64,
+                ),
+                admissions: vec![],
+                reinsertions: vec![],
             };
             let config = FoyerRuntimeConfig {
                 foyer_store_config,
                 runtime_worker_threads: None,
             };
-            FileCache::foyer(config)
-                .await
-                .map_err(HummockError::file_cache)?
+            FileCache::foyer(config).map_err(HummockError::file_cache)?
         };
 
         let store = match s {

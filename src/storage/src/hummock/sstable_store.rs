@@ -210,7 +210,9 @@ impl SstableStore {
             .delete(self.get_sst_data_path(object_id).as_str())
             .await?;
         self.meta_cache.erase(object_id, &object_id);
-        self.meta_file_cache.remove_without_wait(&object_id);
+        self.meta_file_cache
+            .remove(&object_id)
+            .map_err(HummockError::file_cache)?;
         Ok(())
     }
 
@@ -230,7 +232,9 @@ impl SstableStore {
         // Delete from cache.
         for &object_id in object_id_list {
             self.meta_cache.erase(object_id, &object_id);
-            self.meta_file_cache.remove_without_wait(&object_id);
+            self.meta_file_cache
+                .remove(&object_id)
+                .map_err(HummockError::file_cache)?;
         }
 
         Ok(())
@@ -238,7 +242,9 @@ impl SstableStore {
 
     pub fn delete_cache(&self, object_id: HummockSstableObjectId) {
         self.meta_cache.erase(object_id, &object_id);
-        self.meta_file_cache.remove_without_wait(&object_id);
+        if let Err(e) = self.meta_file_cache.remove(&object_id) {
+            tracing::warn!("meta file cache remove error: {}", e);
+        }
     }
 
     async fn put_sst_data(
@@ -380,13 +386,17 @@ impl SstableStore {
     #[cfg(any(test, feature = "test"))]
     pub fn clear_block_cache(&self) {
         self.block_cache.clear();
-        self.data_file_cache.clear_without_wait();
+        if let Err(e) = self.data_file_cache.clear() {
+            tracing::warn!("data file cache clear error: {}", e);
+        }
     }
 
     #[cfg(any(test, feature = "test"))]
     pub fn clear_meta_cache(&self) {
         self.meta_cache.clear();
-        self.meta_file_cache.clear_without_wait();
+        if let Err(e) = self.meta_file_cache.clear() {
+            tracing::warn!("meta file cache clear error: {}", e);
+        }
     }
 
     /// Returns `table_holder`
