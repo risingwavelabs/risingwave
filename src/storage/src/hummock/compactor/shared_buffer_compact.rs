@@ -385,7 +385,7 @@ pub async fn merge_imms_in_memory(
 
     let mut pivot_last_delete_epoch = HummockEpoch::MAX;
 
-    for ((key, value), epoch) in items {
+    for ((key, mut value), epoch) in items {
         assert!(key >= pivot, "key should be in ascending order");
         let earliest_range_delete_which_can_see_key = if key == pivot {
             del_iter.earliest_delete_since(epoch)
@@ -402,20 +402,21 @@ pub async fn merge_imms_in_memory(
         if value.is_delete() {
             pivot_last_delete_epoch = epoch;
         } else if earliest_range_delete_which_can_see_key < pivot_last_delete_epoch {
-            debug_assert!(
-                epoch < earliest_range_delete_which_can_see_key
-                    && earliest_range_delete_which_can_see_key < pivot_last_delete_epoch
-            );
             pivot_last_delete_epoch = earliest_range_delete_which_can_see_key;
-            // In each merged immutable memtable, since a union set of delete ranges is constructed
-            // and thus original delete ranges are replaced with the union set and not
-            // used in read, we lose exact information about whether a key is deleted by
-            // a delete range in the merged imm which it belongs to. Therefore we need
-            // to construct a corresponding delete key to represent this.
-            versions.push((
-                earliest_range_delete_which_can_see_key,
-                HummockValue::Delete,
-            ));
+            if epoch < earliest_range_delete_which_can_see_key {
+                // In each merged immutable memtable, since a union set of delete ranges is constructed
+                // and thus original delete ranges are replaced with the union set and not
+                // used in read, we lose exact information about whether a key is deleted by
+                // a delete range in the merged imm which it belongs to. Therefore we need
+                // to construct a corresponding delete key to represent this.
+                versions.push((
+                    earliest_range_delete_which_can_see_key,
+                    HummockValue::Delete,
+                ));
+            } else {
+                debug_assert_eq!(epoch, earliest_range_delete_which_can_see_key);
+                value = HummockValue::Delete;
+            }
         }
         versions.push((epoch, value));
     }

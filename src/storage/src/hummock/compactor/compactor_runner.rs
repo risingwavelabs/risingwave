@@ -714,7 +714,7 @@ where
 
         let mut drop = false;
         let epoch = iter_key.epoch;
-        let value = iter.value();
+        let mut value = iter.value();
         if is_new_user_key {
             if !max_key.is_empty() && iter_key >= max_key {
                 break;
@@ -797,27 +797,29 @@ where
         if value.is_delete() {
             user_key_last_delete_epoch = epoch;
         } else if earliest_range_delete_which_can_see_iter_key < user_key_last_delete_epoch {
-            debug_assert!(
-                iter_key.epoch < earliest_range_delete_which_can_see_iter_key
-                    && earliest_range_delete_which_can_see_iter_key < user_key_last_delete_epoch
-            );
             user_key_last_delete_epoch = earliest_range_delete_which_can_see_iter_key;
 
-            // In each SST, since a union set of delete ranges is constructed and thus original
-            // delete ranges are replaced with the union set and not used in read, we lose exact
-            // information about whether a key is deleted by a delete range in
-            // the same SST. Therefore we need to construct a corresponding
-            // delete key to represent this.
-            iter_key.epoch = earliest_range_delete_which_can_see_iter_key;
-            sst_builder
-                .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
-                .verbose_instrument_await("add_full_key_delete")
-                .await?;
-            last_table_stats.total_key_count += 1;
-            last_table_stats.total_key_size += iter_key.encoded_len() as i64;
-            last_table_stats.total_value_size += 1;
-            iter_key.epoch = epoch;
-            is_new_user_key = false;
+            if iter_key.epoch < earliest_range_delete_which_can_see_iter_key {
+                // In each SST, since a union set of delete ranges is constructed and thus original
+                // delete ranges are replaced with the union set and not used in read, we lose exact
+                // information about whether a key is deleted by a delete range in
+                // the same SST. Therefore we need to construct a corresponding
+                // delete key to represent this.
+                iter_key.epoch = earliest_range_delete_which_can_see_iter_key;
+                sst_builder
+                    .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
+                    .verbose_instrument_await("add_full_key_delete")
+                    .await?;
+                last_table_stats.total_key_count += 1;
+                last_table_stats.total_key_size += iter_key.encoded_len() as i64;
+                last_table_stats.total_value_size += 1;
+                iter_key.epoch = epoch;
+                is_new_user_key = false;
+            } else {
+                // If the range delete comes from the same epoch, convert value to Delete anyway.
+                debug_assert_eq!(iter_key.epoch, earliest_range_delete_which_can_see_iter_key);
+                value = HummockValue::Delete;
+            }
         }
 
         // Don't allow two SSTs to share same user key
