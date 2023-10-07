@@ -218,7 +218,7 @@ pub mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let sql = r#"CREATE SINK snk1 FROM mv1
-                    WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table =
+                    WITH (connector = 'jdbc', mysql.endpoint = '127.0.0.1:3306', mysql.table =
                         '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
                         mysql.password = '<password>', type = 'append-only', force_append_only = 'true');"#.to_string();
         frontend.run_sql(sql).await.unwrap();
