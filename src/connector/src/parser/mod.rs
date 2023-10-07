@@ -302,8 +302,8 @@ impl SourceStreamChunkRowWriter<'_> {
                         // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
                         tracing::warn!(
                             ?error,
-                            name = desc.name,
-                            "ignore error for non-pk column and pad with `NULL`"
+                            column = desc.name,
+                            "failed to parse non-pk column, padding with `NULL`"
                         );
                         Ok(A::output_for(Datum::None))
                     }
@@ -400,7 +400,9 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     /// The source context, used to report parsing error.
     fn source_ctx(&self) -> &SourceContext;
 
-    /// Parse one record from the given `payload` and write it to the `writer`.
+    /// Parse one record from the given `payload` and write rows to the `writer`.
+    ///
+    /// Returns error if **any** of the rows in the message failed to parse.
     fn parse_one<'a>(
         &'a mut self,
         key: Option<Vec<u8>>,
@@ -408,11 +410,13 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> impl Future<Output = Result<()>> + Send + 'a;
 
-    /// Parse one record from the given `payload`, either write it to the `writer` or interpret it
+    /// Parse one record from the given `payload`, either write rows to the `writer` or interpret it
     /// as a transaction control message.
     ///
     /// The default implementation forwards to [`ByteStreamSourceParser::parse_one`] for
     /// non-transactional sources.
+    ///
+    /// Returns error if **any** of the rows in the message failed to parse.
     fn parse_one_with_txn<'a>(
         &'a mut self,
         key: Option<Vec<u8>>,
@@ -436,12 +440,14 @@ impl<P: ByteStreamSourceParser> P {
     ///
     /// A [`SourceWithStateStream`] which is a stream of parsed messages.
     pub fn into_stream(self, data_stream: BoxSourceStream) -> impl SourceWithStateStream {
+        // Enable tracing to provide more information for parsing failures.
         let source_info = &self.source_ctx().source_info;
         let span = tracing::info_span!(
             "source_parser",
             actor_id = source_info.actor_id,
             source_id = source_info.source_id.table_id()
         );
+
         into_chunk_stream(self, data_stream).instrument(span)
     }
 }
@@ -520,13 +526,20 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 .instrument(parse_span.clone())
                 .await
             {
-                Ok(ParseResult::Rows) => {
+                // It's possible that parsing multiple rows in a single message PARTIALLY failed.
+                // We still have to maintain the row number in this case.
+                res @ (Ok(ParseResult::Rows) | Err(_)) => {
                     // The number of rows added to the builder.
                     let num = builder.op_num() - old_op_num;
 
                     // Aggregate the number of rows in the current transaction.
                     if let Some(Transaction { len, .. }) = &mut current_transaction {
                         *len += num;
+                    }
+
+                    if let Err(error) = res {
+                        tracing::error!(parent: &parse_span, %error, "failed to parse message, skipping");
+                        parser.source_ctx().report_user_source_error(error);
                     }
                 }
 
@@ -556,18 +569,6 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
                         };
                     }
-                }
-
-                Err(error) => {
-                    assert_eq!(
-                        builder.op_num(),
-                        old_op_num,
-                        "no rows should be added to the builder on parse error",
-                    );
-
-                    tracing::error!(parent: &parse_span, %error, "failed to parse message, skipping");
-                    parser.source_ctx().report_user_source_error(error);
-                    continue;
                 }
             }
         }

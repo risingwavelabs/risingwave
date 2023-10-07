@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use apache_avro::Schema;
-use itertools::Either;
+use itertools::{Either, Itertools};
 use jst::{convert_avro, Context};
 use risingwave_common::error::ErrorCode::{self, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -116,26 +116,23 @@ impl JsonParser {
         } else {
             Either::Right(std::iter::once(value))
         };
-        // TODO: simplify
+
         let mut errors = Vec::new();
-        let mut guard = None;
         for value in values {
             let accessor = JsonAccess::new(value);
             match apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer) {
-                Ok(this_guard) => guard = Some(this_guard),
+                Ok(_) => {}
                 Err(err) => errors.push(err),
             }
         }
 
-        if let Some(guard) = guard {
-            if !errors.is_empty() {
-                tracing::error!(?errors, "failed to parse some columns");
-            }
-            Ok(guard)
+        if errors.is_empty() {
+            Ok(())
         } else {
             Err(RwError::from(ErrorCode::InternalError(format!(
-                "failed to parse all columns: {:?}",
-                errors
+                "failed to parse {} row(s) in a single json message: {}",
+                errors.len(),
+                errors.iter().join(", ")
             ))))
         }
     }
