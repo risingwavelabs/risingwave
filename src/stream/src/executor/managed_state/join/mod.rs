@@ -562,6 +562,15 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.inner.put(key.clone(), HashValueWrapper(Some(state)));
     }
 
+    /// Remove an empty [`JoinEntryState`] from the hash table.
+    /// This is only supposed to called after [`Self::take_state()`], especially when the entry is too large to be resident in memory
+    pub fn remove_empty_state(&mut self, key: &K) {
+        let state = self.inner.pop(key);
+        if let Some(entry) = state {
+            assert!(entry.0.is_none(), "state should be taken")
+        }
+    }
+
     /// Manipulate the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
     /// memory and in the degree table.
     fn manipulate_degree(

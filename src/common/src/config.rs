@@ -743,6 +743,10 @@ pub struct StreamingDeveloperConfig {
     /// the channel.
     #[serde(default = "default::developer::stream_dml_channel_initial_permits")]
     pub dml_channel_initial_permits: usize,
+
+    /// The maximum number of entries that can be cached in a `HashJoinExecutor`'s in-memory cache.
+    #[serde(default = "default::developer::hash_join_max_cache_entry_size")]
+    pub hash_join_max_cache_entry_size: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1189,6 +1193,10 @@ pub mod default {
 
         pub fn unsafe_stream_extreme_cache_size() -> usize {
             10
+        }
+
+        pub fn hash_join_max_cache_entry_size() -> usize {
+            2048
         }
 
         pub fn stream_chunk_size() -> usize {

@@ -15,6 +15,7 @@
 use std::cmp::min;
 use std::sync::Arc;
 
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{
@@ -158,7 +159,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,
             join_key_data_types,
-            chunk_size: params.env.config().developer.chunk_size,
+            config: params.env.config().clone(),
         };
 
         args.dispatch()
@@ -187,7 +188,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
     join_type_proto: JoinTypeProto,
     join_key_data_types: Vec<DataType>,
-    chunk_size: usize,
+    config: StreamingConfig,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
@@ -218,7 +219,7 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                         self.lru_manager,
                         self.is_append_only,
                         self.metrics,
-                        self.chunk_size,
+                        self.config,
                     ),
                 ))
             };
