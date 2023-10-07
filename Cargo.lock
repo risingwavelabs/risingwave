@@ -4593,9 +4593,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic-build"
-version = "0.4.0+0.10.0"
+version = "0.4.1+0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fafb68944d3c6ce5e16e46791ead0a5641def0266ff1460e519a0780cdcc078"
+checksum = "c3434b3d59001abcce56b9170fbd7982377858d8b931e8472056bf0c894ab257"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -6303,7 +6303,7 @@ checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "log",
  "multimap",
  "once_cell",
@@ -6337,7 +6337,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.37",
