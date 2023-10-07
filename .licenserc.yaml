@@ -5,9 +5,10 @@ header:
 
   paths:
     - "src/**/*.rs"
+    - "src/**/*.py"
+    - "src/**/*.html"
     - "dashboard/**/*.js"
     - "dashboard/**/*.ts"
-    - "src/**/*.html"
     - "java/**/*.java"
     - "java/**/*.py"
 
@@ -16,5 +17,6 @@ header:
     - "**/*.d.ts"
     - "src/sqlparser/**/*.rs"
     - "java/connector-node/risingwave-source-cdc/src/main/java/com/risingwave/connector/cdc/debezium/internal/*.java"
+    - "src/meta/src/model_v2/migration/**/*.rs"
 
   comment: on-failure

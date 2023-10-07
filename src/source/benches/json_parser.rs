@@ -85,11 +85,11 @@ fn generate_json_row(rng: &mut impl Rng) -> String {
     )
 }
 
-fn generate_json_rows() -> Vec<Option<Vec<u8>>> {
+fn generate_json_rows() -> Vec<Vec<u8>> {
     let mut rng = rand::thread_rng();
     let mut records = Vec::with_capacity(NUM_RECORDS);
     for _ in 0..NUM_RECORDS {
-        records.push(Some(generate_json_row(&mut rng).into_bytes()));
+        records.push(generate_json_row(&mut rng).into_bytes());
     }
     records
 }

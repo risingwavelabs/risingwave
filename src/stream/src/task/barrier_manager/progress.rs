@@ -23,7 +23,7 @@ type ConsumedRows = u64;
 #[derive(Debug, Clone, Copy)]
 pub(super) enum ChainState {
     ConsumingUpstream(ConsumedEpoch, ConsumedRows),
-    Done,
+    Done(ConsumedRows),
 }
 
 impl LocalBarrierManager {
@@ -49,6 +49,35 @@ impl LocalBarrierManager {
 }
 
 /// The progress held by the chain executors to report to the local barrier manager.
+///
+/// Progress can be computed by
+/// `total_rows_consumed` / `total_rows_upstream`.
+/// This yields the (approximate) percentage of rows we are done backfilling.
+///
+/// For `total_rows_consumed`, the progress is tracked in the following way:
+/// 1. Fetching the row count from our state table.
+///    This number is the total number, NOT incremental.
+///    This is done per actor.
+/// 2. Refreshing this number on the meta side, on every barrier.
+///    This is done by just summing up all the row counts from the actors.
+///
+/// For `total_rows_upstream`,
+/// this is fetched from `HummockVersion`'s statistics (`TableStats::total_key_count`).
+///
+/// This is computed per `HummockVersion`, which is updated whenever a checkpoint is committed.
+/// The `total_key_count` figure just counts the number of storage keys.
+/// For example, if a key is inserted and then deleted,
+/// it results two storage entries in `LSMt`, so count=2.
+/// Only after compaction, the count will drop back to 0.
+///
+/// So the total count could be more pessimistic, than actual progress.
+///
+/// It is fine for this number not to be precise,
+/// since we don't rely on it to update the status of a stream job internally.
+///
+/// TODO(kwannoel): Perhaps it is possible to get total key count of the replicated state table
+/// for arrangement backfill. We can use that to estimate the progress as well, and avoid recording
+/// `row_count` state for it.
 pub struct CreateMviewProgress {
     barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>,
 
@@ -100,10 +129,15 @@ impl CreateMviewProgress {
     ) {
         match self.state {
             Some(ChainState::ConsumingUpstream(last, last_consumed_rows)) => {
-                assert!(last < consumed_epoch);
+                assert!(
+                    last < consumed_epoch,
+                    "last_epoch: {:#?} must be greater than consumed epoch: {:#?}",
+                    last,
+                    consumed_epoch
+                );
                 assert!(last_consumed_rows <= current_consumed_rows);
             }
-            Some(ChainState::Done) => unreachable!(),
+            Some(ChainState::Done(_)) => unreachable!(),
             None => {}
         };
         self.update_inner(
@@ -114,11 +148,11 @@ impl CreateMviewProgress {
 
     /// Finish the progress. If the progress is already finished, then perform no-op.
     /// `current_epoch` should be provided to locate the barrier under concurrent checkpoint.
-    pub fn finish(&mut self, current_epoch: u64) {
-        if let Some(ChainState::Done) = self.state {
+    pub fn finish(&mut self, current_epoch: u64, current_consumed_rows: ConsumedRows) {
+        if let Some(ChainState::Done(_)) = self.state {
             return;
         }
-        self.update_inner(current_epoch, ChainState::Done);
+        self.update_inner(current_epoch, ChainState::Done(current_consumed_rows));
     }
 }
 

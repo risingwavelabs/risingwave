@@ -587,6 +587,7 @@ mod tests {
             ],
             downstream_pk: vec![0],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "db".into(),
             sink_from_name: "table".into(),
         };

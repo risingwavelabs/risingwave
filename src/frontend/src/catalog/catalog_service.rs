@@ -21,7 +21,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{
-    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::create_connection_request;
@@ -191,11 +191,15 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
+        let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let (_, version) = self
             .meta_client
             .create_materialized_view(table, graph)
             .await?;
-        self.wait_version(version).await
+        if matches!(create_type, PbCreateType::Foreground) {
+            self.wait_version(version).await?
+        }
+        Ok(())
     }
 
     async fn create_view(&self, view: PbView) -> Result<()> {

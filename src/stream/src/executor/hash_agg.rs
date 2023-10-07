@@ -22,11 +22,12 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
+use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
@@ -142,6 +143,9 @@ struct ExecutionVars<K: HashKey, S: StateStore> {
     /// Changed group keys in the current epoch (before next flush).
     group_change_set: HashSet<K>,
 
+    /// Heap size of `group_change_set` and dirty [`AggGroup`]s in `agg_group_cache`.
+    dirty_groups_heap_size: KvSize,
+
     /// Distinct deduplicater to deduplicate input rows for each distinct agg call.
     distinct_dedup: DistinctDeduplicater<S>,
 
@@ -250,15 +254,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     /// in one chunk.
     ///
     /// * `keys`: Hash Keys of rows.
-    /// * `base_visibility`: Visibility of rows, `None` means all are visible.
-    fn get_group_visibilities(keys: Vec<K>, base_visibility: Option<&Bitmap>) -> Vec<(K, Bitmap)> {
+    /// * `base_visibility`: Visibility of rows.
+    fn get_group_visibilities(keys: Vec<K>, base_visibility: &Bitmap) -> Vec<(K, Bitmap)> {
         let n_rows = keys.len();
         let mut vis_builders = HashMap::new();
-        for (row_idx, key) in keys.into_iter().enumerate().filter(|(row_idx, _)| {
-            base_visibility
-                .map(|vis| vis.is_set(*row_idx))
-                .unwrap_or(true)
-        }) {
+        for (row_idx, key) in keys
+            .into_iter()
+            .enumerate()
+            .filter(|(row_idx, _)| base_visibility.is_set(*row_idx))
+        {
             vis_builders
                 .entry(key)
                 .or_insert_with(|| BitmapBuilder::zeroed(n_rows))
@@ -343,8 +347,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // Calculate the row visibility for every agg call.
         let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
         for agg_call in &this.agg_calls {
-            let agg_call_filter_res =
-                agg_call_filter_res(&this.actor_ctx, &this.info.identity, agg_call, &chunk).await?;
+            let agg_call_filter_res = agg_call_filter_res(agg_call, &chunk).await?;
             call_visibilities.push(agg_call_filter_res);
         }
 
@@ -363,6 +366,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, visibility) in group_visibilities {
             let mut agg_group = vars.agg_group_cache.get_mut(&key).unwrap();
+
+            // Mark the group as changed.
+            let key_size = key.estimated_size();
+            let old_group_size = if vars.group_change_set.insert(key) {
+                None
+            } else {
+                Some(agg_group.estimated_size())
+            };
+
             let visibilities = call_visibilities
                 .iter()
                 .map(|call_vis| call_vis & &visibility)
@@ -390,8 +402,41 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             agg_group
                 .apply_chunk(&chunk, &this.agg_calls, &this.agg_funcs, visibilities)
                 .await?;
-            // Mark the group as changed.
-            vars.group_change_set.insert(key);
+
+            // Update the metrics.
+            let actor_id_str = this.actor_ctx.id.to_string();
+            let fragment_id_str = this.actor_ctx.fragment_id.to_string();
+            let table_id_str = this.intermediate_state_table.table_id().to_string();
+            let metric_dirty_count = this.metrics.agg_dirty_group_count.with_label_values(&[
+                &table_id_str,
+                &actor_id_str,
+                &fragment_id_str,
+            ]);
+            let metric_dirty_heap_size = this
+                .metrics
+                .agg_dirty_group_heap_size
+                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str]);
+            let new_group_size = agg_group.estimated_size();
+            if let Some(old_group_size) = old_group_size {
+                match new_group_size.cmp(&old_group_size) {
+                    std::cmp::Ordering::Greater => {
+                        let inc_size = new_group_size - old_group_size;
+                        vars.dirty_groups_heap_size.add_size(inc_size);
+                        metric_dirty_heap_size.add(inc_size as i64);
+                    }
+                    std::cmp::Ordering::Less => {
+                        let dec_size = old_group_size - new_group_size;
+                        vars.dirty_groups_heap_size.sub_size(dec_size);
+                        metric_dirty_heap_size.sub(dec_size as i64);
+                    }
+                    std::cmp::Ordering::Equal => {}
+                }
+            } else {
+                let inc_size = key_size * 2 + new_group_size;
+                vars.dirty_groups_heap_size.add_size(inc_size);
+                metric_dirty_heap_size.add(inc_size as i64);
+                metric_dirty_count.set(vars.group_change_set.len() as i64);
+            }
         }
 
         Ok(())
@@ -405,29 +450,30 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     ) {
         // Update metrics.
         let actor_id_str = this.actor_ctx.id.to_string();
+        let fragment_id_str = this.actor_ctx.fragment_id.to_string();
         let table_id_str = this.intermediate_state_table.table_id().to_string();
         this.metrics
             .agg_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(vars.stats.lookup_miss_count);
         vars.stats.lookup_miss_count = 0;
         this.metrics
             .agg_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(vars.stats.total_lookup_count);
         vars.stats.total_lookup_count = 0;
         this.metrics
             .agg_cached_keys
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.agg_group_cache.len() as i64);
         this.metrics
             .agg_chunk_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(vars.stats.chunk_lookup_miss_count);
         vars.stats.chunk_lookup_miss_count = 0;
         this.metrics
             .agg_chunk_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(vars.stats.chunk_total_lookup_count);
         vars.stats.chunk_total_lookup_count = 0;
 
@@ -506,6 +552,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // clear the change set
         vars.group_change_set.clear();
+        vars.dirty_groups_heap_size.set(0);
+        this.metrics
+            .agg_dirty_group_count
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .set(0);
+        this.metrics
+            .agg_dirty_group_heap_size
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .set(0);
 
         // Yield the remaining rows in chunk builder.
         if let Some(chunk) = vars.chunk_builder.take() {
@@ -564,6 +619,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 PrecomputedBuildHasher,
             ),
             group_change_set: HashSet::new(),
+            dirty_groups_heap_size: KvSize::default(),
             distinct_dedup: DistinctDeduplicater::new(
                 &this.agg_calls,
                 &this.watermark_epoch,

@@ -112,10 +112,7 @@ fn main() -> Result<()> {
             # This file is generated from `{}` at {}.\n\
             \n\
             statement ok\n\
-            set RW_IMPLICIT_FLUSH to true;\n\
-            \n\
-            statement ok\n\
-            set CREATE_COMPACTION_GROUP_FOR_MV to true;\n",
+            set RW_IMPLICIT_FLUSH to true;\n",
             path.display(),
             chrono::Utc::now()
         )?;

@@ -19,6 +19,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
 use crate::cmd_impl::hummock::{
@@ -220,6 +221,8 @@ enum HummockCommands {
         level0_max_compact_file_number: Option<u64>,
         #[clap(long)]
         level0_overlapping_sub_level_compact_level_count: Option<u32>,
+        #[clap(long)]
+        enable_emergency_picker: Option<bool>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -310,7 +313,7 @@ pub struct ScaleCommon {
 
     /// Specify the fragment ids that need to be scheduled.
     /// empty by default, which means all fragments will be scheduled
-    #[clap(long)]
+    #[clap(long, value_delimiter = ',')]
     fragments: Option<Vec<u32>>,
 }
 
@@ -323,13 +326,14 @@ pub struct ScaleVerticalCommands {
     /// supported
     #[clap(
         long,
+        required = true,
         value_delimiter = ',',
         value_name = "all or worker_id or worker_host, ..."
     )]
     workers: Option<Vec<String>>,
 
     /// The target parallelism per worker, requires `workers` to be set.
-    #[clap(long, requires = "workers")]
+    #[clap(long, required = true)]
     target_parallelism_per_worker: Option<u32>,
 }
 
@@ -416,6 +420,11 @@ enum MetaCommands {
     },
     /// backup meta by taking a meta snapshot
     BackupMeta,
+    /// restore meta by recovering from a meta snapshot
+    RestoreMeta {
+        #[command(flatten)]
+        opts: RestoreOpts,
+    },
     /// delete meta snapshots
     DeleteMetaSnapshots { snapshot_ids: Vec<u64> },
 
@@ -549,6 +558,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             max_space_reclaim_bytes,
             level0_max_compact_file_number,
             level0_overlapping_sub_level_compact_level_count,
+            enable_emergency_picker,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -567,6 +577,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     max_space_reclaim_bytes,
                     level0_max_compact_file_number,
                     level0_overlapping_sub_level_compact_level_count,
+                    enable_emergency_picker,
                 ),
             )
             .await?
@@ -618,6 +629,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
+        Commands::Meta(MetaCommands::RestoreMeta { opts }) => {
+            risingwave_meta::backup_restore::restore(opts).await?
+        }
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
         }
