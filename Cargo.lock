@@ -10931,7 +10931,6 @@ dependencies = [
  "hyper",
  "indexmap 1.9.3",
  "itertools 0.10.5",
- "itertools 0.11.0",
  "jni",
  "lazy_static",
  "lexical-core",
