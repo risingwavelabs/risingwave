@@ -300,6 +300,16 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                     )
                                     .await?;
 
+                                    if let Some(vnode_bitmap) =
+                                        barrier.as_update_vnode_bitmap(self.actor_ctx.id)
+                                    {
+                                        // if _cache_may_stale, we must rebuild the stream to adjust vnode mappings
+                                        let (_prev_vnode_bitmap, _cache_may_stale) =
+                                            state_store_handler
+                                                .state_store
+                                                .update_vnode_bitmap(vnode_bitmap);
+                                    }
+
                                     // Rebuild state store iterator.
                                     store_iter_vec = {
                                         let mut store_iter_collect = Vec::with_capacity(
