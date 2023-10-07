@@ -709,13 +709,14 @@ impl LocalStreamManagerCore {
                 {
                     let metrics = self.streaming_metrics.clone();
                     let actor_id_str = actor_id.to_string();
+                    let fragment_id_str = actor_context.fragment_id.to_string();
                     let allocation_stated = task_stats_alloc::allocation_stat(
                         instrumented,
                         Duration::from_millis(1000),
                         move |bytes| {
                             metrics
                                 .actor_memory_usage
-                                .with_label_values(&[&actor_id_str])
+                                .with_label_values(&[&actor_id_str, &fragment_id_str])
                                 .set(bytes as i64);
 
                             actor_context.store_mem_usage(bytes);
