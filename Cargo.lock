@@ -7238,6 +7238,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tracing",
+ "tracing-futures",
  "url",
  "urlencoding",
  "workspace-hack",

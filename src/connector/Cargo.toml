@@ -122,6 +122,7 @@ tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { workspace = true }
 tracing = "0.1"
+tracing-futures = { version = "0.2", features = ["futures-03"] }
 url = "2"
 urlencoding = "2"
 

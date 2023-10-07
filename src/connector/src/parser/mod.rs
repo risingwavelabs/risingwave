@@ -34,6 +34,7 @@ use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
 };
 pub use schema_registry::name_strategy_from_str;
+use tracing_futures::Instrument;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
@@ -292,9 +293,18 @@ impl SourceStreamChunkRowWriter<'_> {
             } else {
                 match f(desc) {
                     Ok(output) => Ok(output),
+
+                    // Throw error for failed access to primary key columns.
                     Err(e) if desc.is_pk => Err(e),
+                    // Ignore error for other columns and fill in `NULL` instead.
                     Err(error) => {
-                        tracing::warn!(?error, "ignoring error for non-pk column"); // TODO
+                        // TODO: figure out a way to fill in not-null default value if user specifies one
+                        // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
+                        tracing::warn!(
+                            ?error,
+                            name = desc.name,
+                            "ignore error for non-pk column and pad with `NULL`"
+                        );
                         Ok(A::output_for(Datum::None))
                     }
                 }
@@ -412,7 +422,10 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         self.parse_one(key, payload, writer)
             .map_ok(|_| ParseResult::Rows)
     }
+}
 
+#[easy_ext::ext(SourceParserIntoStreamExt)]
+impl<P: ByteStreamSourceParser> P {
     /// Parse a data stream of one source split into a stream of [`StreamChunk`].
     ///
     /// # Arguments
@@ -421,9 +434,15 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     ///
     /// # Returns
     ///
-    /// A [`crate::source::BoxSourceWithStateStream`] which is a stream of parsed msgs.
-    fn into_stream(self, data_stream: BoxSourceStream) -> impl SourceWithStateStream {
-        into_chunk_stream(self, data_stream)
+    /// A [`SourceWithStateStream`] which is a stream of parsed messages.
+    pub fn into_stream(self, data_stream: BoxSourceStream) -> impl SourceWithStateStream {
+        let source_info = &self.source_ctx().source_info;
+        let span = tracing::info_span!(
+            "source_parser",
+            actor_id = source_info.actor_id,
+            source_id = source_info.source_id.table_id()
+        );
+        into_chunk_stream(self, data_stream).instrument(span)
     }
 }
 
@@ -484,8 +503,9 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
             if msg.key.is_none() && msg.payload.is_none() {
                 continue;
             }
-
             split_offset_mapping.insert(msg.split_id, msg.offset.clone());
+
+            let parse_span = tracing::info_span!("parse_one", offset = msg.offset);
 
             let old_op_num = builder.op_num();
             match parser
@@ -497,6 +517,7 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         offset: msg.offset,
                     }),
                 )
+                .instrument(parse_span.clone())
                 .await
             {
                 Ok(ParseResult::Rows) => {
@@ -513,14 +534,14 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     match txn_ctl {
                         TransactionControl::Begin { id } => {
                             if let Some(Transaction { id: current_id, .. }) = &current_transaction {
-                                tracing::warn!(current_id, id, "already in transaction");
+                                tracing::warn!(parent: &parse_span, current_id, id, "already in transaction");
                             }
                             current_transaction = Some(Transaction { id, len: 0 });
                         }
                         TransactionControl::Commit { id } => {
                             let current_id = current_transaction.as_ref().map(|t| &t.id);
                             if current_id != Some(&id) {
-                                tracing::warn!(?current_id, id, "transaction id mismatch");
+                                tracing::warn!(parent: &parse_span, ?current_id, id, "transaction id mismatch");
                             }
                             current_transaction = None;
                         }
@@ -538,8 +559,13 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                 }
 
                 Err(error) => {
-                    tracing::warn!(%error, "message parsing failed, skipping");
-                    // Skip for batch
+                    assert_eq!(
+                        builder.op_num(),
+                        old_op_num,
+                        "no rows should be added to the builder on parse error",
+                    );
+
+                    tracing::error!(parent: &parse_span, %error, "failed to parse message, skipping");
                     parser.source_ctx().report_user_source_error(error);
                     continue;
                 }
@@ -624,11 +650,11 @@ pub enum ByteStreamSourceParserImpl {
     CanalJson(CanalJsonParser),
 }
 
-pub type ParserStream = impl SourceWithStateStream + Unpin;
+pub type ParsedStreamImpl = impl SourceWithStateStream + Unpin;
 
 impl ByteStreamSourceParserImpl {
     /// Converts this parser into a stream of [`StreamChunk`].
-    pub fn into_stream(self, msg_stream: BoxSourceStream) -> ParserStream {
+    pub fn into_stream(self, msg_stream: BoxSourceStream) -> ParsedStreamImpl {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
             Self::Csv(parser) => parser.into_stream(msg_stream),
