@@ -386,8 +386,9 @@ impl HummockManager {
         &self,
         compaction_group_ids: &[CompactionGroupId],
         config_to_update: &[MutableConfig],
-    ) -> Result<()> {
-        self.compaction_group_manager
+    ) -> Result<Vec<CompactionGroup>> {
+        let result = self
+            .compaction_group_manager
             .write()
             .await
             .update_compaction_config(
@@ -402,7 +403,7 @@ impl HummockManager {
         {
             self.try_update_write_limits(compaction_group_ids).await;
         }
-        Ok(())
+        Ok(result)
     }
 
     /// Gets complete compaction group info.
@@ -806,8 +807,9 @@ impl CompactionGroupManager {
         compaction_group_ids: &[CompactionGroupId],
         config_to_update: &[MutableConfig],
         meta_store: &S,
-    ) -> Result<()> {
+    ) -> Result<Vec<CompactionGroup>> {
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
+        let mut result = Vec::with_capacity(compaction_group_ids.len());
         for compaction_group_id in compaction_group_ids.iter().unique() {
             let group = compaction_groups.get(compaction_group_id).ok_or_else(|| {
                 Error::CompactionGroup(format!("invalid group {}", *compaction_group_id))
@@ -819,14 +821,15 @@ impl CompactionGroupManager {
             }
             let mut new_group = group.clone();
             new_group.compaction_config = Arc::new(config);
-            compaction_groups.insert(*compaction_group_id, new_group);
+            compaction_groups.insert(*compaction_group_id, new_group.clone());
+            result.push(new_group);
         }
 
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
         meta_store.txn(trx).await?;
         compaction_groups.commit();
-        Ok(())
+        Ok(result)
     }
 
     /// Initializes the config for a group.
