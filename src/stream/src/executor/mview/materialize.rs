@@ -119,6 +119,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
+        // for metrics
+        let table_id_str = self.state_table.table_id().to_string();
+        let actor_id_str = self.actor_context.id.to_string();
+        let fragment_id_str = self.actor_context.fragment_id.to_string();
+
         let data_types = self.schema().data_types().clone();
         let mut input = self.input.execute();
 
@@ -136,6 +141,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
+                    self.actor_context
+                        .streaming_metrics
+                        .mview_input_row_count
+                        .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                        .inc_by(chunk.cardinality() as u64);
+
                     match self.conflict_behavior {
                         ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict => {
                             // create MaterializeBuffer from chunk

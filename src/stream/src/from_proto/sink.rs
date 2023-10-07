@@ -109,7 +109,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let identity = format!("SinkExecutor {:X?}", params.executor_id);
         let sink_id_str = format!("{}", sink_id.sink_id);
 
-        let sink_metrics = params.executor_stats.new_sink_metrics(
+        let sink_metrics = stream.streaming_metrics.new_sink_metrics(
             identity.as_str(),
             sink_id_str.as_str(),
             connector,
@@ -131,7 +131,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 Ok(Box::new(
                     SinkExecutor::new(
                         input_executor,
-                        stream.streaming_metrics.clone(),
                         sink_write_param,
                         sink_param,
                         columns,
@@ -161,7 +160,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     Ok(Box::new(
                         SinkExecutor::new(
                             input_executor,
-                            stream.streaming_metrics.clone(),
                             sink_write_param,
                             sink_param,
                             columns,

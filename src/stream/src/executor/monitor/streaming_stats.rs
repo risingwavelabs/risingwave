@@ -31,7 +31,10 @@ use risingwave_connector::sink::SinkMetrics;
 pub struct StreamingMetrics {
     pub level: MetricLevel,
 
+    // Executor metrics (disabled by default)
     pub executor_row_count: GenericCounterVec<AtomicU64>,
+
+    // Streaming actor metrics from tokio (disabled by default)
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
     pub actor_output_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
     pub actor_input_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
@@ -45,13 +48,21 @@ pub struct StreamingMetrics {
     pub actor_poll_cnt: GenericGaugeVec<AtomicI64>,
     pub actor_idle_duration: GenericGaugeVec<AtomicF64>,
     pub actor_idle_cnt: GenericGaugeVec<AtomicI64>,
+
+    // Streaming actor
     pub actor_memory_usage: GenericGaugeVec<AtomicI64>,
     pub actor_in_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
+
+    // Source
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
     pub source_split_change_count: GenericCounterVec<AtomicU64>,
+
+    // Sink & materialized view
+    pub sink_input_row_count: GenericCounterVec<AtomicU64>,
+    pub mview_input_row_count: GenericCounterVec<AtomicU64>,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
@@ -88,7 +99,7 @@ pub struct StreamingMetrics {
     pub group_top_n_appendonly_total_query_cache_count: GenericCounterVec<AtomicU64>,
     pub group_top_n_appendonly_cached_entry_count: GenericGaugeVec<AtomicI64>,
 
-    // look up
+    // Lookup executor
     pub lookup_cache_miss_count: GenericCounterVec<AtomicU64>,
     pub lookup_total_query_cache_count: GenericCounterVec<AtomicU64>,
     pub lookup_cached_entry_count: GenericGaugeVec<AtomicI64>,
@@ -170,7 +181,7 @@ impl StreamingMetrics {
         let executor_row_count = register_int_counter_vec_with_registry!(
             "stream_executor_row_count",
             "Total number of rows that have been output from each executor",
-            &["actor_id", "executor_identity"],
+            &["actor_id", "fragment_id", "executor_identity"],
             registry
         )
         .unwrap();
@@ -195,6 +206,22 @@ impl StreamingMetrics {
             "stream_source_split_change_event_count",
             "Total number of split change events that have been operated by source",
             &["source_id", "source_name", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let sink_input_row_count = register_int_counter_vec_with_registry!(
+            "stream_sink_input_row_count",
+            "Total number of rows streamed into sink executors",
+            &["sink_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let mview_input_row_count = register_int_counter_vec_with_registry!(
+            "stream_mview_input_row_count",
+            "Total number of rows streamed into materialize executors",
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -314,7 +341,7 @@ impl StreamingMetrics {
         let actor_in_record_cnt = register_int_counter_vec_with_registry!(
             "stream_actor_in_record_cnt",
             "Total number of rows actor received",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -330,7 +357,7 @@ impl StreamingMetrics {
         let actor_sampled_deserialize_duration_ns = register_int_counter_vec_with_registry!(
             "actor_sampled_deserialize_duration_ns",
             "Duration (ns) of sampled chunk deserialization",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -338,7 +365,7 @@ impl StreamingMetrics {
         let actor_memory_usage = register_int_gauge_vec_with_registry!(
             "actor_memory_usage",
             "Memory usage (bytes)",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry,
         )
         .unwrap();
@@ -346,7 +373,13 @@ impl StreamingMetrics {
         let join_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
             "Join executor lookup miss duration",
-            &["side", "join_table_id", "degree_table_id", "actor_id"],
+            &[
+                "side",
+                "join_table_id",
+                "degree_table_id",
+                "actor_id",
+                "fragment_id"
+            ],
             registry
         )
         .unwrap();
@@ -354,7 +387,13 @@ impl StreamingMetrics {
         let join_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_total_count",
             "Join executor lookup total operation",
-            &["side", "join_table_id", "degree_table_id", "actor_id"],
+            &[
+                "side",
+                "join_table_id",
+                "degree_table_id",
+                "actor_id",
+                "fragment_id"
+            ],
             registry
         )
         .unwrap();
@@ -362,7 +401,13 @@ impl StreamingMetrics {
         let join_insert_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_insert_cache_miss_count",
             "Join executor cache miss when insert operation",
-            &["side", "join_table_id", "degree_table_id", "actor_id"],
+            &[
+                "side",
+                "join_table_id",
+                "degree_table_id",
+                "actor_id",
+                "fragment_id"
+            ],
             registry
         )
         .unwrap();
@@ -370,7 +415,7 @@ impl StreamingMetrics {
         let join_actor_input_waiting_duration_ns = register_int_counter_vec_with_registry!(
             "stream_join_actor_input_waiting_duration_ns",
             "Total waiting duration (ns) of input buffer of join actor",
-            &["actor_id"],
+            &["actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -378,7 +423,7 @@ impl StreamingMetrics {
         let join_match_duration_ns = register_int_counter_vec_with_registry!(
             "stream_join_match_duration_ns",
             "Matching duration for each side",
-            &["actor_id", "side"],
+            &["actor_id", "fragment_id", "side"],
             registry
         )
         .unwrap();
@@ -405,7 +450,7 @@ impl StreamingMetrics {
         let join_cached_entries = register_int_gauge_vec_with_registry!(
             "stream_join_cached_entries",
             "Number of cached entries in streaming join operators",
-            &["actor_id", "side"],
+            &["actor_id", "fragment_id", "side"],
             registry
         )
         .unwrap();
@@ -413,7 +458,7 @@ impl StreamingMetrics {
         let join_cached_rows = register_int_gauge_vec_with_registry!(
             "stream_join_cached_rows",
             "Number of cached rows in streaming join operators",
-            &["actor_id", "side"],
+            &["actor_id", "fragment_id", "side"],
             registry
         )
         .unwrap();
@@ -421,7 +466,7 @@ impl StreamingMetrics {
         let join_cached_estimated_size = register_int_gauge_vec_with_registry!(
             "stream_join_cached_estimated_size",
             "Estimated size of all cached entries in streaming join operators",
-            &["actor_id", "side"],
+            &["actor_id", "fragment_id", "side"],
             registry
         )
         .unwrap();
@@ -449,7 +494,7 @@ impl StreamingMetrics {
         let agg_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_agg_lookup_miss_count",
             "Aggregation executor lookup miss duration",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -457,7 +502,7 @@ impl StreamingMetrics {
         let agg_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_agg_lookup_total_count",
             "Aggregation executor lookup total operation",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -465,7 +510,7 @@ impl StreamingMetrics {
         let agg_distinct_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_agg_distinct_cache_miss_count",
             "Aggregation executor dinsinct miss duration",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -473,7 +518,7 @@ impl StreamingMetrics {
         let agg_distinct_total_cache_count = register_int_counter_vec_with_registry!(
             "stream_agg_distinct_total_cache_count",
             "Aggregation executor distinct total operation",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -481,7 +526,7 @@ impl StreamingMetrics {
         let agg_distinct_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_agg_distinct_cached_entry_count",
             "Total entry counts in distinct aggregation executor cache",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -489,7 +534,7 @@ impl StreamingMetrics {
         let agg_dirty_group_count = register_int_gauge_vec_with_registry!(
             "stream_agg_dirty_group_count",
             "Total dirty group counts in aggregation executor",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -497,7 +542,7 @@ impl StreamingMetrics {
         let agg_dirty_group_heap_size = register_int_gauge_vec_with_registry!(
             "stream_agg_dirty_group_heap_size",
             "Total dirty group heap size in aggregation executor",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -505,7 +550,7 @@ impl StreamingMetrics {
         let group_top_n_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_group_top_n_cache_miss_count",
             "Group top n executor cache miss count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -513,7 +558,7 @@ impl StreamingMetrics {
         let group_top_n_total_query_cache_count = register_int_counter_vec_with_registry!(
             "stream_group_top_n_total_query_cache_count",
             "Group top n executor query cache total count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -521,7 +566,7 @@ impl StreamingMetrics {
         let group_top_n_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_group_top_n_cached_entry_count",
             "Total entry counts in group top n executor cache",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -529,7 +574,7 @@ impl StreamingMetrics {
         let group_top_n_appendonly_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_group_top_n_appendonly_cache_miss_count",
             "Group top n appendonly executor cache miss count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -538,7 +583,7 @@ impl StreamingMetrics {
             register_int_counter_vec_with_registry!(
                 "stream_group_top_n_appendonly_total_query_cache_count",
                 "Group top n appendonly executor total cache count",
-                &["table_id", "actor_id"],
+                &["table_id", "actor_id", "fragment_id"],
                 registry
             )
             .unwrap();
@@ -546,7 +591,7 @@ impl StreamingMetrics {
         let group_top_n_appendonly_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_group_top_n_appendonly_cached_entry_count",
             "Total entry counts in group top n appendonly executor cache",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -554,7 +599,7 @@ impl StreamingMetrics {
         let lookup_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_lookup_cache_miss_count",
             "Lookup executor cache miss count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -562,7 +607,7 @@ impl StreamingMetrics {
         let lookup_total_query_cache_count = register_int_counter_vec_with_registry!(
             "stream_lookup_total_query_cache_count",
             "Lookup executor query cache total count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -570,7 +615,7 @@ impl StreamingMetrics {
         let lookup_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_lookup_cached_entry_count",
             "Total entry counts in lookup executor cache",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -578,7 +623,7 @@ impl StreamingMetrics {
         let temporal_join_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_temporal_join_cache_miss_count",
             "Temporal join executor cache miss count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -586,7 +631,7 @@ impl StreamingMetrics {
         let temporal_join_total_query_cache_count = register_int_counter_vec_with_registry!(
             "stream_temporal_join_total_query_cache_count",
             "Temporal join executor query cache total count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -594,7 +639,7 @@ impl StreamingMetrics {
         let temporal_join_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_temporal_join_cached_entry_count",
             "Total entry count in temporal join executor cache",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -602,7 +647,7 @@ impl StreamingMetrics {
         let agg_cached_keys = register_int_gauge_vec_with_registry!(
             "stream_agg_cached_keys",
             "Number of cached keys in streaming aggregation operators",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -610,7 +655,7 @@ impl StreamingMetrics {
         let agg_chunk_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_agg_chunk_lookup_miss_count",
             "Aggregation executor chunk-level lookup miss duration",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -618,7 +663,7 @@ impl StreamingMetrics {
         let agg_chunk_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_agg_chunk_lookup_total_count",
             "Aggregation executor chunk-level lookup total operation",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -908,6 +953,8 @@ impl StreamingMetrics {
             source_output_row_count,
             source_row_per_barrier,
             source_split_change_count,
+            sink_input_row_count,
+            mview_input_row_count,
             exchange_frag_recv_size,
             join_lookup_miss_count,
             join_total_lookup_count,
