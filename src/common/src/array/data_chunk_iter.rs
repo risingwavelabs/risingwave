@@ -59,10 +59,7 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
         match self.chunk.next_visible_row_idx(self.idx.start) {
             Some(idx) if idx < self.idx.end => {
                 self.idx.start = idx + 1;
-                Some(RowRef {
-                    columns: self.chunk.columns(),
-                    idx,
-                })
+                Some(RowRef::new(self.chunk, idx))
             }
             _ => {
                 self.idx.start = self.idx.end;
@@ -107,10 +104,7 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
             let ret = Some(if !vis.is_set(self.idx) {
                 None
             } else {
-                Some(RowRef {
-                    columns: self.chunk.columns(),
-                    idx: self.idx,
-                })
+                Some(RowRef::new(self.chunk, self.idx))
             });
             self.idx += 1;
             ret
@@ -126,108 +120,122 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
 impl ExactSizeIterator for DataChunkRefIterWithHoles<'_> {}
 unsafe impl TrustedLen for DataChunkRefIterWithHoles<'_> {}
 
-#[derive(Clone, Copy)]
-pub struct RowRef<'a> {
-    columns: &'a [ArrayRef],
+// Deliberately making `RowRef` and `RowRefIter` defined in a private module to ensure
+// the checks in the constructors are always performed.
+mod row_ref {
+    use super::*;
 
-    idx: usize,
-}
+    #[derive(Clone, Copy)]
+    pub struct RowRef<'a> {
+        columns: &'a [ArrayRef],
 
-impl<'a> std::fmt::Debug for RowRef<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list().entries(self.iter()).finish()
+        idx: usize,
     }
-}
 
-impl<'a> RowRef<'a> {
-    pub fn new(chunk: &'a DataChunk, idx: usize) -> Self {
-        assert!(idx < chunk.capacity());
-        Self {
-            columns: chunk.columns(),
-            idx,
+    impl<'a> std::fmt::Debug for RowRef<'a> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_list().entries(self.iter()).finish()
         }
     }
 
-    pub fn with_columns(columns: &'a [ArrayRef], idx: usize) -> Self {
-        if !columns.is_empty() {
-            assert!(idx < columns[0].len());
+    impl<'a> RowRef<'a> {
+        pub fn new(chunk: &'a DataChunk, idx: usize) -> Self {
+            assert!(
+                idx < chunk.capacity(),
+                "index {idx} out of bound {}",
+                chunk.capacity()
+            );
+
+            Self {
+                columns: chunk.columns(),
+                idx,
+            }
         }
-        Self { columns, idx }
-    }
 
-    /// Get the index of this row in the data chunk.
-    #[must_use]
-    pub fn index(&self) -> usize {
-        self.idx
-    }
-}
+        pub fn with_columns(columns: &'a [ArrayRef], idx: usize) -> Self {
+            for column in columns {
+                assert!(
+                    idx < column.len(),
+                    "index {idx} out of bound {}",
+                    column.len()
+                );
+            }
 
-impl PartialEq for RowRef<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.iter().eq(other.iter())
-    }
-}
-impl Eq for RowRef<'_> {}
-
-impl Hash for RowRef<'_> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let len = self.columns.len();
-        for i in 0..len {
-            self.datum_at(i).hash(state);
+            Self { columns, idx }
         }
-    }
-}
 
-impl Row for RowRef<'_> {
-    fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        // for `RowRef`, the index is always in bound.
-        unsafe { self.columns[index].value_at_unchecked(self.idx) }
-    }
-
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        // for `RowRef`, the index is always in bound.
-        self.columns
-            .get_unchecked(index)
-            .value_at_unchecked(self.idx)
-    }
-
-    fn len(&self) -> usize {
-        self.columns.len()
-    }
-
-    fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
-        RowRefIter {
-            columns: self.columns.iter(),
-            row_idx: self.idx,
+        /// Get the index of this row in the data chunk.
+        #[must_use]
+        pub fn index(&self) -> usize {
+            self.idx
         }
     }
-}
 
-#[derive(Clone)]
-pub struct RowRefIter<'a> {
-    columns: std::slice::Iter<'a, ArrayRef>,
-    row_idx: usize,
-}
+    impl PartialEq for RowRef<'_> {
+        fn eq(&self, other: &Self) -> bool {
+            self.iter().eq(other.iter())
+        }
+    }
+    impl Eq for RowRef<'_> {}
 
-impl<'a> Iterator for RowRefIter<'a> {
-    type Item = DatumRef<'a>;
+    impl Hash for RowRef<'_> {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            self.hash_datums_into(state)
+        }
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        // SAFETY: for `RowRef`, the index is always in bound.
-        unsafe {
+    impl Row for RowRef<'_> {
+        fn datum_at(&self, index: usize) -> DatumRef<'_> {
+            // SAFETY: `self.idx` is already checked in `new` or `with_columns`.
+            unsafe { self.columns[index].value_at_unchecked(self.idx) }
+        }
+
+        unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
             self.columns
-                .next()
-                .map(|col| col.value_at_unchecked(self.row_idx))
+                .get_unchecked(index)
+                .value_at_unchecked(self.idx)
+        }
+
+        fn len(&self) -> usize {
+            self.columns.len()
+        }
+
+        fn iter(&self) -> impl ExactSizeIterator<Item = DatumRef<'_>> {
+            RowRefIter {
+                columns: self.columns.iter(),
+                row_idx: self.idx,
+            }
         }
     }
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.columns.size_hint()
+    #[derive(Clone)]
+    pub struct RowRefIter<'a> {
+        columns: std::slice::Iter<'a, ArrayRef>,
+        row_idx: usize,
     }
+
+    impl<'a> Iterator for RowRefIter<'a> {
+        type Item = DatumRef<'a>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            // SAFETY: `self.row_idx` is already checked in `new` or `with_columns` of `RowRef`.
+            unsafe {
+                self.columns
+                    .next()
+                    .map(|col| col.value_at_unchecked(self.row_idx))
+            }
+        }
+
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            self.columns.size_hint()
+        }
+    }
+
+    impl ExactSizeIterator for RowRefIter<'_> {}
+    unsafe impl TrustedLen for RowRefIter<'_> {}
 }
 
-impl ExactSizeIterator for RowRefIter<'_> {}
-unsafe impl TrustedLen for RowRefIter<'_> {}
+pub use row_ref::{RowRef, RowRefIter};
 
 #[cfg(test)]
 mod tests {
