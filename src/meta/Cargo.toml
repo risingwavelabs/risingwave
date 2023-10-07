@@ -43,7 +43,7 @@ parking_lot = { version = "0.12", features = ["arc_lock"] }
 parse-display = "0.8"
 prometheus = "0.13"
 prometheus-http-query = "0.6"
-prost = "0.11"
+prost = "0.12"
 rand = "0.8"
 regex = "1"
 reqwest = "0.11"
@@ -57,10 +57,22 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 scopeguard = "1.2.0"
-sea-orm = { version = "0.12.0", features = [ "sqlx-mysql", "sqlx-postgres", "sqlx-sqlite", "runtime-tokio-native-tls", "macros" ] }
+sea-orm = { version = "0.12.0", features = [
+    "sqlx-mysql",
+    "sqlx-postgres",
+    "sqlx-sqlite",
+    "runtime-tokio-native-tls",
+    "macros",
+] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "mysql", "sqlite", "chrono"] }
+sqlx = { version = "0.7", features = [
+    "runtime-tokio",
+    "postgres",
+    "mysql",
+    "sqlite",
+    "chrono",
+] }
 sync-point = { path = "../utils/sync-point" }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [

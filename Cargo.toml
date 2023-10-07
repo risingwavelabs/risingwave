@@ -105,8 +105,8 @@ hashbrown = { version = "0.14.0", features = [
   "nightly",
 ] }
 criterion = { version = "0.5", features = ["async_futures"] }
-tonic = { package = "madsim-tonic", version = "0.3.1" }
-tonic-build = { package = "madsim-tonic-build", version = "0.3.1" }
+tonic = { package = "madsim-tonic", version = "0.4.0" }
+tonic-build = { package = "madsim-tonic-build", version = "0.4.0" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "72a65aed6ed7b3d529b311031c2c8d99650990e2" }
 arrow-array = "47"
 arrow-cast = "47"
