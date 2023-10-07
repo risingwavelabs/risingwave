@@ -180,7 +180,6 @@ impl DdlService for DdlServiceImpl {
         let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         source.id = source_id;
 
-        // TODO: create source stream job
         match req.fragment_graph {
             None => {
                 let version = self
@@ -197,7 +196,6 @@ impl DdlService for DdlServiceImpl {
                 for fragment in fragment_graph.fragments.values_mut() {
                     visit_fragment(fragment, |node_body| {
                         if let NodeBody::Source(source_node) = node_body {
-                            // TODO: Refactor using source id.
                             source_node.source_inner.as_mut().unwrap().source_id = source_id;
                         }
                     });

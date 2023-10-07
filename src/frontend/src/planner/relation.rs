@@ -64,7 +64,7 @@ impl Planner {
             vec![],
             self.ctx(),
             false,
-            Cardinality::unknown(),
+            Cardinality::unknown(), // TODO(card): cardinality of system table
         )
         .into())
     }

@@ -502,7 +502,6 @@ impl CompleteStreamFragmentGraph {
         }
     }
 
-    // TODO: update comment
     /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV or MV on CDC Source, with the upstream existing
     /// `Materialize` or `Source` fragments.
     pub fn with_upstreams(
@@ -510,7 +509,7 @@ impl CompleteStreamFragmentGraph {
         upstream_job_fragments: HashMap<TableId, Fragment>,
         table_job_type: Option<TableJobType>,
     ) -> MetaResult<Self> {
-        Self::build_helper_new(
+        Self::build_helper(
             graph,
             Some(FragmentGraphUpstreamContext {
                 upstream_job_fragments,
@@ -527,7 +526,7 @@ impl CompleteStreamFragmentGraph {
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
     ) -> MetaResult<Self> {
-        Self::build_helper_new(
+        Self::build_helper(
             graph,
             None,
             Some(FragmentGraphDownstreamContext {
@@ -538,7 +537,7 @@ impl CompleteStreamFragmentGraph {
         )
     }
 
-    fn build_helper_new(
+    fn build_helper(
         mut graph: StreamFragmentGraph,
         upstream_ctx: Option<FragmentGraphUpstreamContext>,
         downstream_ctx: Option<FragmentGraphDownstreamContext>,
