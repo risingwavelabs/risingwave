@@ -40,7 +40,7 @@ use self::bytes_parser::BytesAccessBuilder;
 pub use self::mysql::mysql_row_to_datums;
 use self::plain_parser::PlainParser;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
-use self::unified::AccessImpl;
+use self::unified::{AccessImpl, AccessResult};
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
 use crate::aws_auth::AwsAuthProps;
@@ -282,15 +282,22 @@ impl SourceStreamChunkRowWriter<'_> {
 impl SourceStreamChunkRowWriter<'_> {
     fn do_action<A: OpAction>(
         &mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> Result<A::Output>,
-    ) -> Result<()> {
-        let mut f_with_meta = |desc: &SourceColumnDesc| {
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output>,
+    ) -> AccessResult<()> {
+        let mut wrapped_f = |desc: &SourceColumnDesc| {
             if let Some(meta_value) =
                 (self.row_meta.as_ref()).and_then(|row_meta| row_meta.value_for_column(desc))
             {
                 Ok(A::output_for(meta_value))
             } else {
-                f(desc)
+                match f(desc) {
+                    Ok(output) => Ok(output),
+                    Err(e) if desc.is_pk => Err(e),
+                    Err(error) => {
+                        tracing::warn!(?error, "ignoring error for non-pk column"); // TODO
+                        Ok(A::output_for(Datum::None))
+                    }
+                }
             }
         };
 
@@ -300,7 +307,7 @@ impl SourceStreamChunkRowWriter<'_> {
         let result = (self.descs.iter())
             .zip_eq_fast(self.builders.iter_mut())
             .try_for_each(|(desc, builder)| {
-                f_with_meta(desc).map(|output| {
+                wrapped_f(desc).map(|output| {
                     A::apply(builder, output);
                     applied_columns.push(builder);
                 })
@@ -312,7 +319,6 @@ impl SourceStreamChunkRowWriter<'_> {
                 Ok(())
             }
             Err(e) => {
-                tracing::warn!("failed to parse source data: {}", e);
                 for builder in applied_columns {
                     A::rollback(builder);
                 }
@@ -327,7 +333,10 @@ impl SourceStreamChunkRowWriter<'_> {
     ///
     /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///   Callers only need to handle columns with the type [`SourceColumnType::Normal`].
-    pub fn insert(&mut self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<()> {
+    pub fn insert(
+        &mut self,
+        f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
+    ) -> AccessResult<()> {
         self.do_action::<OpActionInsert>(f)
     }
 
@@ -337,7 +346,10 @@ impl SourceStreamChunkRowWriter<'_> {
     ///
     /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///   Callers only need to handle columns with the type [`SourceColumnType::Normal`].
-    pub fn delete(&mut self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<()> {
+    pub fn delete(
+        &mut self,
+        f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
+    ) -> AccessResult<()> {
         self.do_action::<OpActionDelete>(f)
     }
 
@@ -349,8 +361,8 @@ impl SourceStreamChunkRowWriter<'_> {
     ///   [`SourceColumnDesc`]. Callers only need to handle columns with the type [`SourceColumnType::Normal`].
     pub fn update(
         &mut self,
-        f: impl FnMut(&SourceColumnDesc) -> Result<(Datum, Datum)>,
-    ) -> Result<()> {
+        f: impl FnMut(&SourceColumnDesc) -> AccessResult<(Datum, Datum)>,
+    ) -> AccessResult<()> {
         self.do_action::<OpActionUpdate>(f)
     }
 }

@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use apache_avro::Schema;
+use itertools::Either;
 use jst::{convert_avro, Context};
 use risingwave_common::error::ErrorCode::{self, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -111,10 +112,11 @@ impl JsonParser {
         let value = simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         let values = if let simd_json::BorrowedValue::Array(arr) = value {
-            arr
+            Either::Left(arr.into_iter())
         } else {
-            vec![value]
+            Either::Right(std::iter::once(value))
         };
+        // TODO: simplify
         let mut errors = Vec::new();
         let mut guard = None;
         for value in values {

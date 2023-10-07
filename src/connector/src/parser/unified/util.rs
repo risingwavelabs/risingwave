@@ -37,7 +37,8 @@ pub fn apply_delete_on_stream_chunk_writer(
                 }
             }
         }
-    })
+    })?;
+    Ok(())
 }
 
 pub fn apply_upsert_on_stream_chunk_writer(
@@ -62,7 +63,8 @@ pub fn apply_upsert_on_stream_chunk_writer(
             res
         );
         Ok(res?)
-    })
+    })?;
+    Ok(())
 }
 
 pub fn apply_row_operation_on_stream_chunk_writer_with_op(
@@ -89,9 +91,7 @@ pub fn apply_row_accessor_on_stream_chunk_writer(
     writer: &mut SourceStreamChunkRowWriter<'_>,
 ) -> Result<(), RwError> {
     writer.insert(|column| {
-        let res: Result<Datum, RwError> = match accessor
-            .access(&[&column.name], Some(&column.data_type))
-        {
+        let res = match accessor.access(&[&column.name], Some(&column.data_type)) {
             Ok(o) => Ok(o),
             Err(AccessError::Undefined { name, .. }) if !column.is_pk && name == column.name => {
                 // Fill in null value for non-pk column
@@ -117,7 +117,8 @@ pub fn apply_row_accessor_on_stream_chunk_writer(
             res
         );
         res
-    })
+    })?;
+    Ok(())
 }
 
 impl From<AccessError> for RwError {
