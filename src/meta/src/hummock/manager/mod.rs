@@ -524,6 +524,7 @@ impl HummockManager {
             .await?;
 
         // We've already lowered the default limit for write limit in PR-12183, and to prevent older clusters from continuing to use the outdated configuration, we've introduced a new logic to rewrite it in a uniform way.
+        let mut rewrite_cg_ids = vec![];
         for (cg_id, compaction_group_config) in &mut configs {
             // update write limit
             let relaxed_default_write_stop_level_count = 1000;
@@ -532,23 +533,25 @@ impl HummockManager {
                 .level0_sub_level_compact_level_count
                 == relaxed_default_write_stop_level_count
             {
-                // update meta store
-                let mut result = self
-                    .update_compaction_config(
-                        &[*cg_id],
-                        &[
-                            mutable_config::MutableConfig::Level0StopWriteThresholdSubLevelNumber(
-                                compaction_config::level0_stop_write_threshold_sub_level_number(),
-                            ),
-                        ],
-                    )
-                    .await?;
-
-                if !result.is_empty() {
-                    // update memory
-                    *compaction_group_config = result.pop().unwrap();
-                }
+                rewrite_cg_ids.push(*cg_id);
             }
+        }
+
+        // update meta store
+        let result = self
+            .update_compaction_config(
+                &rewrite_cg_ids,
+                &[
+                    mutable_config::MutableConfig::Level0StopWriteThresholdSubLevelNumber(
+                        compaction_config::level0_stop_write_threshold_sub_level_number(),
+                    ),
+                ],
+            )
+            .await?;
+
+        // update memory
+        for new_config in result {
+            configs.insert(new_config.group_id(), new_config);
         }
 
         versioning_guard.write_limit =
