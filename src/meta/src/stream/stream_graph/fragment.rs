@@ -149,10 +149,10 @@ impl BuildingFragment {
                 dml_node.table_id = table_id;
                 dml_node.table_version_id = job.table_version_id().unwrap();
             }
-            NodeBody::Source(source_node) => {
-                // Table job w/ a shared upstream cdc source is a table fragment too
-                if !has_table && let Some(job_type) = job.table_job_type() {
-                    has_table = matches!(job_type, TableJobType::SharedCdcSource)
+            NodeBody::Source(_) => {
+                // Notice: Table job has a dumb Source node, we should be careful that `has_table` should not be overwrite to `false`
+                if !has_table {
+                    has_table = job.is_source_job();
                 }
             }
             _ => {}

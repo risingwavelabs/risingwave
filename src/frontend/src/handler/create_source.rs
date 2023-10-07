@@ -1310,7 +1310,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_multi_table_cdc_create_source_handler() {
         let sql =
-            format!(r#"CREATE SOURCE t2 WITH (connector = 'mysql-cdc') FORMAT PLAIN ENCODE JSON"#,);
+            "CREATE SOURCE t2 WITH (connector = 'mysql-cdc') FORMAT PLAIN ENCODE JSON".to_string();
         let frontend = LocalFrontend::new(Default::default()).await;
         let session = frontend.session_ref();
         session

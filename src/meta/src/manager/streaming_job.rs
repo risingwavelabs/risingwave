@@ -242,4 +242,8 @@ impl StreamingJob {
             None
         }
     }
+
+    pub fn is_source_job(&self) -> bool {
+        matches!(self, StreamingJob::Source(_))
+    }
 }

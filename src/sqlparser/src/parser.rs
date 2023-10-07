@@ -2433,7 +2433,7 @@ impl Parser {
         let connector = option.map(|opt| opt.value.to_string());
 
         let source_schema = if let Some(connector) = connector {
-            Some(self.parse_source_schema_with_connector(&connector)?)
+            Some(self.parse_source_schema_with_connector(&connector, false)?)
         } else {
             None // Table is NOT created with an external connector.
         };
