@@ -26,7 +26,7 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 #[derive(Debug, Clone)]
 pub struct CompactorMetrics {
     pub compaction_upload_sst_counts: GenericCounter<AtomicU64>,
-    pub compact_fast_runner_bytes: GenericCounter<AtomicU64>,
+    pub compact_fast_runner_bytes: GenericCounterVec<AtomicU64>,
     pub compact_write_bytes: GenericCounterVec<AtomicU64>,
     pub compact_read_current_level: GenericCounterVec<AtomicU64>,
     pub compact_read_next_level: GenericCounterVec<AtomicU64>,
@@ -212,9 +212,10 @@ impl CompactorMetrics {
             "Total size of compaction files size that have been written to object store from shared buffer",
             registry
         ).unwrap();
-        let compact_fast_runner_bytes = register_int_counter_with_registry!(
+        let compact_fast_runner_bytes = register_int_counter_vec_with_registry!(
             "compactor_fast_compact_bytes",
             "Total size of compaction files size of fast compactor runner",
+            &["group", "level_index"],
             registry
         )
         .unwrap();
