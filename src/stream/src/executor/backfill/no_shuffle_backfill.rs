@@ -333,30 +333,12 @@ where
                                             break;
                                         } else {
                                             // Process barrier:
-                                            // - consume upstream buffer chunk
                                             // - switch snapshot
-
-                                            // Consume upstream buffer chunk
-                                            // If no current_pos, means we did not process any snapshot
-                                            // yet. In that case
-                                            // we can just ignore the upstream buffer chunk, but still need to clean it.
-                                            if let Some(current_pos) = &current_pos {
-                                                for chunk in upstream_chunk_buffer.drain(..) {
-                                                    cur_barrier_upstream_processed_rows +=
-                                                        chunk.cardinality() as u64;
-                                                    yield Message::Chunk(mapping_chunk(
-                                                        mark_chunk(
-                                                            chunk,
-                                                            current_pos,
-                                                            &pk_in_output_indices,
-                                                            pk_order,
-                                                        ),
-                                                        &self.output_indices,
-                                                    ));
-                                                }
-                                            } else {
-                                                upstream_chunk_buffer.clear()
-                                            }
+                                            // Upstream updates should only be read after the
+                                            // Nth barrier.
+                                            // Otherwise they would get filtered out,
+                                            // if they are larger than current pos,
+                                            // and we  will lose them.
 
                                             self.metrics
                                                 .backfill_snapshot_read_row_count
