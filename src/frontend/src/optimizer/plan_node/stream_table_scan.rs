@@ -225,14 +225,12 @@ impl StreamNode for StreamTableScan {
 }
 
 impl StreamTableScan {
-    /// In cdc backfill, the upstream and batch scan schema are the same.
-    /// The cdc source stream job will parse the `DebeziumJson` record into a record
-    /// descriped by the downsream table schema.
     pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
         use risingwave_pb::stream_plan::*;
 
         let stream_key = self.base.stream_key.iter().map(|x| *x as u32).collect_vec();
 
+        // A flag to mark whether the upstream is a cdc source job
         let mut cdc_upstream = false;
 
         // The required columns from the table (both scan and upstream).
@@ -267,7 +265,8 @@ impl StreamTableScan {
             })
             .collect_vec();
 
-        // The schema of the upstream stream
+        // The schema of the shared cdc source upstream is different from snapshot,
+        // refer to `debezium_cdc_source_schema()` for details.
         let upstream_schema = if cdc_upstream {
             let mut columns = debezium_cdc_source_schema();
             columns.push(ColumnCatalog::row_id_column());
@@ -309,18 +308,7 @@ impl StreamTableScan {
                     node_body: Some(PbNodeBody::Merge(Default::default())),
                     identity: "Upstream".into(),
                     fields: upstream_schema.clone(),
-                    stream_key: if cdc_upstream {
-                        // the `_rw_offset` column
-                        // TODO: may remove this part, we don't parse upstream chunk in the Merger
-                        self.logical
-                            .table_desc
-                            .distribution_key
-                            .iter()
-                            .map(|&x| x as u32)
-                            .collect_vec()
-                    } else {
-                        vec![] // not used for other scenarios
-                    },
+                    stream_key: vec![], // not used
                     ..Default::default()
                 },
                 PbStreamNode {
