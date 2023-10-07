@@ -250,7 +250,8 @@ impl KinesisSplitReader {
                 .set_starting_sequence_number(starting_seq_num)
                 .set_timestamp(starting_timestamp)
                 .send()
-                .await?;
+                .await
+                .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
 
             if let Some(iter) = resp.shard_iterator() {
                 Ok(iter.to_owned())
