@@ -348,14 +348,6 @@ where
                                                 ])
                                                 .inc_by(cur_barrier_snapshot_processed_rows);
 
-                                            self.metrics
-                                                .backfill_upstream_output_row_count
-                                                .with_label_values(&[
-                                                    upstream_table_id.to_string().as_str(),
-                                                    self.actor_id.to_string().as_str(),
-                                                ])
-                                                .inc_by(cur_barrier_upstream_processed_rows);
-
                                             // Update snapshot read epoch.
                                             snapshot_read_epoch = barrier.epoch.prev;
 
