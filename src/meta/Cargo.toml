@@ -86,6 +86,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = { workspace = true }
+tonic_0_9 = { package = "tonic", version = "0.9" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
 url = "2"
