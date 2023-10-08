@@ -318,7 +318,6 @@ impl StarrocksSinkWriter {
             config.common.table.clone(),
             header,
         );
-        // let insert = Some(starrocks_insert_builder.build_starrocks().await?);
         Ok(Self {
             config,
             schema: schema.clone(),
@@ -361,12 +360,13 @@ impl StarrocksSinkWriter {
                         STARROCKS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),
                     );
-                    let row_json_string = serde_json::to_string(&row_json_value)
-                        .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
+                    let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
+                        SinkError::Starrocks(format!("Json derialize error {:?}", e))
+                    })?;
                     self.insert
                         .as_mut()
                         .ok_or_else(|| {
-                            SinkError::Doris("Can't find doris sink insert".to_string())
+                            SinkError::Starrocks("Can't find starrocks sink insert".to_string())
                         })?
                         .write(row_json_string.into())
                         .await?;
@@ -377,12 +377,13 @@ impl StarrocksSinkWriter {
                         STARROCKS_DELETE_SIGN.to_string(),
                         Value::String("1".to_string()),
                     );
-                    let row_json_string = serde_json::to_string(&row_json_value)
-                        .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
+                    let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
+                        SinkError::Starrocks(format!("Json derialize error {:?}", e))
+                    })?;
                     self.insert
                         .as_mut()
                         .ok_or_else(|| {
-                            SinkError::Doris("Can't find doris sink insert".to_string())
+                            SinkError::Starrocks("Can't find starrocks sink insert".to_string())
                         })?
                         .write(row_json_string.into())
                         .await?;
@@ -394,12 +395,13 @@ impl StarrocksSinkWriter {
                         STARROCKS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),
                     );
-                    let row_json_string = serde_json::to_string(&row_json_value)
-                        .map_err(|e| SinkError::Doris(format!("Json derialize error {:?}", e)))?;
+                    let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
+                        SinkError::Starrocks(format!("Json derialize error {:?}", e))
+                    })?;
                     self.insert
                         .as_mut()
                         .ok_or_else(|| {
-                            SinkError::Doris("Can't find doris sink insert".to_string())
+                            SinkError::Starrocks("Can't find starrocks sink insert".to_string())
                         })?
                         .write(row_json_string.into())
                         .await?;
