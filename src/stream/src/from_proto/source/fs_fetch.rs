@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::source::SourceCtrlOpts;
@@ -78,9 +80,15 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             .collect();
         let schema = Schema::new(fields);
 
-        let state_table_handler = SourceStateTableHandler::from_table_catalog(
+        let vnodes = Some(Arc::new(
+            params
+                .vnode_bitmap
+                .expect("vnodes not set for fetch executor"),
+        ));
+        let state_table_handler = SourceStateTableHandler::from_table_catalog_with_vnodes(
             source.state_table.as_ref().unwrap(),
             store.clone(),
+            vnodes,
         )
         .await;
         let stream_source_core = StreamSourceCore::new(

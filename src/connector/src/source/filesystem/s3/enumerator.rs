@@ -15,7 +15,6 @@
 use anyhow::Context;
 use async_trait::async_trait;
 use aws_sdk_s3::client::Client;
-use itertools::Itertools;
 
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::{default_conn_config, s3_client};
@@ -113,6 +112,7 @@ impl SplitEnumerator for S3SplitEnumerator {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
 
     #[test]
     fn test_get_prefix() {

@@ -26,17 +26,15 @@ use risingwave_common::error::{internal_error, Result, RwError};
 use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
-use risingwave_connector::sink::encoder::SerTo;
 use risingwave_connector::source::filesystem::s3_v2::reader::S3SourceReader;
 use risingwave_connector::source::filesystem::{FsPage, FsPageItem, FsSplit, S3SplitEnumerator};
 use risingwave_connector::source::{
     create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
-    ConnectorState, FsFileReader, FsFilterCtrlCtx, FsFilterCtrlCtxRef, FsListInner,
-    SourceColumnDesc, SourceContext, SourceEnumeratorContext, SplitEnumerator, SplitReader,
+    ConnectorState, FsFileReader, FsFilterCtrlCtx, FsListInner, SourceColumnDesc, SourceContext,
+    SourceEnumeratorContext, SplitEnumerator, SplitReader,
 };
-use tokio::sync::mpsc::Receiver;
+use tokio::time;
 use tokio::time::{Duration, MissedTickBehavior};
-use tokio::{select, time};
 
 #[derive(Clone, Debug)]
 pub struct ConnectorSource {
@@ -104,7 +102,7 @@ impl ConnectorSource {
             FsListCtrlContext {
                 interval: Duration::from_secs(60),
                 last_tick: None,
-                filter_ctx: FsFilterCtrlCtx::default(),
+                filter_ctx: FsFilterCtrlCtx,
             },
             lister,
         ))
