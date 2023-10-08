@@ -7022,6 +7022,7 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "auto_enums",
+ "auto_impl",
  "bitflags 2.4.0",
  "byteorder",
  "bytes",

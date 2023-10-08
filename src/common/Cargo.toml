@@ -22,6 +22,7 @@ arrow-cast = { workspace = true }
 arrow-schema = { workspace = true }
 async-trait = "0.1"
 auto_enums = "0.8"
+auto_impl = "1"
 bitflags = "2"
 byteorder = "1"
 bytes = "1"

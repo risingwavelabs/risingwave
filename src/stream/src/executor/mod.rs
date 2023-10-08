@@ -26,13 +26,13 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
+use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::BoxedExpression;
-use risingwave_pb::data::{PbDatum, PbEpoch};
+use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, PbMutation};
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
@@ -675,16 +675,14 @@ impl Watermark {
                 index: self.col_idx as _,
                 r#type: Some(self.data_type.to_protobuf()),
             }),
-            val: Some(PbDatum {
-                body: serialize_datum(Some(&self.val)),
-            }),
+            val: Some(&self.val).to_protobuf().into(),
         }
     }
 
     pub fn from_protobuf(prost: &PbWatermark) -> StreamExecutorResult<Self> {
         let col_ref = prost.get_column()?;
         let data_type = DataType::from(col_ref.get_type()?);
-        let val = deserialize_datum(prost.get_val()?.get_body().as_slice(), &data_type)?
+        let val = Datum::from_protobuf(prost.get_val()?, &data_type)?
             .expect("watermark value cannot be null");
         Ok(Self::new(col_ref.get_index() as _, data_type, val))
     }
