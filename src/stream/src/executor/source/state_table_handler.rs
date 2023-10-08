@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 use std::ops::{Bound, Deref};
+use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
 use risingwave_common::catalog::{DatabaseId, SchemaId};
@@ -23,6 +24,7 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
+use risingwave_common::buffer::Bitmap;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::table::TableType;
@@ -53,6 +55,17 @@ impl<S: StateStore> SourceStateTableHandler<S> {
 
         Self {
             state_store: StateTable::from_table_catalog(table_catalog, store, None).await,
+        }
+    }
+
+    pub async fn from_table_catalog_with_vnodes(table_catalog: &PbTable, store: S, vnodes: Option<Arc<Bitmap>>) -> Self {
+        // The state of source should not be cleaned up by retention_seconds
+        assert!(!table_catalog
+            .properties
+            .contains_key(&String::from(PROPERTIES_RETENTION_SECOND_KEY)));
+
+        Self {
+            state_store: StateTable::from_table_catalog(table_catalog, store, vnodes).await,
         }
     }
 
