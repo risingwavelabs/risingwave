@@ -14,6 +14,7 @@
 
 use std::future::pending;
 
+use futures::future::Either;
 use futures::{Future, FutureExt, Stream};
 
 /// Convert a list of streams into a [`Stream`] of results from the streams.
@@ -32,4 +33,13 @@ pub fn pending_on_none<I>(future: impl Future<Output = Option<I>>) -> impl Futur
             None => pending::<I>().await,
         }
     })
+}
+
+pub fn drop_either_future<A, B>(
+    either: Either<(A, impl Future), (B, impl Future)>,
+) -> Either<A, B> {
+    match either {
+        Either::Left((left, _)) => Either::Left(left),
+        Either::Right((right, _)) => Either::Right(right),
+    }
 }

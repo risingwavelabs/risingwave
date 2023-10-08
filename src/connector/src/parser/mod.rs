@@ -356,12 +356,14 @@ impl SourceStreamChunkRowWriter<'_> {
 }
 
 /// Transaction control message. Currently only used by Debezium messages.
+#[derive(Debug)]
 pub enum TransactionControl {
     Begin { id: Box<str> },
     Commit { id: Box<str> },
 }
 
 /// The result of parsing a message.
+#[derive(Debug)]
 pub enum ParseResult {
     /// Some rows are parsed and written to the [`SourceStreamChunkRowWriter`].
     Rows,

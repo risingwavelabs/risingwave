@@ -71,7 +71,6 @@ madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "fedb1
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 md-5 = { version = "0.10" }
 mio = { version = "0.8", features = ["net", "os-ext"] }
-multimap = { version = "0.8" }
 nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
@@ -171,7 +170,6 @@ log = { version = "0.4", default-features = false, features = ["kv_unstable", "s
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 md-5 = { version = "0.10" }
 mio = { version = "0.8", features = ["net", "os-ext"] }
-multimap = { version = "0.8" }
 nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }

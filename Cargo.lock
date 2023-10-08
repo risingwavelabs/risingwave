@@ -2176,9 +2176,9 @@ dependencies = [
 
 [[package]]
 name = "csv"
-version = "1.2.2"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "626ae34994d3d8d668f4269922248239db4ae42d538b14c398b74a52208e8086"
+checksum = "ac574ff4d437a7b5ad237ef331c17ccca63c46479e5b5453eb8e10bb99a759fe"
 dependencies = [
  "csv-core",
  "itoa",
@@ -2188,9 +2188,9 @@ dependencies = [
 
 [[package]]
 name = "csv-core"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b2466559f260f48ad25fe6317b3c8dac77b5bdb5763ac7d9d6103530663bc90"
+checksum = "5efa2b3d7902f4b634a20cae3c9c4e6209dc4779feb6863329607560143efa70"
 dependencies = [
  "memchr",
 ]
@@ -4803,6 +4803,12 @@ name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
+
+[[package]]
+name = "multimap"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70db9248a93dc36a36d9a47898caa007a32755c7ad140ec64eeeb50d5a730631"
 dependencies = [
  "serde",
 ]
@@ -6284,7 +6290,7 @@ dependencies = [
  "itertools 0.10.5",
  "lazy_static",
  "log",
- "multimap",
+ "multimap 0.8.3",
  "petgraph",
  "prettyplease 0.1.25",
  "prost 0.11.9",
@@ -6305,7 +6311,7 @@ dependencies = [
  "heck 0.4.1",
  "itertools 0.10.5",
  "log",
- "multimap",
+ "multimap 0.8.3",
  "once_cell",
  "petgraph",
  "prettyplease 0.2.15",
@@ -8054,7 +8060,7 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "memcomparable",
- "multimap",
+ "multimap 0.9.0",
  "num-traits",
  "parking_lot 0.12.1",
  "parse-display",
@@ -9012,10 +9018,11 @@ dependencies = [
 
 [[package]]
 name = "simd-json"
-version = "0.10.6"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de7f1293f0e4e11d52e588766fe9de8caa2857ff63809d40de83245452ca7c5c"
+checksum = "474b451aaac1828ed12f6454a80fe58b940ae2998d10389d41533940a6f641bf"
 dependencies = [
+ "getrandom",
  "halfbrown",
  "lexical-core",
  "serde",
@@ -10946,7 +10953,6 @@ dependencies = [
  "madsim-tokio",
  "md-5",
  "mio",
- "multimap",
  "nom",
  "num-bigint",
  "num-integer",
