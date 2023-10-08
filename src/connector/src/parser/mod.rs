@@ -381,12 +381,14 @@ impl SourceStreamChunkRowWriter<'_> {
 }
 
 /// Transaction control message. Currently only used by Debezium messages.
+#[derive(Debug)]
 pub enum TransactionControl {
     Begin { id: Box<str> },
     Commit { id: Box<str> },
 }
 
 /// The result of parsing a message.
+#[derive(Debug)]
 pub enum ParseResult {
     /// Some rows are parsed and written to the [`SourceStreamChunkRowWriter`].
     Rows,
@@ -902,7 +904,7 @@ impl SpecificParserConfig {
                         Some(info.proto_message_name.clone())
                     },
                     key_record_name: info.key_message_name.clone(),
-                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                    name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                         .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
@@ -933,7 +935,7 @@ impl SpecificParserConfig {
                     message_name: info.proto_message_name.clone(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
-                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                    name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                         .unwrap(),
                     key_message_name: info.key_message_name.clone(),
                     ..Default::default()
@@ -958,7 +960,7 @@ impl SpecificParserConfig {
                     } else {
                         Some(info.proto_message_name.clone())
                     },
-                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                    name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                         .unwrap(),
                     key_record_name: info.key_message_name.clone(),
                     row_schema_location: info.row_schema_location.clone(),
