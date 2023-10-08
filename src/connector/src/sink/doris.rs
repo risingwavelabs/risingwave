@@ -278,7 +278,7 @@ impl DorisSinkWriter {
             let row_json_string = Value::Object(self.row_encoder.encode(row)?).to_string();
             self.insert
                 .as_mut()
-                .ok_or_else(|| SinkError::Doris("Can't find starrocks sink insert".to_string()))?
+                .ok_or_else(|| SinkError::Doris("Can't find doris sink insert".to_string()))?
                 .write(row_json_string.into())
                 .await?;
         }
@@ -299,7 +299,7 @@ impl DorisSinkWriter {
                     self.insert
                         .as_mut()
                         .ok_or_else(|| {
-                            SinkError::Doris("Can't find starrocks sink insert".to_string())
+                            SinkError::Doris("Can't find doris sink insert".to_string())
                         })?
                         .write(row_json_string.into())
                         .await?;
@@ -315,7 +315,7 @@ impl DorisSinkWriter {
                     self.insert
                         .as_mut()
                         .ok_or_else(|| {
-                            SinkError::Doris("Can't find starrocks sink insert".to_string())
+                            SinkError::Doris("Can't find doris sink insert".to_string())
                         })?
                         .write(row_json_string.into())
                         .await?;
@@ -332,7 +332,7 @@ impl DorisSinkWriter {
                     self.insert
                         .as_mut()
                         .ok_or_else(|| {
-                            SinkError::Doris("Can't find starrocks sink insert".to_string())
+                            SinkError::Doris("Can't find doris sink insert".to_string())
                         })?
                         .write(row_json_string.into())
                         .await?;
@@ -369,7 +369,7 @@ impl SinkWriter for DorisSinkWriter {
             let insert = self
                 .insert
                 .take()
-                .ok_or_else(|| SinkError::Doris("Can't find starrocks inserter".to_string()))?;
+                .ok_or_else(|| SinkError::Doris("Can't find doris inserter".to_string()))?;
             insert.finish().await?;
         }
         Ok(())
