@@ -18,9 +18,9 @@ use std::fmt::{Debug, Formatter};
 use std::ops::Bound;
 use std::pin::Pin;
 use std::sync::Arc;
-use either::Either;
 
-use futures::stream::{self, StreamExt, SelectAll};
+use either::Either;
+use futures::stream::{self, SelectAll, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
@@ -41,7 +41,11 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::KeyedRowStream;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::{ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, expect_first_barrier, Message, Mutation, PkIndices, PkIndicesRef, SourceStateTableHandler, StreamExecutorError, StreamExecutorResult, StreamSourceCore};
+use crate::executor::{
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
+    Mutation, PkIndices, PkIndicesRef, SourceStateTableHandler, StreamExecutorError,
+    StreamExecutorResult, StreamSourceCore,
+};
 
 type StateTableIter<'a, S> = SelectAll<Pin<Box<KeyedRowStream<'a, S, BasicSerde>>>>;
 
@@ -68,6 +72,7 @@ pub struct FsFetchExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> FsFetchExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         schema: Schema,
@@ -90,6 +95,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn try_replace_with_new_reader<'a, const BIASED: bool>(
         is_datastream_empty: &mut bool,
         _state_store_handler: &'a SourceStateTableHandler<S>,
@@ -107,7 +113,8 @@ impl<S: StateStore> FsFetchExecutor<S> {
                 fs_split.offset < fs_split.size
             })
             .map(|(_, split)| split.as_fs().unwrap().to_owned())
-            .or(loop { // Otherwise find the next assignment in the state table.
+            .or(loop {
+                // Otherwise find the next assignment in the state table.
                 if let Some(item) = state_table_iter.next().await {
                     let row = item?;
                     let split_id = match row.datum_at(0) {
@@ -209,7 +216,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
     }
 
     async fn build_state_table_iter(
-        state_store_handler: &SourceStateTableHandler<S>
+        state_store_handler: &SourceStateTableHandler<S>,
     ) -> StreamExecutorResult<StateTableIter<'_, S>> {
         Ok(select_all({
             let mut store_iter_collect =
@@ -317,7 +324,8 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                     }
 
                                     // Rebuild state table iterator.
-                                    state_table_iter = Self::build_state_table_iter(&state_store_handler).await?;
+                                    state_table_iter =
+                                        Self::build_state_table_iter(&state_store_handler).await?;
 
                                     // Propagate the barrier.
                                     yield msg;
@@ -330,7 +338,8 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                         let size = row.datum_at(2).unwrap().into_int64();
                                         (
                                             Arc::<str>::from(filename),
-                                            FsSplit::new(filename.to_owned(), 0, size as usize).into(),
+                                            FsSplit::new(filename.to_owned(), 0, size as usize)
+                                                .into(),
                                         )
                                     });
                                     state_cache.extend(file_assignment);
@@ -372,20 +381,24 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                 // Here we expect the fs_split lies in the state store and
                                 // store it into the state cache.
                                 let row = state_store_handler
-                                    .get(split_id.to_owned()).await?
-                                    .expect(&format!("FsSplit with id {} should be in the state table.", split_id));
+                                    .get(split_id.to_owned())
+                                    .await?
+                                    .expect(&format!(
+                                        "FsSplit with id {} should be in the state table.",
+                                        split_id
+                                    ));
                                 if let Some(ScalarRefImpl::Jsonb(jsonb_ref)) = row.datum_at(1) {
-                                    let split = SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?;
+                                    let split =
+                                        SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?;
                                     state_cache.insert(split_id.to_owned(), split);
                                 }
                             }
 
                             // Get FsSplit in the state cache.
-                            let mut cache_entry =
-                                match state_cache.entry(split_id.to_owned()) {
-                                    Entry::Occupied(entry) => entry,
-                                    Entry::Vacant(_) => unreachable!(),
-                                };
+                            let mut cache_entry = match state_cache.entry(split_id.to_owned()) {
+                                Entry::Occupied(entry) => entry,
+                                Entry::Vacant(_) => unreachable!(),
+                            };
 
                             // Update the offset in the state cache.
                             // If offset == size, the entry

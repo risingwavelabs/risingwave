@@ -16,7 +16,7 @@ use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::external::{ExternalTableType, SchemaTableName};
-use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts, S3_V2_CONNECTOR};
+use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;

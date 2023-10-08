@@ -38,7 +38,6 @@ use super::{
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::stream_fs_fetch::StreamFsFetch;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
@@ -288,7 +287,7 @@ impl LogicalSource {
             Ok(StreamProject::new(logical_project).into())
         } else {
             let source = dispatch_new_s3_plan(self.core.clone(), input);
-            Ok(source.into())
+            Ok(source)
         }
     }
 

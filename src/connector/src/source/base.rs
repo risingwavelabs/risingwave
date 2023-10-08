@@ -32,7 +32,6 @@ use risingwave_pb::catalog::PbSource;
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
-use tokio::sync::mpsc::Receiver;
 
 use super::datagen::DatagenMeta;
 use super::filesystem::FsSplit;
