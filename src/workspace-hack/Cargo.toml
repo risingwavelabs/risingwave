@@ -29,7 +29,7 @@ bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 byteorder = { version = "1" }
 bytes = { version = "1", features = ["serde"] }
-chrono = { version = "0.4", features = ["alloc", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 clap_builder = { version = "4", default-features = false, features = ["cargo", "color", "env", "help", "std", "suggestions", "usage"] }
 combine = { version = "4" }
@@ -71,7 +71,6 @@ madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "fedb1
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 md-5 = { version = "0.10" }
 mio = { version = "0.8", features = ["net", "os-ext"] }
-multimap = { version = "0.8" }
 nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
@@ -87,7 +86,9 @@ phf = { version = "0.11", features = ["uncased"] }
 phf_shared = { version = "0.11", features = ["uncased"] }
 postgres-types = { version = "0.2", default-features = false, features = ["derive", "with-chrono-0_4", "with-serde_json-1"] }
 prometheus = { version = "0.13", features = ["process"] }
-prost = { version = "0.11", features = ["no-recursion-limit"] }
+prost-5ef9efb8ec2df382 = { package = "prost", version = "0.12", features = ["no-recursion-limit"] }
+prost-a6292c17cd707f01 = { package = "prost", version = "0.11" }
+prost-types = { version = "0.12" }
 rand = { version = "0.8", features = ["small_rng"] }
 rand_chacha = { version = "0.3" }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }
@@ -97,6 +98,7 @@ regex-syntax = { version = "0.7" }
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+rustls = { version = "0.21" }
 scopeguard = { version = "1" }
 sea-orm = { version = "0.12", features = ["runtime-tokio-native-tls", "sqlx-mysql", "sqlx-postgres", "sqlx-sqlite"] }
 sea-query = { version = "0.30", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "derive", "hashable-value", "postgres-array", "thread-safe", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
@@ -144,7 +146,7 @@ bitflags = { version = "2", default-features = false, features = ["serde", "std"
 byteorder = { version = "1" }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
-chrono = { version = "0.4", features = ["alloc", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
 crossbeam-queue = { version = "0.3" }
 crossbeam-utils = { version = "0.8" }
 deranged = { version = "0.3", default-features = false, features = ["serde", "std"] }
@@ -168,7 +170,6 @@ log = { version = "0.4", default-features = false, features = ["kv_unstable", "s
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 md-5 = { version = "0.10" }
 mio = { version = "0.8", features = ["net", "os-ext"] }
-multimap = { version = "0.8" }
 nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
@@ -181,7 +182,9 @@ phf = { version = "0.11", features = ["uncased"] }
 phf_shared = { version = "0.11", features = ["uncased"] }
 postgres-types = { version = "0.2", default-features = false, features = ["derive", "with-chrono-0_4", "with-serde_json-1"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
-prost = { version = "0.11", features = ["no-recursion-limit"] }
+prost-5ef9efb8ec2df382 = { package = "prost", version = "0.12", features = ["no-recursion-limit"] }
+prost-a6292c17cd707f01 = { package = "prost", version = "0.11" }
+prost-types = { version = "0.12" }
 rand = { version = "0.8", features = ["small_rng"] }
 rand_chacha = { version = "0.3" }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }

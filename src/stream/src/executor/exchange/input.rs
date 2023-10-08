@@ -177,7 +177,7 @@ impl RemoteInput {
                         let msg_res = Message::from_protobuf(&msg);
                         metrics
                             .actor_sampled_deserialize_duration_ns
-                            .with_label_values(&[&down_actor_id])
+                            .with_label_values(&[&down_actor_id, &down_fragment_id])
                             .inc_by(start_time.elapsed().as_nanos() as u64);
                         msg_res
                     } else {

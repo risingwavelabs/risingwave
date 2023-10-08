@@ -405,15 +405,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
             // Update the metrics.
             let actor_id_str = this.actor_ctx.id.to_string();
+            let fragment_id_str = this.actor_ctx.fragment_id.to_string();
             let table_id_str = this.intermediate_state_table.table_id().to_string();
-            let metric_dirty_count = this
-                .metrics
-                .agg_dirty_group_count
-                .with_label_values(&[&table_id_str, &actor_id_str]);
+            let metric_dirty_count = this.metrics.agg_dirty_group_count.with_label_values(&[
+                &table_id_str,
+                &actor_id_str,
+                &fragment_id_str,
+            ]);
             let metric_dirty_heap_size = this
                 .metrics
                 .agg_dirty_group_heap_size
-                .with_label_values(&[&table_id_str, &actor_id_str]);
+                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str]);
             let new_group_size = agg_group.estimated_size();
             if let Some(old_group_size) = old_group_size {
                 match new_group_size.cmp(&old_group_size) {
@@ -448,29 +450,30 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     ) {
         // Update metrics.
         let actor_id_str = this.actor_ctx.id.to_string();
+        let fragment_id_str = this.actor_ctx.fragment_id.to_string();
         let table_id_str = this.intermediate_state_table.table_id().to_string();
         this.metrics
             .agg_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(vars.stats.lookup_miss_count);
         vars.stats.lookup_miss_count = 0;
         this.metrics
             .agg_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(vars.stats.total_lookup_count);
         vars.stats.total_lookup_count = 0;
         this.metrics
             .agg_cached_keys
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.agg_group_cache.len() as i64);
         this.metrics
             .agg_chunk_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(vars.stats.chunk_lookup_miss_count);
         vars.stats.chunk_lookup_miss_count = 0;
         this.metrics
             .agg_chunk_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(vars.stats.chunk_total_lookup_count);
         vars.stats.chunk_total_lookup_count = 0;
 
@@ -552,11 +555,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         vars.dirty_groups_heap_size.set(0);
         this.metrics
             .agg_dirty_group_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(0);
         this.metrics
             .agg_dirty_group_heap_size
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(0);
 
         // Yield the remaining rows in chunk builder.
