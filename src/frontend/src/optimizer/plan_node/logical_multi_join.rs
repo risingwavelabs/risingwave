@@ -246,7 +246,7 @@ impl LogicalMultiJoin {
 
         let pk_indices = {
             let mut pk_indices = vec![];
-            for (i, input_pk) in inputs.iter().map(|input| input.logical_pk()).enumerate() {
+            for (i, input_pk) in inputs.iter().map(|input| input.stream_key()).enumerate() {
                 for input_pk_idx in input_pk {
                     pk_indices.push(inner_i2o_mappings[i].map(*input_pk_idx));
                 }

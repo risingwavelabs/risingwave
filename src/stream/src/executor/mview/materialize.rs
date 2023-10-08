@@ -22,7 +22,7 @@ use enum_as_inner::EnumAsInner;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
-use risingwave_common::array::{Op, StreamChunk, Vis};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
 use risingwave_common::estimate_size::EstimateSize;
@@ -119,6 +119,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
+        // for metrics
+        let table_id_str = self.state_table.table_id().to_string();
+        let actor_id_str = self.actor_context.id.to_string();
+        let fragment_id_str = self.actor_context.fragment_id.to_string();
+
         let data_types = self.schema().data_types().clone();
         let mut input = self.input.execute();
 
@@ -136,6 +141,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
+                    self.actor_context
+                        .streaming_metrics
+                        .mview_input_row_count
+                        .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                        .inc_by(chunk.cardinality() as u64);
+
                     match self.conflict_behavior {
                         ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict => {
                             // create MaterializeBuffer from chunk
@@ -281,7 +292,7 @@ fn generate_output(
     }
 
     if let Some(new_data_chunk) = data_chunk_builder.consume_all() {
-        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
+        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec());
         Ok(Some(new_stream_chunk))
     } else {
         Ok(None)
@@ -329,26 +340,12 @@ impl MaterializeBuffer {
         let (_, vis) = key_chunk.into_parts();
 
         let mut buffer = MaterializeBuffer::new();
-        match vis {
-            Vis::Bitmap(vis) => {
-                for ((op, key, value), vis) in
-                    izip!(ops.iter(), pks, values).zip_eq_debug(vis.iter())
-                {
-                    if vis {
-                        match op {
-                            Op::Insert | Op::UpdateInsert => buffer.insert(key, value),
-                            Op::Delete | Op::UpdateDelete => buffer.delete(key, value),
-                        };
-                    }
-                }
-            }
-            Vis::Compact(_) => {
-                for (op, key, value) in izip!(ops.iter(), pks, values) {
-                    match op {
-                        Op::Insert | Op::UpdateInsert => buffer.insert(key, value),
-                        Op::Delete | Op::UpdateDelete => buffer.delete(key, value),
-                    };
-                }
+        for ((op, key, value), vis) in izip!(ops.iter(), pks, values).zip_eq_debug(vis.iter()) {
+            if vis {
+                match op {
+                    Op::Insert | Op::UpdateInsert => buffer.insert(key, value),
+                    Op::Delete | Op::UpdateDelete => buffer.delete(key, value),
+                };
             }
         }
         buffer

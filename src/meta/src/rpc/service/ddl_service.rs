@@ -25,7 +25,7 @@ use risingwave_pb::catalog::connection::private_link_service::{
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Connection, PbSource, PbTable};
+use risingwave_pb::catalog::{connection, Connection, CreateType, PbSource, PbTable};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
@@ -229,7 +229,11 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(
+                stream_job,
+                fragment_graph,
+                CreateType::Foreground,
+            ))
             .await?;
 
         Ok(Response::new(CreateSinkResponse {
@@ -272,6 +276,7 @@ impl DdlService for DdlServiceImpl {
 
         let req = request.into_inner();
         let mview = req.get_materialized_view()?.clone();
+        let create_type = mview.get_create_type().unwrap_or(CreateType::Foreground);
         let fragment_graph = req.get_fragment_graph()?.clone();
 
         let mut stream_job = StreamingJob::MaterializedView(mview);
@@ -280,7 +285,11 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(
+                stream_job,
+                fragment_graph,
+                create_type,
+            ))
             .await?;
 
         Ok(Response::new(CreateMaterializedViewResponse {
@@ -331,7 +340,11 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(
+                stream_job,
+                fragment_graph,
+                CreateType::Foreground,
+            ))
             .await?;
 
         Ok(Response::new(CreateIndexResponse {
@@ -423,7 +436,11 @@ impl DdlService for DdlServiceImpl {
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(
+                stream_job,
+                fragment_graph,
+                CreateType::Foreground,
+            ))
             .await?;
 
         Ok(Response::new(CreateTableResponse {

@@ -49,10 +49,11 @@ impl BackupService for BackupServiceImpl {
         request: Request<GetBackupJobStatusRequest>,
     ) -> Result<Response<GetBackupJobStatusResponse>, Status> {
         let job_id = request.into_inner().job_id;
-        let job_status = self.backup_manager.get_backup_job_status(job_id).await? as _;
+        let (job_status, message) = self.backup_manager.get_backup_job_status(job_id);
         Ok(Response::new(GetBackupJobStatusResponse {
             job_id,
-            job_status,
+            job_status: job_status as _,
+            message,
         }))
     }
 

@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_expr::expr::build_from_prost;
+use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::ValuesNode;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::unbounded_channel;
@@ -53,7 +53,9 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
                 tuple
                     .get_cells()
                     .iter()
-                    .map(|node| build_from_prost(node).unwrap())
+                    .map(|node| {
+                        build_non_strict_from_prost(node, params.eval_error_report.clone()).unwrap()
+                    })
                     .collect_vec()
             })
             .collect_vec();

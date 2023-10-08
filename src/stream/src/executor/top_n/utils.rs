@@ -164,7 +164,7 @@ pub fn generate_output(
         }
         // since `new_rows` is not empty, we unwrap directly
         let new_data_chunk = data_chunk_builder.consume_all().unwrap();
-        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
+        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec());
         Ok(new_stream_chunk)
     } else {
         let columns = schema
@@ -172,7 +172,7 @@ pub fn generate_output(
             .into_iter()
             .map(|x| x.finish().into())
             .collect_vec();
-        Ok(StreamChunk::new(vec![], columns, None))
+        Ok(StreamChunk::new(vec![], columns))
     }
 }
 

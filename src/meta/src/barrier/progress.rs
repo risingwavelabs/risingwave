@@ -35,7 +35,7 @@ type ConsumedRows = u64;
 enum ChainState {
     Init,
     ConsumingUpstream(Epoch, ConsumedRows),
-    Done,
+    Done(ConsumedRows),
 }
 
 /// Progress of all actors containing chain nodes while creating mview.
@@ -93,18 +93,17 @@ impl Progress {
         match self.states.remove(&actor).unwrap() {
             ChainState::Init => {}
             ChainState::ConsumingUpstream(_, old_consumed_rows) => {
-                if !matches!(new_state, ChainState::Done) {
-                    self.consumed_rows -= old_consumed_rows;
-                }
+                self.consumed_rows -= old_consumed_rows;
             }
-            ChainState::Done => panic!("should not report done multiple times"),
+            ChainState::Done(_) => panic!("should not report done multiple times"),
         };
         match &new_state {
             ChainState::Init => {}
             ChainState::ConsumingUpstream(_, new_consumed_rows) => {
                 self.consumed_rows += new_consumed_rows;
             }
-            ChainState::Done => {
+            ChainState::Done(new_consumed_rows) => {
+                self.consumed_rows += new_consumed_rows;
                 self.done_count += 1;
             }
         };
@@ -281,14 +280,21 @@ impl CreateMviewProgressTracker {
     ) -> Option<TrackingCommand> {
         let actor = progress.chain_actor_id;
         let Some(epoch) = self.actor_map.get(&actor).copied() else {
-            panic!(
-                "no tracked progress for actor {}, is it already finished?",
+            // On restart, backfill will ALWAYS notify CreateMviewProgressTracker,
+            // even if backfill is finished on recovery.
+            // This is because we don't know if only this actor is finished,
+            // OR the entire stream job is finished.
+            // For the first case, we must notify meta.
+            // For the second case, we can still notify meta, but ignore it here.
+            tracing::info!(
+                "no tracked progress for actor {}, the stream job could already be finished",
                 actor
             );
+            return None;
         };
 
         let new_state = if progress.done {
-            ChainState::Done
+            ChainState::Done(progress.consumed_rows)
         } else {
             ChainState::ConsumingUpstream(progress.consumed_epoch.into(), progress.consumed_rows)
         };

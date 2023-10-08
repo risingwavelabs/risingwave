@@ -20,7 +20,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::agg::{
+use risingwave_expr::aggregate::{
     AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction,
 };
 use risingwave_expr::Result;
@@ -83,7 +83,7 @@ impl AggregateFunction for Distinct {
         let state = state.downcast_mut::<State>();
 
         let mut bitmap_builder = BitmapBuilder::with_capacity(input.capacity());
-        bitmap_builder.append_bitmap(&input.data_chunk().vis().to_bitmap());
+        bitmap_builder.append_bitmap(input.data_chunk().visibility());
         for row_id in range.clone() {
             let (row_ref, vis) = input.data_chunk().row_at(row_id);
             let row = row_ref.to_owned_row();
@@ -94,7 +94,7 @@ impl AggregateFunction for Distinct {
             }
             bitmap_builder.set(row_id, b);
         }
-        let input = input.with_visibility(bitmap_builder.finish().into());
+        let input = input.clone_with_vis(bitmap_builder.finish());
         self.inner
             .update_range(&mut state.inner, &input, range)
             .await
@@ -112,7 +112,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{Datum, Decimal};
-    use risingwave_expr::agg::AggCall;
+    use risingwave_expr::aggregate::AggCall;
 
     use super::super::build;
 
