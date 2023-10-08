@@ -637,8 +637,8 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::lfu_tiny_lru_capacity_ratio")]
     pub lfu_tiny_lru_capacity_ratio: f64,
 
-    #[serde(default = "default::file_cache::rated_random_rate_mb")]
-    pub rated_random_rate_mb: usize,
+    #[serde(default = "default::file_cache::insert_rate_limit_mb")]
+    pub insert_rate_limit_mb: usize,
 
     #[serde(default = "default::file_cache::flush_rate_limit_mb")]
     pub flush_rate_limit_mb: usize,
@@ -1134,7 +1134,7 @@ pub mod default {
             0.01
         }
 
-        pub fn rated_random_rate_mb() -> usize {
+        pub fn insert_rate_limit_mb() -> usize {
             0
         }
 

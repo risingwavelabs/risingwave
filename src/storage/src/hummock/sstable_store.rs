@@ -562,7 +562,7 @@ impl SstableStore {
             let cache = self.data_file_cache.clone();
             let task = async move {
                 cache
-                    .insert_force(key, block)
+                    .insert(key, block)
                     .await
                     .map_err(HummockError::file_cache)
             };

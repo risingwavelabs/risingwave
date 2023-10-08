@@ -75,7 +75,7 @@ pub struct StorageOpts {
     pub data_file_cache_recover_concurrency: usize,
     pub data_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub data_file_cache_lfu_tiny_lru_capacity_ratio: f64,
-    pub data_file_cache_rated_random_rate_mb: usize,
+    pub data_file_cache_insert_rate_limit_mb: usize,
     pub data_file_cache_flush_rate_limit_mb: usize,
     pub data_file_cache_reclaim_rate_limit_mb: usize,
     pub data_file_cache_allocation_bits: usize,
@@ -96,7 +96,7 @@ pub struct StorageOpts {
     pub meta_file_cache_recover_concurrency: usize,
     pub meta_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub meta_file_cache_lfu_tiny_lru_capacity_ratio: f64,
-    pub meta_file_cache_rated_random_rate_mb: usize,
+    pub meta_file_cache_insert_rate_limit_mb: usize,
     pub meta_file_cache_flush_rate_limit_mb: usize,
     pub meta_file_cache_reclaim_rate_limit_mb: usize,
     pub meta_file_cache_allocation_bits: usize,
@@ -177,7 +177,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .data_file_cache
                 .lfu_tiny_lru_capacity_ratio,
-            data_file_cache_rated_random_rate_mb: c.storage.data_file_cache.rated_random_rate_mb,
+            data_file_cache_insert_rate_limit_mb: c.storage.data_file_cache.insert_rate_limit_mb,
             data_file_cache_flush_rate_limit_mb: c.storage.data_file_cache.flush_rate_limit_mb,
             data_file_cache_reclaim_rate_limit_mb: c.storage.data_file_cache.reclaim_rate_limit_mb,
             data_file_cache_allocation_bits: c.storage.data_file_cache.allocation_bits,
@@ -199,7 +199,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .meta_file_cache
                 .lfu_tiny_lru_capacity_ratio,
-            meta_file_cache_rated_random_rate_mb: c.storage.meta_file_cache.rated_random_rate_mb,
+            meta_file_cache_insert_rate_limit_mb: c.storage.meta_file_cache.insert_rate_limit_mb,
             meta_file_cache_flush_rate_limit_mb: c.storage.meta_file_cache.flush_rate_limit_mb,
             meta_file_cache_reclaim_rate_limit_mb: c.storage.meta_file_cache.reclaim_rate_limit_mb,
             meta_file_cache_allocation_bits: c.storage.meta_file_cache.allocation_bits,

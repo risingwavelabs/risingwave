@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use bytes::{Buf, BufMut, Bytes};
 use foyer::common::code::{Key, Value};
-use foyer::storage::admission::rated_random::RatedRandomAdmissionPolicy;
+use foyer::storage::admission::rated_ticket::RatedTicketAdmissionPolicy;
 use foyer::storage::admission::AdmissionPolicy;
 pub use foyer::storage::metrics::set_metrics_registry as set_foyer_metrics_registry;
 use foyer::storage::reinsertion::ReinsertionPolicy;
@@ -73,7 +73,7 @@ where
     pub recover_concurrency: usize,
     pub lfu_window_to_cache_size_ratio: usize,
     pub lfu_tiny_lru_capacity_ratio: f64,
-    pub rated_random_rate: usize,
+    pub insert_rate_limit: usize,
     pub enable_filter: bool,
     pub allocator_bits: usize,
     pub allocation_timeout: Duration,
@@ -192,11 +192,8 @@ where
         let capacity = capacity - (capacity % file_capacity);
 
         let mut admissions = foyer_store_config.admissions;
-        if foyer_store_config.rated_random_rate > 0 {
-            let rr = RatedRandomAdmissionPolicy::new(
-                foyer_store_config.rated_random_rate,
-                Duration::from_millis(100),
-            );
+        if foyer_store_config.insert_rate_limit > 0 {
+            let rr = RatedTicketAdmissionPolicy::new(foyer_store_config.insert_rate_limit);
             admissions.push(Arc::new(rr));
         }
 
