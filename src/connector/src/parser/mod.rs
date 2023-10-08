@@ -512,9 +512,13 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
             if msg.key.is_none() && msg.payload.is_none() {
                 continue;
             }
-            split_offset_mapping.insert(msg.split_id, msg.offset.clone());
+            let parse_span = tracing::info_span!(
+                "parse_one",
+                split_id = msg.split_id.as_ref(),
+                offset = msg.offset
+            );
 
-            let parse_span = tracing::info_span!("parse_one", offset = msg.offset);
+            split_offset_mapping.insert(msg.split_id, msg.offset.clone());
 
             let old_op_num = builder.op_num();
             match parser
