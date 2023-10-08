@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{select, Either};
-use futures::{Future, FutureExt};
+use futures::{Future, FutureExt, TryFuture};
 use rdkafka::error::KafkaError;
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
@@ -31,7 +31,6 @@ use risingwave_common::util::drop_either_future;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
-use tonic::codegen::futures_core::TryFuture;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};

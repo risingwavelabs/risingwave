@@ -45,7 +45,7 @@ pub enum Error {
     ServiceError(String),
 }
 
-static_assertions::const_assert_eq!(std::mem::size_of::<Error>(), 32);
+static_assertions::const_assert_eq!(std::mem::size_of::<Error>(), 40);
 
 impl From<tonic::Status> for Error {
     fn from(status: tonic::Status) -> Self {
