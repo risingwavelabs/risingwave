@@ -22,10 +22,9 @@ use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
-use risingwave_common::util::value_encoding;
+use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::sig::agg::AGG_FUNC_SIG_MAP;
-use risingwave_pb::data::PbDatum;
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
@@ -715,9 +714,7 @@ impl PlanAggCall {
                 .direct_args
                 .iter()
                 .map(|x| PbConstant {
-                    datum: Some(PbDatum {
-                        body: value_encoding::serialize_datum(x.get_data()),
-                    }),
+                    datum: Some(x.get_data().to_protobuf()),
                     r#type: Some(x.return_type().to_protobuf()),
                 })
                 .collect(),
