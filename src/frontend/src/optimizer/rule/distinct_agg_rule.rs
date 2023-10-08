@@ -18,7 +18,7 @@ use std::mem;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_expr::agg::{agg_kinds, AggKind};
+use risingwave_expr::aggregate::{agg_kinds, AggKind};
 
 use super::{BoxedRule, Rule};
 use crate::expr::{CollectInputRef, ExprType, FunctionCall, InputRef, Literal};

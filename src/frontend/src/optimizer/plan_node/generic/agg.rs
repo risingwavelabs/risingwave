@@ -23,7 +23,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding;
-use risingwave_expr::agg::{agg_kinds, AggKind};
+use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::sig::agg::AGG_FUNC_SIG_MAP;
 use risingwave_pb::data::PbDatum;
 use risingwave_pb::expr::{PbAggCall, PbConstant};

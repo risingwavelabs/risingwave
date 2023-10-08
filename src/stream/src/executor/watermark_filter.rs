@@ -23,7 +23,7 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_expr::expr::{
-    build_func, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
+    build_func_non_strict, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
 };
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
@@ -36,6 +36,7 @@ use super::{
 };
 use crate::common::table::state_table::StateTable;
 use crate::executor::{expect_first_barrier, Watermark};
+use crate::task::ActorEvalErrorReport;
 
 /// The executor will generate a `Watermark` after each chunk.
 /// This will also guarantee all later rows with event time **less than** the watermark will be
@@ -111,6 +112,11 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             mut table,
         } = *self;
 
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: ctx.clone(),
+            identity: info.identity.into(),
+        };
+
         let watermark_type = watermark_expr.return_type();
         assert_eq!(
             watermark_type,
@@ -151,11 +157,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         continue;
                     }
 
-                    let watermark_array = watermark_expr
-                        .eval_infallible(chunk.data_chunk(), |err| {
-                            ctx.on_compute_error(err, &info.identity)
-                        })
-                        .await;
+                    let watermark_array = watermark_expr.eval_infallible(chunk.data_chunk()).await;
 
                     // Build the expression to calculate watermark filter.
                     let watermark_filter_expr = current_watermark
@@ -165,6 +167,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                                 watermark_type.clone(),
                                 event_time_col_idx,
                                 watermark,
+                                eval_error_report.clone(),
                             )
                         })
                         .transpose()?;
@@ -190,11 +193,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     }
 
                     if let Some(expr) = watermark_filter_expr {
-                        let pred_output = expr
-                            .eval_infallible(chunk.data_chunk(), |err| {
-                                ctx.on_compute_error(err, &info.identity)
-                            })
-                            .await;
+                        let pred_output = expr.eval_infallible(chunk.data_chunk()).await;
 
                         if let Some(output_chunk) = FilterExecutor::filter(chunk, pred_output)? {
                             yield Message::Chunk(output_chunk);
@@ -298,14 +297,16 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         watermark_type: DataType,
         event_time_col_idx: usize,
         watermark: ScalarImpl,
+        eval_error_report: ActorEvalErrorReport,
     ) -> ExprResult<BoxedExpression> {
-        build_func(
+        build_func_non_strict(
             Type::GreaterThanOrEqual,
             DataType::Boolean,
             vec![
                 InputRefExpression::new(watermark_type.clone(), event_time_col_idx).boxed(),
                 LiteralExpression::new(watermark_type, Some(watermark)).boxed(),
             ],
+            eval_error_report,
         )
     }
 

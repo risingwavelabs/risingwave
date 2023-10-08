@@ -154,10 +154,11 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
     async fn lookup(&mut self, key: &K, epoch: HummockEpoch) -> StreamExecutorResult<JoinEntry> {
         let table_id_str = self.source.table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
+        let fragment_id_str = self.ctx.id.to_string();
         self.ctx
             .streaming_metrics
             .temporal_join_total_query_cache_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc();
 
         let res = if self.cache.contains(key) {
@@ -168,7 +169,7 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
             self.ctx
                 .streaming_metrics
                 .temporal_join_cache_miss_count
-                .with_label_values(&[&table_id_str, &actor_id_str])
+                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                 .inc();
 
             let pk_prefix = key.deserialize(&self.join_key_data_types)?;
@@ -414,13 +415,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
 
         let table_id_str = self.right_table.source.table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
+        let fragment_id_str = self.ctx.fragment_id.to_string();
         #[for_await]
         for msg in align_input(self.left, self.right) {
             self.right_table.cache.evict();
             self.ctx
                 .streaming_metrics
                 .temporal_join_cached_entry_count
-                .with_label_values(&[&table_id_str, &actor_id_str])
+                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                 .set(self.right_table.cache.len() as i64);
             match msg? {
                 InternalMessage::WaterMark(watermark) => {
@@ -447,9 +449,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                 // check join condition
                                 let ok = if let Some(ref mut cond) = self.condition {
                                     let concat_row = left_row.chain(&right_row).into_owned_row();
-                                    cond.eval_row_infallible(&concat_row, |err| {
-                                        self.ctx.on_compute_error(err, self.identity.as_str())
-                                    })
+                                    cond.eval_row_infallible(&concat_row)
                                         .await
                                         .map(|s| *s.as_bool())
                                         .unwrap_or(false)

@@ -36,17 +36,20 @@
 
 pub mod backup_restore;
 mod barrier;
+pub mod controller;
 #[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
 mod error;
 pub mod hummock;
 pub mod manager;
 pub mod model;
+pub mod model_v2;
 mod rpc;
 pub(crate) mod serving;
 pub mod storage;
 mod stream;
 pub(crate) mod telemetry;
+
 use std::time::Duration;
 
 use clap::Parser;
@@ -56,7 +59,7 @@ use risingwave_common::{GIT_SHA, RW_VERSION};
 pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 
 use crate::manager::MetaOpts;
-use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
+use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend, MetaStoreSqlBackend};
 
 #[derive(Debug, Clone, Parser, OverrideConfig)]
 #[command(version, about = "The central metadata management service")]
@@ -98,6 +101,10 @@ pub struct MetaNodeOpts {
     /// Password of etcd, required when --etcd-auth is enabled.
     #[clap(long, env = "RW_ETCD_PASSWORD", default_value = "")]
     etcd_password: String,
+
+    /// Endpoint of the SQL service, make it non-option when SQL service is required.
+    #[clap(long, env = "RW_SQL_ENDPOINT")]
+    sql_endpoint: Option<String>,
 
     #[clap(long, env = "RW_DASHBOARD_UI_PATH")]
     dashboard_ui_path: Option<String>,
@@ -219,6 +226,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
             MetaBackend::Mem => MetaStoreBackend::Mem,
         };
+        let sql_backend = opts
+            .sql_endpoint
+            .map(|endpoint| MetaStoreSqlBackend { endpoint });
 
         validate_config(&config);
 
@@ -236,7 +246,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .collect()
             });
 
-        info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
             advertise_addr: opts.advertise_addr,
             listen_addr,
@@ -248,6 +257,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
             backend,
+            sql_backend,
             max_heartbeat_interval,
             config.meta.meta_leader_lease_secs,
             MetaOpts {
@@ -307,6 +317,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         )
         .await
         .unwrap();
+
+        tracing::info!("Meta server listening at {}", listen_addr);
 
         match leader_lost_handle {
             None => {

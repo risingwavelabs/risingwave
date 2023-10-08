@@ -200,7 +200,6 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         validate_opts(&opts);
 
         let listen_addr = opts.listen_addr.parse().unwrap();
-        tracing::info!("Server Listening at {}", listen_addr);
 
         let advertise_addr = opts
             .advertise_addr
@@ -215,6 +214,8 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
 
         let (join_handle_vec, _shutdown_send) =
             compute_node_serve(listen_addr, advertise_addr, opts).await;
+
+        tracing::info!("Server listening at {}", listen_addr);
 
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();

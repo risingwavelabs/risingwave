@@ -14,9 +14,11 @@
 
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::Schema;
 
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
+use crate::sink::writer::LogSinkerOf;
+use crate::sink::{
+    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam,
+};
 
 #[derive(Clone, Debug)]
 pub struct RedisConfig;
@@ -24,18 +26,21 @@ pub struct RedisConfig;
 #[derive(Debug)]
 pub struct RedisSink;
 
-impl RedisSink {
-    pub fn new(_cfg: RedisConfig, _schema: Schema) -> Result<Self> {
+impl TryFrom<SinkParam> for RedisSink {
+    type Error = SinkError;
+
+    fn try_from(_param: SinkParam) -> std::result::Result<Self, Self::Error> {
         todo!()
     }
 }
 
-#[async_trait]
 impl Sink for RedisSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = RedisSinkWriter;
+    type LogSinker = LogSinkerOf<RedisSinkWriter>;
 
-    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
+    const SINK_NAME: &'static str = "redis";
+
+    async fn new_log_sinker(&self, _writer_env: SinkWriterParam) -> Result<Self::LogSinker> {
         todo!()
     }
 

@@ -489,5 +489,20 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
+    timeout_in_minutes: 30
+    retry: *auto-retry
+
+  - label: "fuzz test"
+    command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-simulation"
+    plugins:
+      - ./ci/plugins/swapfile
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
     retry: *auto-retry

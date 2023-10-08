@@ -249,7 +249,7 @@ fn get_acl_items(
                 .unwrap()
                 .iter()
                 .for_each(|(action, option)| {
-                    let str = match Action::from_i32(*action).unwrap() {
+                    let str = match Action::try_from(*action).unwrap() {
                         Action::Select => "r",
                         Action::Insert => "a",
                         Action::Update => "w",
@@ -407,6 +407,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_HUMMOCK_PINNED_SNAPSHOTS), read_hummock_pinned_snapshots await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_CURRENT_VERSION), read_hummock_current_version await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_CHECKPOINT_VERSION), read_hummock_checkpoint_version await },
+    { BuiltinCatalog::Table(&RW_HUMMOCK_SSTABLES), read_hummock_sstables await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_VERSION_DELTAS), read_hummock_version_deltas await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_BRANCHED_OBJECTS), read_hummock_branched_objects await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACTION_GROUP_CONFIGS), read_hummock_compaction_group_configs await },

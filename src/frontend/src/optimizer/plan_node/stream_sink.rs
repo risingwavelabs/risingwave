@@ -25,7 +25,7 @@ use risingwave_common::constants::log_store::{
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
-use risingwave_connector::sink::catalog::{SinkId, SinkType};
+use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::{
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
     SINK_USER_FORCE_APPEND_ONLY_OPTION,
@@ -78,6 +78,7 @@ impl StreamSink {
         out_names: Vec<String>,
         definition: String,
         properties: WithOptions,
+        format_desc: Option<SinkFormatDesc>,
     ) -> Result<Self> {
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
         let (input, sink) = Self::derive_sink_desc(
@@ -90,6 +91,7 @@ impl StreamSink {
             columns,
             definition,
             properties,
+            format_desc,
         )?;
 
         Ok(Self::new(input, sink))
@@ -105,8 +107,10 @@ impl StreamSink {
         columns: Vec<ColumnCatalog>,
         definition: String,
         properties: WithOptions,
+        format_desc: Option<SinkFormatDesc>,
     ) -> Result<(PlanRef, SinkDesc)> {
-        let sink_type = Self::derive_sink_type(input.append_only(), &properties)?;
+        let sink_type =
+            Self::derive_sink_type(input.append_only(), &properties, format_desc.as_ref())?;
         let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
         let downstream_pk = Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
 
@@ -157,11 +161,12 @@ impl StreamSink {
             distribution_key,
             properties: properties.into_inner(),
             sink_type,
+            format_desc,
         };
         Ok((input, sink_desc))
     }
 
-    fn derive_sink_type(input_append_only: bool, properties: &WithOptions) -> Result<SinkType> {
+    fn is_user_defined_append_only(properties: &WithOptions) -> Result<bool> {
         if let Some(sink_type) = properties.get(SINK_TYPE_OPTION) {
             if sink_type != SINK_TYPE_APPEND_ONLY
                 && sink_type != SINK_TYPE_DEBEZIUM
@@ -180,7 +185,10 @@ impl StreamSink {
                 .into());
             }
         }
+        Ok(properties.value_eq_ignore_case(SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY))
+    }
 
+    fn is_user_force_append_only(properties: &WithOptions) -> Result<bool> {
         if properties.contains_key(SINK_USER_FORCE_APPEND_ONLY_OPTION)
             && !properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "true")
             && !properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "false")
@@ -194,12 +202,25 @@ impl StreamSink {
             )))
             .into());
         }
+        Ok(properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "true"))
+    }
 
+    fn derive_sink_type(
+        input_append_only: bool,
+        properties: &WithOptions,
+        format_desc: Option<&SinkFormatDesc>,
+    ) -> Result<SinkType> {
         let frontend_derived_append_only = input_append_only;
-        let user_defined_append_only =
-            properties.value_eq_ignore_case(SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY);
-        let user_force_append_only =
-            properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "true");
+        let (user_defined_append_only, user_force_append_only) = match format_desc {
+            Some(f) => (
+                f.format == SinkFormat::AppendOnly,
+                Self::is_user_force_append_only(&WithOptions::from_inner(f.options.clone()))?,
+            ),
+            None => (
+                Self::is_user_defined_append_only(properties)?,
+                Self::is_user_force_append_only(properties)?,
+            ),
+        };
 
         match (
             frontend_derived_append_only,
@@ -212,14 +233,14 @@ impl StreamSink {
             (false, true, false) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                        "The sink cannot be append-only. Please add \"force_append_only='true'\" in WITH options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.",
+                        "The sink cannot be append-only. Please add \"force_append_only='true'\" in options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.",
                 )))
                 .into())
             }
             (_, false, true) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                    "Cannot force the sink to be append-only without \"type='append-only'\"in WITH options.",
+                    "Cannot force the sink to be append-only without \"FORMAT PLAIN\" or \"type='append-only'\".",
                 )))
                 .into())
             }

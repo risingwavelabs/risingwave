@@ -28,7 +28,7 @@ use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
@@ -368,8 +368,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // Calculate the row visibility for every agg call.
         let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
         for agg_call in &this.agg_calls {
-            let agg_call_filter_res =
-                agg_call_filter_res(&this.actor_ctx, &this.info.identity, agg_call, &chunk).await?;
+            let agg_call_filter_res = agg_call_filter_res(agg_call, &chunk).await?;
             call_visibilities.push(agg_call_filter_res);
         }
 
@@ -420,14 +419,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Update the metrics.
         let actor_id_str = this.actor_ctx.id.to_string();
+        let fragment_id_str = this.actor_ctx.fragment_id.to_string();
         let table_id_str = this.intermediate_state_table.table_id().to_string();
         this.metrics
             .agg_dirty_groups_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.dirty_groups.len() as i64);
         this.metrics
             .agg_dirty_groups_heap_size
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.dirty_groups.estimated_heap_size() as i64);
 
         Ok(())
@@ -537,26 +537,27 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
     fn update_metrics(this: &ExecutorInner<K, S>, vars: &mut ExecutionVars<K, S>) {
         let actor_id_str = this.actor_ctx.id.to_string();
+        let fragment_id_str = this.actor_ctx.fragment_id.to_string();
         let table_id_str = this.intermediate_state_table.table_id().to_string();
         this.metrics
             .agg_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.lookup_miss_count));
         this.metrics
             .agg_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.total_lookup_count));
         this.metrics
             .agg_cached_keys
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.agg_group_cache.len() as i64);
         this.metrics
             .agg_chunk_lookup_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.chunk_lookup_miss_count));
         this.metrics
             .agg_chunk_total_lookup_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.chunk_total_lookup_count));
     }
 

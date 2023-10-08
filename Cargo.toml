@@ -10,13 +10,15 @@ members = [
   "src/compute",
   "src/connector",
   "src/ctl",
-  "src/expr",
+  "src/expr/core",
+  "src/expr/impl",
   "src/expr/macro",
   "src/frontend",
   "src/frontend/planner_test",
   "src/java_binding",
   "src/jni_core",
   "src/meta",
+  "src/meta/src/model_v2/migration",
   "src/object_store",
   "src/prost",
   "src/prost/helpers",
@@ -103,14 +105,18 @@ hashbrown = { version = "0.14.0", features = [
   "nightly",
 ] }
 criterion = { version = "0.5", features = ["async_futures"] }
-tonic = { package = "madsim-tonic", version = "0.3.1" }
-tonic-build = { package = "madsim-tonic-build", version = "0.3.1" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "166a36b1a40a64086db09a0e0f2ed6791cec548b" }
-arrow-array = "46"
-arrow-schema = "46"
-arrow-buffer = "46"
-arrow-flight = "46"
-arrow-select = "46"
+tonic = { package = "madsim-tonic", version = "0.4.0" }
+tonic-build = { package = "madsim-tonic-build", version = "0.4.0" }
+prost = { version = "0.12" }
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "72a65aed6ed7b3d529b311031c2c8d99650990e2" }
+arrow-array = "47"
+arrow-cast = "47"
+arrow-schema = "47"
+arrow-buffer = "47"
+arrow-flight = "47"
+arrow-select = "47"
+arrow-ord = "47"
+tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",
   "stats",
@@ -125,7 +131,8 @@ risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
-risingwave_expr = { path = "./src/expr" }
+risingwave_expr = { path = "./src/expr/core" }
+risingwave_expr_impl = { path = "./src/expr/impl" }
 risingwave_frontend = { path = "./src/frontend" }
 risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
 risingwave_hummock_test = { path = "./src/storage/hummock_test" }

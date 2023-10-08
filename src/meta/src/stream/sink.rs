@@ -25,5 +25,5 @@ pub async fn validate_sink(prost_sink_catalog: &PbSink) -> MetaResult<()> {
 
     let sink = build_sink(param)?;
 
-    dispatch_sink!(sink, sink, { Ok(sink.validate().await?) })
+    dispatch_sink!(sink, sink, Ok(sink.validate().await?))
 }
