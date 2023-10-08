@@ -44,7 +44,7 @@ ENV JAVA_HOME ${JAVA_HOME_PATH}
 ENV LD_LIBRARY_PATH ${JAVA_HOME_PATH}/lib/server:${LD_LIBRARY_PATH}
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
+  cargo build -p risingwave_cmd_all --release --features "rw-static-link" hdfs-backend  && \
   mkdir -p /risingwave/bin && \
     mv /risingwave/target/release/risingwave /risingwave/bin/ && \
     mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \
