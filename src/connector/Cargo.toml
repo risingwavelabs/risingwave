@@ -44,7 +44,7 @@ chrono = { version = "0.4", default-features = false, features = [
 clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "622501c1c98c80baaf578c716d6903dde947804e", features = [
     "time",
 ] }
-csv = "1.2"
+csv = "1.3"
 duration-str = "0.7.0"
 easy-ext = "1"
 enum-as-inner = "0.6"
@@ -53,10 +53,16 @@ futures-async-stream = { workspace = true }
 glob = "0.3"
 google-cloud-pubsub = "0.20"
 http = "0.2"
-hyper = { version = "0.14", features = ["client", "tcp", "http1", "http2", "stream"] }
+hyper = { version = "0.14", features = [
+    "client",
+    "tcp",
+    "http1",
+    "http2",
+    "stream",
+] }
 hyper-tls = "0.5"
 icelake = { workspace = true }
-indexmap ={ version = "1.9.3", features = ["serde"] }
+indexmap = { version = "1.9.3", features = ["serde"] }
 itertools = "0.11"
 jni = { version = "0.21.1", features = ["invocation"] }
 jsonschema-transpiler = { git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
@@ -75,8 +81,8 @@ opendal = "0.39"
 parking_lot = "0.12"
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
-prost = { version = "0.11", features = ["no-recursion-limit"] }
-prost-reflect = "0.11"
+prost = { version = "0.12", features = ["no-recursion-limit"] }
+prost-reflect = "0.12"
 protobuf-native = "0.2.1"
 pulsar = { version = "6.0", default-features = false, features = [
     "tokio-runtime",
@@ -102,7 +108,7 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
-simd-json = "0.10.6"
+simd-json = "0.11.1"
 strum = "0.25"
 strum_macros = "0.25"
 tempfile = "3"
@@ -121,6 +127,7 @@ tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { workspace = true }
+tonic_0_9 = { package = "tonic", version = "0.9" }
 tracing = "0.1"
 url = "2"
 urlencoding = "2"
@@ -130,12 +137,12 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "async"] }
-prost-types = "0.11"
+prost-types = "0.12"
 rand = "0.8"
 tempfile = "3"
 
 [build-dependencies]
-prost-build = "0.11"
+prost-build = "0.12"
 
 [[bench]]
 name = "parser"

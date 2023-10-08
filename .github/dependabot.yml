@@ -19,3 +19,7 @@ updates:
     aws:
       patterns:
         - "aws*"
+    tonic:
+      patterns:
+        - "tonic*"
+        - "prost*"

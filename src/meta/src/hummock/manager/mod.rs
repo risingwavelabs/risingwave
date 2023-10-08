@@ -2700,7 +2700,7 @@ impl HummockManager {
                                 sorted_output_ssts,
                                 table_stats_change
                             }) => {
-                                if let Err(e) =  hummock_manager.report_compact_task(task_id, TaskStatus::from_i32(task_status).unwrap(), sorted_output_ssts, Some(table_stats_change))
+                                if let Err(e) =  hummock_manager.report_compact_task(task_id, TaskStatus::try_from(task_status).unwrap(), sorted_output_ssts, Some(table_stats_change))
                                        .await {
                                         tracing::error!("report compact_tack fail {e:?}");
                                 }
@@ -3016,9 +3016,13 @@ impl CompactionState {
             Some(compact_task::TaskType::SpaceReclaim)
         } else if guard.contains(&(group, compact_task::TaskType::Ttl)) {
             Some(compact_task::TaskType::Ttl)
+        } else if guard.contains(&(group, compact_task::TaskType::Tombstone)) {
+            Some(compact_task::TaskType::Tombstone)
         } else if guard.contains(&(group, compact_task::TaskType::Dynamic)) {
             Some(compact_task::TaskType::Dynamic)
         } else {
+            // Other types are not triggered by `try_sched_compaction`, so no need to be handled.
+            // TODO: Consider using match state to avoid missing newly added types
             None
         }
     }

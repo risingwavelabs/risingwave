@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ffi::CStr;
+use std::ffi::CString;
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -111,21 +111,20 @@ impl JemallocMemoryControl {
                 return;
             }
 
-            let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-            let file_name = format!("{}.{}\0", time_prefix, AUTO_DUMP_SUFFIX);
+            let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
+            let file_name = format!("{}.{}", time_prefix, AUTO_DUMP_SUFFIX);
 
             let file_path = Path::new(&self.heap_profiling_config.dir)
-                .join(Path::new(&file_name))
+                .join(&file_name)
                 .to_str()
-                .unwrap()
-                .to_string();
+                .expect("file path is not valid utf8")
+                .to_owned();
+            let file_path_c = CString::new(file_path).expect("0 byte in file path");
 
-            // `file_path_str` is leaked because `jemalloc_dump_mib.write` requires static lifetime
-            let file_path_str = Box::leak(file_path.into_boxed_str());
-            let file_path_bytes = file_path_str.as_bytes();
+            // FIXME(yuhao): `unsafe` here because `jemalloc_dump_mib.write` requires static lifetime
             if let Err(e) = self
                 .jemalloc_dump_mib
-                .write(CStr::from_bytes_with_nul(file_path_bytes).unwrap())
+                .write(unsafe { &*(file_path_c.as_c_str() as *const _) })
             {
                 tracing::warn!("Auto Jemalloc dump heap file failed! {:?}", e);
             } else {
