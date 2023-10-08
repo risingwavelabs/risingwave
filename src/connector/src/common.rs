@@ -466,6 +466,24 @@ impl DorisCommon {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct StarrocksCommon {
+    #[serde(rename = "starrocks.host")]
+    pub host: String,
+    #[serde(rename = "starrocks.mysqlport")]
+    pub mysql_port: String,
+    #[serde(rename = "starrocks.httpport")]
+    pub http_port: String,
+    #[serde(rename = "starrocks.user")]
+    pub user: String,
+    #[serde(rename = "starrocks.password")]
+    pub password: String,
+    #[serde(rename = "starrocks.database")]
+    pub database: String,
+    #[serde(rename = "starrocks.table")]
+    pub table: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpsertMessage<'a> {
     #[serde(borrow)]

@@ -24,9 +24,10 @@ use hyper::body::{Body, Sender};
 use hyper::client::HttpConnector;
 use hyper::{body, Client, Request, StatusCode};
 use hyper_tls::HttpsConnector;
+use mysql_async::prelude::Queryable;
+use mysql_async::Opts;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{MySqlPool, Row};
 use tokio::task::JoinHandle;
 
 use super::{Result, SinkError};
@@ -35,20 +36,30 @@ const BUFFER_SIZE: usize = 64 * 1024;
 const MIN_CHUNK_SIZE: usize = BUFFER_SIZE - 1024;
 const DORIS_SUCCESS_STATUS: [&str; 2] = ["Success", "Publish Timeout"];
 pub(crate) const DORIS_DELETE_SIGN: &str = "__DORIS_DELETE_SIGN__";
+pub(crate) const STARROCKS_DELETE_SIGN: &str = "__op";
+const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
+const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
+const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 31536000;
 const SEND_CHUNK_TIMEOUT: Duration = Duration::from_secs(10);
 const WAIT_HANDDLE_TIMEOUT: Duration = Duration::from_secs(10);
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-const DORIS:&str = "doris";
-const STARROCKS:&str = "starrocks";
+const DORIS: &str = "doris";
+const STARROCKS: &str = "starrocks";
 pub struct HeaderBuilder {
     header: HashMap<String, String>,
 }
-impl HeaderBuilder{
-    pub fn new() -> Self {        
+impl Default for HeaderBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl HeaderBuilder {
+    pub fn new() -> Self {
         Self {
             header: HashMap::default(),
         }
     }
+
     pub fn add_common_header(mut self) -> Self {
         self.header
             .insert("expect".to_string(), "100-continue".to_string());
@@ -59,6 +70,12 @@ impl HeaderBuilder{
     /// Doris will generate a default, non-repeating label.
     pub fn set_label(mut self, label: String) -> Self {
         self.header.insert("label".to_string(), label);
+        self
+    }
+
+    pub fn set_columns_name(mut self, columns_name: Vec<&str>) -> Self {
+        let columns_name_str = columns_name.join(",");
+        self.header.insert("columns".to_string(), columns_name_str);
         self
     }
 
@@ -111,8 +128,7 @@ impl HeaderBuilder{
     }
 
     pub fn add_json_format(mut self) -> Self {
-        self.header
-            .insert("format".to_string(), "json".to_string());
+        self.header.insert("format".to_string(), "json".to_string());
         self
     }
 
@@ -130,7 +146,7 @@ impl HeaderBuilder{
         self
     }
 
-    pub fn build(self) -> HashMap<String, String>{
+    pub fn build(self) -> HashMap<String, String> {
         self.header
     }
 }
@@ -141,9 +157,9 @@ pub struct InserterBuilder {
     sender: Option<Sender>,
 }
 impl InserterBuilder {
-    pub fn new(url: String, db: String, table: String,header: HashMap<String, String>) -> Self {
+    pub fn new(url: String, db: String, table: String, header: HashMap<String, String>) -> Self {
         let url = format!("{}/api/{}/{}/_stream_load", url, db, table);
-        
+
         Self {
             url,
             sender: None,
@@ -168,53 +184,11 @@ impl InserterBuilder {
         (builder, client)
     }
 
-    fn build_http_send_feature(&self, uri: &str, send_type: &'static str) -> Result<(JoinHandle<Result<InsertResultResponse>>,Sender)>{
-        let (builder, client) = self.build_request_and_client(uri.to_string());
-        let (sender, body) = Body::channel();
-        let request = builder
-            .body(body)
-            .map_err(|err| SinkError::Http(err.into()))?;
-        let feature = client.request(request);
-
-        let handle: JoinHandle<Result<InsertResultResponse>> = tokio::spawn(async move {
-            let response = feature.await.map_err(|err| SinkError::Http(err.into()))?;
-            let status = response.status();
-            let raw_string = String::from_utf8(
-                body::to_bytes(response.into_body())
-                    .await
-                    .map_err(|err| SinkError::Http(err.into()))?
-                    .to_vec(),
-            )
-            .map_err(|err| SinkError::Http(err.into()))?;
-
-            if status == StatusCode::OK && !raw_string.is_empty() {
-                let response = if send_type.eq(DORIS){
-                    let response: DorisInsertResultResponse =serde_json::from_str(&raw_string).map_err(|err| SinkError::Http(err.into()))?;
-                    InsertResultResponse::Doris(response)
-                }else if send_type.eq(STARROCKS) {
-                    let response: StarrocksInsertResultResponse =serde_json::from_str(&raw_string).map_err(|err| SinkError::Http(err.into()))?;
-                    InsertResultResponse::Starrocks(response)
-                }else{
-                    return Err(SinkError::Http(anyhow::anyhow!(
-                        "Can't convert {:?}'s http response to struct",
-                        send_type
-                    )))
-                };
-                Ok(response)
-            } else {
-                Err(SinkError::Http(anyhow::anyhow!(
-                    "Failed connection {:?},{:?}",
-                    status,
-                    raw_string
-                )))
-            }
-        });
-        Ok((handle,sender))
-    }
-
-    pub async fn build_doris(&mut self) -> Result<DorisInsert> {
+    async fn build_http_send_feature(
+        &self,
+        send_type: &'static str,
+    ) -> Result<(JoinHandle<Result<InsertResultResponse>>, Sender)> {
         let (builder, client) = self.build_request_and_client(self.url.clone());
-
         let request_get_url = builder
             .body(Body::empty())
             .map_err(|err| SinkError::Http(err.into()))?;
@@ -239,25 +213,74 @@ impl InserterBuilder {
             return Err(SinkError::Http(anyhow::anyhow!("Can't get doris BE url",)));
         };
 
-        let (handle,sender) = self.build_http_send_feature(&be_url, DORIS)?;
+        let (builder, client) = self.build_request_and_client(be_url.to_string());
+        let (sender, body) = Body::channel();
+        let request = builder
+            .body(body)
+            .map_err(|err| SinkError::Http(err.into()))?;
+        let feature = client.request(request);
+
+        let handle: JoinHandle<Result<InsertResultResponse>> = tokio::spawn(async move {
+            let response = feature.await.map_err(|err| SinkError::Http(err.into()))?;
+            let status = response.status();
+            let raw_string = String::from_utf8(
+                body::to_bytes(response.into_body())
+                    .await
+                    .map_err(|err| SinkError::Http(err.into()))?
+                    .to_vec(),
+            )
+            .map_err(|err| SinkError::Http(err.into()))?;
+
+            if status == StatusCode::OK && !raw_string.is_empty() {
+                let response = if send_type.eq(DORIS) {
+                    let response: DorisInsertResultResponse = serde_json::from_str(&raw_string)
+                        .map_err(|err| SinkError::Http(err.into()))?;
+                    InsertResultResponse::Doris(response)
+                } else if send_type.eq(STARROCKS) {
+                    let response: StarrocksInsertResultResponse = serde_json::from_str(&raw_string)
+                        .map_err(|err| SinkError::Http(err.into()))?;
+                    InsertResultResponse::Starrocks(response)
+                } else {
+                    return Err(SinkError::Http(anyhow::anyhow!(
+                        "Can't convert {:?}'s http response to struct",
+                        send_type
+                    )));
+                };
+                Ok(response)
+            } else {
+                Err(SinkError::Http(anyhow::anyhow!(
+                    "Failed connection {:?},{:?}",
+                    status,
+                    raw_string
+                )))
+            }
+        });
+        Ok((handle, sender))
+    }
+
+    pub async fn build_doris(&mut self) -> Result<DorisInsert> {
+        let (handle, sender) = self.build_http_send_feature(DORIS).await?;
 
         Ok(DorisInsert::new(sender, handle))
     }
 
     pub async fn build_starrocks(&mut self) -> Result<StarrocksInsert> {
-        let (handle,sender) = self.build_http_send_feature(&self.url, STARROCKS)?;
+        let (handle, sender) = self.build_http_send_feature(STARROCKS).await?;
 
         Ok(StarrocksInsert::new(sender, handle))
     }
 }
 
 pub struct DorisInsert {
-    insert:Inserter,
+    insert: InserterInner,
     is_first_record: bool,
 }
 impl DorisInsert {
     pub fn new(sender: Sender, join_handle: JoinHandle<Result<InsertResultResponse>>) -> Self {
-        Self { insert: Inserter::new(sender, join_handle), is_first_record: true }
+        Self {
+            insert: InserterInner::new(sender, join_handle),
+            is_first_record: true,
+        }
     }
 
     pub async fn write(&mut self, data: Bytes) -> Result<()> {
@@ -265,7 +288,7 @@ impl DorisInsert {
         if self.is_first_record {
             self.is_first_record = false;
         } else {
-            data_build.put_slice("\n".as_bytes().into());
+            data_build.put_slice("\n".as_bytes());
         }
         data_build.put_slice(&data);
         self.insert.write(data_build.into()).await?;
@@ -273,10 +296,11 @@ impl DorisInsert {
     }
 
     pub async fn finish(self) -> Result<DorisInsertResultResponse> {
-        let res = match self.insert.finish().await?{
+        let res = match self.insert.finish().await? {
             InsertResultResponse::Doris(doris_res) => doris_res,
-            InsertResultResponse::Starrocks(_) => return Err(SinkError::Http(anyhow::anyhow!(
-                        "Response is not doris"))),
+            InsertResultResponse::Starrocks(_) => {
+                return Err(SinkError::Http(anyhow::anyhow!("Response is not doris")))
+            }
         };
 
         if !DORIS_SUCCESS_STATUS.contains(&res.status.as_str()) {
@@ -291,12 +315,13 @@ impl DorisInsert {
 }
 
 pub struct StarrocksInsert {
-    insert:Inserter,
-    is_first_record: bool,
+    insert: InserterInner,
 }
 impl StarrocksInsert {
     pub fn new(sender: Sender, join_handle: JoinHandle<Result<InsertResultResponse>>) -> Self {
-        Self { insert: Inserter::new(sender, join_handle), is_first_record: true }
+        Self {
+            insert: InserterInner::new(sender, join_handle),
+        }
     }
 
     pub async fn write(&mut self, data: Bytes) -> Result<()> {
@@ -305,13 +330,16 @@ impl StarrocksInsert {
     }
 
     pub async fn finish(self) -> Result<StarrocksInsertResultResponse> {
-        let res = match self.insert.finish().await?{
-            InsertResultResponse::Doris(_) => return Err(SinkError::Http(anyhow::anyhow!(
-                "Response is not starrocks"))),
+        let res = match self.insert.finish().await? {
+            InsertResultResponse::Doris(_) => {
+                return Err(SinkError::Http(anyhow::anyhow!(
+                    "Response is not starrocks"
+                )))
+            }
             InsertResultResponse::Starrocks(res) => res,
         };
 
-        if res.status.ne("OK") {
+        if !DORIS_SUCCESS_STATUS.contains(&res.status.as_str()) {
             return Err(SinkError::Http(anyhow::anyhow!(
                 "Insert error: {:?}",
                 res.message,
@@ -321,17 +349,17 @@ impl StarrocksInsert {
     }
 }
 
-struct Inserter{
+struct InserterInner {
     sender: Option<Sender>,
     join_handle: Option<JoinHandle<Result<InsertResultResponse>>>,
     buffer: BytesMut,
 }
-impl Inserter{
+impl InserterInner {
     pub fn new(sender: Sender, join_handle: JoinHandle<Result<InsertResultResponse>>) -> Self {
         Self {
             sender: Some(sender),
             join_handle: Some(join_handle),
-            buffer: BytesMut::with_capacity(BUFFER_SIZE)
+            buffer: BytesMut::with_capacity(BUFFER_SIZE),
         }
     }
 
@@ -492,7 +520,7 @@ impl DorisField {
     }
 }
 
-pub enum InsertResultResponse{
+pub enum InsertResultResponse {
     Doris(DorisInsertResultResponse),
     Starrocks(StarrocksInsertResultResponse),
 }
@@ -568,47 +596,72 @@ pub struct StarrocksInsertResultResponse {
     stream_load_plan_time_ms: Option<i32>,
 }
 
-pub struct StarrocksMysqlQuery{
+pub struct StarrocksMysqlQuery {
     table: String,
     db: String,
-    pool: MySqlPool,
+    conn: mysql_async::Conn,
 }
 
-impl StarrocksMysqlQuery{
-    pub async fn new(url: String, table: String, db: String, user: String, password: String) -> Result<Self>{
-        let mysql_url = format!("mysql://{}:{}@{}/{}",user,password,url,db);
-        println!("{:?}",mysql_url);
-        
-        let pool = MySqlPool::connect("mysql://xxhx:123456@127.0.0.1:9030/demo")
-        .await
-        .map_err(|err| SinkError::Http(err.into()))?;
+impl StarrocksMysqlQuery {
+    pub async fn new(
+        host: String,
+        port: String,
+        table: String,
+        db: String,
+        user: String,
+        password: String,
+    ) -> Result<Self> {
+        let conn_uri = format!(
+            "mysql://{}:{}@{}:{}/{}?prefer_socket={}&max_allowed_packet={}&wait_timeout={}",
+            user,
+            password,
+            host,
+            port,
+            db,
+            STARROCK_MYSQL_PREFER_SOCKET,
+            STARROCK_MYSQL_MAX_ALLOWED_PACKET,
+            STARROCK_MYSQL_WAIT_TIMEOUT
+        );
+        let pool = mysql_async::Pool::new(
+            Opts::from_url(&conn_uri).map_err(|err| SinkError::Http(err.into()))?,
+        );
+        let conn = pool
+            .get_conn()
+            .await
+            .map_err(|err| SinkError::Http(err.into()))?;
 
-        Ok(Self { table, db, pool })
+        Ok(Self { table, db, conn })
     }
 
-    pub async fn get_schema_from_starrocks(&self) -> Result<HashMap<String, String>>{
-        let query = format!("select column_name, column_type from information_schema.columns where table_name = {:?} and database_name = {:?};",self.table,self.db);
-        let row = sqlx::query(&query).fetch_all(&self.pool).await
-        .map_err(|err| SinkError::Http(err.into()))?;
-        
-        let query_map: HashMap<String, String> = row.into_iter().map(|row| (row.get(0), row.get(1))).collect();
+    pub async fn get_columns_from_starrocks(&mut self) -> Result<HashMap<String, String>> {
+        let query = format!("select column_name, column_type from information_schema.columns where table_name = {:?} and table_schema = {:?};",self.table,self.db);
+        let mut query_map: HashMap<String, String> = HashMap::default();
+        self.conn
+            .query_map(query, |(column_name, column_type)| {
+                query_map.insert(column_name, column_type)
+            })
+            .await
+            .map_err(|err| SinkError::Http(err.into()))?;
         Ok(query_map)
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use crate::sink::doris_connector::StarrocksMysqlQuery;
-
-
-    #[tokio::test]
-    async fn test_get_schema() {
-        let a = StarrocksMysqlQuery::new("127.0.0.1:9030".to_string(),"detailDemo".to_string(),"demo".to_string(),"xxhx".to_string(),"123456".to_string()).await;
-        let b = a.unwrap().get_schema_from_starrocks().await.unwrap();
-        println!("{:?}",b);
-    }
-    #[tokio::test]
-    async fn test_insert() {
-
+    pub async fn get_pk_from_starrocks(&mut self) -> Result<(String, String)> {
+        let query = format!("select table_model, primary_key from information_schema.tables_config where table_name = {:?} and table_schema = {:?};",self.table,self.db);
+        let table_mode_pk: (String, String) = self
+            .conn
+            .query_map(query, |(table_model, primary_key)| {
+                (table_model, primary_key)
+            })
+            .await
+            .map_err(|err| SinkError::Http(err.into()))?
+            .get(0)
+            .ok_or_else(|| {
+                SinkError::Starrocks(format!(
+                    "Can't find schema with table {:?} and database {:?}",
+                    self.table, self.db
+                ))
+            })?
+            .clone();
+        Ok(table_mode_pk)
     }
 }

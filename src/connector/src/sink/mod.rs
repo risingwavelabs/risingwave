@@ -27,6 +27,7 @@ pub mod nats;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
+pub mod starrocks;
 #[cfg(any(test, madsim))]
 pub mod test_sink;
 pub mod utils;
@@ -56,6 +57,7 @@ use self::encoder::SerTo;
 use self::formatter::SinkFormatter;
 use self::iceberg::{IcebergSink, ICEBERG_SINK, REMOTE_ICEBERG_SINK};
 use self::pulsar::{PulsarConfig, PulsarSink};
+use self::starrocks::{StarrocksConfig, StarrocksSink};
 use crate::sink::boxed::BoxSink;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::clickhouse::CLICKHOUSE_SINK;
@@ -67,6 +69,7 @@ use crate::sink::nats::{NatsConfig, NatsSink, NATS_SINK};
 use crate::sink::pulsar::PULSAR_SINK;
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{CoordinatedRemoteSink, RemoteConfig, RemoteSink};
+use crate::sink::starrocks::STARROCKS_SINK;
 #[cfg(any(test, madsim))]
 use crate::sink::test_sink::{build_test_sink, TEST_SINK_NAME};
 use crate::ConnectorParams;
@@ -332,6 +335,7 @@ pub enum SinkConfig {
     BlackHole,
     ClickHouse(Box<ClickHouseConfig>),
     Doris(Box<DorisConfig>),
+    Starrocks(Box<StarrocksConfig>),
     Nats(NatsConfig),
     #[cfg(any(test, madsim))]
     Test,
@@ -397,6 +401,9 @@ impl SinkConfig {
             DORIS_SINK => Ok(SinkConfig::Doris(Box::new(DorisConfig::from_hashmap(
                 properties,
             )?))),
+            STARROCKS_SINK => Ok(SinkConfig::Starrocks(Box::new(
+                StarrocksConfig::from_hashmap(properties)?,
+            ))),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
             PULSAR_SINK => Ok(SinkConfig::Pulsar(PulsarConfig::from_hashmap(properties)?)),
             REMOTE_ICEBERG_SINK => Ok(SinkConfig::RemoteIceberg(
@@ -429,6 +436,7 @@ pub enum SinkImpl {
     Kinesis(KinesisSink),
     ClickHouse(ClickHouseSink),
     Doris(DorisSink),
+    Starrocks(StarrocksSink),
     Iceberg(IcebergSink),
     Nats(NatsSink),
     RemoteIceberg(RemoteIcebergSink),
@@ -450,6 +458,7 @@ impl SinkImpl {
             SinkImpl::RemoteIceberg(_) => "iceberg_java",
             SinkImpl::TestSink(_) => "test",
             SinkImpl::Doris(_) => "doris",
+            SinkImpl::Starrocks(_) => "starrocks",
         }
     }
 }
@@ -468,6 +477,7 @@ macro_rules! dispatch_sink {
             SinkImpl::Kinesis($sink) => $body,
             SinkImpl::ClickHouse($sink) => $body,
             SinkImpl::Doris($sink) => $body,
+            SinkImpl::Starrocks($sink) => $body,
             SinkImpl::Iceberg($sink) => $body,
             SinkImpl::Nats($sink) => $body,
             SinkImpl::RemoteIceberg($sink) => $body,
@@ -508,6 +518,12 @@ impl SinkImpl {
                 param.downstream_pk,
                 param.sink_type.is_append_only(),
             )?),
+            SinkConfig::Starrocks(cfg) => SinkImpl::Starrocks(StarrocksSink::new(
+                *cfg,
+                param.schema(),
+                param.downstream_pk,
+                param.sink_type.is_append_only(),
+            )?),
         })
     }
 }
@@ -534,10 +550,12 @@ pub enum SinkError {
     ClickHouse(String),
     #[error("Nats error: {0}")]
     Nats(anyhow::Error),
-    #[error("Doris http error: {0}")]
+    #[error("Doris/Starrocks connect error: {0}")]
     Http(anyhow::Error),
     #[error("Doris error: {0}")]
     Doris(String),
+    #[error("Starrocks error: {0}")]
+    Starrocks(String),
     #[error("Pulsar error: {0}")]
     Pulsar(anyhow::Error),
     #[error("Internal error: {0}")]
