@@ -22,7 +22,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::{enable_jemalloc_on_unix, hash};
-use risingwave_expr::agg::{AggCall, AggKind};
+use risingwave_expr::aggregate::{AggCall, AggKind};
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};

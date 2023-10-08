@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};

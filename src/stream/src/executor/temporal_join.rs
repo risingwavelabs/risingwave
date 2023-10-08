@@ -447,9 +447,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                 // check join condition
                                 let ok = if let Some(ref mut cond) = self.condition {
                                     let concat_row = left_row.chain(&right_row).into_owned_row();
-                                    cond.eval_row_infallible(&concat_row, |err| {
-                                        self.ctx.on_compute_error(err, self.identity.as_str())
-                                    })
+                                    cond.eval_row_infallible(&concat_row)
                                         .await
                                         .map(|s| *s.as_bool())
                                         .unwrap_or(false)

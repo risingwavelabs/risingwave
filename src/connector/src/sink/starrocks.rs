@@ -29,9 +29,11 @@ use serde_with::serde_as;
 use super::doris_connector::{
     HeaderBuilder, InserterBuilder, StarrocksInsert, StarrocksMysqlQuery, STARROCKS_DELETE_SIGN,
 };
-use super::utils::doris_rows_to_json;
-use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
+use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use super::writer::LogSinkerOf;
+use super::{SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::common::StarrocksCommon;
+use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const STARROCKS_SINK: &str = "starrocks";
@@ -171,19 +173,21 @@ impl StarrocksSink {
     }
 }
 
-#[async_trait]
 impl Sink for StarrocksSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = StarrocksSinkWriter;
+    type LogSinker = LogSinkerOf<StarrocksSinkWriter>;
 
-    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
+    const SINK_NAME: &'static str = STARROCKS_SINK;
+
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(StarrocksSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
         )
-        .await?)
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
     async fn validate(&self) -> Result<()> {
@@ -232,7 +236,22 @@ pub struct StarrocksSinkWriter {
     builder: InserterBuilder,
     is_append_only: bool,
     insert: Option<StarrocksInsert>,
-    decimal_map: HashMap<String, (u8, u8)>,
+    row_encoder: JsonEncoder,
+}
+
+impl TryFrom<SinkParam> for StarrocksSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = StarrocksConfig::from_hashmap(param.properties)?;
+        StarrocksSink::new(
+            config,
+            schema,
+            param.downstream_pk,
+            param.sink_type.is_append_only(),
+        )
+    }
 }
 
 impl StarrocksSinkWriter {
@@ -302,12 +321,17 @@ impl StarrocksSinkWriter {
         // let insert = Some(starrocks_insert_builder.build_starrocks().await?);
         Ok(Self {
             config,
-            schema,
+            schema: schema.clone(),
             pk_indices,
             builder: starrocks_insert_builder,
             is_append_only,
             insert: None,
-            decimal_map,
+            row_encoder: JsonEncoder::new_with_doris(
+                schema,
+                None,
+                TimestampHandlingMode::String,
+                decimal_map,
+            ),
         })
     }
 
@@ -316,9 +340,7 @@ impl StarrocksSinkWriter {
             if op != Op::Insert {
                 continue;
             }
-            let row_json_string =
-                Value::Object(doris_rows_to_json(row, &self.schema, &self.decimal_map)?)
-                    .to_string();
+            let row_json_string = Value::Object(self.row_encoder.encode(row)?).to_string();
             self.insert
                 .as_mut()
                 .ok_or_else(|| {
@@ -334,8 +356,7 @@ impl StarrocksSinkWriter {
         for (op, row) in chunk.rows() {
             match op {
                 Op::Insert => {
-                    let mut row_json_value =
-                        doris_rows_to_json(row, &self.schema, &self.decimal_map)?;
+                    let mut row_json_value = self.row_encoder.encode(row)?;
                     row_json_value.insert(
                         STARROCKS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),
@@ -351,8 +372,7 @@ impl StarrocksSinkWriter {
                         .await?;
                 }
                 Op::Delete => {
-                    let mut row_json_value =
-                        doris_rows_to_json(row, &self.schema, &self.decimal_map)?;
+                    let mut row_json_value = self.row_encoder.encode(row)?;
                     row_json_value.insert(
                         STARROCKS_DELETE_SIGN.to_string(),
                         Value::String("1".to_string()),
@@ -369,8 +389,7 @@ impl StarrocksSinkWriter {
                 }
                 Op::UpdateDelete => {}
                 Op::UpdateInsert => {
-                    let mut row_json_value =
-                        doris_rows_to_json(row, &self.schema, &self.decimal_map)?;
+                    let mut row_json_value = self.row_encoder.encode(row)?;
                     row_json_value.insert(
                         STARROCKS_DELETE_SIGN.to_string(),
                         Value::String("0".to_string()),
