@@ -3363,6 +3363,10 @@ impl Parser {
         loop {
             idents.push(self.parse_identifier()?);
 
+            // There are cases where no skip is required as minus could be used
+            // as a subtraction if an object has whitespace from the minus. If 
+            // normal peek_token is used the subsequent minus could be mistaken
+            // to be part of the object rather than being a subtraction.
             match self.peek_token_no_skip() {
                 Some(token_with_location) => match token_with_location.token {
                     Token::Period => {
