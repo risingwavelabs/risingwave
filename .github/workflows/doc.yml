@@ -26,6 +26,7 @@ jobs:
           remove-codeql: 'true'
           remove-docker-images: 'true'
           root-reserve-mb: 2048
+          temp-reserve-mb: 1024
       - uses: actions/checkout@v3
       - name: Setup Rust toolchain
         run: rustup show
@@ -51,14 +52,7 @@ jobs:
       - name: build docsets
         run: |
           cargo docset --no-clean --docset-name RisingWave
-
-          echo "Check available storage"
-          df -h
-
           tar -czf risingwave.docset.tgz target/docset/risingwave.docset
-          
-          echo "Check available storage"
-          df -h
 
           echo "<entry>
           <version>$(date -u +%Y-%m-%dT%H:%M:%SZ)</version>
