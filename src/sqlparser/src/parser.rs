@@ -3364,7 +3364,7 @@ impl Parser {
             idents.push(self.parse_identifier()?);
 
             // There are cases where no skip is required as minus could be used
-            // as a subtraction if an object has whitespace from the minus. If 
+            // as a subtraction if an object has whitespace from the minus. If
             // normal peek_token is used the subsequent minus could be mistaken
             // to be part of the object rather than being a subtraction.
             match self.peek_token_no_skip() {
