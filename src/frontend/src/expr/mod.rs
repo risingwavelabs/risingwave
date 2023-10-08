@@ -323,7 +323,13 @@ impl ExprImpl {
         if self.is_const() {
             self.eval_row(&OwnedRow::empty())
                 .now_or_never()
-                .expect("constant expression should not be async")
+                .unwrap_or_else(|| {
+                    // TODO: error type
+                    Err(ErrorCode::ExprError(
+                        anyhow::anyhow!("constant expression should not be async").into(),
+                    )
+                    .into())
+                })
                 .into()
         } else {
             None
