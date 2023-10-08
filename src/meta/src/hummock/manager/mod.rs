@@ -435,29 +435,16 @@ impl HummockManager {
                 .collect();
 
         let mut redo_state = if self.need_init().await? {
-            // For backward compatibility, try to read checkpoint from meta store.
-            let versions = HummockVersion::list(self.env.meta_store()).await?;
-            let checkpoint_version = if !versions.is_empty() {
-                let checkpoint = versions.into_iter().next().unwrap();
-                tracing::warn!(
-                    "read hummock version checkpoint from meta store: {:#?}",
-                    checkpoint
-                );
-                checkpoint
-            } else {
-                // As no record found in stores, create a initial version.
-                let default_compaction_config = self
-                    .compaction_group_manager
-                    .read()
-                    .await
-                    .default_compaction_config();
-                let checkpoint = create_init_version(default_compaction_config);
-                tracing::info!("init hummock version checkpoint");
-                HummockVersionStats::default()
-                    .insert(self.env.meta_store())
-                    .await?;
-                checkpoint
-            };
+            let default_compaction_config = self
+                .compaction_group_manager
+                .read()
+                .await
+                .default_compaction_config();
+            let checkpoint_version = create_init_version(default_compaction_config);
+            tracing::info!("init hummock version checkpoint");
+            HummockVersionStats::default()
+                .insert(self.env.meta_store())
+                .await?;
             versioning_guard.checkpoint = HummockVersionCheckpoint {
                 version: Some(checkpoint_version.clone()),
                 stale_objects: Default::default(),
