@@ -3018,7 +3018,10 @@ impl CompactionState {
             Some(compact_task::TaskType::Ttl)
         } else if guard.contains(&(group, compact_task::TaskType::Dynamic)) {
             Some(compact_task::TaskType::Dynamic)
+        } else if guard.contains(&(group, compact_task::TaskType::Tombstone)) {
+            Some(compact_task::TaskType::Tombstone)
         } else {
+            // Other types are not triggered by `try_sched_compaction`, so no need to be handled.
             None
         }
     }
