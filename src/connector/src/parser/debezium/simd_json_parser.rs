@@ -447,6 +447,7 @@ mod tests {
             assert_json_eq(&row[12], "{\"k1\": \"v1_updated\", \"k2\": 33}");
         }
 
+        #[cfg(not(madsim))] // Traced test does not work with madsim
         #[tokio::test]
         #[tracing_test::traced_test]
         async fn test2_debezium_json_parser_overflow() {
