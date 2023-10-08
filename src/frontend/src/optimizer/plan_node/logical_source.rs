@@ -208,10 +208,7 @@ impl LogicalSource {
             base: PlanBase::new_stream_with_logical(
                 &logical_source,
                 Distribution::Single,
-                logical_source
-                    .catalog
-                    .as_ref()
-                    .map_or(true, |s| s.append_only),
+                true, // `list` will keep listing all objects, it must be append-only
                 false,
                 FixedBitSet::with_capacity(logical_source.column_catalog.len()),
             ),
