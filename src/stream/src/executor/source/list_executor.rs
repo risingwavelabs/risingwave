@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Formatter;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -212,5 +213,19 @@ impl<S: StateStore> Executor for FsListExecutor<S> {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+}
+
+impl<S: StateStore> Debug for FsListExecutor<S> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(core) = &self.stream_source_core {
+            f.debug_struct("FsListExecutor")
+                .field("source_id", &core.source_id)
+                .field("column_ids", &core.column_ids)
+                .field("pk_indices", &self.pk_indices)
+                .finish()
+        } else {
+            f.debug_struct("FsListExecutor").finish()
+        }
     }
 }
