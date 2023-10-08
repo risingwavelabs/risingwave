@@ -539,6 +539,9 @@ impl HummockManager {
 
         // update meta store
         let result = self
+            .compaction_group_manager
+            .write()
+            .await
             .update_compaction_config(
                 &rewrite_cg_ids,
                 &[
@@ -546,6 +549,7 @@ impl HummockManager {
                         compaction_config::level0_stop_write_threshold_sub_level_number(),
                     ),
                 ],
+                self.env.meta_store(),
             )
             .await?;
 

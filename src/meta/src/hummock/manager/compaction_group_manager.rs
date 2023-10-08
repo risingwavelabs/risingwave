@@ -802,7 +802,7 @@ impl CompactionGroupManager {
         self.default_config.clone()
     }
 
-    async fn update_compaction_config<S: MetaStore>(
+    pub async fn update_compaction_config<S: MetaStore>(
         &mut self,
         compaction_group_ids: &[CompactionGroupId],
         config_to_update: &[MutableConfig],
