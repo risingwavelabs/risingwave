@@ -1793,6 +1793,11 @@ impl Parser {
         }
     }
 
+    /// Return nth non-whitespace token that has not yet been processed
+    pub fn peek_token_no_skip(&self) -> Option<&TokenWithLocation> {
+        self.tokens.get(self.index)
+    }
+
     /// Return the first non-whitespace token that has not yet been processed
     /// (or None if reached end-of-file) and mark it as processed. OK to call
     /// repeatedly after reaching EOF.
@@ -1852,6 +1857,28 @@ impl Parser {
             expected,
             found,
             TokensDisplay(near_tokens),
+        ))
+    }
+
+    fn get_near_tokens_display(&self) -> String {
+        let start_off = self.index.saturating_sub(10);
+        let end_off = self.index.min(self.tokens.len());
+        let near_tokens = &self.tokens[start_off..end_off];
+
+        // Directly create a formatted string of the nearby tokens
+        let tokens_str: Vec<String> = near_tokens
+            .iter()
+            .map(|token| format!("{}", token.token))
+            .collect();
+
+        format!("Near \"{}\"", tokens_str.join(""))
+    }
+
+    pub fn at_or_near_error<T>(&self, found: TokenWithLocation) -> Result<T, ParserError> {
+        parser_err!(format!(
+            "syntax error at or near {}\n{}",
+            found,
+            self.get_near_tokens_display()
         ))
     }
 
@@ -3335,8 +3362,27 @@ impl Parser {
         let mut idents = vec![];
         loop {
             idents.push(self.parse_identifier()?);
-            if !self.consume_token(&Token::Period) {
-                break;
+
+            match self.peek_token_no_skip() {
+                Some(token_with_location) => match token_with_location.token {
+                    Token::Period => {
+                        self.next_token();
+                    }
+                    Token::Minus => {
+                        return self.at_or_near_error(
+                            token_with_location
+                                .token
+                                .clone()
+                                .with_location(token_with_location.clone().location),
+                        );
+                    }
+                    _ => {
+                        break;
+                    }
+                },
+                None => {
+                    break;
+                }
             }
         }
         Ok(ObjectName(idents))

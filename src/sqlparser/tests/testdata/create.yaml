@@ -78,3 +78,7 @@
   error_msg: |-
     sql parser error: Expected literal string, found: null at line:1, column:45
     Near " tmp with encrypted password null"
+- input: CREATE SOURCE foo-bar WITH () FORMAT PLAIN ENCODE PROTOBUF ();
+  error_msg: |-
+    sql parser error: syntax error at or near - at line:1, column:19
+    Near "CREATE SOURCE foo"
