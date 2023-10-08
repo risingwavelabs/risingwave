@@ -869,7 +869,7 @@ impl ClusterControllerInner {
 mod tests {
     use super::*;
 
-    fn make_worker_hosts_for_test(count: usize) -> Vec<HostAddress> {
+    fn mock_worker_hosts_for_test(count: usize) -> Vec<HostAddress> {
         (0..count)
             .map(|i| HostAddress {
                 host: "localhost".to_string(),
@@ -892,7 +892,7 @@ mod tests {
             is_serving: true,
             is_unschedulable: false,
         };
-        let hosts = make_worker_hosts_for_test(worker_count);
+        let hosts = mock_worker_hosts_for_test(worker_count);
         let mut worker_ids = vec![];
         for host in &hosts {
             worker_ids.push(
