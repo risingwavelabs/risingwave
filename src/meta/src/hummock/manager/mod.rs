@@ -3016,13 +3016,13 @@ impl CompactionState {
             Some(compact_task::TaskType::SpaceReclaim)
         } else if guard.contains(&(group, compact_task::TaskType::Ttl)) {
             Some(compact_task::TaskType::Ttl)
-        } else if guard.contains(&(group, compact_task::TaskType::Dynamic)) {
-            Some(compact_task::TaskType::Dynamic)
         } else if guard.contains(&(group, compact_task::TaskType::Tombstone)) {
             Some(compact_task::TaskType::Tombstone)
+        } else if guard.contains(&(group, compact_task::TaskType::Dynamic)) {
+            Some(compact_task::TaskType::Dynamic)
         } else {
             // Other types are not triggered by `try_sched_compaction`, so no need to be handled.
-            None
+            panic!("Unhandled Compact TaskType");
         }
     }
 }
