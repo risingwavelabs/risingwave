@@ -141,6 +141,7 @@ criterion = { workspace = true, features = ["async_tokio", "async"] }
 prost-types = "0.12"
 rand = "0.8"
 tempfile = "3"
+tracing-test = "0.2"
 
 [build-dependencies]
 prost-build = "0.12"

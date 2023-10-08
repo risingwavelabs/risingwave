@@ -448,6 +448,7 @@ mod tests {
         }
 
         #[tokio::test]
+        #[tracing_test::traced_test]
         async fn test2_debezium_json_parser_overflow() {
             let columns = vec![
                 SourceColumnDesc::simple("O_KEY", DataType::Int64, ColumnId::from(0)),
@@ -478,23 +479,19 @@ mod tests {
                     r#"{{"payload":{{"before":null,"after":{{"O_KEY":{},"O_BOOL":{},"O_TINY":{},"O_INT":{},"O_REAL":{},"O_DOUBLE":{}}},"source":{{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null}},"op":"c","ts_ms":1678158055464,"transaction":null}}}}"#,
                     values[0], values[1], values[2], values[3], values[4], values[5]
                 ).as_bytes().to_vec();
-                let e = parser
+
+                let res = parser
                     .parse_inner(None, Some(data), builder.row_writer())
-                    .await
-                    .unwrap_err();
-                println!("{}", e);
+                    .await;
                 if i < 5 {
                     // For other overflow, the parsing succeeds but the type conversion fails
-                    assert!(
-                        e.to_string().contains("AccessError: TypeError"),
-                        "i={i}, actual error: {e}"
-                    );
+                    // The errors are ignored and logged.
+                    res.unwrap();
+                    assert!(logs_contain("Expected type"), "{i}");
                 } else {
                     // For f64 overflow, the parsing fails
-                    assert!(
-                        e.to_string().contains("InvalidNumber"),
-                        "i={i}, actual error: {e}"
-                    );
+                    let e = res.unwrap_err();
+                    assert!(e.to_string().contains("InvalidNumber"), "{i}: {e}");
                 }
             }
         }
