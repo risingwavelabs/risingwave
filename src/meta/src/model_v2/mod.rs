@@ -41,3 +41,9 @@ pub mod worker_property;
 
 #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Eq, Serialize, Deserialize, Default)]
 pub struct I32Array(pub Vec<i32>);
+
+#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Eq, Serialize, Deserialize, Default)]
+pub struct DataType(pub risingwave_pb::data::DataType);
+
+#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Eq, Serialize, Deserialize, Default)]
+pub struct DataTypeArray(pub Vec<risingwave_pb::data::DataType>);

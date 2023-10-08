@@ -12,7 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::catalog::function::Kind;
+use risingwave_pb::catalog::PbFunction;
 use sea_orm::entity::prelude::*;
+use sea_orm::ActiveValue;
+
+use crate::model_v2::{DataType, DataTypeArray};
+
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(None)")]
+pub enum FunctionKind {
+    #[sea_orm(string_value = "Scalar")]
+    Scalar,
+    #[sea_orm(string_value = "Table")]
+    Table,
+    #[sea_orm(string_value = "Aggregate")]
+    Aggregate,
+}
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "function")]
@@ -22,12 +38,12 @@ pub struct Model {
     pub name: String,
     pub schema_id: i32,
     pub database_id: i32,
-    pub arg_types: Option<Json>,
-    pub return_type: Option<String>,
-    pub language: Option<String>,
-    pub link: Option<String>,
-    pub identifier: Option<String>,
-    pub kind: Option<Json>,
+    pub arg_types: DataTypeArray,
+    pub return_type: DataType,
+    pub language: String,
+    pub link: String,
+    pub identifier: String,
+    pub kind: FunctionKind,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -77,3 +93,30 @@ impl Related<super::schema::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Kind> for FunctionKind {
+    fn from(kind: Kind) -> Self {
+        match kind {
+            Kind::Scalar(_) => Self::Scalar,
+            Kind::Table(_) => Self::Table,
+            Kind::Aggregate(_) => Self::Aggregate,
+        }
+    }
+}
+
+impl From<PbFunction> for ActiveModel {
+    fn from(function: PbFunction) -> Self {
+        Self {
+            function_id: ActiveValue::Set(function.id as _),
+            name: ActiveValue::Set(function.name),
+            schema_id: ActiveValue::Set(function.schema_id as _),
+            database_id: ActiveValue::Set(function.database_id as _),
+            arg_types: ActiveValue::Set(DataTypeArray(function.arg_types)),
+            return_type: ActiveValue::Set(DataType(function.return_type.unwrap())),
+            language: ActiveValue::Set(function.language),
+            link: ActiveValue::Set(function.link),
+            identifier: ActiveValue::Set(function.identifier),
+            kind: ActiveValue::Set(function.kind.unwrap().into()),
+        }
+    }
+}

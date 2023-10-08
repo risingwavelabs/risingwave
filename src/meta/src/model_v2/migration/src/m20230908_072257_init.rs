@@ -164,6 +164,7 @@ impl MigrationTrait for Migration {
                             .name("FK_object_owner_id")
                             .from(Object::Table, Object::OwnerId)
                             .to(User::Table, User::UserId)
+                            .on_delete(ForeignKeyAction::Cascade)
                             .to_owned(),
                     )
                     .to_owned(),
@@ -671,12 +672,12 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Function::Name).string().not_null())
                     .col(ColumnDef::new(Function::SchemaId).integer().not_null())
                     .col(ColumnDef::new(Function::DatabaseId).integer().not_null())
-                    .col(ColumnDef::new(Function::ArgTypes).json())
-                    .col(ColumnDef::new(Function::ReturnType).string())
-                    .col(ColumnDef::new(Function::Language).string())
-                    .col(ColumnDef::new(Function::Link).string())
-                    .col(ColumnDef::new(Function::Identifier).string())
-                    .col(ColumnDef::new(Function::Kind).json())
+                    .col(ColumnDef::new(Function::ArgTypes).json().not_null())
+                    .col(ColumnDef::new(Function::ReturnType).json().not_null())
+                    .col(ColumnDef::new(Function::Language).string().not_null())
+                    .col(ColumnDef::new(Function::Link).string().not_null())
+                    .col(ColumnDef::new(Function::Identifier).string().not_null())
+                    .col(ColumnDef::new(Function::Kind).string().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_function_database_id")

@@ -16,7 +16,7 @@ use std::iter;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
-use risingwave_pb::catalog::{PbDatabase, PbSchema};
+use risingwave_pb::catalog::{PbDatabase, PbFunction, PbSchema};
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
@@ -29,7 +29,7 @@ use tokio::sync::RwLock;
 
 use crate::controller::utils::construct_obj_dependency_query;
 use crate::controller::ObjectModel;
-use crate::manager::{DatabaseId, MetaSrvEnv, NotificationVersion, UserId};
+use crate::manager::{DatabaseId, FunctionId, MetaSrvEnv, NotificationVersion, UserId};
 use crate::model_v2::object::ObjectType;
 use crate::model_v2::prelude::*;
 use crate::model_v2::{
@@ -297,6 +297,55 @@ impl CatalogController {
             .await;
         Ok(version)
     }
+
+    pub async fn create_function(
+        &self,
+        mut pb_function: PbFunction,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let owner_id = pb_function.owner;
+
+        let function_obj = Self::create_object(&txn, ObjectType::Function, owner_id).await?;
+        pb_function.id = function_obj.oid as _;
+        let function: function::ActiveModel = pb_function.clone().into();
+        function.insert(&txn).await?;
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Add,
+                NotificationInfo::Function(pb_function),
+            )
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        // todo: wrap the error and return the list if used by others.
+        let res = Object::delete(object::ActiveModel {
+            oid: ActiveValue::Set(function_id as _),
+            ..Default::default()
+        })
+        .exec(&inner.db)
+        .await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found("function", function_id));
+        }
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Delete,
+                NotificationInfo::Function(PbFunction {
+                    id: function_id,
+                    ..Default::default()
+                }),
+            )
+            .await;
+        Ok(version)
+    }
 }
 
 #[cfg(test)]
@@ -304,23 +353,70 @@ mod tests {
     use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
 
     use super::*;
+    use crate::manager::SchemaId;
+
+    const TEST_DATABASE_ID: DatabaseId = 1;
+    const TEST_SCHEMA_ID: SchemaId = 2;
+    const TEST_OWNER_ID: UserId = 1;
 
     #[tokio::test]
     #[cfg(not(madsim))]
-    async fn test_create_database() {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).unwrap();
+    async fn test_create_database() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
         let db = PbDatabase {
             name: "test".to_string(),
             owner: DEFAULT_SUPER_USER_ID,
             ..Default::default()
         };
-        mgr.create_database(db).await.unwrap();
+        mgr.create_database(db).await?;
+
         let db = Database::find()
             .filter(database::Column::Name.eq("test"))
             .one(&mgr.inner.read().await.db)
-            .await
-            .unwrap()
+            .await?
             .unwrap();
-        mgr.drop_database(db.database_id as _).await.unwrap();
+        mgr.drop_database(db.database_id as _).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[cfg(not(madsim))]
+    async fn test_create_function() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let return_type = risingwave_pb::data::DataType {
+            type_name: risingwave_pb::data::data_type::TypeName::Int32 as _,
+            ..Default::default()
+        };
+        mgr.create_function(PbFunction {
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "test_function".to_string(),
+            owner: TEST_OWNER_ID,
+            arg_types: vec![],
+            return_type: Some(return_type.clone()),
+            language: "python".to_string(),
+            kind: Some(risingwave_pb::catalog::function::Kind::Scalar(
+                Default::default(),
+            )),
+            ..Default::default()
+        })
+        .await?;
+
+        let function = Function::find()
+            .filter(
+                function::Column::DatabaseId
+                    .eq(TEST_DATABASE_ID)
+                    .and(function::Column::SchemaId.eq(TEST_SCHEMA_ID))
+                    .add(function::Column::Name.eq("test_function")),
+            )
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(function.return_type.0, return_type);
+        assert_eq!(function.language, "python");
+
+        mgr.drop_function(function.function_id as _).await?;
+
+        Ok(())
     }
 }
