@@ -14,7 +14,7 @@
 
 use risingwave_common::array::list_array::display_for_explain;
 use risingwave_common::types::{literal_type_match, DataType, Datum, ToText};
-use risingwave_common::util::value_encoding::{deserialize_datum, DatumToProtoExt};
+use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::Expr;
@@ -130,7 +130,7 @@ fn value_encoding_to_literal(
 ) -> risingwave_common::error::Result<Datum> {
     if let Some(rex_node) = proto {
         if let RexNode::Constant(prost_datum) = rex_node {
-            let datum = deserialize_datum(prost_datum.body.as_ref(), ty)?;
+            let datum = Datum::from_protobuf(prost_datum, ty)?;
             Ok(datum)
         } else {
             unreachable!()
