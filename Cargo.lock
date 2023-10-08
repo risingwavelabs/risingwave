@@ -6310,7 +6310,7 @@ checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "log",
  "multimap 0.8.3",
  "once_cell",
@@ -6344,7 +6344,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.37",
@@ -10080,6 +10080,7 @@ dependencies = [
  "axum",
  "base64 0.21.4",
  "bytes",
+ "flate2",
  "h2",
  "http",
  "http-body",
@@ -10088,12 +10089,16 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.12.1",
+ "rustls 0.21.7",
+ "rustls-pemfile",
  "tokio",
+ "tokio-rustls 0.24.1",
  "tokio-stream",
  "tower",
  "tower-layer",
  "tower-service",
  "tracing",
+ "webpki-roots 0.25.2",
 ]
 
 [[package]]
@@ -11012,7 +11017,7 @@ dependencies = [
  "tokio-util",
  "toml_datetime",
  "toml_edit",
- "tonic 0.9.2",
+ "tonic 0.10.2",
  "tower",
  "tracing",
  "tracing-core",
