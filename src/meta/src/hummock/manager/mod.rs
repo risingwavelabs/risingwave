@@ -3022,7 +3022,8 @@ impl CompactionState {
             Some(compact_task::TaskType::Dynamic)
         } else {
             // Other types are not triggered by `try_sched_compaction`, so no need to be handled.
-            panic!("Unhandled Compact TaskType");
+            // TODO: Consider using match state to avoid missing newly added types
+            None
         }
     }
 }
