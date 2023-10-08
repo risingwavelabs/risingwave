@@ -20,22 +20,22 @@ source ci/scripts/common.sh
 echo "--- Run trailing spaces check"
 scripts/check/check-trailing-spaces.sh
 
-# echo "--- Run clippy check (dev, all features)"
-# cargo clippy --all-targets --all-features --locked -- -D warnings
+echo "--- Run clippy check (dev, all features)"
+cargo clippy --all-targets --all-features --locked -- -D warnings
 
-# echo "--- Show sccache stats"
-# sccache --show-stats
-# sccache --zero-stats
+echo "--- Show sccache stats"
+sccache --show-stats
+sccache --zero-stats
 
-# echo "--- Run clippy check (release)"
-# cargo clippy --release --all-targets --features "rw-static-link" --locked -- -D warnings
+echo "--- Run clippy check (release)"
+cargo clippy --release --all-targets --features "rw-static-link" --locked -- -D warnings
 
-# echo "--- Show sccache stats"
-# sccache --show-stats
-# sccache --zero-stats
+echo "--- Show sccache stats"
+sccache --show-stats
+sccache --zero-stats
 
-# echo "--- Build documentation"
-# RUSTDOCFLAGS="-Dwarnings" cargo doc --document-private-items --no-deps
+echo "--- Build documentation"
+RUSTDOCFLAGS="-Dwarnings" cargo doc --document-private-items --no-deps
 
 echo "--- Show sccache stats"
 sccache --show-stats
