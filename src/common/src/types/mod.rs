@@ -123,7 +123,7 @@ pub enum DataType {
     #[from_str(regex = "(?i)^date$")]
     Date,
     #[display("character varying")]
-    #[from_str(regex = "(?i)^varchar$")]
+    #[from_str(regex = "(?i)^character varying$|^varchar$")]
     Varchar,
     #[display("time without time zone")]
     #[from_str(regex = "(?i)^time$|^time without time zone$")]
