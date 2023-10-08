@@ -2734,7 +2734,7 @@ impl HummockManager {
                                 sorted_output_ssts,
                                 table_stats_change
                             }) => {
-                                if let Err(e) =  hummock_manager.report_compact_task(task_id, TaskStatus::from_i32(task_status).unwrap(), sorted_output_ssts, Some(table_stats_change))
+                                if let Err(e) =  hummock_manager.report_compact_task(task_id, TaskStatus::try_from(task_status).unwrap(), sorted_output_ssts, Some(table_stats_change))
                                        .await {
                                         tracing::error!("report compact_tack fail {e:?}");
                                 }
