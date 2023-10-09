@@ -16,7 +16,8 @@ select
     a,
     sum((sum(b))) over (partition by a order by a)
 from t
-group by a;
+group by a
+order by a;
 ----
 1 23
 2 34
@@ -29,7 +30,8 @@ select
     a,
     row_number() over (partition by a order by a)
 from t
-group by a;
+group by a
+order by a;
 ----
 1 1
 2 1
@@ -42,7 +44,8 @@ select
     a,
     row_number() over (partition by a order by a desc)
 from t
-group by a;
+group by a
+order by a;
 ----
 1 1
 2 1
@@ -56,7 +59,8 @@ select
     b,
     sum(sum(c)) over (partition by a order by b)
 from t
-group by a, b;
+group by a, b
+order by a, b;
 ----
 1 23 84
 2 34 29
@@ -70,7 +74,8 @@ select
     b,
     sum(sum(c)) over (partition by a, avg(d) order by max(e), b)
 from t
-group by a, b;
+group by a, b
+order by a, b;
 ----
 1 23 84
 2 34 29
