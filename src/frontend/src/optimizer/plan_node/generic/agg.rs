@@ -91,7 +91,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         self.ctx().session_ctx().config().get_force_two_phase_agg()
     }
 
-    fn two_phase_agg_enabled(&self) -> bool {
+    pub fn two_phase_agg_enabled(&self) -> bool {
         self.enable_two_phase
     }
 

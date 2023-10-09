@@ -42,7 +42,9 @@ impl Rule for AggCallMergeRule {
             // no change
             None
         } else {
-            let new_agg = Agg::new(new_calls, agg.group_key().clone(), agg.input()).into();
+            let new_agg = Agg::new(new_calls, agg.group_key().clone(), agg.input())
+                .with_enable_two_phase(agg.core().two_phase_agg_enabled())
+                .into();
             Some(LogicalProject::with_out_col_idx(new_agg, out_fields.into_iter()).into())
         }
     }
