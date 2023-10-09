@@ -129,6 +129,7 @@ tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { workspace = true }
 tonic_0_9 = { package = "tonic", version = "0.9" }
 tracing = "0.1"
+tracing-futures = { version = "0.2", features = ["futures-03"] }
 url = "2"
 urlencoding = "2"
 
@@ -140,6 +141,7 @@ criterion = { workspace = true, features = ["async_tokio", "async"] }
 prost-types = "0.12"
 rand = "0.8"
 tempfile = "3"
+tracing-test = "0.2"
 
 [build-dependencies]
 prost-build = "0.12"

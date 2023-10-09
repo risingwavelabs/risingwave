@@ -7308,6 +7308,8 @@ dependencies = [
  "tokio-util",
  "tonic 0.9.2",
  "tracing",
+ "tracing-futures",
+ "tracing-test",
  "url",
  "urlencoding",
  "workspace-hack",
