@@ -14,9 +14,9 @@
 
 use std::sync::Arc;
 
-use prometheus::IntCounter;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_connector::sink::log_store::LogStoreFactory;
 use risingwave_connector::sink::{SinkParam, SinkWriterParam};
 use risingwave_pb::catalog::Table;
@@ -47,24 +47,24 @@ type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
 #[derive(Clone)]
 pub(crate) struct KvLogStoreReadMetrics {
-    pub storage_read_count: IntCounter,
-    pub storage_read_size: IntCounter,
+    pub storage_read_count: LabelGuardedIntCounter,
+    pub storage_read_size: LabelGuardedIntCounter,
 }
 
 impl KvLogStoreReadMetrics {
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
         Self {
-            storage_read_count: IntCounter::new("unused", "unused").unwrap(),
-            storage_read_size: IntCounter::new("unused", "unused").unwrap(),
+            storage_read_count: LabelGuardedIntCounter::test_int_counter(),
+            storage_read_size: LabelGuardedIntCounter::test_int_counter(),
         }
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct KvLogStoreMetrics {
-    pub storage_write_count: IntCounter,
-    pub storage_write_size: IntCounter,
+    pub storage_write_count: LabelGuardedIntCounter,
+    pub storage_write_size: LabelGuardedIntCounter,
     pub persistent_log_read_metrics: KvLogStoreReadMetrics,
     pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
 }
@@ -135,8 +135,8 @@ impl KvLogStoreMetrics {
     #[cfg(test)]
     fn for_test() -> Self {
         KvLogStoreMetrics {
-            storage_write_count: IntCounter::new("unused", "unused").unwrap(),
-            storage_write_size: IntCounter::new("unused", "unused").unwrap(),
+            storage_write_count: LabelGuardedIntCounter::test_int_counter(),
+            storage_write_size: LabelGuardedIntCounter::test_int_counter(),
             persistent_log_read_metrics: KvLogStoreReadMetrics::for_test(),
             flushed_buffer_read_metrics: KvLogStoreReadMetrics::for_test(),
         }
