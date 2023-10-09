@@ -177,6 +177,7 @@ async fn test_sink_basic() -> Result<()> {
             sleep(Duration::from_millis(10)).await;
         }
     }
+    sleep(Duration::from_millis(10000)).await;
 
     assert_eq!(6, parallelism_counter.load(Relaxed));
     assert_eq!(count, row_counter.load(Relaxed));

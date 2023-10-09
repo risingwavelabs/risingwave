@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::agg::{AggArgs, AggKind};
+use risingwave_expr::aggregate::{AggArgs, AggKind};
 use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncCall, WindowFuncKind};
 use risingwave_stream::executor::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
 

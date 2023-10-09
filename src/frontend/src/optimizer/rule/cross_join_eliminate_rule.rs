@@ -44,7 +44,7 @@ impl Rule for CrossJoinEliminateRule {
             && join_type == JoinType::Inner
             && values.rows().len() == 1 // one row
             && values.rows()[0].is_empty() // no columns
-            && join.output_indices_is_trivial()
+            && join.output_indices_are_trivial()
         {
             Some(left)
         } else {

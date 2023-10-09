@@ -22,7 +22,7 @@ use super::unified::util::apply_row_operation_on_stream_chunk_writer_with_op;
 use super::unified::{AccessImpl, ChangeEventOperation};
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, BytesProperties, EncodingProperties, EncodingType,
-    SourceStreamChunkRowWriter, SpecificParserConfig, WriteGuard,
+    SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::extract_key_config;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
@@ -100,7 +100,7 @@ impl UpsertParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         let mut row_op: UpsertChangeEvent<AccessImpl<'_, '_>, AccessImpl<'_, '_>> =
             UpsertChangeEvent::default();
         let mut change_event_op = ChangeEventOperation::Delete;
@@ -117,6 +117,7 @@ impl UpsertParser {
         }
 
         apply_row_operation_on_stream_chunk_writer_with_op(row_op, &mut writer, change_event_op)
+            .map_err(Into::into)
     }
 }
 
@@ -134,7 +135,7 @@ impl ByteStreamSourceParser for UpsertParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         self.parse_inner(key, payload, writer).await
     }
 }

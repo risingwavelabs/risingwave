@@ -14,7 +14,7 @@
 
 use multimap::MultiMap;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::build_from_prost;
+use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
@@ -37,7 +37,7 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
         let project_exprs: Vec<_> = node
             .get_select_list()
             .iter()
-            .map(build_from_prost)
+            .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
             .try_collect()?;
 
         let watermark_derivations = MultiMap::from_iter(

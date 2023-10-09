@@ -15,6 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
+use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{
@@ -337,11 +338,13 @@ impl Binder {
 
             if let Some(from_alias) = alias {
                 original_alias.name = from_alias.name;
-                let mut alias_iter = from_alias.columns.into_iter();
                 original_alias.columns = original_alias
                     .columns
                     .into_iter()
-                    .map(|ident| alias_iter.next().unwrap_or(ident))
+                    .zip_longest(
+                        from_alias.columns
+                    )
+                    .map(EitherOrBoth::into_right)
                     .collect();
             }
 
