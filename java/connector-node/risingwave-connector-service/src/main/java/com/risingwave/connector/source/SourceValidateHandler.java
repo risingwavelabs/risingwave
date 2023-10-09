@@ -15,10 +15,7 @@
 package com.risingwave.connector.source;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.source.common.DbzConnectorConfig;
-import com.risingwave.connector.source.common.MySqlValidator;
-import com.risingwave.connector.source.common.PostgresValidator;
-import com.risingwave.connector.source.common.ValidatorUtils;
+import com.risingwave.connector.source.common.*;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
@@ -97,7 +94,7 @@ public class SourceValidateHandler {
 
             case CITUS:
                 ensurePropNotNull(props, DbzConnectorConfig.PG_SCHEMA_NAME);
-                try (var coordinatorValidator = new PostgresValidator(props, tableSchema)) {
+                try (var coordinatorValidator = new CitusValidator(props, tableSchema)) {
                     coordinatorValidator.validateDistributedTable();
                     coordinatorValidator.validateTable();
                 }
@@ -110,13 +107,12 @@ public class SourceValidateHandler {
                 for (String workerAddr : workerServers) {
                     String[] hostPort = StringUtils.split(workerAddr, ':');
                     if (hostPort.length != 2) {
-                        throw ValidatorUtils.invalidArgument(
-                                String.format("invalid database.servers"));
+                        throw ValidatorUtils.invalidArgument("invalid database.servers");
                     }
                     // set HOST for each worker server
                     mutableProps.put(DbzConnectorConfig.HOST, hostPort[0]);
                     mutableProps.put(DbzConnectorConfig.PORT, hostPort[1]);
-                    try (var workerValidator = new PostgresValidator(mutableProps, tableSchema)) {
+                    try (var workerValidator = new CitusValidator(mutableProps, tableSchema)) {
                         workerValidator.validateDbConfig();
                         workerValidator.validateUserPrivilege();
                     }

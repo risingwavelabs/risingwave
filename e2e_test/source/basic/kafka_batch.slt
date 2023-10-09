@@ -92,6 +92,28 @@ select * from s1 where _rw_kafka_timestamp > '1977-01-01 00:00:00+00:00'
 3 333
 4 4444
 
+query IT rowsort
+select * from s1 where _rw_kafka_timestamp > '1977-01-01 00:00:00'
+----
+1 1
+2 22
+3 333
+4 4444
+
+query IT rowsort
+select * from s1 where _rw_kafka_timestamp > TO_TIMESTAMP('1977-01-01 00:00:00.000000', 'YYYY-MM-DD HH24:MI:SS.US')
+----
+1 1
+2 22
+3 333
+4 4444
+
+statement error expected format
+select * from s1 where _rw_kafka_timestamp > 'abc'
+
+statement error out of range
+select * from s1 where _rw_kafka_timestamp < TO_TIMESTAMP(2147483647 + 1)
+
 query IT
 select * from s1 where _rw_kafka_timestamp > '2045-01-01 0:00:00+00:00'
 ----

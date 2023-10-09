@@ -29,7 +29,7 @@ bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 byteorder = { version = "1" }
 bytes = { version = "1", features = ["serde"] }
-chrono = { version = "0.4", features = ["alloc", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 clap_builder = { version = "4", default-features = false, features = ["cargo", "color", "env", "help", "std", "suggestions", "usage"] }
 combine = { version = "4" }
@@ -55,7 +55,8 @@ hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features
 heck = { version = "0.4", features = ["unicode"] }
 hyper = { version = "0.14", features = ["full"] }
 indexmap = { version = "1", default-features = false, features = ["serde", "std"] }
-itertools = { version = "0.10" }
+itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10" }
+itertools-a6292c17cd707f01 = { package = "itertools", version = "0.11" }
 jni = { version = "0.21", features = ["invocation"] }
 lazy_static = { version = "1", default-features = false, features = ["spin_no_std"] }
 lexical-core = { version = "0.8", features = ["format"] }
@@ -66,12 +67,11 @@ lexical-write-float = { version = "0.8", default-features = false, features = ["
 lexical-write-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
 libc = { version = "0.2", features = ["extra_traits"] }
 lock_api = { version = "0.4", features = ["arc_lock"] }
-log = { version = "0.4", default-features = false, features = ["std"] }
+log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
 madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "fedb1e3", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 md-5 = { version = "0.10" }
 mio = { version = "0.8", features = ["net", "os-ext"] }
-multimap = { version = "0.8" }
 nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
@@ -79,6 +79,7 @@ num-iter = { version = "0.1", default-features = false, features = ["i128", "std
 num-traits = { version = "0.2", features = ["i128", "libm"] }
 opentelemetry_api = { version = "0.20", features = ["logs", "metrics"] }
 opentelemetry_sdk = { version = "0.20", features = ["logs", "metrics"] }
+ordered-float = { version = "3" }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 petgraph = { version = "0.6" }
@@ -86,7 +87,9 @@ phf = { version = "0.11", features = ["uncased"] }
 phf_shared = { version = "0.11", features = ["uncased"] }
 postgres-types = { version = "0.2", default-features = false, features = ["derive", "with-chrono-0_4", "with-serde_json-1"] }
 prometheus = { version = "0.13", features = ["process"] }
-prost = { version = "0.11", features = ["no-recursion-limit"] }
+prost-5ef9efb8ec2df382 = { package = "prost", version = "0.12", features = ["no-recursion-limit"] }
+prost-a6292c17cd707f01 = { package = "prost", version = "0.11" }
+prost-types = { version = "0.12" }
 rand = { version = "0.8", features = ["small_rng"] }
 rand_chacha = { version = "0.3" }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }
@@ -96,7 +99,11 @@ regex-syntax = { version = "0.7" }
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+rustls = { version = "0.21" }
 scopeguard = { version = "1" }
+sea-orm = { version = "0.12", features = ["runtime-tokio-native-tls", "sqlx-mysql", "sqlx-postgres", "sqlx-sqlite"] }
+sea-query = { version = "0.30", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "derive", "hashable-value", "postgres-array", "thread-safe", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
+sea-query-binder = { version = "0.5", default-features = false, features = ["postgres-array", "runtime-tokio-native-tls", "sqlx-mysql", "sqlx-postgres", "sqlx-sqlite", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc", "raw_value"] }
 serde_with = { version = "3", features = ["json"] }
@@ -104,10 +111,12 @@ sha1 = { version = "0.10" }
 sha2 = { version = "0.10" }
 signature = { version = "2", default-features = false, features = ["digest", "rand_core", "std"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
-sqlx-core = { version = "0.7", features = ["_rt-tokio", "any", "chrono", "json", "migrate", "offline"] }
-sqlx-mysql = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline"] }
-sqlx-postgres = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline"] }
-sqlx-sqlite = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline"] }
+sqlx = { version = "0.7", features = ["bigdecimal", "chrono", "mysql", "postgres", "runtime-tokio-native-tls", "rust_decimal", "sqlite", "time", "uuid"] }
+sqlx-core = { version = "0.7", features = ["_rt-tokio", "_tls-native-tls", "any", "bigdecimal", "chrono", "json", "migrate", "offline", "rust_decimal", "time", "uuid"] }
+sqlx-mysql = { version = "0.7", default-features = false, features = ["any", "bigdecimal", "chrono", "json", "migrate", "offline", "rust_decimal", "time", "uuid"] }
+sqlx-postgres = { version = "0.7", default-features = false, features = ["any", "bigdecimal", "chrono", "json", "migrate", "offline", "rust_decimal", "time", "uuid"] }
+sqlx-sqlite = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline", "time", "uuid"] }
+strum = { version = "0.25", features = ["derive"] }
 subtle = { version = "2" }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
@@ -138,7 +147,7 @@ bitflags = { version = "2", default-features = false, features = ["serde", "std"
 byteorder = { version = "1" }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
-chrono = { version = "0.4", features = ["alloc", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
 crossbeam-queue = { version = "0.3" }
 crossbeam-utils = { version = "0.8" }
 deranged = { version = "0.3", default-features = false, features = ["serde", "std"] }
@@ -154,15 +163,15 @@ futures-task = { version = "0.3" }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
 hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14", features = ["nightly", "raw"] }
 heck = { version = "0.4", features = ["unicode"] }
-itertools = { version = "0.10" }
+itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10" }
+itertools-a6292c17cd707f01 = { package = "itertools", version = "0.11" }
 lazy_static = { version = "1", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2", features = ["extra_traits"] }
 lock_api = { version = "0.4", features = ["arc_lock"] }
-log = { version = "0.4", default-features = false, features = ["std"] }
+log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 md-5 = { version = "0.10" }
 mio = { version = "0.8", features = ["net", "os-ext"] }
-multimap = { version = "0.8" }
 nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
@@ -173,14 +182,18 @@ parking_lot_core = { version = "0.9", default-features = false, features = ["dea
 petgraph = { version = "0.6" }
 phf = { version = "0.11", features = ["uncased"] }
 phf_shared = { version = "0.11", features = ["uncased"] }
+postgres-types = { version = "0.2", default-features = false, features = ["derive", "with-chrono-0_4", "with-serde_json-1"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
-prost = { version = "0.11", features = ["no-recursion-limit"] }
+prost-5ef9efb8ec2df382 = { package = "prost", version = "0.12", features = ["no-recursion-limit"] }
+prost-a6292c17cd707f01 = { package = "prost", version = "0.11" }
+prost-types = { version = "0.12" }
 rand = { version = "0.8", features = ["small_rng"] }
 rand_chacha = { version = "0.3" }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }
 regex = { version = "1" }
 regex-automata = { version = "0.3", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
 regex-syntax = { version = "0.7" }
+rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc", "raw_value"] }
@@ -188,10 +201,10 @@ sha1 = { version = "0.10" }
 sha2 = { version = "0.10" }
 signature = { version = "2", default-features = false, features = ["digest", "rand_core", "std"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
-sqlx-core = { version = "0.7", features = ["_rt-tokio", "any", "chrono", "json", "migrate", "offline"] }
-sqlx-mysql = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline"] }
-sqlx-postgres = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline"] }
-sqlx-sqlite = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline"] }
+sqlx-core = { version = "0.7", features = ["_rt-tokio", "_tls-native-tls", "any", "bigdecimal", "chrono", "json", "migrate", "offline", "rust_decimal", "time", "uuid"] }
+sqlx-mysql = { version = "0.7", default-features = false, features = ["any", "bigdecimal", "chrono", "json", "migrate", "offline", "rust_decimal", "time", "uuid"] }
+sqlx-postgres = { version = "0.7", default-features = false, features = ["any", "bigdecimal", "chrono", "json", "migrate", "offline", "rust_decimal", "time", "uuid"] }
+sqlx-sqlite = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline", "time", "uuid"] }
 subtle = { version = "2" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
@@ -199,7 +212,9 @@ time = { version = "0.3", features = ["local-offset", "macros", "serde-well-know
 time-macros = { version = "0.2", default-features = false, features = ["formatting", "parsing", "serde"] }
 tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
 tokio = { version = "1", features = ["full", "stats", "tracing"] }
+tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88", features = ["with-chrono-0_4"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e", features = ["fs", "net"] }
+tokio-util = { version = "0.7", features = ["codec", "io"] }
 toml_datetime = { version = "0.6", default-features = false, features = ["serde"] }
 toml_edit = { version = "0.19", features = ["serde"] }
 tracing = { version = "0.1", features = ["log"] }
@@ -207,6 +222,7 @@ tracing-core = { version = "0.1" }
 unicode-bidi = { version = "0.3" }
 unicode-normalization = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
+uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 whoami = { version = "1" }
 
 ### END HAKARI SECTION

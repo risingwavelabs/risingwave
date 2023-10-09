@@ -105,10 +105,26 @@ pub struct LocalStreamManager {
     total_mem_val: Arc<TrAdder<i64>>,
 }
 
+/// Report expression evaluation errors to the actor context.
+///
+/// The struct can be cheaply cloned.
+#[derive(Clone)]
+pub struct ActorEvalErrorReport {
+    pub actor_context: ActorContextRef,
+    pub identity: Arc<str>,
+}
+
+impl risingwave_expr::expr::EvalErrorReport for ActorEvalErrorReport {
+    fn report(&self, err: risingwave_expr::ExprError) {
+        self.actor_context.on_compute_error(err, &self.identity);
+    }
+}
+
 pub struct ExecutorParams {
     pub env: StreamEnvironment,
 
     /// Indices of primary keys
+    // TODO: directly use it for `ExecutorInfo`
     pub pk_indices: PkIndices,
 
     /// Executor id, unique across all actors.
@@ -117,11 +133,17 @@ pub struct ExecutorParams {
     /// Operator id, unique for each operator in fragment.
     pub operator_id: u64,
 
-    /// Information of the operator from plan node.
+    /// Information of the operator from plan node, like `StreamHashJoin { .. }`.
+    // TODO: use it for `identity`
     pub op_info: String,
 
     /// The output schema of the executor.
+    // TODO: directly use it for `ExecutorInfo`
     pub schema: Schema,
+
+    /// The identity of the executor, like `HashJoin 1234ABCD`.
+    // TODO: directly use it for `ExecutorInfo`
+    pub identity: String,
 
     /// The input executor.
     pub input: Vec<BoxedExecutor>,
@@ -137,6 +159,9 @@ pub struct ExecutorParams {
 
     /// Vnodes owned by this executor. Represented in bitmap.
     pub vnode_bitmap: Option<Bitmap>,
+
+    /// Used for reporting expression evaluation errors.
+    pub eval_error_report: ActorEvalErrorReport,
 }
 
 impl Debug for ExecutorParams {
@@ -479,7 +504,6 @@ impl LocalStreamManagerCore {
         &mut self,
         fragment_id: FragmentId,
         node: &stream_plan::StreamNode,
-        input_pos: usize,
         env: StreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
@@ -506,12 +530,11 @@ impl LocalStreamManagerCore {
 
         // Create the input executor before creating itself
         let mut input = Vec::with_capacity(node.input.iter().len());
-        for (input_pos, input_stream_node) in node.input.iter().enumerate() {
+        for input_stream_node in &node.input {
             input.push(
                 self.create_nodes_inner(
                     fragment_id,
                     input_stream_node,
-                    input_pos,
                     env.clone(),
                     store.clone(),
                     actor_context,
@@ -536,12 +559,19 @@ impl LocalStreamManagerCore {
         let operator_id = unique_operator_id(fragment_id, node.operator_id);
         let schema = node.fields.iter().map(Field::from).collect();
 
+        let identity = format!("{} {:X}", node.get_node_body().unwrap(), executor_id);
+        let eval_error_report = ActorEvalErrorReport {
+            actor_context: actor_context.clone(),
+            identity: identity.clone().into(),
+        };
+
         // Build the executor with params.
         let executor_params = ExecutorParams {
             env: env.clone(),
             pk_indices,
             executor_id,
             operator_id,
+            identity,
             op_info,
             schema,
             input,
@@ -549,6 +579,7 @@ impl LocalStreamManagerCore {
             executor_stats: self.streaming_metrics.clone(),
             actor_context: actor_context.clone(),
             vnode_bitmap,
+            eval_error_report,
         };
 
         let executor = create_executor(executor_params, self, node, store).await?;
@@ -556,10 +587,7 @@ impl LocalStreamManagerCore {
         // Wrap the executor for debug purpose.
         let executor = WrapperExecutor::new(
             executor,
-            input_pos,
-            actor_context.id,
-            executor_id,
-            self.streaming_metrics.clone(),
+            actor_context.clone(),
             self.config.developer.enable_executor_row_count,
         )
         .boxed();
@@ -595,7 +623,6 @@ impl LocalStreamManagerCore {
             self.create_nodes_inner(
                 fragment_id,
                 node,
-                0,
                 env,
                 store,
                 actor_context,
@@ -682,13 +709,14 @@ impl LocalStreamManagerCore {
                 {
                     let metrics = self.streaming_metrics.clone();
                     let actor_id_str = actor_id.to_string();
+                    let fragment_id_str = actor_context.fragment_id.to_string();
                     let allocation_stated = task_stats_alloc::allocation_stat(
                         instrumented,
                         Duration::from_millis(1000),
                         move |bytes| {
                             metrics
                                 .actor_memory_usage
-                                .with_label_values(&[&actor_id_str])
+                                .with_label_values(&[&actor_id_str, &fragment_id_str])
                                 .set(bytes as i64);
 
                             actor_context.store_mem_usage(bytes);

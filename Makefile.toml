@@ -24,6 +24,7 @@ env_scripts = [
 #!@duckscript
 
 # only duckscript can modify env variables in cargo-make
+# duckscript doc: https://github.com/sagiegurari/duckscript/blob/master/docs/sdk.md
 
 set_env ENABLE_TELEMETRY "false"
 
@@ -70,6 +71,26 @@ else
   set_env BUILD_HUMMOCK_TRACE_CMD ""
 end
 
+is_ci = get_env RISINGWAVE_CI
+is_not_ci = not ${is_ci}
+
+if ${is_not_ci}
+  query_log_path = get_env RW_QUERY_LOG_PATH
+  no_query_log_path = not ${query_log_path}
+
+  if ${no_query_log_path}
+    set_env RW_QUERY_LOG_PATH "${PREFIX_LOG}"
+  fi
+
+  rust_log = get_env RUST_LOG
+  no_rust_log = not ${rust_log}
+
+  if ${no_rust_log}
+    set_env RUST_LOG "pgwire_query_log=info"
+  else
+    set_env RUST_LOG "pgwire_query_log=info,${rust_log}"
+  end
+end
 ''',
 ]
 
@@ -440,12 +461,37 @@ cargo build -p risingwave_cmd_all \
 [tasks.clean]
 private = true
 category = "RiseDev - Build"
+description = "Clean all build targets"
+dependencies = ["clean-rust", "clean-java"]
+
+[tasks.clean-rust]
+private = true
+category = "RiseDev - Build"
 description = "Clean Rust targets"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 script = '''
 #!/usr/bin/env bash
 set -e
 cargo clean
+'''
+
+[tasks.clean-java]
+private = true
+category = "RiseDev - Build"
+description = "Clean Rust targets"
+condition = { env_set = ["ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+script = '''
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+cd "${JAVA_DIR}"
+"${MAVEN_PATH}" clean
 '''
 
 [tasks.build-docs]
@@ -855,7 +901,7 @@ TARGET_PATH="${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}"
 
 echo "Building connector node..."
 cd "${JAVA_DIR}"
-"${MAVEN_PATH}" --batch-mode --update-snapshots package -Dmaven.test.skip
+"${MAVEN_PATH}" --batch-mode --update-snapshots package -Dmaven.test.skip -Dno-build-rust
 
 rm -rf ${PREFIX_BIN}/connector-node
 mkdir -p "${PREFIX_BIN}/connector-node"
@@ -1292,9 +1338,12 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.17.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.17.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+env = { SLT_HOST = "${RW_FRONTEND_LISTEN_ADDRESS}", SLT_PORT = "${RW_FRONTEND_PORT}", SLT_DB = "dev" }
 command = "sqllogictest"
 args = ["${@}"]
 description = "🌟 Run SQLLogicTest"
@@ -1397,3 +1446,15 @@ cargo run -p risingwave_common --bin example-config >> src/config/example.toml
 category = "RiseDev - Backwards Compatibility Test"
 description = "Run backwards compatibility test"
 script = "./backwards-compat-tests/scripts/run_local.sh"
+
+# For debugging.
+# To show the env for a specific task, use `run_task = "show-env"` for that task.
+[tasks.show-env]
+private = true
+description = "Show cargo-make runtime environment variables"
+script = """
+#!@duckscript
+# https://github.com/sagiegurari/cargo-make/issues/889
+vars = dump_variables
+echo ${vars}
+"""

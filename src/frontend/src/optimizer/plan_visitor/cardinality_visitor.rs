@@ -36,7 +36,7 @@ impl CardinalityVisitor {
         input_card: Cardinality,
         eq_set: HashSet<usize>,
     ) -> Cardinality {
-        let mut unique_keys: Vec<HashSet<_>> = vec![input.logical_pk().iter().copied().collect()];
+        let mut unique_keys: Vec<HashSet<_>> = vec![input.stream_key().iter().copied().collect()];
 
         // We don't have UNIQUE key now. So we hack here to support some complex queries on
         // system tables.

@@ -64,7 +64,7 @@ impl LogicalHopWindow {
         };
 
         let _schema = core.schema();
-        let _pk_indices = core.logical_pk();
+        let _pk_indices = core.stream_key();
         let ctx = core.ctx();
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
@@ -79,7 +79,7 @@ impl LogicalHopWindow {
         let base = PlanBase::new_logical(
             ctx,
             core.schema(),
-            core.logical_pk().unwrap_or_default(),
+            core.stream_key().unwrap_or_default(),
             core.functional_dependency(),
         );
 
@@ -88,6 +88,10 @@ impl LogicalHopWindow {
 
     pub fn into_parts(self) -> (PlanRef, InputRef, Interval, Interval, Interval, Vec<usize>) {
         self.core.into_parts()
+    }
+
+    pub fn output_indices_are_trivial(&self) -> bool {
+        self.output_indices() == &(0..self.core.internal_column_num()).collect_vec()
     }
 
     /// used for binder and planner. The function will add a filter operator to ignore records with
@@ -344,7 +348,7 @@ impl ToStream for LogicalHopWindow {
         let i2o = self.core.i2o_col_mapping();
         output_indices.extend(
             input
-                .logical_pk()
+                .stream_key()
                 .iter()
                 .cloned()
                 .filter(|i| i2o.try_map(*i).is_none()),

@@ -32,7 +32,7 @@ use tokio::sync::oneshot::Receiver;
 
 use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
-use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits,
 };
@@ -244,6 +244,7 @@ pub async fn compact(
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
     object_id_getter: Box<dyn GetObjectId>,
+    filter_key_extractor_manager: FilterKeyExtractorManager,
 ) -> (CompactTask, HashMap<u32, TableStats>) {
     let context = compactor_context.clone();
     let group_label = compact_task.compaction_group_id.to_string();
@@ -316,8 +317,7 @@ pub async fn compact(
             .into_iter()
             .filter(|table_id| existing_table_ids.contains(table_id)),
     );
-    let multi_filter_key_extractor = match compactor_context
-        .filter_key_extractor_manager
+    let multi_filter_key_extractor = match filter_key_extractor_manager
         .acquire(compact_table_ids.clone())
         .await
     {
@@ -433,17 +433,17 @@ pub async fn compact(
     ) * compact_task.splits.len() as u64;
 
     tracing::info!(
-            "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}",
-                compact_task.compaction_group_id,
-                compact_task.task_id,
-                compact_task_statistics,
-                compact_task.target_level,
-                compact_task.compression_algorithm,
-                compact_task.existing_table_ids,
-                parallelism,
-                task_memory_capacity_with_parallelism,
-                optimize_by_copy_block
-            );
+        "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}",
+            compact_task.compaction_group_id,
+            compact_task.task_id,
+            compact_task_statistics,
+            compact_task.target_level,
+            compact_task.compression_algorithm,
+            compact_task.existing_table_ids,
+            parallelism,
+            task_memory_capacity_with_parallelism,
+            optimize_by_copy_block
+    );
 
     // If the task does not have enough memory, it should cancel the task and let the meta
     // reschedule it, so that it does not occupy the compactor's resources.
@@ -868,6 +868,7 @@ where
 
     Ok(compaction_statistics)
 }
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;

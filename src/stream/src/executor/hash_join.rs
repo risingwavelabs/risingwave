@@ -310,7 +310,6 @@ struct HashJoinChunkBuilder<const T: JoinTypePrimitive, const SIDE: SideTypePrim
 
 struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     ctx: &'a ActorContextRef,
-    identity: &'a str,
     side_l: &'a mut JoinSide<K, S>,
     side_r: &'a mut JoinSide<K, S>,
     actual_output_data_types: &'a [DataType],
@@ -640,6 +639,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_contained_in_jk_l,
                     metrics.clone(),
                     ctx.id,
+                    ctx.fragment_id,
                     "left",
                 ),
                 join_key_indices: join_key_indices_l,
@@ -667,6 +667,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_contained_in_jk_r,
                     metrics.clone(),
                     ctx.id,
+                    ctx.fragment_id,
                     "right",
                 ),
                 join_key_indices: join_key_indices_r,
@@ -713,6 +714,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
         let actor_id_str = self.ctx.id.to_string();
+        let fragment_id_str = self.ctx.fragment_id.to_string();
         let mut start_time = Instant::now();
 
         while let Some(msg) = aligned_stream
@@ -722,7 +724,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         {
             self.metrics
                 .join_actor_input_waiting_duration_ns
-                .with_label_values(&[&actor_id_str])
+                .with_label_values(&[&actor_id_str, &fragment_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             match msg? {
                 AlignedMessage::WatermarkLeft(watermark) => {
@@ -745,7 +747,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     #[for_await]
                     for chunk in Self::eq_join_left(EqJoinArgs {
                         ctx: &self.ctx,
-                        identity: &self.identity,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
                         actual_output_data_types: &self.actual_output_data_types,
@@ -763,7 +764,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     left_time += left_start_time.elapsed();
                     self.metrics
                         .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, "left"])
+                        .with_label_values(&[&actor_id_str, &fragment_id_str, "left"])
                         .inc_by(left_time.as_nanos() as u64);
                 }
                 AlignedMessage::Right(chunk) => {
@@ -772,7 +773,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     #[for_await]
                     for chunk in Self::eq_join_right(EqJoinArgs {
                         ctx: &self.ctx,
-                        identity: &self.identity,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
                         actual_output_data_types: &self.actual_output_data_types,
@@ -790,7 +790,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     right_time += right_start_time.elapsed();
                     self.metrics
                         .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, "right"])
+                        .with_label_values(&[&actor_id_str, &fragment_id_str, "right"])
                         .inc_by(right_time.as_nanos() as u64);
                 }
                 AlignedMessage::Barrier(barrier) => {
@@ -820,17 +820,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         // chunk would never be selected.
                         // self.metrics
                         //     .join_cached_rows
-                        //     .with_label_values(&[&actor_id_str, side])
+                        //     .with_label_values(&[&actor_id_str, &fragment_id_str, side])
                         //     .set(ht.cached_rows() as i64);
                         self.metrics
                             .join_cached_entries
-                            .with_label_values(&[&actor_id_str, side])
+                            .with_label_values(&[&actor_id_str, &fragment_id_str, side])
                             .set(ht.entry_count() as i64);
                     }
 
                     self.metrics
                         .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, "barrier"])
+                        .with_label_values(&[&actor_id_str, &fragment_id_str, "barrier"])
                         .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                     yield Message::Barrier(barrier);
                 }
@@ -990,7 +990,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     async fn eq_join_oneside<const SIDE: SideTypePrimitive>(args: EqJoinArgs<'_, K, S>) {
         let EqJoinArgs {
             ctx,
-            identity,
             side_l,
             side_r,
             actual_output_data_types,
@@ -1000,6 +999,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             append_only_optimize,
             chunk_size,
             cnt_rows_received,
+            ..
         } = args;
 
         let (side_update, side_match) = if SIDE == SideType::Left {
@@ -1080,12 +1080,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                     side_match.start_pos,
                                 );
 
-                                cond.eval_row_infallible(&new_row, |err| {
-                                    ctx.on_compute_error(err, identity)
-                                })
-                                .await
-                                .map(|s| *s.as_bool())
-                                .unwrap_or(false)
+                                cond.eval_row_infallible(&new_row)
+                                    .await
+                                    .map(|s| *s.as_bool())
+                                    .unwrap_or(false)
                             } else {
                                 true
                             };
@@ -1191,12 +1189,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                     side_match.start_pos,
                                 );
 
-                                cond.eval_row_infallible(&new_row, |err| {
-                                    ctx.on_compute_error(err, identity)
-                                })
-                                .await
-                                .map(|s| *s.as_bool())
-                                .unwrap_or(false)
+                                cond.eval_row_infallible(&new_row)
+                                    .await
+                                    .map(|s| *s.as_bool())
+                                    .unwrap_or(false)
                             } else {
                                 true
                             };

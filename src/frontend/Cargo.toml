@@ -64,7 +64,7 @@ risingwave_variables = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10.7"
-smallvec = { version = "1.11.0", features = ["serde"] }
+smallvec = { version = "1.11.1", features = ["serde"] }
 tempfile = "3"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -87,6 +87,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
+risingwave_expr_impl = { workspace = true }
 tempfile = "3"
 
 [lints]

@@ -20,8 +20,10 @@ use super::{EstimateSize, KvSize};
 mod heap;
 pub mod lru;
 pub use heap::*;
-mod vecdeque;
+pub mod vecdeque;
 pub use vecdeque::EstimatedVecDeque as VecDeque;
+pub mod hashmap;
+pub use hashmap::EstimatedHashMap as HashMap;
 
 pub struct MutGuard<'a, V: EstimateSize> {
     inner: &'a mut V,
