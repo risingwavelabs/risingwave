@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 risingwave_expr_impl::enable!();
 
 use itertools::Itertools;
-use risingwave_expr::sig::{scalar_functions, FuncSign, SigDataType};
-use risingwave_pb::expr::expr_node::PbType;
-
+use risingwave_expr::sig::{scalar_functions, FuncName, FuncSign, SigDataType};
 #[test]
 fn test_func_sig_map() {
     // convert FUNC_SIG_MAP to a more convenient map for testing
-    let mut new_map: BTreeMap<PbType, BTreeMap<Vec<SigDataType>, Vec<FuncSign>>> = BTreeMap::new();
+    let mut new_map: HashMap<FuncName, HashMap<Vec<SigDataType>, Vec<FuncSign>>> = HashMap::new();
     for sig in scalar_functions() {
         // exclude deprecated functions
         if sig.deprecated {
@@ -31,76 +29,52 @@ fn test_func_sig_map() {
         }
 
         new_map
-            .entry(sig.name.as_scalar())
+            .entry(sig.name)
             .or_default()
             .entry(sig.inputs_type.to_vec())
             .or_default()
             .push(sig.clone());
     }
 
-    let duplicated: BTreeMap<_, Vec<_>> = new_map
-        .into_iter()
-        .filter_map(|(k, funcs_with_same_name)| {
-            let funcs_with_same_name_type: Vec<_> = funcs_with_same_name
-                .into_values()
-                .filter_map(|v| {
-                    if v.len() > 1 {
-                        Some(
-                            format!(
-                                "{}({:?}) -> {:?}",
-                                v[0].name,
-                                v[0].inputs_type.iter().format(", "),
-                                v.iter().map(|sig| sig.ret_type.clone()).format("/")
-                            )
-                            .to_ascii_lowercase(),
-                        )
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            if !funcs_with_same_name_type.is_empty() {
-                Some((k, funcs_with_same_name_type))
-            } else {
-                None
-            }
+    let mut duplicated: Vec<_> = new_map
+        .into_values()
+        .flat_map(|funcs_with_same_name| {
+            funcs_with_same_name.into_values().filter_map(|v| {
+                if v.len() > 1 {
+                    Some(format!(
+                        "{}({}) -> {}",
+                        v[0].name.as_str_name().to_ascii_lowercase(),
+                        v[0].inputs_type.iter().format(", "),
+                        v.iter().map(|sig| &sig.ret_type).format("/")
+                    ))
+                } else {
+                    None
+                }
+            })
         })
         .collect();
+    duplicated.sort();
 
     // This snapshot shows the function signatures without a unique match. Frontend has to
     // handle them specially without relying on FuncSigMap.
     let expected = expect_test::expect![[r#"
-        {
-            Cast: [
-                "cast(boolean) -> int32/varchar",
-                "cast(int16) -> int256/decimal/float64/float32/int64/int32/varchar",
-                "cast(int32) -> int256/int16/decimal/float64/float32/int64/boolean/varchar",
-                "cast(int64) -> int256/int32/int16/decimal/float64/float32/varchar",
-                "cast(float32) -> decimal/int64/int32/int16/float64/varchar",
-                "cast(float64) -> decimal/float32/int64/int32/int16/varchar",
-                "cast(decimal) -> float64/float32/int64/int32/int16/varchar",
-                "cast(date) -> timestamp/varchar",
-                "cast(varchar) -> jsonb/interval/timestamp/time/date/int256/float32/float64/decimal/int16/int32/int64/varchar/boolean/bytea/list",
-                "cast(time) -> interval/varchar",
-                "cast(timestamp) -> time/date/varchar",
-                "cast(interval) -> time/varchar",
-                "cast(list) -> varchar/list",
-                "cast(jsonb) -> boolean/float64/float32/decimal/int64/int32/int16/varchar",
-                "cast(int256) -> float64/varchar",
-            ],
-            ArrayAccess: [
-                "array_access(list, int32) -> boolean/int16/int32/int64/int256/float32/float64/decimal/serial/date/time/timestamp/timestamptz/interval/varchar/bytea/jsonb/list/struct",
-            ],
-            ArrayMin: [
-                "array_min(list) -> bytea/varchar/timestamptz/timestamp/time/date/int256/serial/decimal/float32/float64/int16/int32/int64",
-            ],
-            ArrayMax: [
-                "array_max(list) -> bytea/varchar/timestamptz/timestamp/time/date/int256/serial/decimal/float32/float64/int16/int32/int64",
-            ],
-            ArraySum: [
-                "array_sum(list) -> interval/decimal/float64/float32/int64",
-            ],
-        }
-        "#]];
+        [
+            "cast(anyarray) -> varchar/anyarray",
+            "cast(bigint) -> rw_int256/integer/smallint/numeric/double precision/real/varchar",
+            "cast(boolean) -> integer/varchar",
+            "cast(date) -> timestamp/varchar",
+            "cast(double precision) -> numeric/real/bigint/integer/smallint/varchar",
+            "cast(integer) -> rw_int256/smallint/numeric/double precision/real/bigint/boolean/varchar",
+            "cast(interval) -> time/varchar",
+            "cast(jsonb) -> boolean/double precision/real/numeric/bigint/integer/smallint/varchar",
+            "cast(numeric) -> double precision/real/bigint/integer/smallint/varchar",
+            "cast(real) -> numeric/bigint/integer/smallint/double precision/varchar",
+            "cast(rw_int256) -> double precision/varchar",
+            "cast(smallint) -> rw_int256/numeric/double precision/real/bigint/integer/varchar",
+            "cast(time) -> interval/varchar",
+            "cast(timestamp) -> time/date/varchar",
+            "cast(varchar) -> jsonb/interval/timestamp/time/date/rw_int256/real/double precision/numeric/smallint/integer/bigint/varchar/boolean/bytea/anyarray",
+        ]
+    "#]];
     expected.assert_debug_eq(&duplicated);
 }
