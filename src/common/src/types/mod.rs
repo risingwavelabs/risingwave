@@ -1201,7 +1201,10 @@ mod tests {
             vec![DataType::Int32, DataType::Varchar],
             vec!["i".to_string(), "j".to_string()],
         );
-        assert_eq!(format!("{}", d), "struct<i integer,j character varying>".to_string());
+        assert_eq!(
+            format!("{}", d),
+            "struct<i integer,j character varying>".to_string()
+        );
     }
 
     #[test]
