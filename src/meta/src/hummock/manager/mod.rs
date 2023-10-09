@@ -537,25 +537,29 @@ impl HummockManager {
             }
         }
 
-        // update meta store
-        let result = self
-            .compaction_group_manager
-            .write()
-            .await
-            .update_compaction_config(
-                &rewrite_cg_ids,
-                &[
-                    mutable_config::MutableConfig::Level0StopWriteThresholdSubLevelNumber(
-                        compaction_config::level0_stop_write_threshold_sub_level_number(),
-                    ),
-                ],
-                self.env.meta_store(),
-            )
-            .await?;
+        if !rewrite_cg_ids.is_empty() {
+            tracing::info!("Compaction group {:?} configs rewrite ", rewrite_cg_ids);
 
-        // update memory
-        for new_config in result {
-            configs.insert(new_config.group_id(), new_config);
+            // update meta store
+            let result = self
+                .compaction_group_manager
+                .write()
+                .await
+                .update_compaction_config(
+                    &rewrite_cg_ids,
+                    &[
+                        mutable_config::MutableConfig::Level0StopWriteThresholdSubLevelNumber(
+                            compaction_config::level0_stop_write_threshold_sub_level_number(),
+                        ),
+                    ],
+                    self.env.meta_store(),
+                )
+                .await?;
+
+            // update memory
+            for new_config in result {
+                configs.insert(new_config.group_id(), new_config);
+            }
         }
 
         versioning_guard.write_limit =
