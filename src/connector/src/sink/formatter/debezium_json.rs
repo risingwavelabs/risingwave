@@ -213,7 +213,14 @@ pub(crate) fn schema_to_json(schema: &Schema, db_name: &str, sink_from_name: &st
                 "type": "string",
                 "optional": true,
                 "field": "table"
-            })],
+            }),
+            json!({
+                "type": "int64",
+                "optional": false,
+                "field": "table"
+            }),
+        ],
+
         "field": "source"
     }));
     schema_fields.push(json!({
