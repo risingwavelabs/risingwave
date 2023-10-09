@@ -292,7 +292,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                         if let Err(e) = hummock_manager_compact
                             .report_compact_task(
                                 task_id,
-                                TaskStatus::from_i32(task_status).unwrap(),
+                                TaskStatus::try_from(task_status).unwrap(),
                                 sorted_output_ssts,
                                 Some(table_stats_change),
                             )

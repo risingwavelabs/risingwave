@@ -749,6 +749,10 @@ pub struct StreamingDeveloperConfig {
     /// the channel.
     #[serde(default = "default::developer::stream_dml_channel_initial_permits")]
     pub dml_channel_initial_permits: usize,
+
+    /// The max heap size of dirty groups of `HashAggExecutor`.
+    #[serde(default = "default::developer::stream_hash_agg_max_dirty_groups_heap_size")]
+    pub hash_agg_max_dirty_groups_heap_size: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1223,6 +1227,10 @@ pub mod default {
 
         pub fn stream_dml_channel_initial_permits() -> usize {
             32768
+        }
+
+        pub fn stream_hash_agg_max_dirty_groups_heap_size() -> usize {
+            64 << 20 // 64MB
         }
     }
 

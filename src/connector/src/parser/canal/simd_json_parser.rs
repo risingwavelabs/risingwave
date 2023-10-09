@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, Mutable, ValueAccess};
@@ -89,24 +90,23 @@ impl CanalJsonParser {
                     "'data' is missing for creating event".to_string(),
                 ))
             })?;
+
         let mut errors = Vec::new();
-        let mut guard = None;
         for event in events.drain(..) {
             let accessor = JsonAccess::new_with_options(event, &JsonParseOptions::CANAL);
             match apply_row_operation_on_stream_chunk_writer((op, accessor), &mut writer) {
-                Ok(this_guard) => guard = Some(this_guard),
+                Ok(_) => {}
                 Err(err) => errors.push(err),
             }
         }
-        if let Some(guard) = guard {
-            if !errors.is_empty() {
-                tracing::error!(?errors, "failed to parse some columns");
-            }
-            Ok(guard)
+
+        if errors.is_empty() {
+            Ok(())
         } else {
             Err(RwError::from(ErrorCode::InternalError(format!(
-                "failed to parse all columns: {:?}",
-                errors
+                "failed to parse {} row(s) in a single canal json message: {}",
+                errors.len(),
+                errors.iter().join(", ")
             ))))
         }
     }

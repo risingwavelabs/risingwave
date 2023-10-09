@@ -249,7 +249,7 @@ fn get_acl_items(
                 .unwrap()
                 .iter()
                 .for_each(|(action, option)| {
-                    let str = match Action::from_i32(*action).unwrap() {
+                    let str = match Action::try_from(*action).unwrap() {
                         Action::Select => "r",
                         Action::Insert => "a",
                         Action::Update => "w",
