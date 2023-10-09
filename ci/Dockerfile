@@ -7,7 +7,7 @@ RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://us-east-2.ec2.archive.ubun
 RUN apt-get update -yy && \
     DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl parallel python3 python3-pip \
     openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld postgresql-client kafkacat netcat mysql-client \
-    maven zstd libzstd-dev -yy \
+    maven zstd libzstd-dev locales -yy \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 SHELL ["/bin/bash", "-c"]
@@ -42,8 +42,8 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-cache cargo-audit \
     cargo-make@0.36.10 \
-    sqllogictest-bin@0.15.3 \
-    && cargo install sccache --locked \
+    sqllogictest-bin@0.17.0 \
+    && cargo install sccache \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
     && rm -rf "/root/.cargo/registry/cache" \

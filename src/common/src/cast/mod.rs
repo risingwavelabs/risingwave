@@ -12,77 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use itertools::Itertools;
-use speedate::{Date as SpeedDate, DateTime as SpeedDateTime, Time as SpeedTime};
 
-use crate::types::{Date, Time, Timestamp, Timestamptz};
+use crate::types::{Timestamp, Timestamptz};
 
 type Result<T> = std::result::Result<T, String>;
 
-pub const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
-pub const PARSE_ERROR_STR_TO_TIME: &str =
-    "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}][Z] or HH:MM)";
-pub const PARSE_ERROR_STR_TO_DATE: &str =
-    "Can't cast string to date (expected format is YYYY-MM-DD)";
 pub const PARSE_ERROR_STR_TO_BYTEA: &str = "Invalid Bytea syntax";
 
 const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
 
-pub fn str_to_date(elem: &str) -> Result<Date> {
-    Ok(Date::new(parse_naive_date(elem)?))
-}
+/// Parse a string into a bool.
+///
+/// See [`https://www.postgresql.org/docs/9.5/datatype-boolean.html`]
+pub fn str_to_bool(input: &str) -> Result<bool> {
+    /// String literals for bool type.
+    const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes", "ye", "y"];
+    const FALSE_BOOL_LITERALS: [&str; 10] = [
+        "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
+    ];
 
-pub fn str_to_time(elem: &str) -> Result<Time> {
-    Ok(Time::new(parse_naive_time(elem)?))
-}
-
-pub fn str_to_timestamp(elem: &str) -> Result<Timestamp> {
-    Ok(Timestamp::new(parse_naive_datetime(elem)?))
-}
-
-#[inline]
-pub fn parse_naive_date(s: &str) -> Result<NaiveDate> {
-    let res = SpeedDate::parse_str(s).map_err(|_| PARSE_ERROR_STR_TO_DATE.to_string())?;
-    Ok(Date::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32).0)
-}
-
-#[inline]
-pub fn parse_naive_time(s: &str) -> Result<NaiveTime> {
-    let s_without_zone = s.trim_end_matches('Z');
-    let res =
-        SpeedTime::parse_str(s_without_zone).map_err(|_| PARSE_ERROR_STR_TO_TIME.to_string())?;
-    Ok(Time::from_hms_micro_uncheck(
-        res.hour as u32,
-        res.minute as u32,
-        res.second as u32,
-        res.microsecond,
-    )
-    .0)
-}
-
-#[inline]
-pub fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
-    if let Ok(res) = SpeedDateTime::parse_str(s) {
-        Ok(Date::from_ymd_uncheck(
-            res.date.year as i32,
-            res.date.month as u32,
-            res.date.day as u32,
-        )
-        .and_hms_micro_uncheck(
-            res.time.hour as u32,
-            res.time.minute as u32,
-            res.time.second as u32,
-            res.time.microsecond,
-        )
-        .0)
+    let trimmed_input = input.trim();
+    if TRUE_BOOL_LITERALS
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case(trimmed_input))
+    {
+        Ok(true)
+    } else if FALSE_BOOL_LITERALS
+        .iter()
+        .any(|s| trimmed_input.eq_ignore_ascii_case(s))
+    {
+        Ok(false)
     } else {
-        let res = SpeedDate::parse_str(s).map_err(|_| PARSE_ERROR_STR_TO_TIMESTAMP.to_string())?;
-        Ok(
-            Date::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
-                .and_hms_micro_uncheck(0, 0, 0, 0)
-                .0,
-        )
+        Err("Invalid bool".into())
     }
 }
 
@@ -232,32 +194,6 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_str() {
-        str_to_timestamp("1999-01-08 04:02").unwrap();
-        str_to_timestamp("1999-01-08 04:05:06").unwrap();
-        assert_eq!(
-            str_to_timestamp("2022-08-03T10:34:02Z").unwrap(),
-            str_to_timestamp("2022-08-03 10:34:02").unwrap()
-        );
-        str_to_date("1999-01-08").unwrap();
-        str_to_time("04:05").unwrap();
-        str_to_time("04:05:06").unwrap();
-
-        assert_eq!(
-            str_to_timestamp("1999-01-08 04:05:06AA").unwrap_err(),
-            PARSE_ERROR_STR_TO_TIMESTAMP.to_string()
-        );
-        assert_eq!(
-            str_to_date("1999-01-08AA").unwrap_err(),
-            PARSE_ERROR_STR_TO_DATE.to_string()
-        );
-        assert_eq!(
-            str_to_time("AA04:05:06").unwrap_err(),
-            PARSE_ERROR_STR_TO_TIME.to_string()
-        );
-    }
 
     #[test]
     fn test_bytea() {

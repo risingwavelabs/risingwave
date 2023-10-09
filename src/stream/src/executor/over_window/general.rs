@@ -21,7 +21,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{RowRef, StreamChunk};
+use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Field;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
@@ -225,26 +225,25 @@ impl<S: StateStore> OverWindowExecutor<S> {
         chunk: &'a StreamChunk,
     ) -> impl Iterator<Item = Record<RowRef<'a>>> {
         let mut changes_merged = BTreeMap::new();
-        for record in chunk.records() {
-            match record {
-                Record::Insert { new_row } => {
-                    let pk = DefaultOrdered(this.get_input_pk(new_row));
+        for (op, row) in chunk.rows() {
+            let pk = DefaultOrdered(this.get_input_pk(row));
+            match op {
+                Op::Insert | Op::UpdateInsert => {
                     if let Some(prev_change) = changes_merged.get_mut(&pk) {
                         match prev_change {
                             Record::Delete { old_row } => {
                                 *prev_change = Record::Update {
                                     old_row: *old_row,
-                                    new_row,
+                                    new_row: row,
                                 };
                             }
                             _ => panic!("inconsistent changes in input chunk"),
                         }
                     } else {
-                        changes_merged.insert(pk, record);
+                        changes_merged.insert(pk, Record::Insert { new_row: row });
                     }
                 }
-                Record::Delete { old_row } => {
-                    let pk = DefaultOrdered(this.get_input_pk(old_row));
+                Op::Delete | Op::UpdateDelete => {
                     if let Some(prev_change) = changes_merged.get_mut(&pk) {
                         match prev_change {
                             Record::Insert { .. } => {
@@ -261,29 +260,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                             _ => panic!("inconsistent changes in input chunk"),
                         }
                     } else {
-                        changes_merged.insert(pk, record);
-                    }
-                }
-                Record::Update { old_row, new_row } => {
-                    let pk = DefaultOrdered(this.get_input_pk(old_row));
-                    if let Some(prev_change) = changes_merged.get_mut(&pk) {
-                        match prev_change {
-                            Record::Insert { .. } => {
-                                *prev_change = Record::Insert { new_row };
-                            }
-                            Record::Update {
-                                old_row: real_old_row,
-                                ..
-                            } => {
-                                *prev_change = Record::Update {
-                                    old_row: *real_old_row,
-                                    new_row,
-                                };
-                            }
-                            _ => panic!("inconsistent changes in input chunk"),
-                        }
-                    } else {
-                        changes_merged.insert(pk, record);
+                        changes_merged.insert(pk, Record::Delete { old_row: row });
                     }
                 }
             }
@@ -307,7 +284,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             match record {
                 Record::Insert { new_row } => {
                     let part_key = this.get_partition_key(new_row).into();
-                    let part_delta = deltas.entry(part_key).or_insert(PartitionDelta::new());
+                    let part_delta = deltas.entry(part_key).or_default();
                     part_delta.insert(
                         this.row_to_cache_key(new_row)?,
                         Change::Insert(new_row.into_owned_row()),
@@ -315,7 +292,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 }
                 Record::Delete { old_row } => {
                     let part_key = this.get_partition_key(old_row).into();
-                    let part_delta = deltas.entry(part_key).or_insert(PartitionDelta::new());
+                    let part_delta = deltas.entry(part_key).or_default();
                     part_delta.insert(this.row_to_cache_key(old_row)?, Change::Delete);
                 }
                 Record::Update { old_row, new_row } => {
@@ -325,15 +302,13 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     let new_state_key = this.row_to_cache_key(new_row)?;
                     if old_part_key == new_part_key && old_state_key == new_state_key {
                         // not a key-change update
-                        let part_delta =
-                            deltas.entry(old_part_key).or_insert(PartitionDelta::new());
+                        let part_delta = deltas.entry(old_part_key).or_default();
                         part_delta.insert(old_state_key, Change::Insert(new_row.into_owned_row()));
                     } else if old_part_key == new_part_key {
                         // order-change update, split into delete + insert, will be merged after
                         // building changes
                         key_change_updated_pks.insert(this.get_input_pk(old_row));
-                        let part_delta =
-                            deltas.entry(old_part_key).or_insert(PartitionDelta::new());
+                        let part_delta = deltas.entry(old_part_key).or_default();
                         part_delta.insert(old_state_key, Change::Delete);
                         part_delta.insert(new_state_key, Change::Insert(new_row.into_owned_row()));
                     } else {
@@ -341,11 +316,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
                         // NOTE(rc): Since we append partition key to logical pk, we can't merge the
                         // delete + insert back to update later.
                         // TODO: IMO this behavior is problematic. Deep discussion is needed.
-                        let old_part_delta =
-                            deltas.entry(old_part_key).or_insert(PartitionDelta::new());
+                        let old_part_delta = deltas.entry(old_part_key).or_default();
                         old_part_delta.insert(old_state_key, Change::Delete);
-                        let new_part_delta =
-                            deltas.entry(new_part_key).or_insert(PartitionDelta::new());
+                        let new_part_delta = deltas.entry(new_part_key).or_default();
                         new_part_delta
                             .insert(new_state_key, Change::Insert(new_row.into_owned_row()));
                     }

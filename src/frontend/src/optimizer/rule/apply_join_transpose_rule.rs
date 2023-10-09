@@ -122,7 +122,7 @@ impl Rule for ApplyJoinTransposeRule {
         }
 
         assert!(
-            join.output_indices_is_trivial(),
+            join.output_indices_are_trivial(),
             "ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule"
         );
 
@@ -435,7 +435,7 @@ impl ApplyJoinTransposeRule {
                 .clone()
                 .into_iter()
                 .map(|expr| rewriter.rewrite_expr(expr))
-                .chain(natural_conjunctions.into_iter())
+                .chain(natural_conjunctions)
                 .collect_vec(),
         };
 

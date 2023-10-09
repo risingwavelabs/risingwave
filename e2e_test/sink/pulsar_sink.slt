@@ -1,0 +1,51 @@
+statement ok
+CREATE TABLE pulsar (
+    id BIGINT,
+    content VARCHAR,
+    PRIMARY KEY (id)
+);
+
+statement ok
+INSERT INTO pulsar VALUES (1, 'test1');
+
+statement ok
+INSERT INTO pulsar VALUES (2, 'test2');
+
+statement ok
+INSERT INTO pulsar VALUES (3, 'test3');
+
+statement ok
+CREATE SINK pulsar_sink FROM pulsar
+WITH (
+    connector='pulsar',
+    type='upsert',
+    primary_key='id',
+    topic='persistent://public/default/rw',
+    service.url='pulsar://pulsar:6650',
+);
+
+statement ok
+CREATE TABLE pulsar_source (
+    id BIGINT,
+    content VARCHAR
+)
+WITH (
+   connector='pulsar',
+   topic='persistent://public/default/rw',
+   service.url='pulsar://pulsar:6650',
+   scan.startup.mode='earliest',
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+FLUSH;
+
+# We can't control Sink -> Source Table
+# latency. We just have to wait.
+sleep 5s
+
+query IT rowsort
+SELECT * FROM pulsar_source;
+----
+1 test1
+2 test2
+3 test3

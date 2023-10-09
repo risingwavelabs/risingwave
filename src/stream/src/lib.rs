@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rustdoc::private_intra_doc_links)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(iterator_try_collect)]
 #![feature(trait_alias)]
@@ -21,8 +20,8 @@
 #![feature(lint_reasons)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(let_chains)]
-#![feature(hash_drain_filter)]
-#![feature(drain_filter)]
+#![feature(hash_extract_if)]
+#![feature(extract_if)]
 #![feature(generators)]
 #![feature(iter_from_generator)]
 #![feature(proc_macro_hygiene)]
@@ -34,8 +33,7 @@
 #![feature(btreemap_alloc)]
 #![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
-#![feature(btree_drain_filter)]
+#![feature(btree_extract_if)]
 #![feature(bound_map)]
 #![feature(iter_order_by)]
 #![feature(exact_size_is_empty)]
@@ -45,6 +43,7 @@
 #![feature(is_sorted)]
 #![feature(btree_cursors)]
 #![feature(assert_matches)]
+#![feature(async_fn_in_trait)]
 
 #[macro_use]
 extern crate tracing;
@@ -55,3 +54,6 @@ pub mod error;
 pub mod executor;
 mod from_proto;
 pub mod task;
+
+#[cfg(test)]
+risingwave_expr_impl::enable!();

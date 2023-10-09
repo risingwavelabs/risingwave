@@ -90,11 +90,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
         Schema { fields }
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         let _left_len = self.left.schema().len();
         let _right_len = self.right.schema().len();
-        let left_pk = self.left.logical_pk();
-        let right_pk = self.right.logical_pk();
+        let left_pk = self.left.stream_key();
+        let right_pk = self.right.stream_key();
         let l2i = self.l2i_col_mapping();
         let r2i = self.r2i_col_mapping();
         let full_out_col_num = self.internal_column_num();
@@ -202,11 +202,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
                 get_new_left_fd_set(left_fd_set)
                     .into_dependencies()
                     .into_iter()
-                    .chain(
-                        get_new_right_fd_set(right_fd_set)
-                            .into_dependencies()
-                            .into_iter(),
-                    )
+                    .chain(get_new_right_fd_set(right_fd_set).into_dependencies())
                     .for_each(|fd| fd_set.add_functional_dependency(fd));
                 fd_set
             }
@@ -407,7 +403,7 @@ pub fn push_down_into_join(
         // Do not push now on to the on, it will be pulled up into a filter instead.
         let on = Condition {
             conjunctions: conjunctions
-                .drain_filter(|expr| expr.count_nows() == 0)
+                .extract_if(|expr| expr.count_nows() == 0)
                 .collect(),
         };
         predicate.conjunctions = conjunctions;

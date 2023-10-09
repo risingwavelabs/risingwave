@@ -79,6 +79,8 @@ impl TrivialMovePicker {
             self.pick_trivial_move_sst(select_tables, target_tables, level_handlers, stats)
         {
             return Some(CompactionInput {
+                select_input_size: trivial_move_sst.file_size,
+                total_file_count: 1,
                 input_levels: vec![
                     InputLevel {
                         level_idx: self.level as u32,
@@ -92,7 +94,7 @@ impl TrivialMovePicker {
                     },
                 ],
                 target_level: self.target_level,
-                target_sub_level_id: 0,
+                ..Default::default()
             });
         }
 

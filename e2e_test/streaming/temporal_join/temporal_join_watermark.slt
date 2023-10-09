@@ -1,0 +1,73 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table stream(id1 int, a1 int, b1 int, v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '10' SECOND) APPEND ONLY;
+
+# FIXME. If we don't insert at first, it would cause a panic when create eowc_mv.
+statement ok
+insert into stream values (1, 1, 1, '2023-09-14 06:00:00');
+
+statement ok
+create table version(id2 int, a2 int, b2 int, primary key (id2));
+
+statement ok
+create materialized view temporal_join_mv as select id1, a1, id2, v1 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
+
+statement ok
+create materialized view eowc_mv as select window_start, count(id1) from tumble(temporal_join_mv, v1, interval '5 s') group by window_start emit on window close;
+
+query IIII rowsort
+select * from temporal_join_mv;
+----
+1 1 NULL 2023-09-14 06:00:00+00:00
+
+skipif in-memory
+query IIII rowsort
+select * from eowc_mv;
+----
+
+statement ok
+insert into stream values (2, 2, 2, '2023-09-14 06:00:25');
+
+sleep 10s
+
+query IIII rowsort
+select * from temporal_join_mv;
+----
+1 1 NULL 2023-09-14 06:00:00+00:00
+2 2 NULL 2023-09-14 06:00:25+00:00
+
+skipif in-memory
+query IIII rowsort
+select * from eowc_mv;
+----
+2023-09-14 06:00:00+00:00 1
+
+statement ok
+insert into stream values (3, 3, 3, '2023-09-14 06:00:45');
+
+sleep 10s
+
+query IIII rowsort
+select * from temporal_join_mv;
+----
+1 1 NULL 2023-09-14 06:00:00+00:00
+2 2 NULL 2023-09-14 06:00:25+00:00
+3 3 NULL 2023-09-14 06:00:45+00:00
+
+skipif in-memory
+query IIII rowsort
+select * from eowc_mv;
+----
+2023-09-14 06:00:00+00:00 1
+2023-09-14 06:00:25+00:00 1
+
+statement ok
+drop table stream cascade;
+
+statement ok
+drop table version cascade;
+
+
+

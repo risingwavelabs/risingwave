@@ -420,8 +420,9 @@ mod tests {
             sink_id,
             properties: Default::default(),
             columns: vec![],
-            pk_indices: vec![],
+            downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -434,7 +435,7 @@ mod tests {
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-            for i in indexes.iter() {
+            for i in indexes {
                 builder.set(*i, true);
             }
             builder.finish()
@@ -593,8 +594,9 @@ mod tests {
             sink_id,
             properties: Default::default(),
             columns: vec![],
-            pk_indices: vec![],
+            downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -631,8 +633,9 @@ mod tests {
             sink_id,
             properties: Default::default(),
             columns: vec![],
-            pk_indices: vec![],
+            downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -644,7 +647,7 @@ mod tests {
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-            for i in indexes.iter() {
+            for i in indexes {
                 builder.set(*i, true);
             }
             builder.finish()
@@ -713,8 +716,9 @@ mod tests {
             sink_id,
             properties: Default::default(),
             columns: vec![],
-            pk_indices: vec![],
+            downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -726,7 +730,7 @@ mod tests {
         let (first, second) = all_vnode.split_at(VirtualNode::COUNT / 2);
         let build_bitmap = |indexes: &[usize]| {
             let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
-            for i in indexes.iter() {
+            for i in indexes {
                 builder.set(*i, true);
             }
             builder.finish()

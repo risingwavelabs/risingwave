@@ -16,7 +16,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
-byteorder = "1.4"
+byteorder = "1.5"
 bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.11"
@@ -34,3 +34,6 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
 tokio-postgres = "0.7"
+
+[lints]
+workspace = true

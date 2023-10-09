@@ -12,27 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Debug, Formatter};
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_rpc_client::ConnectorClient;
 
-use crate::sink::{Sink, SinkCommitCoordinator, SinkWriter, SinkWriterParam};
+use crate::sink::{SinkCommitCoordinator, SinkWriter};
 
 pub type BoxWriter<CM> = Box<dyn SinkWriter<CommitMetadata = CM> + Send + 'static>;
 pub type BoxCoordinator = Box<dyn SinkCommitCoordinator + Send + 'static>;
-pub type BoxSink =
-    Box<dyn Sink<Writer = BoxWriter<()>, Coordinator = BoxCoordinator> + Send + Sync + 'static>;
-
-impl Debug for BoxSink {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str("BoxSink")
-    }
-}
 
 #[async_trait]
 impl<CM: 'static + Send> SinkWriter for BoxWriter<CM> {
@@ -54,7 +45,7 @@ impl<CM: 'static + Send> SinkWriter for BoxWriter<CM> {
         self.deref_mut().abort().await
     }
 
-    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> crate::sink::Result<()> {
+    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> crate::sink::Result<()> {
         self.deref_mut().update_vnode_bitmap(vnode_bitmap).await
     }
 }
@@ -67,26 +58,5 @@ impl SinkCommitCoordinator for BoxCoordinator {
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> crate::sink::Result<()> {
         self.deref_mut().commit(epoch, metadata).await
-    }
-}
-
-#[async_trait]
-impl Sink for BoxSink {
-    type Coordinator = BoxCoordinator;
-    type Writer = BoxWriter<()>;
-
-    async fn validate(&self, client: Option<ConnectorClient>) -> crate::sink::Result<()> {
-        self.deref().validate(client).await
-    }
-
-    async fn new_writer(&self, writer_param: SinkWriterParam) -> crate::sink::Result<Self::Writer> {
-        self.deref().new_writer(writer_param).await
-    }
-
-    async fn new_coordinator(
-        &self,
-        connector_client: Option<ConnectorClient>,
-    ) -> crate::sink::Result<Self::Coordinator> {
-        self.deref().new_coordinator(connector_client).await
     }
 }

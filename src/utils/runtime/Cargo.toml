@@ -28,10 +28,11 @@ hostname = "0.3"
 opentelemetry-otlp = { version = "0.13" }
 opentelemetry-semantic-conventions = "0.12"
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
-pprof = { version = "0.12", features = ["flamegraph"] }
+pprof = { version = "0.13", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
 risingwave_common = { workspace = true }
 risingwave_variables = { workspace = true }
+rlimit = "0.10"
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -49,3 +50,6 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std",
 [target.'cfg(not(madsim))'.dependencies]
 opentelemetry = { version = "0.20", default-features = false, features = ["rt-tokio"] }
 workspace-hack = { path = "../../workspace-hack" }
+
+[lints]
+workspace = true

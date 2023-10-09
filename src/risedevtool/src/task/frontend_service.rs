@@ -61,9 +61,7 @@ impl FrontendService {
             .arg(format!(
                 "{}:{}",
                 config.listen_address, config.health_check_port
-            ))
-            .arg("--metrics-level")
-            .arg("1");
+            ));
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         if provide_meta_node.is_empty() {
@@ -94,8 +92,6 @@ impl Task for FrontendService {
         let mut cmd = self.frontend()?;
 
         cmd.env("RUST_BACKTRACE", "1");
-        // FIXME: Otherwise, CI will throw log size too large error
-        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
         cmd.arg("--config-path")

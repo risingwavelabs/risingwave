@@ -20,6 +20,7 @@ use risingwave_common::error::BoxedError;
 use risingwave_connector::sink::SinkError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
+use sqlx::Error;
 
 use crate::hummock::error::Error as HummockError;
 use crate::manager::WorkerId;
@@ -62,7 +63,7 @@ enum MetaErrorInner {
     Unavailable(String),
 
     #[error("Election failed: {0}")]
-    Election(etcd_client::Error),
+    Election(String),
 
     #[error("Cancelled: {0}")]
     Cancelled(String),
@@ -73,7 +74,7 @@ enum MetaErrorInner {
     #[error("Sink error: {0}")]
     Sink(SinkError),
 
-    #[error("AWS SDK error: {}", DisplayErrorContext(&**.0))]
+    #[error("AWS SDK error: {}", DisplayErrorContext(& * *.0))]
     Aws(BoxedError),
 
     #[error(transparent)]
@@ -102,7 +103,7 @@ impl std::fmt::Debug for MetaError {
 
         write!(f, "{}", self.inner)?;
         writeln!(f)?;
-        if let Some(backtrace) = (&self.inner as &dyn Error).request_ref::<Backtrace>() {
+        if let Some(backtrace) = std::error::request_ref::<Backtrace>(&self.inner as &dyn Error) {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(f, "  backtrace of `MetaError`:\n{}", self.backtrace)?;
@@ -165,7 +166,13 @@ impl From<HummockError> for MetaError {
 
 impl From<etcd_client::Error> for MetaError {
     fn from(e: etcd_client::Error) -> Self {
-        MetaErrorInner::Election(e).into()
+        MetaErrorInner::Election(e.to_string()).into()
+    }
+}
+
+impl From<sqlx::Error> for MetaError {
+    fn from(value: Error) -> Self {
+        MetaErrorInner::Election(value.to_string()).into()
     }
 }
 

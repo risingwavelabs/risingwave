@@ -430,14 +430,14 @@ mod tests {
     fn test_memcomparable_structs() {
         // NOTE: `NULL`s inside composite type values are always the largest.
 
-        let struct_none = None;
-        let struct_1 = Some(
+        let struct_none = Datum::None;
+        let struct_1 = Datum::Some(
             StructValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(2))]).into(),
         );
-        let struct_2 = Some(
+        let struct_2 = Datum::Some(
             StructValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(3))]).into(),
         );
-        let struct_3 = Some(StructValue::new(vec![Some(ScalarImpl::from(1)), None]).into());
+        let struct_3 = Datum::Some(StructValue::new(vec![Some(ScalarImpl::from(1)), None]).into());
 
         {
             // ASC NULLS FIRST (NULLS SMALLEST)
@@ -489,12 +489,14 @@ mod tests {
     fn test_memcomparable_lists() {
         // NOTE: `NULL`s inside composite type values are always the largest.
 
-        let list_none = None;
-        let list_1 =
-            Some(ListValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(2))]).into());
-        let list_2 =
-            Some(ListValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(3))]).into());
-        let list_3 = Some(ListValue::new(vec![Some(ScalarImpl::from(1)), None]).into());
+        let list_none = Datum::None;
+        let list_1 = Datum::Some(
+            ListValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(2))]).into(),
+        );
+        let list_2 = Datum::Some(
+            ListValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(3))]).into(),
+        );
+        let list_3 = Datum::Some(ListValue::new(vec![Some(ScalarImpl::from(1)), None]).into());
 
         {
             // ASC NULLS FIRST (NULLS SMALLEST)
@@ -618,10 +620,7 @@ mod tests {
             OrderType::descending(),
         )
         .unwrap();
-        let concated_encoded_row1 = encoded_v10
-            .into_iter()
-            .chain(encoded_v11.into_iter())
-            .collect();
+        let concated_encoded_row1 = encoded_v10.into_iter().chain(encoded_v11).collect();
         assert_eq!(encoded_row1, concated_encoded_row1);
 
         let encoded_row2 = encode_row(row2.project(&order_col_indices), &order_types).unwrap();

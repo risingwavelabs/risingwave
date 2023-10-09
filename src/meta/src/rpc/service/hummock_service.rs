@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -24,28 +24,21 @@ use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status, Streaming};
 
-use crate::hummock::compaction::ManualCompactionOption;
+use crate::hummock::compaction::selector::ManualCompactionOption;
 use crate::hummock::{HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
-use crate::storage::MetaStore;
-pub struct HummockServiceImpl<S>
-where
-    S: MetaStore,
-{
-    hummock_manager: HummockManagerRef<S>,
-    vacuum_manager: VacuumManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
+pub struct HummockServiceImpl {
+    hummock_manager: HummockManagerRef,
+    vacuum_manager: VacuumManagerRef,
+    fragment_manager: FragmentManagerRef,
 }
 
-impl<S> HummockServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl HummockServiceImpl {
     pub fn new(
-        hummock_manager: HummockManagerRef<S>,
-        vacuum_trigger: VacuumManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        hummock_manager: HummockManagerRef,
+        vacuum_trigger: VacuumManagerRef,
+        fragment_manager: FragmentManagerRef,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
@@ -55,11 +48,20 @@ where
     }
 }
 
+macro_rules! fields_to_kvs {
+    ($struct:ident, $($field:ident),*) => {
+        {
+            let mut kvs = HashMap::default();
+            $(
+                kvs.insert(stringify!($field).to_string(), $struct.$field.to_string());
+            )*
+            kvs
+        }
+    }
+}
+
 #[async_trait::async_trait]
-impl<S> HummockManagerService for HummockServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl HummockManagerService for HummockServiceImpl {
     type SubscribeCompactionEventStream = RwReceiverStream<SubscribeCompactionEventResponse>;
 
     async fn unpin_version_before(
@@ -522,5 +524,94 @@ where
         }
 
         Ok(Response::new(RwReceiverStream::new(rx)))
+    }
+
+    async fn report_compaction_task(
+        &self,
+        _request: Request<ReportCompactionTaskRequest>,
+    ) -> Result<Response<ReportCompactionTaskResponse>, Status> {
+        unreachable!()
+    }
+
+    async fn list_branched_object(
+        &self,
+        _request: Request<ListBranchedObjectRequest>,
+    ) -> Result<Response<ListBranchedObjectResponse>, Status> {
+        let branched_objects = self
+            .hummock_manager
+            .list_branched_objects()
+            .await
+            .into_iter()
+            .flat_map(|(object_id, v)| {
+                v.into_iter()
+                    .map(move |(compaction_group_id, sst_id)| BranchedObject {
+                        object_id,
+                        sst_id,
+                        compaction_group_id,
+                    })
+            })
+            .collect();
+        Ok(Response::new(ListBranchedObjectResponse {
+            branched_objects,
+        }))
+    }
+
+    async fn list_active_write_limit(
+        &self,
+        _request: Request<ListActiveWriteLimitRequest>,
+    ) -> Result<Response<ListActiveWriteLimitResponse>, Status> {
+        Ok(Response::new(ListActiveWriteLimitResponse {
+            write_limits: self.hummock_manager.write_limits().await,
+        }))
+    }
+
+    async fn list_hummock_meta_config(
+        &self,
+        _request: Request<ListHummockMetaConfigRequest>,
+    ) -> Result<Response<ListHummockMetaConfigResponse>, Status> {
+        let opt = &self.hummock_manager.env.opts;
+        let configs = fields_to_kvs!(
+            opt,
+            vacuum_interval_sec,
+            vacuum_spin_interval_ms,
+            hummock_version_checkpoint_interval_sec,
+            min_delta_log_num_for_hummock_version_checkpoint,
+            min_sst_retention_time_sec,
+            full_gc_interval_sec,
+            collect_gc_watermark_spin_interval_sec,
+            periodic_compaction_interval_sec,
+            periodic_space_reclaim_compaction_interval_sec,
+            periodic_ttl_reclaim_compaction_interval_sec,
+            periodic_tombstone_reclaim_compaction_interval_sec,
+            periodic_split_compact_group_interval_sec,
+            split_group_size_limit,
+            min_table_split_size,
+            do_not_config_object_storage_lifecycle,
+            partition_vnode_count,
+            table_write_throughput_threshold,
+            min_table_split_write_throughput,
+            compaction_task_max_heartbeat_interval_secs
+        );
+        Ok(Response::new(ListHummockMetaConfigResponse { configs }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    #[test]
+    fn test_fields_to_kvs() {
+        struct S {
+            foo: u64,
+            bar: String,
+        }
+        let s = S {
+            foo: 15,
+            bar: "foobar".to_string(),
+        };
+        let kvs: HashMap<String, String> = fields_to_kvs!(s, foo, bar);
+        assert_eq!(kvs.len(), 2);
+        assert_eq!(kvs.get("foo").unwrap(), "15");
+        assert_eq!(kvs.get("bar").unwrap(), "foobar");
     }
 }

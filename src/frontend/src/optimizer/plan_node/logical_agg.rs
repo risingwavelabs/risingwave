@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_expr::agg::{agg_kinds, AggKind};
+use risingwave_expr::aggregate::{agg_kinds, AggKind};
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
@@ -222,7 +222,7 @@ impl LogicalAgg {
         // so it obeys consistent hash strategy via [`Distribution::HashShard`].
         let stream_input =
             if *input_dist == Distribution::SomeShard && self.core.must_try_two_phase_agg() {
-                RequiredDist::shard_by_key(stream_input.schema().len(), stream_input.logical_pk())
+                RequiredDist::shard_by_key(stream_input.schema().len(), stream_input.stream_key())
                     .enforce_if_not_satisfies(stream_input, &Order::any())?
             } else {
                 stream_input
@@ -361,13 +361,9 @@ impl LogicalAggBuilder {
         let logical_project = LogicalProject::with_core(self.input_proj_builder.build(input));
 
         // This LogicalAgg focuses on calculating the aggregates and grouping.
-        Agg::new_with_grouping_sets(
-            self.agg_calls,
-            self.group_key,
-            self.grouping_sets,
-            logical_project.into(),
-        )
-        .into()
+        Agg::new(self.agg_calls, self.group_key, logical_project.into())
+            .with_grouping_sets(self.grouping_sets)
+            .into()
     }
 
     fn rewrite_with_error(&mut self, expr: ExprImpl) -> Result<ExprImpl> {
@@ -831,7 +827,7 @@ impl LogicalAgg {
         &self.core.grouping_sets
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef) {
+    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef, bool) {
         self.core.decompose()
     }
 
@@ -870,8 +866,9 @@ impl LogicalAgg {
             .map(|set| set.indices().map(|key| input_col_change.map(key)).collect())
             .collect();
 
-        let new_agg =
-            Agg::new_with_grouping_sets(agg_calls, group_key.clone(), grouping_sets, input);
+        let new_agg = Agg::new(agg_calls, group_key.clone(), input)
+            .with_grouping_sets(grouping_sets)
+            .with_enable_two_phase(self.core().enable_two_phase);
 
         // group_key remapping might cause an output column change, since group key actually is a
         // `FixedBitSet`.
@@ -896,13 +893,10 @@ impl PlanTreeNodeUnary for LogicalAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Agg::new_with_grouping_sets(
-            self.agg_calls().to_vec(),
-            self.group_key().clone(),
-            self.grouping_sets().clone(),
-            input,
-        )
-        .into()
+        Agg::new(self.agg_calls().to_vec(), self.group_key().clone(), input)
+            .with_grouping_sets(self.grouping_sets().clone())
+            .with_enable_two_phase(self.core().enable_two_phase)
+            .into()
     }
 
     #[must_use]

@@ -28,18 +28,25 @@ fi
 
 cluster_start() {
   if [[ $mode == "standalone" ]]; then
+    mkdir -p "$PREFIX_LOG"
+    cargo make clean-data
+    cargo make pre-start-dev
     start_standalone "$PREFIX_LOG"/standalone.log &
-    cargo make ci-start standalone-minio-etcd-compactor
+    cargo make dev standalone-minio-etcd
   else
     cargo make ci-start "$mode"
   fi
 }
 
 cluster_stop() {
-  if [[ $mode == "standalone" ]]; then
+  if [[ $mode == "standalone" ]]
+  then
     stop_standalone
+    # Don't check standalone logs, they will exceed the limit.
+    cargo make kill
+  else
+    cargo make ci-kill
   fi
-  cargo make ci-kill
 }
 
 download_and_prepare_rw "$profile" common
@@ -65,6 +72,7 @@ echo "--- e2e, $mode, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cluster_start
 sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/background_ddl/**/*.slt' --junit "batch-ddl-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
@@ -163,12 +171,7 @@ fi
 
 if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     echo "--- e2e, ci-meta-backup-test"
-    download-and-decompress-artifact backup-restore-"$profile" target/debug/
-    mv target/debug/backup-restore-"$profile" target/debug/backup-restore
-    chmod +x ./target/debug/backup-restore
-
     test_root="src/storage/backup/integration_tests"
-    BACKUP_TEST_BACKUP_RESTORE="target/debug/backup-restore" \
     BACKUP_TEST_MCLI=".risingwave/bin/mcli" \
     BACKUP_TEST_MCLI_CONFIG=".risingwave/config/mcli" \
     BACKUP_TEST_RW_ALL_IN_ONE="target/debug/risingwave" \
@@ -183,6 +186,13 @@ fi
 if [[ "$mode" == "standalone" ]]; then
   run_sql() {
     psql -h localhost -p 4566 -d dev -U root -c "$@"
+  }
+  compactor_is_online() {
+    set +e
+    grep -q "risingwave_cmd_all::standalone: starting compactor-node thread" "${PREFIX_LOG}/standalone.log"
+    local EXIT_CODE=$?
+    set -e
+    return $EXIT_CODE
   }
 
   echo "--- e2e, standalone, cluster-persistence-test"
@@ -213,6 +223,43 @@ if [[ "$mode" == "standalone" ]]; then
 
   echo "--- Kill cluster"
   cluster_stop
+
+  wait
+
+  # Test that we can optionally include nodes in standalone mode.
+  echo "--- e2e, standalone, cluster-opts-test"
+
+  echo "test standalone without compactor"
+  mkdir -p "$PREFIX_LOG"
+  cargo make clean-data
+  cargo make pre-start-dev
+  start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
+  cargo make dev standalone-minio-etcd-compactor
+  wait_standalone
+  if compactor_is_online
+  then
+    echo "ERROR: Compactor should not be online."
+    exit 1
+  fi
+  cluster_stop
+  echo "test standalone without compactor [TEST PASSED]"
+
+  wait
+
+  echo "test standalone with compactor"
+  mkdir -p "$PREFIX_LOG"
+  cargo make clean-data
+  cargo make pre-start-dev
+  start_standalone "$PREFIX_LOG"/standalone.log &
+  cargo make dev standalone-minio-etcd
+  wait_standalone
+  if ! compactor_is_online
+  then
+    echo "ERROR: Compactor should be online."
+    exit 1
+  fi
+  cluster_stop
+  echo "test standalone with compactor [TEST PASSED]"
 
   # Make sure any remaining background task exits.
   wait

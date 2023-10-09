@@ -75,7 +75,7 @@ impl ObjectStoreMetaSnapshotStorage {
 
     async fn get_manifest(&self) -> BackupResult<Option<MetaSnapshotManifest>> {
         let manifest_path = self.get_manifest_path();
-        let bytes = match self.store.read(&manifest_path, None).await {
+        let bytes = match self.store.read(&manifest_path, ..).await {
             Ok(bytes) => bytes,
             Err(e) => {
                 if e.is_object_not_found_error() {
@@ -129,7 +129,7 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
 
     async fn get(&self, id: MetaSnapshotId) -> BackupResult<MetaSnapshot> {
         let path = self.get_snapshot_path(id);
-        let data = self.store.read(&path, None).await?;
+        let data = self.store.read(&path, ..).await?;
         MetaSnapshot::decode(&data)
     }
 

@@ -15,9 +15,11 @@
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
 mod arrow;
+pub use arrow::to_record_batch_with_schema;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
+pub mod compact_chunk;
 mod data_chunk;
 pub mod data_chunk_iter;
 mod decimal_array;
@@ -35,7 +37,6 @@ pub mod stream_record;
 pub mod struct_array;
 mod utf8_array;
 mod value_reader;
-mod vis;
 
 use std::convert::From;
 use std::hash::{Hash, Hasher};
@@ -47,6 +48,7 @@ pub use chrono_array::{
     DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray,
     TimestampArrayBuilder, TimestamptzArray, TimestamptzArrayBuilder,
 };
+pub use compact_chunk::*;
 pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
@@ -61,7 +63,6 @@ use risingwave_pb::data::PbArray;
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
-pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
 pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
@@ -709,7 +710,7 @@ mod test_util {
     use super::Array;
     use crate::util::iter_util::ZipEqFast;
 
-    pub fn hash_finish<H: Hasher>(hashers: &mut [H]) -> Vec<u64> {
+    pub fn hash_finish<H: Hasher>(hashers: &[H]) -> Vec<u64> {
         return hashers
             .iter()
             .map(|hasher| hasher.finish())
@@ -733,8 +734,8 @@ mod test_util {
         itertools::cons_tuples(
             expects
                 .iter()
-                .zip_eq_fast(hash_finish(&mut states_scalar[..]))
-                .zip_eq_fast(hash_finish(&mut states_vec[..])),
+                .zip_eq_fast(hash_finish(&states_scalar[..]))
+                .zip_eq_fast(hash_finish(&states_vec[..])),
         )
         .all(|(a, b, c)| *a == b && b == c);
     }

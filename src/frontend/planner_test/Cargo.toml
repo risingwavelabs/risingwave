@@ -18,6 +18,7 @@ anyhow = "1"
 expect-test = "1"
 itertools = "0.11"
 paste = "1"
+risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 serde = { version = "1", features = ["derive"] }
@@ -47,3 +48,6 @@ test = false
 [[test]]
 name = "planner_test_runner"
 harness = false
+
+[lints]
+workspace = true

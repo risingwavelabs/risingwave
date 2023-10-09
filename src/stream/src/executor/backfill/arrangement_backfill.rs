@@ -428,7 +428,7 @@ where
                     barrier.epoch,
                     &mut self.state_table,
                     false,
-                    &mut backfill_state,
+                    &backfill_state,
                     &mut committed_progress,
                     &mut temporary_state,
                 )
@@ -468,12 +468,12 @@ where
                         barrier.epoch,
                         &mut self.state_table,
                         false,
-                        &mut backfill_state,
+                        &backfill_state,
                         &mut committed_progress,
                         &mut temporary_state,
                     ).await?;
 
-                    self.progress.finish(barrier.epoch.curr);
+                    self.progress.finish(barrier.epoch.curr, total_snapshot_processed_rows);
                     yield msg;
                     break;
                 }

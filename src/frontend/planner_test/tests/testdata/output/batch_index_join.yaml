@@ -60,9 +60,9 @@
     select t2.c, t2.d, count(distinct t.a) from t join t2 on t.a = t2.c group by t2.c, t2.d;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashAgg { group_key: [t2.c, t2.d], aggs: [count(t.a)] }
-      └─BatchExchange { order: [], dist: HashShard(t2.c, t2.d) }
-        └─BatchHashAgg { group_key: [t2.c, t2.d, t.a], aggs: [] }
+    └─BatchHashAgg { group_key: [first_value(t2.c order_by(t2.c ASC))], aggs: [first_value(first_value(t2.d order_by(t2.d ASC)) order_by(first_value(t2.d order_by(t2.d ASC)) ASC)), count(t.a)] }
+      └─BatchExchange { order: [], dist: HashShard(first_value(t2.c order_by(t2.c ASC))) }
+        └─BatchHashAgg { group_key: [t.a], aggs: [first_value(t2.c order_by(t2.c ASC)), first_value(t2.d order_by(t2.d ASC))] }
           └─BatchLookupJoin { type: Inner, predicate: t.a = t2.c, output: [t2.c, t2.d, t.a] }
             └─BatchExchange { order: [], dist: UpstreamHashShard(t.a) }
               └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }

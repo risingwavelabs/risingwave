@@ -18,8 +18,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::{ArrayRef, Op, Vis, VisRef};
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::array::{ArrayRef, Op};
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -55,12 +55,11 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         &mut self,
         ops: &[Op],
         column: &ArrayRef,
-        mut visibilities: Vec<&mut Vis>,
+        mut visibilities: Vec<&mut Bitmap>,
         dedup_table: &mut StateTable<S>,
         group_key: Option<&GroupKey>,
         ctx: ActorContextRef,
     ) -> StreamExecutorResult<()> {
-        let column = column;
         let n_calls = visibilities.len();
 
         let mut prev_counts_map = HashMap::new(); // also serves as changeset
@@ -70,6 +69,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             .map(|_| BitmapBuilder::zeroed(column.len()))
             .collect_vec();
         let actor_id_str = ctx.id.to_string();
+        let fragment_id_str = ctx.fragment_id.to_string();
         let table_id_str = dedup_table.table_id().to_string();
         for (datum_idx, (op, datum)) in ops.iter().zip_eq_fast(column.iter()).enumerate() {
             // skip if this item is hidden to all agg calls (this is likely to happen)
@@ -86,7 +86,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             self.metrics_info
                 .metrics
                 .agg_distinct_total_cache_count
-                .with_label_values(&[&table_id_str, &actor_id_str])
+                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                 .inc();
             // TODO(yuhao): avoid this `contains`.
             // https://github.com/risingwavelabs/risingwave/issues/9233
@@ -96,7 +96,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
                 self.metrics_info
                     .metrics
                     .agg_distinct_cache_miss_count
-                    .with_label_values(&[&table_id_str, &actor_id_str])
+                    .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                     .inc();
                 // load from table into the cache
                 let counts = if let Some(counts_row) =
@@ -174,11 +174,8 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             });
 
         for (vis, vis_mask_inv) in visibilities.iter_mut().zip_eq(vis_masks_inv.into_iter()) {
-            let mask = !vis_mask_inv.finish();
-            if !mask.all() {
-                // update visibility if needed
-                **vis = vis.as_ref() & VisRef::from(&mask);
-            }
+            // update visibility
+            **vis &= !vis_mask_inv.finish();
         }
 
         // if we determine to flush to the table when processing every chunk instead of barrier
@@ -189,16 +186,17 @@ impl<S: StateStore> ColumnDeduplicater<S> {
     }
 
     /// Flush the deduplication table.
-    fn flush(&mut self, dedup_table: &mut StateTable<S>, ctx: ActorContextRef) {
+    fn flush(&mut self, dedup_table: &StateTable<S>, ctx: ActorContextRef) {
         // TODO(rc): now we flush the table in `dedup` method.
         // WARN: if you want to change to batching the write to table. please remember to change
         // `self.cache.evict()` too.
         let actor_id_str = ctx.id.to_string();
+        let fragment_id_str = ctx.fragment_id.to_string();
         let table_id_str = dedup_table.table_id().to_string();
         self.metrics_info
             .metrics
             .agg_distinct_cached_entry_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(self.cache.len() as i64);
         self.cache.evict();
     }
@@ -260,11 +258,11 @@ impl<S: StateStore> DistinctDeduplicater<S> {
         &mut self,
         ops: &[Op],
         columns: &[ArrayRef],
-        mut visibilities: Vec<Vis>,
+        mut visibilities: Vec<Bitmap>,
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
         group_key: Option<&GroupKey>,
         ctx: ActorContextRef,
-    ) -> StreamExecutorResult<Vec<Vis>> {
+    ) -> StreamExecutorResult<Vec<Bitmap>> {
         for (distinct_col, (ref call_indices, deduplicater)) in &mut self.deduplicaters {
             let column = &columns[*distinct_col];
             let dedup_table = dedup_tables.get_mut(distinct_col).unwrap();

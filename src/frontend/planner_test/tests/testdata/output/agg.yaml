@@ -1395,21 +1395,21 @@
         sq_1.col_2;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [max(max(lineitem.l_commitdate))] }
-      └─BatchHashAgg { group_key: [lineitem.l_commitdate], aggs: [max(max(lineitem.l_commitdate))] }
-        └─BatchExchange { order: [], dist: HashShard(lineitem.l_commitdate) }
-          └─BatchHashAgg { group_key: [lineitem.l_commitdate], aggs: [max(lineitem.l_commitdate)] }
-            └─BatchHashAgg { group_key: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], aggs: [] }
-              └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], distribution: UpstreamHashShard(lineitem.l_orderkey) }
+    └─BatchProject { exprs: [max(max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))))] }
+      └─BatchHashAgg { group_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], aggs: [max(max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))))] }
+        └─BatchExchange { order: [], dist: HashShard(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))) }
+          └─BatchHashAgg { group_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], aggs: [max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)))] }
+            └─BatchSortAgg { group_key: [lineitem.l_orderkey], aggs: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))] }
+              └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_commitdate], distribution: UpstreamHashShard(lineitem.l_orderkey) }
   stream_plan: |-
-    StreamMaterialize { columns: [col_0, lineitem.l_commitdate(hidden)], stream_key: [lineitem.l_commitdate], pk_columns: [lineitem.l_commitdate], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [max(max(lineitem.l_commitdate)), lineitem.l_commitdate] }
-      └─StreamHashAgg { group_key: [lineitem.l_commitdate], aggs: [max(max(lineitem.l_commitdate)), count] }
-        └─StreamExchange { dist: HashShard(lineitem.l_commitdate) }
-          └─StreamHashAgg { group_key: [lineitem.l_commitdate, $expr1], aggs: [max(lineitem.l_commitdate), count] }
-            └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct, Vnode(lineitem.l_orderkey) as $expr1] }
-              └─StreamHashAgg { group_key: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], aggs: [count] }
-                └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
+    StreamMaterialize { columns: [col_0, first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))(hidden)], stream_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], pk_columns: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [max(max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)))), first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))] }
+      └─StreamHashAgg { group_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], aggs: [max(max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)))), count] }
+        └─StreamExchange { dist: HashShard(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))) }
+          └─StreamHashAgg { group_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)), $expr1], aggs: [max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))), count] }
+            └─StreamProject { exprs: [lineitem.l_orderkey, first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)), Vnode(lineitem.l_orderkey) as $expr1] }
+              └─StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)), count] }
+                └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_commitdate], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
 - name: two phase agg on hop window input should use two phase agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
@@ -1636,3 +1636,16 @@
         └─BatchHashAgg { group_key: [integers.i], aggs: [] }
           └─BatchExchange { order: [], dist: HashShard(integers.i) }
             └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+- sql: |
+    CREATE TABLE t(id int primary key, a int, b int);
+    SELECT count(*) FROM t group by a, id, b;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [count] }
+      └─BatchSortAgg { group_key: [t.id], aggs: [count] }
+        └─BatchScan { table: t, columns: [t.id], distribution: UpstreamHashShard(t.id) }
+  stream_plan: |-
+    StreamMaterialize { columns: [count, t.id(hidden)], stream_key: [t.id], pk_columns: [t.id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [count, t.id] }
+      └─StreamHashAgg { group_key: [t.id], aggs: [count] }
+        └─StreamTableScan { table: t, columns: [t.id], pk: [t.id], dist: UpstreamHashShard(t.id) }

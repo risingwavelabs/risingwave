@@ -24,6 +24,7 @@ env_scripts = [
 #!@duckscript
 
 # only duckscript can modify env variables in cargo-make
+# duckscript doc: https://github.com/sagiegurari/duckscript/blob/master/docs/sdk.md
 
 set_env ENABLE_TELEMETRY "false"
 
@@ -70,6 +71,26 @@ else
   set_env BUILD_HUMMOCK_TRACE_CMD ""
 end
 
+is_ci = get_env RISINGWAVE_CI
+is_not_ci = not ${is_ci}
+
+if ${is_not_ci}
+  query_log_path = get_env RW_QUERY_LOG_PATH
+  no_query_log_path = not ${query_log_path}
+
+  if ${no_query_log_path}
+    set_env RW_QUERY_LOG_PATH "${PREFIX_LOG}"
+  fi
+
+  rust_log = get_env RUST_LOG
+  no_rust_log = not ${rust_log}
+
+  if ${no_rust_log}
+    set_env RUST_LOG "pgwire_query_log=info"
+  else
+    set_env RUST_LOG "pgwire_query_log=info,${rust_log}"
+  end
+end
 ''',
 ]
 
@@ -281,6 +302,50 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/standalone"
 '''
 
+[tasks.codesign-playground]
+private = true
+category = "RiseDev - Build"
+description = "Codesign playground binary to support coredump"
+# If core dump is enabled by RiseDev and we're on an Apple Silicon platform,
+# codesign the binary before running.
+# https://developer.apple.com/forums/thread/694233?answerId=695943022#695943022
+condition = { env_set = [
+  "ENABLE_COREDUMP",
+], env = { "SYSTEM" = "darwin-arm64" } }
+script = '''
+#!/usr/bin/env bash
+
+set -ex
+codesign -s - -f --entitlements scripts/coredump/coredump.entitlements "target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave"
+'''
+
+[tasks.codesign-binaries]
+private = true
+category = "RiseDev - Build"
+description = "Codesign all binaries to support coredump"
+# If core dump is enabled by RiseDev and we're on an Apple Silicon platform,
+# codesign the binary before running.
+# https://developer.apple.com/forums/thread/694233?answerId=695943022#695943022
+condition = { env_set = [
+  "ENABLE_COREDUMP",
+], env = { "SYSTEM" = "darwin-arm64" } }
+script = '''
+#!/usr/bin/env bash
+set -e
+
+binaries=()
+
+if [[ "$ENABLE_ALL_IN_ONE" == "true" ]]; then
+  binaries=("risingwave")
+else
+  binaries=("meta-node" "compute-node" "frontend" "compactor")
+fi
+
+set -ex
+echo -n "${binaries[*]}" | parallel -d ' ' \
+  "codesign -s - -f --entitlements scripts/coredump/coredump.entitlements \"target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/{}\""
+'''
+
 [tasks.link-user-bin]
 private = true
 category = "RiseDev - Build"
@@ -307,6 +372,7 @@ dependencies = [
   "link-standalone-binaries",
   "link-all-in-one-binaries",
   "link-user-bin",
+  "codesign-binaries",
 ]
 
 [tasks.b]
@@ -319,7 +385,7 @@ alias = "build-risingwave"
 private = true
 category = "RiseDev - Build"
 description = "Extract dashboard artifact"
-condition = { env_not_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
+condition = { env_not_set = ["ENABLE_BUILD_DASHBOARD"] }
 script = '''
 #!/usr/bin/env bash
 
@@ -332,11 +398,19 @@ git worktree prune
 git worktree add "${PREFIX_UI}" origin/dashboard-artifact
 '''
 
-[tasks.export-dashboard-v2]
+[tasks.export-dashboard]
 private = true
 category = "RiseDev - Build"
-description = "Build dashboard v2"
-condition = { env_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
+description = "Build dashboard"
+condition = { env_set = [
+  "ENABLE_BUILD_DASHBOARD",
+], files_modified = { input = [
+  "./dashboard/**/*.js",
+  "./dashboard/package.json",
+  "./dashboard/next.config.js",
+], output = [
+  "./dashboard/out/**/*.html",
+] } }
 script = """
 #!/usr/bin/env bash
 set -e
@@ -366,7 +440,31 @@ ${BUILD_HUMMOCK_TRACE_CMD}\
             ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
 '''
 
+[tasks.build-risingwave-playground]
+category = "RiseDev - Build"
+description = "Build RisingWave playground"
+condition = { env_true = ["ENABLE_BUILD_RUST"] }
+script = '''
+#!/usr/bin/env bash
+
+set -e
+[[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
+echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
+set -xe
+
+cargo build -p risingwave_cmd_all \
+          --profile "${RISINGWAVE_BUILD_PROFILE}" \
+          ${RISINGWAVE_FEATURE_FLAGS} \
+          ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
+'''
+
 [tasks.clean]
+private = true
+category = "RiseDev - Build"
+description = "Clean all build targets"
+dependencies = ["clean-rust", "clean-java"]
+
+[tasks.clean-rust]
 private = true
 category = "RiseDev - Build"
 description = "Clean Rust targets"
@@ -375,6 +473,25 @@ script = '''
 #!/usr/bin/env bash
 set -e
 cargo clean
+'''
+
+[tasks.clean-java]
+private = true
+category = "RiseDev - Build"
+description = "Clean Rust targets"
+condition = { env_set = ["ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+script = '''
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+cd "${JAVA_DIR}"
+"${MAVEN_PATH}" clean
 '''
 
 [tasks.build-docs]
@@ -460,7 +577,7 @@ dependencies = [
   "build-connector-node",
   "post-build-risingwave",
   "extract-dashboard-artifact",
-  "export-dashboard-v2",
+  "export-dashboard",
   "prepare-config",
 ]
 
@@ -476,6 +593,15 @@ dependencies = [
   "download-tempo",
   "download-kafka",
   "download-redis",
+]
+
+[tasks.pre-start-playground]
+category = "RiseDev - Prepare"
+description = "Preparation steps for playground"
+dependencies = [
+  "build-risingwave-playground",
+  "codesign-playground",
+  "build-connector-node",
 ]
 
 [tasks.check-risedev-env-file]
@@ -521,33 +647,35 @@ alias = "playground"
 [tasks.playground]
 category = "RiseDev - Start/Stop"
 description = "🌟 Start a lite RisingWave playground using risingwave all-in-one binary"
-dependencies = ["build-connector-node"]
+dependencies = ["pre-start-playground"]
 script = '''
 #!/usr/bin/env bash
 
-set -ex
+set -e
+if [[ $ENABLE_COREDUMP == "true" ]]; then
+  echo "+ ulimit -c unlimited"
+  ulimit -c unlimited
+fi
 
-RUST_BACKTRACE=1 \
-cargo run -p risingwave_cmd_all \
-          --profile "${RISINGWAVE_BUILD_PROFILE}" \
-          ${RISINGWAVE_FEATURE_FLAGS} \
-          -- playground
+set -x
+target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave playground $@
 '''
 
 [tasks.standalone]
 category = "RiseDev - Start/Stop"
 description = "🌟 Start a RisingWave standalone instance"
-dependencies = ["build"]
+dependencies = ["pre-start-playground"]
 script = '''
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -e
+if [[ $ENABLE_COREDUMP == "true" ]]; then
+  echo "+ ulimit -c unlimited"
+  ulimit -c unlimited
+fi
 
-RUST_BACKTRACE=1 \
-cargo run -p risingwave_cmd_all \
-          --profile "${RISINGWAVE_BUILD_PROFILE}" \
-          ${RISINGWAVE_FEATURE_FLAGS} \
-          -- standalone $@
+set -x
+target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave standalone $@
 '''
 
 # TODO(kwannoel): Support `tasks.standalone-dev` as well.
@@ -570,8 +698,19 @@ alias = "dev"
 [tasks.dev]
 category = "RiseDev - Start/Stop"
 dependencies = ["pre-start-dev"]
-script = "RUST_BACKTRACE=1 target/${BUILD_MODE_DIR}/risedev-dev ${@}"
 description = "🌟 Start a full RisingWave dev cluster using risedev-dev"
+script = '''
+#!/usr/bin/env bash
+
+set -e
+if [[ $ENABLE_COREDUMP == "true" ]]; then
+  echo "+ ulimit -c unlimited"
+  ulimit -c unlimited
+fi
+
+set -x
+target/${BUILD_MODE_DIR}/risedev-dev ${@}
+'''
 
 [tasks.kill-risedev]
 category = "RiseDev - Start/Stop"
@@ -579,7 +718,53 @@ description = "Kill RisingWave dev cluster"
 script = '''
 #!/usr/bin/env bash
 
-tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+set -euo pipefail
+
+wait_kafka_exit() {
+  # Follow kafka-server-stop.sh
+  while [[ -n "$(ps ax | grep ' kafka\.Kafka ' | grep java | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for kafka to exit"
+    sleep 1
+  done
+}
+
+wait_zookeeper_exit() {
+  # Follow zookeeper-server-stop.sh
+  while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for zookeeper to exit"
+    sleep 1
+  done
+}
+
+kill_kafka() {
+  ${PREFIX_BIN}/kafka/bin/kafka-server-stop.sh
+  wait_kafka_exit
+}
+
+kill_zookeeper() {
+  ${PREFIX_BIN}/kafka/bin/zookeeper-server-stop.sh
+  wait_zookeeper_exit
+}
+
+# Kill other components
+tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
+| grep -v 'kafka' \
+| grep -v 'zookeeper' \
+| awk '{ print $2 }' \
+| xargs -I {} tmux send-keys -t {} C-c C-d
+
+if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
+then
+  echo "kill kafka"
+  kill_kafka
+
+  echo "kill zookeeper"
+  kill_zookeeper
+
+  # Kill their tmux sessions
+  tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+fi
+
 tmux kill-session -t risedev
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
@@ -654,6 +839,10 @@ echo
 echo "check: $(tput setaf 4)protoc >= 3.12.0$(tput sgr0)"
 protoc --version || echo "$(tput setaf 3)protoc$(tput sgr0) not found."
 echo
+
+echo "check: $(tput setaf 4)parallel >= 2022XXXX$(tput sgr0)"
+parallel --version || echo "$(tput setaf 3)parallel$(tput sgr0) not found."
+echo
 """
 description = "Install (or upgrade) required tools to do pre-CI check and run e2e tests"
 
@@ -712,7 +901,7 @@ TARGET_PATH="${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}"
 
 echo "Building connector node..."
 cd "${JAVA_DIR}"
-"${MAVEN_PATH}" --batch-mode --update-snapshots package -Dmaven.test.skip
+"${MAVEN_PATH}" --batch-mode --update-snapshots package -Dmaven.test.skip -Dno-build-rust
 
 rm -rf ${PREFIX_BIN}/connector-node
 mkdir -p "${PREFIX_BIN}/connector-node"
@@ -811,7 +1000,18 @@ set -e
 
 cargo check \
   --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
-  -p risingwave_simulation --all-targets "$@"
+  -p risingwave_batch \
+  -p risingwave_common \
+  -p risingwave_compute \
+  -p risingwave_connector \
+  -p risingwave_frontend \
+  -p risingwave_meta \
+  -p risingwave_object_store \
+  -p risingwave_source \
+  -p risingwave_storage \
+  -p risingwave_stream \
+  -p pgwire \
+  -p risingwave_simulation --tests "$@"
 """
 
 [tasks.sslt]
@@ -1138,9 +1338,12 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.15.3", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.17.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+env = { SLT_HOST = "${RW_FRONTEND_LISTEN_ADDRESS}", SLT_PORT = "${RW_FRONTEND_PORT}", SLT_DB = "dev" }
 command = "sqllogictest"
 args = ["${@}"]
 description = "🌟 Run SQLLogicTest"
@@ -1238,3 +1441,20 @@ cat << EOF > src/config/example.toml
 EOF
 cargo run -p risingwave_common --bin example-config >> src/config/example.toml
 '''
+
+[tasks.backwards-compat-test]
+category = "RiseDev - Backwards Compatibility Test"
+description = "Run backwards compatibility test"
+script = "./backwards-compat-tests/scripts/run_local.sh"
+
+# For debugging.
+# To show the env for a specific task, use `run_task = "show-env"` for that task.
+[tasks.show-env]
+private = true
+description = "Show cargo-make runtime environment variables"
+script = """
+#!@duckscript
+# https://github.com/sagiegurari/cargo-make/issues/889
+vars = dump_variables
+echo ${vars}
+"""

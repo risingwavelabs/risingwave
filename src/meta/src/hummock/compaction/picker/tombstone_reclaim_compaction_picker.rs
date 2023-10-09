@@ -117,6 +117,14 @@ impl TombstoneReclaimCompactionPicker {
                     }
                 };
                 return Some(CompactionInput {
+                    select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+                    target_input_size: target_level
+                        .table_infos
+                        .iter()
+                        .map(|sst| sst.file_size)
+                        .sum(),
+                    total_file_count: (select_input_ssts.len() + target_level.table_infos.len())
+                        as u64,
                     target_level: target_level.level_idx as usize,
                     input_levels: vec![
                         InputLevel {
@@ -126,7 +134,7 @@ impl TombstoneReclaimCompactionPicker {
                         },
                         target_level,
                     ],
-                    target_sub_level_id: 0,
+                    ..Default::default()
                 });
             }
             state.last_level += 1;
@@ -143,7 +151,7 @@ pub mod tests {
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::create_overlap_strategy;
-    use crate::hummock::compaction::level_selector::tests::{generate_level, generate_table};
+    use crate::hummock::compaction::selector::tests::{generate_level, generate_table};
 
     #[test]
     fn test_basic() {

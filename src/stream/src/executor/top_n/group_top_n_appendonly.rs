@@ -69,6 +69,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
+        pk_indices: PkIndices,
     ) -> StreamResult<Self> {
         let info = input.info();
         Ok(TopNExecutorWrapper {
@@ -84,6 +85,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
                 state_table,
                 watermark_epoch,
                 ctx,
+                pk_indices,
             )?,
         })
     }
@@ -129,9 +131,11 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
         ctx: ActorContextRef,
+        pk_indices: PkIndices,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
-            pk_indices, schema, ..
+            schema: input_schema,
+            ..
         } = input_info;
 
         let metrics_info = MetricsInfo::new(
@@ -141,12 +145,13 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             "GroupTopN",
         );
 
-        let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &group_by);
+        let cache_key_serde =
+            create_cache_key_serde(&storage_key, &input_schema, &order_by, &group_by);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
         Ok(Self {
             info: ExecutorInfo {
-                schema,
+                schema: input_schema,
                 pk_indices,
                 identity: format!("AppendOnlyGroupTopNExecutor {:X}", executor_id),
             },
@@ -170,14 +175,17 @@ where
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.limit);
         let mut res_rows = Vec::with_capacity(self.limit);
-        let chunk = chunk.compact();
         let keys = K::build(&self.group_by, chunk.data_chunk())?;
 
         let data_types = self.schema().data_types();
         let row_deserializer = RowDeserializer::new(data_types.clone());
         let table_id_str = self.managed_state.state_table.table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
-        for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq_debug(keys.iter()) {
+        let fragment_id_str = self.ctx.fragment_id.to_string();
+        for (r, group_cache_key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
+            let Some((op, row_ref)) = r else {
+                continue;
+            };
             // The pk without group by
             let pk_row = row_ref.project(&self.storage_key_indices[self.group_by.len()..]);
             let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
@@ -186,7 +194,7 @@ where
             self.ctx
                 .streaming_metrics
                 .group_top_n_appendonly_total_query_cache_count
-                .with_label_values(&[&table_id_str, &actor_id_str])
+                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                 .inc();
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
@@ -194,7 +202,7 @@ where
                 self.ctx
                     .streaming_metrics
                     .group_top_n_appendonly_cache_miss_count
-                    .with_label_values(&[&table_id_str, &actor_id_str])
+                    .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                     .inc();
                 let mut topn_cache = TopNCache::new(self.offset, self.limit, data_types.clone());
                 self.managed_state
@@ -217,7 +225,7 @@ where
         self.ctx
             .streaming_metrics
             .group_top_n_appendonly_cached_entry_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(self.caches.len() as i64);
         generate_output(res_rows, res_ops, self.schema())
     }

@@ -12,22 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use async_nats;
+use async_nats::jetstream::Message;
 
 use crate::source::base::SourceMessage;
-use crate::source::SourceMeta;
+use crate::source::{SourceMeta, SplitId};
 
-impl SourceMessage {
-    pub fn from_nats_message(message: async_nats::Message) -> Self {
+#[derive(Clone, Debug)]
+pub struct NatsMessage {
+    pub split_id: SplitId,
+    pub sequence_number: String,
+    pub payload: Vec<u8>,
+}
+
+impl From<NatsMessage> for SourceMessage {
+    fn from(message: NatsMessage) -> Self {
         SourceMessage {
             key: None,
-            payload: Some(message.payload.to_vec()),
-            // Nats message doesn't have offset
-            offset: "".to_string(),
-            split_id: Arc::from(""),
+            payload: Some(message.payload),
+            // For nats jetstream, use sequence id as offset
+            offset: message.sequence_number,
+            split_id: message.split_id,
             meta: SourceMeta::Empty,
+        }
+    }
+}
+
+impl NatsMessage {
+    pub fn new(split_id: SplitId, message: Message) -> Self {
+        NatsMessage {
+            split_id,
+            sequence_number: message.info().unwrap().stream_sequence.to_string(),
+            payload: message.message.payload.to_vec(),
         }
     }
 }

@@ -24,7 +24,6 @@ use risingwave_common::error::{Result, RwError};
 
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::{default_conn_config, s3_client};
-use crate::parser::WriteGuard;
 
 const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
 
@@ -71,7 +70,7 @@ pub(super) async fn download_from_http(location: &Url) -> Result<Bytes> {
 // if all ok, return ok
 // if part of them are errors, log err and return ok
 #[inline]
-pub(super) fn at_least_one_ok(mut results: Vec<Result<WriteGuard>>) -> Result<WriteGuard> {
+pub(super) fn at_least_one_ok(mut results: Vec<Result<()>>) -> Result<()> {
     let errors = results
         .iter()
         .filter_map(|r| r.as_ref().err())
@@ -100,8 +99,8 @@ pub(super) fn at_least_one_ok(mut results: Vec<Result<WriteGuard>>) -> Result<Wr
 #[macro_export]
 macro_rules! only_parse_payload {
     ($self:ident, $payload:ident, $writer:ident) => {
-        if $payload.is_some() {
-            $self.parse_inner($payload.unwrap(), $writer).await
+        if let Some(payload) = $payload {
+            $self.parse_inner(payload, $writer).await
         } else {
             Err(RwError::from(ErrorCode::InternalError(
                 "Empty payload with nonempty key".into(),

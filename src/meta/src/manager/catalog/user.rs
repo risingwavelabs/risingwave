@@ -22,7 +22,6 @@ use super::database::DatabaseManager;
 use super::UserId;
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub struct UserManager {
@@ -34,10 +33,7 @@ pub struct UserManager {
 }
 
 impl UserManager {
-    pub async fn new<S: MetaStore>(
-        env: MetaSrvEnv<S>,
-        database: &DatabaseManager,
-    ) -> MetaResult<Self> {
+    pub async fn new(env: MetaSrvEnv, database: &DatabaseManager) -> MetaResult<Self> {
         let users = UserInfo::list(env.meta_store()).await?;
         let user_info = BTreeMap::from_iter(users.into_iter().map(|user| (user.id, user)));
 
@@ -88,7 +84,7 @@ impl UserManager {
                 for option in &grant_privilege_item.action_with_opts {
                     self.user_grant_relation
                         .entry(option.get_granted_by())
-                        .or_insert_with(HashSet::new)
+                        .or_default()
                         .insert(*user_id);
                 }
             }
@@ -135,7 +131,7 @@ mod tests {
     use super::*;
     use crate::manager::{commit_meta, CatalogManager};
     use crate::model::{BTreeMapTransaction, ValTransaction};
-    use crate::storage::{MemStore, Transaction};
+    use crate::storage::Transaction;
 
     fn make_test_user(id: u32, name: &str) -> UserInfo {
         UserInfo {
@@ -402,7 +398,7 @@ mod tests {
         // Release all privileges with object.
         let user_core = &mut catalog_manager.core.lock().await.user;
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
-        CatalogManager::<MemStore>::update_user_privileges(&mut users, &[object]);
+        CatalogManager::update_user_privileges(&mut users, &[object]);
         commit_meta!(&catalog_manager, users)?;
         let user = user_core.user_info.get(&test_user_id).unwrap();
         assert!(user.grant_privileges.is_empty());

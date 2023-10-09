@@ -34,6 +34,7 @@
 #![feature(result_option_inspect)]
 #![feature(assert_matches)]
 #![feature(lazy_cell)]
+#![feature(return_position_impl_trait_in_trait)]
 
 mod error;
 pub mod exchange_source;
@@ -47,3 +48,6 @@ pub mod task;
 extern crate tracing;
 #[macro_use]
 extern crate risingwave_common;
+
+#[cfg(test)]
+risingwave_expr_impl::enable!();

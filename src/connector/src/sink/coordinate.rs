@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
@@ -19,7 +21,8 @@ use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_rpc_client::{CoordinatorStreamHandle, SinkCoordinationRpcClient};
 use tracing::warn;
 
-use crate::sink::{Result, SinkError, SinkParam, SinkWriter};
+use crate::sink::writer::SinkWriter;
+use crate::sink::{Result, SinkError, SinkParam};
 
 pub struct CoordinatedSinkWriter<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> {
     epoch: u64,
@@ -81,7 +84,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> SinkWriter for Coordi
         self.inner.abort().await
     }
 
-    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Bitmap) -> Result<()> {
+    async fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         self.inner.update_vnode_bitmap(vnode_bitmap).await
     }
 }

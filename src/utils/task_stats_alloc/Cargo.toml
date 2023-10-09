@@ -27,3 +27,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 
 [target.'cfg(loom)'.dependencies]
 loom = {version = "0.5", features = ["futures", "checkpoint"]}
+
+[lints]
+workspace = true

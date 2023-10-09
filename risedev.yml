@@ -137,6 +137,7 @@ profile:
       - use: frontend
         user-managed: true
       - use: compactor
+        user-managed: true
       - use: prometheus
       - use: grafana
       - use: zookeeper
@@ -144,6 +145,19 @@ profile:
       - use: kafka
         persist-data: true
       - use: connector-node
+
+  standalone-minio-etcd:
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+        user-managed: true
+      - use: compute-node
+        user-managed: true
+      - use: frontend
+        user-managed: true
+      - use: compactor
+        user-managed: true
 
   standalone-minio-etcd-compactor:
     steps:
@@ -156,23 +170,6 @@ profile:
       - use: frontend
         user-managed: true
       - use: compactor
-
-  standalone-full-peripherals-without-kafka:
-    steps:
-      - use: minio
-      - use: etcd
-      - use: meta-node
-        user-managed: true
-      - use: compute-node
-        user-managed: true
-      - use: frontend
-        user-managed: true
-      - use: compactor
-      - use: prometheus
-      - use: grafana
-      - use: zookeeper
-        persist-data: true
-      - use: connector-node
 
   hdfs:
     steps:
@@ -805,6 +802,16 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-pulsar-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
   hummock-trace:
     config-path: src/config/hummock-trace.toml
     steps:
@@ -815,7 +822,7 @@ profile:
       - use: compactor
 
   ci-backfill:
-    config-path: "src/config/backfill.toml"
+    config-path: "src/config/ci-backfill.toml"
     steps:
       - use: minio
       - use: etcd
@@ -1166,7 +1173,6 @@ template:
     namenode: 127.0.0.1:9000
 
     bucket: risingwave-test
-
 
   # aws-s3 is a placeholder service to provide configurations
   aws-s3:

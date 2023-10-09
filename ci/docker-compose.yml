@@ -71,7 +71,7 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230821
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230919
     depends_on:
       - mysql
       - db
@@ -81,22 +81,23 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230821
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230919
     depends_on:
       - mysql
       - db
       - elasticsearch
       - clickhouse-server
+      - pulsar
     volumes:
       - ..:/risingwave
 
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230821
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230919
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230821
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230919
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -107,7 +108,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230821
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230919
     depends_on:
       db:
         condition: service_healthy
@@ -182,3 +183,19 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9093,PLAINTEXT_INTERNAL://localhost:29093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  pulsar:
+    container_name: pulsar
+    image: apachepulsar/pulsar:latest
+    command: bin/pulsar standalone
+    ports:
+      - "6650:6650"
+      - "6651:8080"
+    expose:
+      - "8080"
+      - "6650"
+    healthcheck:
+      test: [ "CMD-SHELL", "bin/pulsar-admin brokers healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 5

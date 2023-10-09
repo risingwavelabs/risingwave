@@ -12,12 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ffi::CString;
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use itertools::Itertools;
+use risingwave_common::config::ServerConfig;
+use risingwave_common::heap_profiling::{
+    self, AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX,
+};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    HeapProfilingRequest, HeapProfilingResponse, ProfilingRequest, ProfilingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
+    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
 use risingwave_stream::task::LocalStreamManager;
@@ -27,16 +36,19 @@ use tonic::{Request, Response, Status};
 pub struct MonitorServiceImpl {
     stream_mgr: Arc<LocalStreamManager>,
     grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
+    server_config: ServerConfig,
 }
 
 impl MonitorServiceImpl {
     pub fn new(
         stream_mgr: Arc<LocalStreamManager>,
         grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
+        server_config: ServerConfig,
     ) -> Self {
         Self {
             stream_mgr,
             grpc_await_tree_reg,
+            server_config,
         }
     }
 }
@@ -105,17 +117,21 @@ impl MonitorService for MonitorServiceImpl {
         }
     }
 
-    #[cfg(target_os = "linux")]
     #[cfg_attr(coverage, no_coverage)]
     async fn heap_profiling(
         &self,
         request: Request<HeapProfilingRequest>,
     ) -> Result<Response<HeapProfilingResponse>, Status> {
-        use std::ffi::CStr;
         use std::fs::create_dir_all;
         use std::path::PathBuf;
 
         use tikv_jemalloc_ctl;
+
+        if !cfg!(target_os = "linux") {
+            return Err(Status::unimplemented(
+                "heap profiling is only implemented on Linux",
+            ));
+        }
 
         if !tikv_jemalloc_ctl::opt::prof::read().unwrap() {
             return Err(Status::failed_precondition(
@@ -123,40 +139,91 @@ impl MonitorService for MonitorServiceImpl {
             ));
         }
 
-        let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-        let file_name = format!("{}.risectl-dump-heap-prof.compute.dump\0", time_prefix,);
-        let dir = PathBuf::from(request.into_inner().get_dir());
+        let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
+        let file_name = format!("{}.{}", time_prefix, MANUALLY_DUMP_SUFFIX);
+        let arg_dir = request.into_inner().dir;
+        let dir = PathBuf::from(if arg_dir.is_empty() {
+            &self.server_config.heap_profiling.dir
+        } else {
+            &arg_dir
+        });
         create_dir_all(&dir)?;
 
         let file_path_buf = dir.join(file_name);
         let file_path = file_path_buf
             .to_str()
             .ok_or_else(|| Status::internal("The file dir is not a UTF-8 String"))?;
+        let file_path_c =
+            CString::new(file_path).map_err(|_| Status::internal("0 byte in file path"))?;
 
-        let file_path_str = Box::leak(file_path.to_string().into_boxed_str());
-        let file_path_bytes = unsafe { file_path_str.as_bytes_mut() };
-        let file_path_ptr = file_path_bytes.as_mut_ptr();
-        let response = if let Err(e) = tikv_jemalloc_ctl::prof::dump::write(
-            CStr::from_bytes_with_nul(file_path_bytes).unwrap(),
-        ) {
-            tracing::warn!("Risectl Jemalloc dump heap file failed! {:?}", e);
+        // FIXME(yuhao): `unsafe` here because `jemalloc_dump_mib.write` requires static lifetime
+        if let Err(e) =
+            tikv_jemalloc_ctl::prof::dump::write(unsafe { &*(file_path_c.as_c_str() as *const _) })
+        {
+            tracing::warn!("Manually Jemalloc dump heap file failed! {:?}", e);
             Err(Status::internal(e.to_string()))
         } else {
+            tracing::info!("Manually Jemalloc dump heap file created: {}", file_path);
             Ok(Response::new(HeapProfilingResponse {}))
-        };
-        unsafe { Box::from_raw(file_path_ptr) };
-        response
+        }
     }
 
-    #[cfg(not(target_os = "linux"))]
     #[cfg_attr(coverage, no_coverage)]
-    async fn heap_profiling(
+    async fn list_heap_profiling(
         &self,
-        _request: Request<HeapProfilingRequest>,
-    ) -> Result<Response<HeapProfilingResponse>, Status> {
-        Err(Status::unimplemented(
-            "heap profiling is only implemented on Linux",
-        ))
+        _request: Request<ListHeapProfilingRequest>,
+    ) -> Result<Response<ListHeapProfilingResponse>, Status> {
+        let dump_dir = self.server_config.heap_profiling.dir.clone();
+        let auto_dump_files_name: Vec<_> = fs::read_dir(dump_dir.clone())?
+            .map(|entry| {
+                let entry = entry?;
+                Ok::<_, Status>(entry.file_name().to_string_lossy().to_string())
+            })
+            .filter(|name| {
+                if let Ok(name) = name {
+                    name.contains(AUTO_DUMP_SUFFIX) && !name.ends_with(COLLAPSED_SUFFIX)
+                } else {
+                    true
+                }
+            })
+            .try_collect()?;
+        let manually_dump_files_name: Vec<_> = fs::read_dir(dump_dir.clone())?
+            .map(|entry| {
+                let entry = entry?;
+                Ok::<_, Status>(entry.file_name().to_string_lossy().to_string())
+            })
+            .filter(|name| {
+                if let Ok(name) = name {
+                    name.contains(MANUALLY_DUMP_SUFFIX) && !name.ends_with(COLLAPSED_SUFFIX)
+                } else {
+                    true
+                }
+            })
+            .try_collect()?;
+
+        Ok(Response::new(ListHeapProfilingResponse {
+            dir: dump_dir,
+            name_auto: auto_dump_files_name,
+            name_manually: manually_dump_files_name,
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn analyze_heap(
+        &self,
+        request: Request<AnalyzeHeapRequest>,
+    ) -> Result<Response<AnalyzeHeapResponse>, Status> {
+        let dumped_path_str = request.into_inner().get_path().clone();
+        let collapsed_path_str = format!("{}.{}", dumped_path_str, COLLAPSED_SUFFIX);
+        let collapsed_path = Path::new(&collapsed_path_str);
+
+        // run jeprof if the target was not analyzed before
+        if !collapsed_path.exists() {
+            heap_profiling::jeprof::run(dumped_path_str, collapsed_path_str.clone()).await?;
+        }
+
+        let file = fs::read(Path::new(&collapsed_path_str))?;
+        Ok(Response::new(AnalyzeHeapResponse { result: file }))
     }
 }
 

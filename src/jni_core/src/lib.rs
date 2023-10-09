@@ -13,13 +13,14 @@
 // limitations under the License.
 
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
 #![feature(lazy_cell)]
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
 #![feature(result_option_inspect)]
 
 pub mod hummock_iterator;
+pub mod jvm_runtime;
+mod macros;
 pub mod stream_chunk_iterator;
 
 use std::backtrace::Backtrace;
@@ -28,13 +29,16 @@ use std::ops::{Deref, DerefMut};
 use std::slice::from_raw_parts;
 use std::sync::{Arc, LazyLock, OnceLock};
 
+use cfg_or_panic::cfg_or_panic;
 use hummock_iterator::{HummockJavaBindingIterator, KeyedRow};
 use jni::objects::{
     AutoElements, GlobalRef, JByteArray, JClass, JMethodID, JObject, JStaticMethodID, JString,
     JValue, JValueGen, JValueOwned, ReleaseMode,
 };
 use jni::signature::ReturnType;
-use jni::sys::{jboolean, jbyte, jdouble, jfloat, jint, jlong, jshort, jsize, jvalue};
+use jni::sys::{
+    jboolean, jbyte, jdouble, jfloat, jint, jlong, jshort, jsize, jvalue, JNI_FALSE, JNI_TRUE,
+};
 use jni::JNIEnv;
 use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
@@ -43,19 +47,22 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::ScalarRefImpl;
 use risingwave_common::util::panic::rw_catch_unwind;
-use risingwave_pb::connector_service::GetEventStreamResponse;
+use risingwave_pb::connector_service::{
+    GetEventStreamResponse, SinkWriterStreamRequest, SinkWriterStreamResponse,
+};
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
 
+pub use crate::jvm_runtime::register_native_method_for_jvm;
 use crate::stream_chunk_iterator::{StreamChunkIterator, StreamChunkRow};
 pub type GetEventStreamJniSender = Sender<GetEventStreamResponse>;
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
 
 #[derive(Error, Debug)]
-enum BindingError {
+pub enum BindingError {
     #[error("JniError {error}")]
     Jni {
         #[from]
@@ -87,7 +94,7 @@ enum BindingError {
 
 type Result<T> = std::result::Result<T, BindingError>;
 
-fn to_guarded_slice<'array, 'env>(
+pub fn to_guarded_slice<'array, 'env>(
     array: &'array JByteArray<'env>,
     env: &'array mut JNIEnv<'env>,
 ) -> Result<SliceGuard<'env, 'array>> {
@@ -294,6 +301,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(
     VirtualNode::COUNT as jint
 }
 
+#[cfg_or_panic(not(madsim))]
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNew<'a>(
     env: EnvParam<'a>,
@@ -306,6 +314,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorN
     })
 }
 
+#[cfg_or_panic(not(madsim))]
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNext<'a>(
     env: EnvParam<'a>,
@@ -823,10 +832,82 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowClose<'a>(
     pointer.drop()
 }
 
+/// Send messages to the channel received by `CdcSplitReader`.
+/// If msg is null, just check whether the channel is closed.
+/// Return true if sending is successful, otherwise, return false so that caller can stop
+/// gracefully.
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToChannel<'a>(
+    env: EnvParam<'a>,
+    channel: Pointer<'a, GetEventStreamJniSender>,
+    msg: JByteArray<'a>,
+) -> jboolean {
+    execute_and_catch(env, move |env| {
+        // If msg is null means just check whether channel is closed.
+        if msg.is_null() {
+            if channel.as_ref().is_closed() {
+                return Ok(JNI_FALSE);
+            } else {
+                return Ok(JNI_TRUE);
+            }
+        }
+
+        let get_event_stream_response: GetEventStreamResponse =
+            Message::decode(to_guarded_slice(&msg, env)?.deref())?;
+
+        match channel.as_ref().blocking_send(get_event_stream_response) {
+            Ok(_) => Ok(JNI_TRUE),
+            Err(e) => {
+                tracing::info!("send error.  {:?}", e);
+                Ok(JNI_FALSE)
+            }
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRequestFromChannel<
+    'a,
+>(
+    env: EnvParam<'a>,
+    mut channel: Pointer<'a, Receiver<SinkWriterStreamRequest>>,
+) -> JByteArray<'a> {
+    execute_and_catch(env, move |env| match channel.as_mut().blocking_recv() {
+        Some(msg) => {
+            let bytes = env
+                .byte_array_from_slice(&Message::encode_to_vec(&msg))
+                .unwrap();
+            Ok(bytes)
+        }
+        None => Ok(JObject::null().into()),
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterResponseToChannel<
+    'a,
+>(
+    env: EnvParam<'a>,
+    channel: Pointer<'a, Sender<SinkWriterStreamResponse>>,
+    msg: JByteArray<'a>,
+) -> jboolean {
+    execute_and_catch(env, move |env| {
+        let sink_writer_stream_response: SinkWriterStreamResponse =
+            Message::decode(to_guarded_slice(&msg, env)?.deref())?;
+
+        match channel.as_ref().blocking_send(sink_writer_stream_response) {
+            Ok(_) => Ok(JNI_TRUE),
+            Err(e) => {
+                tracing::info!("send error.  {:?}", e);
+                Ok(JNI_FALSE)
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::{DataType, Timestamptz};
-    use risingwave_expr::vector_op::cast::literal_parsing;
+    use risingwave_common::types::Timestamptz;
 
     /// make sure that the [`ScalarRefImpl::Int64`] received by
     /// [`Java_com_risingwave_java_binding_Binding_rowGetTimestampValue`]
@@ -834,8 +915,8 @@ mod tests {
     #[test]
     fn test_timestamptz_to_i64() {
         assert_eq!(
-            literal_parsing(&DataType::Timestamptz, "2023-06-01 09:45:00+08:00").unwrap(),
-            Timestamptz::from_micros(1_685_583_900_000_000).into()
+            "2023-06-01 09:45:00+08:00".parse::<Timestamptz>().unwrap(),
+            Timestamptz::from_micros(1_685_583_900_000_000)
         );
     }
 }

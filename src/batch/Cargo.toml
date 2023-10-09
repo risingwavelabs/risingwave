@@ -64,10 +64,9 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = "0.8"
+risingwave_expr_impl = { workspace = true }
 tempfile = "3"
-
-[target.'cfg(unix)'.dev-dependencies]
-tikv-jemallocator = { git = "https://github.com/yuhao-su/jemallocator.git", rev = "a0911601bb7bb263ca55c7ea161ef308fdc623f8" }
+tikv-jemallocator = { workspace = true }
 
 [[bench]]
 name = "filter"
@@ -100,3 +99,6 @@ harness = false
 [[bench]]
 name = "limit"
 harness = false
+
+[lints]
+workspace = true
