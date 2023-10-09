@@ -15,6 +15,6 @@
 #[cfg(madsim)]
 mod basic;
 #[cfg(madsim)]
-mod utils;
-#[cfg(madsim)]
 mod recovery;
+#[cfg(madsim)]
+mod utils;
