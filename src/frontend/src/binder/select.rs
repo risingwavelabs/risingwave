@@ -207,9 +207,10 @@ impl Binder {
 
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_select_list(select.projection)?;
+        let out_name_to_index = Self::build_name_to_index(aliases.iter().filter_map(Clone::clone));
 
         // Bind DISTINCT ON.
-        let distinct = self.bind_distinct_on(select.distinct)?;
+        let distinct = self.bind_distinct_on(select.distinct, &out_name_to_index, &select_items)?;
 
         // Bind WHERE clause.
         self.context.clause = Some(Clause::Where);
@@ -223,7 +224,6 @@ impl Binder {
         self.context.clause = None;
 
         // Bind GROUP BY clause.
-        let out_name_to_index = Self::build_name_to_index(aliases.iter().filter_map(Clone::clone));
         self.context.clause = Some(Clause::GroupBy);
 
         // Only support one grouping item in group by clause
@@ -360,6 +360,7 @@ impl Binder {
                 }
             }
         }
+        assert_eq!(select_list.len(), aliases.len());
         Ok((select_list, aliases))
     }
 
@@ -769,14 +770,43 @@ impl Binder {
             .unzip()
     }
 
-    fn bind_distinct_on(&mut self, distinct: Distinct) -> Result<BoundDistinct> {
+    /// Bind `DISTINCT` clause in a [`Select`].
+    ///
+    /// # Arguments
+    ///
+    /// * `name_to_index` - output column name -> index. Ambiguous (duplicate) output names are
+    ///   marked with `usize::MAX`.
+    fn bind_distinct_on(
+        &mut self,
+        distinct: Distinct,
+        name_to_index: &HashMap<String, usize>,
+        select_items: &[ExprImpl],
+    ) -> Result<BoundDistinct> {
         Ok(match distinct {
             Distinct::All => BoundDistinct::All,
             Distinct::Distinct => BoundDistinct::Distinct,
             Distinct::DistinctOn(exprs) => {
                 let mut bound_exprs = vec![];
                 for expr in exprs {
-                    bound_exprs.push(self.bind_expr(expr)?);
+                    let name = match &expr {
+                        Expr::Identifier(ident) => Some(ident.real_value()),
+                        _ => None,
+                    };
+                    let expr_impl = match (self.bind_expr(expr), name) {
+                        (Ok(expr_impl), _) => expr_impl,
+                        (Err(e), Some(name)) => match name_to_index.get(&name) {
+                            None => return Err(e),
+                            Some(&usize::MAX) => {
+                                return Err(ErrorCode::BindError(format!(
+                                    "DISTINCT ON \"{name}\" is ambiguous"
+                                ))
+                                .into())
+                            }
+                            Some(out_idx) => select_items[*out_idx].clone(),
+                        },
+                        (Err(e), None) => return Err(e),
+                    };
+                    bound_exprs.push(expr_impl);
                 }
                 BoundDistinct::DistinctOn(bound_exprs)
             }
