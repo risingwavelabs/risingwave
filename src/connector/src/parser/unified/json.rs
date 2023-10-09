@@ -23,7 +23,7 @@ use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
-use simd_json::{BorrowedValue, TryTypeError, ValueAccess, ValueType};
+use simd_json::{BorrowedValue, ValueAccess, ValueType};
 
 use super::{Access, AccessError, AccessResult};
 use crate::parser::common::json_object_get_case_insensitive;
@@ -157,6 +157,7 @@ impl JsonParseOptions {
             got: value.value_type().to_string(),
             value: value.to_string(),
         };
+
         let v: ScalarImpl = match (type_expected, value.value_type()) {
             (_, ValueType::Null) => return Ok(None),
             // ---- Boolean -----
@@ -205,7 +206,7 @@ impl JsonParseOptions {
             (
                 Some(DataType::Int16),
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => value.try_as_i16()?.into(),
+            ) => value.try_as_i16().map_err(|_| create_error())?.into(),
 
             (Some(DataType::Int16), ValueType::String)
                 if matches!(
@@ -226,7 +227,7 @@ impl JsonParseOptions {
             (
                 Some(DataType::Int32),
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => value.try_as_i32()?.into(),
+            ) => value.try_as_i32().map_err(|_| create_error())?.into(),
 
             (Some(DataType::Int32), ValueType::String)
                 if matches!(
@@ -244,11 +245,13 @@ impl JsonParseOptions {
                     .into()
             }
             // ---- Int64 -----
-            (None, ValueType::I64 | ValueType::U64) => value.try_as_i64()?.into(),
+            (None, ValueType::I64 | ValueType::U64) => {
+                value.try_as_i64().map_err(|_| create_error())?.into()
+            }
             (
                 Some(DataType::Int64),
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => value.try_as_i64()?.into(),
+            ) => value.try_as_i64().map_err(|_| create_error())?.into(),
 
             (Some(DataType::Int64), ValueType::String)
                 if matches!(
@@ -270,7 +273,7 @@ impl JsonParseOptions {
                 Some(DataType::Float32),
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) if matches!(self.numeric_handling, NumericHandling::Relax { .. }) => {
-                (value.try_as_i64()? as f32).into()
+                (value.try_as_i64().map_err(|_| create_error())? as f32).into()
             }
             (Some(DataType::Float32), ValueType::String)
                 if matches!(
@@ -287,13 +290,15 @@ impl JsonParseOptions {
                     .map_err(|_| create_error())?
                     .into()
             }
-            (Some(DataType::Float32), ValueType::F64) => value.try_as_f32()?.into(),
+            (Some(DataType::Float32), ValueType::F64) => {
+                value.try_as_f32().map_err(|_| create_error())?.into()
+            }
             // ---- Float64 -----
             (
                 Some(DataType::Float64),
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
             ) if matches!(self.numeric_handling, NumericHandling::Relax { .. }) => {
-                (value.try_as_i64()? as f64).into()
+                (value.try_as_i64().map_err(|_| create_error())? as f64).into()
             }
             (Some(DataType::Float64), ValueType::String)
                 if matches!(
@@ -310,20 +315,24 @@ impl JsonParseOptions {
                     .map_err(|_| create_error())?
                     .into()
             }
-            (Some(DataType::Float64) | None, ValueType::F64) => value.try_as_f64()?.into(),
+            (Some(DataType::Float64) | None, ValueType::F64) => {
+                value.try_as_f64().map_err(|_| create_error())?.into()
+            }
             // ---- Decimal -----
             (Some(DataType::Decimal) | None, ValueType::I128 | ValueType::U128) => {
-                Decimal::from_str(&value.try_as_i128()?.to_string())
+                Decimal::from_str(&value.try_as_i128().map_err(|_| create_error())?.to_string())
                     .map_err(|_| create_error())?
                     .into()
             }
             (Some(DataType::Decimal), ValueType::I64 | ValueType::U64) => {
-                Decimal::from(value.try_as_i64()?).into()
+                Decimal::from(value.try_as_i64().map_err(|_| create_error())?).into()
             }
 
-            (Some(DataType::Decimal), ValueType::F64) => Decimal::try_from(value.try_as_f64()?)
-                .map_err(|_| create_error())?
-                .into(),
+            (Some(DataType::Decimal), ValueType::F64) => {
+                Decimal::try_from(value.try_as_f64().map_err(|_| create_error())?)
+                    .map_err(|_| create_error())?
+                    .into()
+            }
 
             (Some(DataType::Decimal), ValueType::String) => ScalarImpl::Decimal(
                 Decimal::from_str(value.as_str().unwrap()).map_err(|_err| create_error())?,
@@ -353,7 +362,7 @@ impl JsonParseOptions {
             (
                 Some(DataType::Date),
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => Date::with_days_since_unix_epoch(value.try_as_i32()?)
+            ) => Date::with_days_since_unix_epoch(value.try_as_i32().map_err(|_| create_error())?)
                 .map_err(|_| create_error())?
                 .into(),
             (Some(DataType::Date), ValueType::String) => value
@@ -526,7 +535,7 @@ impl JsonParseOptions {
             (
                 Some(DataType::Int256),
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => Int256::from(value.try_as_i64()?).into(),
+            ) => Int256::from(value.try_as_i64().map_err(|_| create_error())?).into(),
 
             (Some(DataType::Int256), ValueType::String) => {
                 Int256::from_str(value.as_str().unwrap())
@@ -577,15 +586,5 @@ where
         }
 
         self.options.parse(value, type_expected)
-    }
-}
-
-impl From<TryTypeError> for AccessError {
-    fn from(value: TryTypeError) -> Self {
-        AccessError::TypeError {
-            expected: value.expected.to_string(),
-            got: value.got.to_string(),
-            value: Default::default(),
-        }
     }
 }

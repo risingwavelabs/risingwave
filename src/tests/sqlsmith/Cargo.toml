@@ -27,7 +27,7 @@ risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_sqlparser = { workspace = true }
-similar = "2.2.1"
+similar = "2.3.0"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7"
 tracing = "0.1"
