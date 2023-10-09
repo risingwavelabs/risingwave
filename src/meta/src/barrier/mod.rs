@@ -948,7 +948,7 @@ impl GlobalBarrierManager {
                 prev_epoch = prev_epoch.value().0
             );
 
-            *state = self.recovery(prev_epoch, None).instrument(span).await;
+            *state = self.recovery(prev_epoch, Some(PausedReason::Manual)).instrument(span).await;
             self.set_status(BarrierManagerStatus::Running).await;
         } else {
             panic!("failed to execute barrier: {:?}", err);
