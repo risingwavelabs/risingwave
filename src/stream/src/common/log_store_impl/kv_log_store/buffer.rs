@@ -244,8 +244,15 @@ impl LogStoreBufferSender {
         self.update_notify.notify_waiters();
     }
 
-    pub(crate) fn pop_truncation(&self) -> Option<ReaderTruncationOffsetType> {
-        self.buffer.inner().updated_truncation.take()
+    pub(crate) fn pop_truncation(&self, curr_epoch: u64) -> Option<ReaderTruncationOffsetType> {
+        let mut inner = self.buffer.inner();
+        if let Some((ref epoch, _)) = &inner.updated_truncation {
+            assert!(*epoch <= curr_epoch);
+            if *epoch < curr_epoch {
+                return inner.updated_truncation.take();
+            }
+        }
+        None
     }
 
     pub(crate) fn flush_all_unflushed(

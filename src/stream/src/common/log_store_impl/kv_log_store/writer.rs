@@ -119,7 +119,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 Ok(())
             })?;
         let mut delete_range = Vec::with_capacity(self.serde.vnodes().count_ones());
-        if let Some(truncation_offset) = self.tx.pop_truncation() {
+        if let Some(truncation_offset) = self.tx.pop_truncation(epoch) {
             for vnode in self.serde.vnodes().iter_vnodes() {
                 let range_begin = Bytes::from(vnode.to_be_bytes().to_vec());
                 let range_end = self
