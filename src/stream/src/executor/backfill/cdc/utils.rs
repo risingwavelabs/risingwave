@@ -99,6 +99,7 @@ async fn parse_debezium_chunk(
 
     // concat the rows in the parsed chunk with the _rw_offset column, we should also retain the Op column
     let mut new_rows = Vec::with_capacity(chunk.capacity());
+    let offset_columns = offset_columns.compact();
     for (data_row, offset_row) in data_chunk
         .rows_with_holes()
         .zip_eq_fast(offset_columns.rows_with_holes())

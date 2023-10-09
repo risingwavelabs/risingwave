@@ -111,7 +111,6 @@ public class DbzCdcEventConsumer
                             .setPartition(String.valueOf(sourceId))
                             .setPayload(new String(payload, StandardCharsets.UTF_8))
                             .build();
-            LOG.info("fullTableName => {}", fullTableName);
             LOG.debug("record => {}", message.getPayload());
             builder.addEvents(message);
             committer.markProcessed(event);
