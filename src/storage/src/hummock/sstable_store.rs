@@ -556,8 +556,8 @@ impl SstableStore {
             let (range_last, _) = sst.calculate_block_info(block_index_end - 1);
             let range = range_first.start..range_last.end;
 
-            let mut writers = Vec::with_capacity(block_index_start - block_index_end);
-            let mut ranges = Vec::with_capacity(block_index_start - block_index_end);
+            let mut writers = Vec::with_capacity(block_index_end - block_index_start);
+            let mut ranges = Vec::with_capacity(block_index_end - block_index_start);
             let mut admits = 0;
 
             for block_index in block_index_start..block_index_end {
