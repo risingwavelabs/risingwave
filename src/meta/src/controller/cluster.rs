@@ -866,6 +866,7 @@ impl ClusterControllerInner {
 }
 
 #[cfg(test)]
+#[cfg(not(madsim))]
 mod tests {
     use super::*;
 
@@ -879,7 +880,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(not(madsim))]
     async fn test_cluster_controller() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
@@ -958,7 +958,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(not(madsim))]
     async fn test_update_schedulability() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
