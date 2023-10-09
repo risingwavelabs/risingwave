@@ -1149,6 +1149,7 @@ where
             read_version_from_backup: false,
             prefetch_options,
             cache_policy: CachePolicy::Fill(CachePriority::High),
+            ..Default::default()
         };
         let table_key_range = map_table_key_range(key_range);
 
@@ -1285,6 +1286,7 @@ where
             read_version_from_backup: false,
             prefetch_options: Default::default(),
             cache_policy: CachePolicy::Fill(CachePriority::High),
+            ..Default::default()
         };
 
         self.local_store

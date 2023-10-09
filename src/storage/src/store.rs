@@ -317,6 +317,7 @@ pub struct ReadOptions {
     /// Read from historical hummock version of meta snapshot backup.
     /// It should only be used by `StorageTable` for batch query.
     pub read_version_from_backup: bool,
+    pub with_tombstone: bool,
 }
 
 impl From<TracedReadOptions> for ReadOptions {
@@ -329,6 +330,7 @@ impl From<TracedReadOptions> for ReadOptions {
             retention_seconds: value.retention_seconds,
             table_id: value.table_id.into(),
             read_version_from_backup: value.read_version_from_backup,
+            with_tombstone: value.with_tombstone,
         }
     }
 }
@@ -343,6 +345,7 @@ impl From<ReadOptions> for TracedReadOptions {
             retention_seconds: value.retention_seconds,
             table_id: value.table_id.into(),
             read_version_from_backup: value.read_version_from_backup,
+            with_tombstone: value.with_tombstone,
         }
     }
 }

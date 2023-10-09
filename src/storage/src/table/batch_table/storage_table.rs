@@ -407,6 +407,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         vnode_hint: Option<VirtualNode>,
         ordered: bool,
         prefetch_options: PrefetchOptions,
+        with_tombstone: bool,
     ) -> StorageResult<StorageTableInnerIter<S, SD>> {
         let cache_policy = match (
             encoded_key_range.start_bound(),
@@ -461,6 +462,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                     read_version_from_backup: read_backup,
                     prefetch_options,
                     cache_policy,
+                    with_tombstone,
                     ..Default::default()
                 };
                 let pk_serializer = match self.output_row_in_key_indices.is_empty() {
@@ -509,6 +511,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
         prefetch_options: PrefetchOptions,
+        with_tombstone: bool,
     ) -> StorageResult<StorageTableInnerIter<S, SD>> {
         // TODO: directly use `prefixed_range`.
         fn serialize_pk_bound(
@@ -617,6 +620,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             self.try_compute_vnode_by_pk_prefix(pk_prefix),
             ordered,
             prefetch_options,
+            with_tombstone,
         )
         .await
     }
@@ -631,8 +635,36 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         ordered: bool,
         prefetch_options: PrefetchOptions,
     ) -> StorageResult<StorageTableInnerIter<S, SD>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options)
-            .await
+        self.iter_with_pk_bounds(
+            epoch,
+            pk_prefix,
+            range_bounds,
+            ordered,
+            prefetch_options,
+            false,
+        )
+        .await
+    }
+
+    /// Construct a [`StorageTableInnerIter`] for batch executors.
+    /// Differs from the streaming one, this iterator will wait for the epoch before iteration
+    pub async fn iter_tombstone_with_pk_bounds(
+        &self,
+        epoch: HummockReadEpoch,
+        pk_prefix: impl Row,
+        range_bounds: impl RangeBounds<OwnedRow>,
+        ordered: bool,
+        prefetch_options: PrefetchOptions,
+    ) -> StorageResult<StorageTableInnerIter<S, SD>> {
+        self.iter_with_pk_bounds(
+            epoch,
+            pk_prefix,
+            range_bounds,
+            ordered,
+            prefetch_options,
+            true,
+        )
+        .await
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
@@ -759,17 +791,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                     }
                     let row = OwnedRow::new(result_row_vec);
 
-                    yield KeyedRow {
-                        vnode_prefixed_key: table_key,
-                        row,
-                    }
+                    yield KeyedRow::new(table_key, row)
                 }
-                None => {
-                    yield KeyedRow {
-                        vnode_prefixed_key: table_key,
-                        row: result_row_in_value,
-                    }
-                }
+                None => yield KeyedRow::new(table_key, result_row_in_value),
             }
         }
     }

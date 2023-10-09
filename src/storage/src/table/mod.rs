@@ -209,6 +209,7 @@ fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
 pub struct KeyedRow<T: AsRef<[u8]>> {
     vnode_prefixed_key: TableKey<T>,
     row: OwnedRow,
+    is_tombstone: bool,
 }
 
 impl<T: AsRef<[u8]>> KeyedRow<T> {
@@ -216,6 +217,7 @@ impl<T: AsRef<[u8]>> KeyedRow<T> {
         Self {
             vnode_prefixed_key: table_key,
             row,
+            is_tombstone: false,
         }
     }
 
