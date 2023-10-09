@@ -268,7 +268,7 @@ impl CacheRefillTask {
         let now = Instant::now();
 
         // return if data file cache is disabled
-        let Some(filter) = context.sstable_store.data_file_cache_refill_filter() else {
+        let Some(filter) = context.sstable_store.data_recent_filter() else {
             return;
         };
 

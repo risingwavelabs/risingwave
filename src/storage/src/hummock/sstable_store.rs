@@ -20,11 +20,13 @@ use std::time::Duration;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
+use foyer::common::code::Key;
 use futures::future::try_join_all;
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
 use risingwave_common::config::StorageMemoryConfig;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
@@ -41,6 +43,7 @@ use super::{
     Block, BlockCache, BlockMeta, BlockResponse, FileCache, RecentFilter, Sstable,
     SstableBlockIndex, SstableMeta, SstableWriter,
 };
+use crate::hummock::file_cache::preclude::*;
 use crate::hummock::multi_builder::UploadJoinHandle;
 use crate::hummock::{
     BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache, MemoryLimiter,
@@ -107,7 +110,7 @@ impl LruCacheEventListener for BlockCacheEventListener {
             sst_id: key.0,
             block_idx: key.1,
         };
-        self.data_file_cache.insert_without_wait(key, value);
+        self.data_file_cache.insert_async(key, value);
     }
 }
 
@@ -118,7 +121,7 @@ impl LruCacheEventListener for MetaCacheEventListener {
     type T = Box<Sstable>;
 
     fn on_release(&self, key: Self::K, value: Self::T) {
-        self.0.insert_without_wait(key, value);
+        self.0.insert_async(key, value);
     }
 }
 
@@ -131,7 +134,7 @@ pub struct SstableStore {
     data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
     meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
 
-    data_file_cache_refill_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
+    recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
 }
 
 impl SstableStore {
@@ -154,7 +157,8 @@ impl SstableStore {
             data_file_cache: data_file_cache.clone(),
         });
         let meta_cache_listener = Arc::new(MetaCacheEventListener(meta_file_cache.clone()));
-        let data_file_cache_refill_filter = if data_file_cache.is_filter_enabled() {
+
+        let recent_filter = if matches!(data_file_cache, FileCache::Foyer { .. }) {
             Some(Arc::new(RecentFilter::new(6, Duration::from_secs(10))))
         } else {
             None
@@ -179,7 +183,7 @@ impl SstableStore {
             data_file_cache,
             meta_file_cache,
 
-            data_file_cache_refill_filter,
+            recent_filter,
         }
     }
 
@@ -200,7 +204,7 @@ impl SstableStore {
             data_file_cache: FileCache::none(),
             meta_file_cache: FileCache::none(),
 
-            data_file_cache_refill_filter: None,
+            recent_filter: None,
         }
     }
 
@@ -310,7 +314,7 @@ impl SstableStore {
             policy
         };
 
-        if let Some(filter) = self.data_file_cache_refill_filter.as_ref() {
+        if let Some(filter) = self.recent_filter.as_ref() {
             filter.insert(object_id);
         }
 
@@ -323,7 +327,7 @@ impl SstableStore {
             )),
             CachePolicy::FillFileCache => {
                 let block = fetch_block().await?;
-                self.data_file_cache.insert_without_wait(
+                self.data_file_cache.insert_async(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: block_index as u64,
@@ -490,7 +494,7 @@ impl SstableStore {
         block_index: u64,
         block: Box<Block>,
     ) {
-        if let Some(filter) = self.data_file_cache_refill_filter.as_ref() {
+        if let Some(filter) = self.recent_filter.as_ref() {
             filter.insert(object_id);
         }
         self.block_cache
@@ -525,10 +529,8 @@ impl SstableStore {
         ))
     }
 
-    pub fn data_file_cache_refill_filter(
-        &self,
-    ) -> Option<&Arc<RecentFilter<HummockSstableObjectId>>> {
-        self.data_file_cache_refill_filter.as_ref()
+    pub fn data_recent_filter(&self) -> Option<&Arc<RecentFilter<HummockSstableObjectId>>> {
+        self.recent_filter.as_ref()
     }
 
     pub fn data_file_cache(&self) -> &FileCache<SstableBlockIndex, Box<Block>> {
@@ -538,35 +540,73 @@ impl SstableStore {
     pub async fn fill_data_file_cache(&self, sst: &Sstable) -> HummockResult<()> {
         let object_id = sst.id;
 
-        if let Some(filter) = self.data_file_cache_refill_filter.as_ref() {
+        if let Some(filter) = self.recent_filter.as_ref() {
             filter.insert(object_id);
         }
 
-        let data = self
-            .store
-            .read(&self.get_sst_data_path(object_id), ..)
-            .await?;
+        const STEP: usize = 16;
+        const ADMIT_THRESHOLD: f64 = 0.5;
 
         let mut tasks = vec![];
-        for block_index in 0..sst.block_count() {
-            let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
-            let bytes = data.slice(range);
-            let block = Block::decode(bytes, uncompressed_capacity)?;
-            let block = Box::new(block);
 
-            let key = SstableBlockIndex {
-                sst_id: object_id,
-                block_idx: block_index as u64,
-            };
+        for block_index_start in (0..sst.block_count()).step_by(STEP) {
+            let block_index_end = std::cmp::min(block_index_start + STEP, sst.block_count());
 
-            let cache = self.data_file_cache.clone();
-            let task = async move {
-                cache
-                    .insert(key, block)
-                    .await
-                    .map_err(HummockError::file_cache)
-            };
-            tasks.push(task);
+            let (range_first, _) = sst.calculate_block_info(block_index_start);
+            let (range_last, _) = sst.calculate_block_info(block_index_end - 1);
+            let range = range_first.start..range_last.end;
+
+            let mut writers = Vec::with_capacity(block_index_start - block_index_end);
+            let mut ranges = Vec::with_capacity(block_index_start - block_index_end);
+            let mut admits = 0;
+
+            for block_index in block_index_start..block_index_end {
+                let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
+                let key = SstableBlockIndex {
+                    sst_id: object_id,
+                    block_idx: block_index as u64,
+                };
+                let mut writer = self
+                    .data_file_cache
+                    .writer(key, key.serialized_len() + uncompressed_capacity);
+
+                if writer.judge() {
+                    admits += 1;
+                }
+
+                writers.push(writer);
+                ranges.push(range);
+            }
+
+            if admits as f64 / writers.len() as f64 >= ADMIT_THRESHOLD {
+                let task = async move {
+                    let data = self
+                        .store
+                        .read(&self.get_sst_data_path(object_id), range.clone())
+                        .await?;
+                    let mut futures = vec![];
+                    for (writer, r) in writers.into_iter().zip_eq_fast(ranges) {
+                        let offset = r.start - range.start;
+                        let len = r.end - r.start;
+                        let bytes = data.slice(offset..offset + len);
+
+                        let future = async move {
+                            let block = Block::decode(
+                                bytes,
+                                writer.weight() - writer.key().serialized_len(),
+                            )?;
+                            let block = Box::new(block);
+                            writer.finish(block).await.map_err(HummockError::file_cache)
+                        };
+                        futures.push(future);
+                    }
+                    try_join_all(futures)
+                        .await
+                        .map_err(HummockError::file_cache)?;
+                    Ok::<_, HummockError>(())
+                };
+                tasks.push(task);
+            }
         }
 
         try_join_all(tasks).await?;
@@ -752,7 +792,7 @@ impl SstableWriter for BatchUploadWriter {
                 .await?;
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 
-            if let Some(filter) = self.sstable_store.data_file_cache_refill_filter.as_ref() {
+            if let Some(filter) = self.sstable_store.recent_filter.as_ref() {
                 filter.insert(self.object_id);
             }
 

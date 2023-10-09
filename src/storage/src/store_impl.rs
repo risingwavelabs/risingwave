@@ -24,10 +24,11 @@ use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
+use crate::hummock::file_cache::preclude::*;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{
-    set_foyer_metrics_registry, FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError,
-    HummockStorage, SstableStore,
+    set_foyer_metrics_registry, FileCache, FileCacheConfig, HummockError, HummockStorage,
+    SstableStore,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -531,7 +532,7 @@ impl StateStoreImpl {
         } else {
             const MB: usize = 1024 * 1024;
 
-            let foyer_store_config = FoyerStoreConfig {
+            let config = FileCacheConfig {
                 name: "data".to_string(),
                 dir: PathBuf::from(opts.data_file_cache_dir.clone()),
                 capacity: opts.data_file_cache_capacity_mb * MB,
@@ -547,7 +548,6 @@ impl StateStoreImpl {
                 flush_rate_limit: opts.data_file_cache_flush_rate_limit_mb * MB,
                 reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
-                enable_filter: !opts.cache_refill_data_refill_levels.is_empty(),
                 allocator_bits: opts.data_file_cache_allocation_bits,
                 allocation_timeout: Duration::from_millis(
                     opts.data_file_cache_allocation_timeout_ms as u64,
@@ -555,11 +555,9 @@ impl StateStoreImpl {
                 admissions: vec![],
                 reinsertions: vec![],
             };
-            let config = FoyerRuntimeConfig {
-                foyer_store_config,
-                runtime_worker_threads: None,
-            };
-            FileCache::foyer(config).map_err(HummockError::file_cache)?
+            FileCache::open(config)
+                .await
+                .map_err(HummockError::file_cache)?
         };
 
         let meta_file_cache = if opts.meta_file_cache_dir.is_empty() {
@@ -567,7 +565,7 @@ impl StateStoreImpl {
         } else {
             const MB: usize = 1024 * 1024;
 
-            let foyer_store_config = FoyerStoreConfig {
+            let config = FileCacheConfig {
                 name: "meta".to_string(),
                 dir: PathBuf::from(opts.meta_file_cache_dir.clone()),
                 capacity: opts.meta_file_cache_capacity_mb * MB,
@@ -583,7 +581,6 @@ impl StateStoreImpl {
                 flush_rate_limit: opts.meta_file_cache_flush_rate_limit_mb * MB,
                 reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
-                enable_filter: false,
                 allocator_bits: opts.meta_file_cache_allocation_bits,
                 allocation_timeout: Duration::from_millis(
                     opts.meta_file_cache_allocation_timeout_ms as u64,
@@ -591,11 +588,9 @@ impl StateStoreImpl {
                 admissions: vec![],
                 reinsertions: vec![],
             };
-            let config = FoyerRuntimeConfig {
-                foyer_store_config,
-                runtime_worker_threads: None,
-            };
-            FileCache::foyer(config).map_err(HummockError::file_cache)?
+            FileCache::open(config)
+                .await
+                .map_err(HummockError::file_cache)?
         };
 
         let store = match s {

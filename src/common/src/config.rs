@@ -1147,7 +1147,7 @@ pub mod default {
         }
 
         pub fn allocation_bits() -> usize {
-            4
+            0
         }
 
         pub fn allocation_timeout_ms() -> usize {
