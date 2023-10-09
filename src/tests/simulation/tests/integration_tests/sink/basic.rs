@@ -311,7 +311,7 @@ async fn test_sink_decouple_blackhole() -> Result<()> {
         etcd_timeout_rate: 0.0,
         etcd_data_path: None,
     })
-        .await?;
+    .await?;
 
     let source_parallelism = 12;
     let mut txs = Vec::new();
@@ -338,7 +338,7 @@ async fn test_sink_decouple_blackhole() -> Result<()> {
                 let rx = rxs[id].take().unwrap();
                 UnboundedReceiverStream::new(rx).map(|chunk| Ok(StreamChunkWithState::from(chunk)))
             }))
-                .boxed()
+            .boxed()
         },
     ));
 
