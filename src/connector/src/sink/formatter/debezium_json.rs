@@ -100,8 +100,11 @@ impl SinkFormatter for DebeziumJsonFormatter {
                 .unwrap()
                 .as_millis() as u64;
             let source_field = json!({
+                // todo: still some missing fields in source field
+                // ref https://debezium.io/documentation/reference/2.4/connectors/postgresql.html#postgresql-create-events
                 "db": db_name,
                 "table": sink_from_name,
+                "ts_ms": ts_ms,
             });
 
             let mut update_cache: Option<Map<String, Value>> = None;
