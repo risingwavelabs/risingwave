@@ -30,7 +30,7 @@ const SHOW_INTERNAL_TABLES: &str = "SHOW INTERNAL TABLES;";
 
 static EXPECTED_NO_BACKFILL: LazyLock<String> = LazyLock::new(|| {
     (0..=255)
-        .map(|vnode| format!("{} NULL t", vnode))
+        .map(|vnode| format!("{} NULL t 0", vnode))
         .join("\n")
 });
 

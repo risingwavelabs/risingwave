@@ -19,8 +19,9 @@ use std::process::Command;
 
 use crate::{add_hummock_backend, HummockInMemoryStrategy, ServiceConfig};
 
-/// Generate environment variables from the given service configurations to be used by future
-/// RiseDev commands, like `risedev ctl` or `risedev psql`.
+/// Generate environment variables (put in file `.risingwave/config/risedev-env`)
+/// from the given service configurations to be used by future
+/// RiseDev commands, like `risedev ctl` or `risedev psql` ().
 pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
     let mut env = String::new();
     for item in services {
