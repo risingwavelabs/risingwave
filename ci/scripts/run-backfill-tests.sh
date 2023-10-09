@@ -43,21 +43,13 @@ test_basic() {
 
 test_replication_with_column_pruning() {
    run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_base_table.sql
-   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert_seed.sql
-
    # Provide snapshot
-   for i in $(seq 1 18)
-   do
-     run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert_recurse.sql
-   done
+   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql
 
    run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_mv.sql &
 
    # Provide upstream updates
-   for i in $(seq 1 2)
-   do
-     run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert_recurse.sql &
-   done
+   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql &
 
    wait
 
@@ -69,9 +61,9 @@ main() {
   set -euo pipefail
   echo "--- Basic test"
   test_basic
-  # echo "--- Replication with Column pruning"
-  # test_replication_with_column_pruning
-  # echo "Backfill tests complete"
+  echo "--- Replication with Column pruning"
+  test_replication_with_column_pruning
+  echo "Backfill tests complete"
 }
 
 main
