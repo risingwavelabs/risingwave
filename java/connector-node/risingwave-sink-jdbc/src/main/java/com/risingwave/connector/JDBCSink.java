@@ -18,7 +18,6 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
 import com.risingwave.connector.jdbc.JdbcDialect;
-import com.risingwave.connector.jdbc.JdbcDialectFactory;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
 import java.sql.*;
@@ -33,7 +32,12 @@ public class JDBCSink extends SinkWriterBase {
     private final JDBCSinkConfig config;
     private final Connection conn;
     private final List<String> pkColumnNames;
+
+    // column name -> java.sql.Types
+    private final Map<String, Integer> columnTypeMapping;
+
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
+    public static final String JDBC_DATA_TYPE_KEY = "DATA_TYPE";
 
     private PreparedStatement insertPreparedStmt;
     private PreparedStatement upsertPreparedStmt;
@@ -48,18 +52,22 @@ public class JDBCSink extends SinkWriterBase {
 
         var jdbcUrl = config.getJdbcUrl().toLowerCase();
         var factory = JdbcUtils.getDialectFactory(jdbcUrl);
-        this.jdbcDialect =
-                factory.map(JdbcDialectFactory::create)
-                        .orElseThrow(
-                                () ->
-                                        Status.INVALID_ARGUMENT
-                                                .withDescription("Unsupported jdbc url: " + jdbcUrl)
-                                                .asRuntimeException());
         this.config = config;
         try {
             this.conn = DriverManager.getConnection(config.getJdbcUrl());
             this.pkColumnNames =
                     getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
+            this.columnTypeMapping =
+                    getColumnTypeMapping(conn, config.getTableName(), config.getSchemaName());
+
+            if (factory.isPresent()) {
+                this.jdbcDialect = factory.get().create(columnTypeMapping);
+            } else {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription("Unsupported jdbc url: " + jdbcUrl)
+                        .asRuntimeException();
+            }
+
             // disable auto commit can improve performance
             this.conn.setAutoCommit(false);
             // explicitly set isolation level to RC
@@ -111,6 +119,28 @@ public class JDBCSink extends SinkWriterBase {
                             String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
                     .asRuntimeException();
         }
+    }
+
+    private static Map<String, Integer> getColumnTypeMapping(
+            Connection conn, String tableName, String schemaName) {
+        Map<String, Integer> columnTypeMap = new HashMap<>();
+        try {
+            ResultSet columnResultSet =
+                    conn.getMetaData().getColumns(null, schemaName, tableName, null);
+
+            while (columnResultSet.next()) {
+                columnTypeMap.put(
+                        columnResultSet.getString(JDBC_COLUMN_NAME_KEY),
+                        columnResultSet.getInt(JDBC_DATA_TYPE_KEY));
+            }
+        } catch (SQLException e) {
+            throw Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
+        }
+        LOG.info("detected column type mapping {}", columnTypeMap);
+        return columnTypeMap;
     }
 
     private static List<String> getPkColumnNames(

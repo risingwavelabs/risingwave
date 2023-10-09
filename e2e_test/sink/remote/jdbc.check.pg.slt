@@ -39,3 +39,8 @@ select * from biz.t2 order by "aBc";
 ----
 1
 2
+
+query IT
+select * from t1_uuid;
+----
+221 74605c5a-a7bb-4b3b-8742-2a12e9709dea

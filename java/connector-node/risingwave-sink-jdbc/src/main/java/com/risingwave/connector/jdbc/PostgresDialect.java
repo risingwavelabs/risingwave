@@ -20,12 +20,19 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import org.postgresql.util.PGInterval;
 import org.postgresql.util.PGobject;
 
 public class PostgresDialect implements JdbcDialect {
+
+    private final Map<String, Integer> columnTypeMapping;
+
+    public PostgresDialect(Map<String, Integer> columnTypeMapping) {
+        this.columnTypeMapping = columnTypeMapping;
+    }
 
     @Override
     public SchemaTableName createSchemaTableName(String schemaName, String tableName) {
@@ -111,6 +118,12 @@ public class PostgresDialect implements JdbcDialect {
                     var fieldType = column.getDataType().getFieldType(0);
                     stmt.setArray(
                             i + 1, conn.createArrayOf(fieldType.getTypeName().name(), objArray));
+                    break;
+                case VARCHAR:
+                    // since VARCHAR column may sink to a UUID column, we get the target type
+                    // from the mapping which should be Types.OTHER.
+                    stmt.setObject(
+                            placeholderIdx++, row.get(i), columnTypeMapping.get(column.getName()));
                     break;
                 default:
                     stmt.setObject(placeholderIdx++, row.get(i));

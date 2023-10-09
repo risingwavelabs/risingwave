@@ -14,7 +14,9 @@
 
 package com.risingwave.connector.jdbc;
 
+import java.util.Map;
+
 public interface JdbcDialectFactory {
 
-    JdbcDialect create();
+    JdbcDialect create(Map<String, Integer> columnTypeMapping);
 }

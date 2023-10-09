@@ -14,10 +14,12 @@
 
 package com.risingwave.connector.jdbc;
 
+import java.util.Map;
+
 public class MySqlDialectFactory implements JdbcDialectFactory {
 
     @Override
-    public JdbcDialect create() {
+    public JdbcDialect create(Map<String, Integer> columnTypeMapping) {
         return new MySqlDialect();
     }
 }
