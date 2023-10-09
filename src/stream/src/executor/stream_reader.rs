@@ -107,6 +107,7 @@ impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
     /// Pause the data stream.
     pub fn pause_stream(&mut self) {
         assert!(!self.paused, "already paused");
+        tracing::info!("source executor is paused");
         self.paused = true;
     }
 
