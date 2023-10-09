@@ -482,7 +482,7 @@ impl CompactorRunner {
             total_read_bytes += sst.file_size;
         }
         self.metrics
-            .write_build_l0_bytes
+            .compact_fast_runner_bytes
             .inc_by(skip_raw_block_size);
         tracing::info!(
             "OPTIMIZATION: skip {} blocks for task-{}, optimize {}% data compression",
