@@ -1047,6 +1047,7 @@ fn sig_data_type(ty: &str) -> TokenStream2 {
         "any" => quote! { SigDataType::Any },
         "anyarray" => quote! { SigDataType::AnyArray },
         "struct" => quote! { SigDataType::AnyStruct },
+        _ if ty.starts_with("struct") && ty.contains("any") => quote! { SigDataType::AnyStruct },
         _ => {
             let datatype = data_type(ty);
             quote! { SigDataType::Exact(#datatype) }
