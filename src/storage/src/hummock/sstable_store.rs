@@ -15,7 +15,6 @@ use std::clone::Clone;
 use std::future::Future;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
@@ -146,6 +145,7 @@ impl SstableStore {
         high_priority_ratio: usize,
         data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
         meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
+        recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
     ) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
@@ -157,12 +157,6 @@ impl SstableStore {
             data_file_cache: data_file_cache.clone(),
         });
         let meta_cache_listener = Arc::new(MetaCacheEventListener(meta_file_cache.clone()));
-
-        let recent_filter = if matches!(data_file_cache, FileCache::Foyer { .. }) {
-            Some(Arc::new(RecentFilter::new(6, Duration::from_secs(10))))
-        } else {
-            None
-        };
 
         Self {
             path,

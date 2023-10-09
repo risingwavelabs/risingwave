@@ -595,6 +595,12 @@ pub struct CacheRefillConfig {
     #[serde(default = "default::cache_refill::concurrency")]
     pub concurrency: usize,
 
+    #[serde(default = "default::cache_refill::recent_filter_layers")]
+    pub recent_filter_layers: usize,
+
+    #[serde(default = "default::cache_refill::recent_filter_rotate_interval_ms")]
+    pub recent_filter_rotate_interval_ms: usize,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -1170,6 +1176,14 @@ pub mod default {
 
         pub fn concurrency() -> usize {
             10
+        }
+
+        pub fn recent_filter_layers() -> usize {
+            6
+        }
+
+        pub fn recent_filter_rotate_interval_ms() -> usize {
+            10000
         }
     }
 

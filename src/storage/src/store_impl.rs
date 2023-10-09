@@ -28,7 +28,7 @@ use crate::hummock::file_cache::preclude::*;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{
     set_foyer_metrics_registry, FileCache, FileCacheConfig, HummockError, HummockStorage,
-    SstableStore,
+    RecentFilter, SstableStore,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -527,8 +527,8 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
 
-        let data_file_cache = if opts.data_file_cache_dir.is_empty() {
-            FileCache::none()
+        let (data_file_cache, recent_filter) = if opts.data_file_cache_dir.is_empty() {
+            (FileCache::none(), None)
         } else {
             const MB: usize = 1024 * 1024;
 
@@ -555,9 +555,14 @@ impl StateStoreImpl {
                 admissions: vec![],
                 reinsertions: vec![],
             };
-            FileCache::open(config)
+            let cache = FileCache::open(config)
                 .await
-                .map_err(HummockError::file_cache)?
+                .map_err(HummockError::file_cache)?;
+            let filter = Some(Arc::new(RecentFilter::new(
+                opts.cache_refill_recent_filter_layers,
+                Duration::from_millis(opts.cache_refill_recent_filter_rotate_interval_ms as u64),
+            )));
+            (cache, filter)
         };
 
         let meta_file_cache = if opts.meta_file_cache_dir.is_empty() {
@@ -616,6 +621,7 @@ impl StateStoreImpl {
                     opts.high_priority_ratio,
                     data_file_cache,
                     meta_file_cache,
+                    recent_filter,
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
