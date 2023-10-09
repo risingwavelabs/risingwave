@@ -73,22 +73,22 @@ def section_overview(panels):
             ],
         ),
         panels.timeseries_rowsps(
-            "Aggregated Sink Throughput(rows/s)",
-            "The figure shows the number of rows output by each sink per second.",
+            "Sink Throughput(rows/s)",
+            "The number of rows streamed into each sink per second.",
             [
                 panels.target(
-                    f"sum(rate({metric('stream_executor_row_count', filter=sink_filter)}[$__rate_interval])) by (executor_identity)",
-                    "{{executor_identity}}",
+                    f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)",
+                    "sink {{sink_id}} {{sink_name}}",
                 ),
             ],
         ),
         panels.timeseries_rowsps(
-            "Aggregated Materialized View Throughput(rows/s)",
-            "The figure shows the number of rows output by each materialized view per second.",
+            "Materialized View Throughput(rows/s)",
+            "The figure shows the number of rows written into each materialized view per second.",
             [
                 panels.target(
-                    f"sum(rate({metric('stream_executor_row_count', filter=mv_filter)}[$__rate_interval])) by (executor_identity)",
-                    "{{executor_identity}}",
+                    f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
+                    "mview {{table_id}} {{table_name}}",
                 ),
             ],
         ),

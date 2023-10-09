@@ -105,8 +105,8 @@ pub(super) mod handlers {
         let mut result = srv
             .cluster_manager
             .list_worker_node(
-                WorkerType::from_i32(ty)
-                    .ok_or_else(|| anyhow!("invalid worker type"))
+                WorkerType::try_from(ty)
+                    .map_err(|_| anyhow!("invalid worker type"))
                     .map_err(err)?,
                 None,
             )

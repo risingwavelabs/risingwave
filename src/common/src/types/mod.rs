@@ -37,6 +37,7 @@ use crate::array::{
     ArrayBuilderImpl, ArrayError, ArrayResult, PrimitiveArrayItemType, NULL_VAL_FOR_HASH,
 };
 pub use crate::array::{ListRef, ListValue, StructRef, StructValue};
+use crate::cast::{str_to_bool, str_to_bytea};
 use crate::error::{BoxedError, ErrorCode, Result as RwResult};
 use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
@@ -565,18 +566,13 @@ impl ToOwnedDatum for DatumRef<'_> {
     }
 }
 
+#[auto_impl::auto_impl(&)]
 pub trait ToDatumRef: PartialEq + Eq + Debug {
     /// Convert the datum to [`DatumRef`].
     fn to_datum_ref(&self) -> DatumRef<'_>;
 }
 
 impl ToDatumRef for Datum {
-    #[inline(always)]
-    fn to_datum_ref(&self) -> DatumRef<'_> {
-        self.as_ref().map(|d| d.as_scalar_ref_impl())
-    }
-}
-impl ToDatumRef for &Datum {
     #[inline(always)]
     fn to_datum_ref(&self) -> DatumRef<'_> {
         self.as_ref().map(|d| d.as_scalar_ref_impl())
@@ -977,6 +973,39 @@ impl<'a> From<&'a ScalarImpl> for ScalarRefImpl<'a> {
 }
 
 impl ScalarImpl {
+    /// A lite version of casting from string to target type. Used by frontend to handle types that have
+    /// to be created by casting.
+    ///
+    /// For example, the user can input `1` or `true` directly, but they have to use
+    /// `'2022-01-01'::date`.
+    pub fn from_literal(s: &str, t: &DataType) -> std::result::Result<Self, String> {
+        Ok(match t {
+            DataType::Boolean => str_to_bool(s)?.into(),
+            DataType::Int16 => i16::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Int32 => i32::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Int64 => i64::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Int256 => Int256::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Serial => return Err("not supported".into()),
+            DataType::Decimal => Decimal::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Float32 => F32::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Float64 => F64::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Varchar => s.into(),
+            DataType::Date => Date::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Timestamp => Timestamp::from_str(s).map_err(|e| e.to_string())?.into(),
+            // We only handle the case with timezone here, and leave the implicit session timezone case
+            // for later phase.
+            DataType::Timestamptz => Timestamptz::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Time => Time::from_str(s).map_err(|e| e.to_string())?.into(),
+            DataType::Interval => Interval::from_str(s).map_err(|e| e.to_string())?.into(),
+            // Not processing list or struct literal right now. Leave it for later phase (normal backend
+            // evaluation).
+            DataType::List { .. } => return Err("not supported".into()),
+            DataType::Struct(_) => return Err("not supported".into()),
+            DataType::Jsonb => return Err("not supported".into()),
+            DataType::Bytea => str_to_bytea(s)?.into(),
+        })
+    }
+
     /// Converts [`ScalarImpl`] to [`ScalarRefImpl`]
     pub fn as_scalar_ref_impl(&self) -> ScalarRefImpl<'_> {
         dispatch_scalar_variants!(self, inner, { inner.as_scalar_ref().into() })

@@ -22,10 +22,9 @@ use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
-use risingwave_common::util::value_encoding;
-use risingwave_expr::agg::{agg_kinds, AggKind};
+use risingwave_common::util::value_encoding::DatumToProtoExt;
+use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use risingwave_expr::sig::FUNCTION_REGISTRY;
-use risingwave_pb::data::PbDatum;
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
@@ -195,7 +194,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
         Schema { fields }
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         Some((0..self.group_key.len()).collect())
     }
 
@@ -344,7 +343,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         window_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
         let in_fields = self.input.schema().fields().to_vec();
-        let in_pks = self.input.logical_pk().to_vec();
+        let in_pks = self.input.stream_key().to_vec();
         let in_append_only = self.input.append_only();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
 
@@ -718,9 +717,7 @@ impl PlanAggCall {
                 .direct_args
                 .iter()
                 .map(|x| PbConstant {
-                    datum: Some(PbDatum {
-                        body: value_encoding::serialize_datum(x.get_data()),
-                    }),
+                    datum: Some(x.get_data().to_protobuf()),
                     r#type: Some(x.return_type().to_protobuf()),
                 })
                 .collect(),

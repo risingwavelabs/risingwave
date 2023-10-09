@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::build_from_prost;
+use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::*;
@@ -52,12 +52,12 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
         let window_start_exprs: Vec<_> = node
             .get_window_start_exprs()
             .iter()
-            .map(build_from_prost)
+            .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
             .try_collect()?;
         let window_end_exprs: Vec<_> = node
             .get_window_end_exprs()
             .iter()
-            .map(build_from_prost)
+            .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
             .try_collect()?;
 
         let time_col = node.get_time_col() as usize;

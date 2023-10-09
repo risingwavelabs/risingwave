@@ -124,7 +124,7 @@ impl FunctionAttr {
         let deprecated = self.deprecated;
 
         Ok(quote! {
-            #[risingwave_expr::ctor]
+            #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
                 use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
@@ -275,9 +275,9 @@ impl FunctionAttr {
             quote! {
                 let mut columns = Vec::with_capacity(self.children.len() - #num_args);
                 for child in &self.children[#num_args..] {
-                    columns.push(child.eval_checked(input).await?);
+                    columns.push(child.eval(input).await?);
                 }
-                let variadic_input = DataChunk::new(columns, input.vis().clone());
+                let variadic_input = DataChunk::new(columns, input.visibility().clone());
             }
         });
         // evaluate variadic arguments in `eval_row`
@@ -387,6 +387,7 @@ impl FunctionAttr {
         } else if (types::is_primitive(&self.ret) || self.ret == "boolean")
             && user_fn.is_pure()
             && !variadic
+            && self.prebuild.is_none()
         {
             // SIMD optimization for primitive types
             match self.args.len() {
@@ -431,24 +432,21 @@ impl FunctionAttr {
             quote! {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
 
-                match input.vis() {
-                    Vis::Bitmap(vis) => {
-                        // allow using `zip` for performance
-                        #[allow(clippy::disallowed_methods)]
-                        for (i, ((#(#inputs,)*), visible)) in #array_zip.zip(vis.iter()).enumerate() {
-                            if !visible {
-                                builder.append_null();
-                                continue;
-                            }
-                            #let_variadic
-                            #append_output
-                        }
+                if input.is_compacted() {
+                    for (i, (#(#inputs,)*)) in #array_zip.enumerate() {
+                        #let_variadic
+                        #append_output
                     }
-                    Vis::Compact(_) => {
-                        for (i, (#(#inputs,)*)) in #array_zip.enumerate() {
-                            #let_variadic
-                            #append_output
+                } else {
+                    // allow using `zip` for performance
+                    #[allow(clippy::disallowed_methods)]
+                    for (i, ((#(#inputs,)*), visible)) in #array_zip.zip(input.visibility().iter()).enumerate() {
+                        if !visible {
+                            builder.append_null();
+                            continue;
                         }
+                        #let_variadic
+                        #append_output
                     }
                 }
                 Ok(Arc::new(builder.finish().into()))
@@ -465,10 +463,10 @@ impl FunctionAttr {
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::row::OwnedRow;
                 use risingwave_common::util::iter_util::ZipEqFast;
-                use itertools::multizip;
 
                 use risingwave_expr::expr::{Context, BoxedExpression};
                 use risingwave_expr::Result;
+                use risingwave_expr::codegen::*;
 
                 #check_children
                 let prebuilt_arg = #prebuild_const;
@@ -483,14 +481,14 @@ impl FunctionAttr {
                     children: Vec<BoxedExpression>,
                     prebuilt_arg: #prebuilt_arg_type,
                 }
-                #[async_trait::async_trait]
+                #[async_trait]
                 impl risingwave_expr::expr::Expression for #struct_name {
                     fn return_type(&self) -> DataType {
                         self.context.return_type.clone()
                     }
                     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
                         #(
-                            let #array_refs = self.children[#children_indices].eval_checked(input).await?;
+                            let #array_refs = self.children[#children_indices].eval(input).await?;
                             let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
                         #eval_variadic
@@ -559,13 +557,13 @@ impl FunctionAttr {
         let deprecated = self.deprecated;
 
         Ok(quote! {
-            #[risingwave_expr::ctor]
+            #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
                 use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
 
                 unsafe { _register(FuncSign {
-                    name: risingwave_expr::agg::AggKind::#pb_type.into(),
+                    name: risingwave_expr::aggregate::AggKind::#pb_type.into(),
                     inputs_type: vec![#(#args),*],
                     variadic: false,
                     ret_type: #ret,
@@ -736,7 +734,8 @@ impl FunctionAttr {
                 use risingwave_common::estimate_size::EstimateSize;
 
                 use risingwave_expr::Result;
-                use risingwave_expr::agg::AggregateState;
+                use risingwave_expr::aggregate::AggregateState;
+                use risingwave_expr::codegen::async_trait;
 
                 #[derive(Clone)]
                 struct Agg {
@@ -744,8 +743,8 @@ impl FunctionAttr {
                     #function_field
                 }
 
-                #[async_trait::async_trait]
-                impl risingwave_expr::agg::AggregateFunction for Agg {
+                #[async_trait]
+                impl risingwave_expr::aggregate::AggregateFunction for Agg {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }
@@ -756,21 +755,10 @@ impl FunctionAttr {
                         #(#let_arrays)*
                         let state0 = state0.as_datum_mut();
                         let mut state: Option<#state_type> = #let_state;
-                        match input.vis() {
-                            Vis::Bitmap(bitmap) => {
-                                for row_id in bitmap.iter_ones() {
-                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #(#let_values)*
-                                    state = #next_state;
-                                }
-                            }
-                            Vis::Compact(_) => {
-                                for row_id in 0..input.capacity() {
-                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #(#let_values)*
-                                    state = #next_state;
-                                }
-                            }
+                        for row_id in input.visibility().iter_ones() {
+                            let op = unsafe { *input.ops().get_unchecked(row_id) };
+                            #(#let_values)*
+                            state = #next_state;
                         }
                         *state0 = #assign_state;
                         Ok(())
@@ -781,25 +769,22 @@ impl FunctionAttr {
                         #(#let_arrays)*
                         let state0 = state0.as_datum_mut();
                         let mut state: Option<#state_type> = #let_state;
-                        match input.vis() {
-                            Vis::Bitmap(bitmap) => {
-                                for row_id in bitmap.iter_ones() {
-                                    if row_id < range.start {
-                                        continue;
-                                    } else if row_id >= range.end {
-                                        break;
-                                    }
-                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #(#let_values)*
-                                    state = #next_state;
-                                }
+                        if input.is_compacted() {
+                            for row_id in range {
+                                let op = unsafe { *input.ops().get_unchecked(row_id) };
+                                #(#let_values)*
+                                state = #next_state;
                             }
-                            Vis::Compact(_) => {
-                                for row_id in range {
-                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #(#let_values)*
-                                    state = #next_state;
+                        } else {
+                            for row_id in input.visibility().iter_ones() {
+                                if row_id < range.start {
+                                    continue;
+                                } else if row_id >= range.end {
+                                    break;
                                 }
+                                let op = unsafe { *input.ops().get_unchecked(row_id) };
+                                #(#let_values)*
+                                state = #next_state;
                             }
                         }
                         *state0 = #assign_state;
@@ -847,7 +832,7 @@ impl FunctionAttr {
         let deprecated = self.deprecated;
 
         Ok(quote! {
-            #[risingwave_expr::ctor]
+            #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
                 use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
@@ -909,15 +894,26 @@ impl FunctionAttr {
                 .map(|i| quote! { self.return_type.as_struct().types().nth(#i).unwrap().clone() })
                 .collect()
         };
+        #[allow(clippy::disallowed_methods)]
+        let optioned_outputs = user_fn
+            .core_return_type
+            .split(',')
+            .map(|t| t.contains("Option"))
+            // example: "(Option<&str>, i32)" => [true, false]
+            .zip(&outputs)
+            .map(|(optional, o)| match optional {
+                false => quote! { Some(#o.as_scalar_ref()) },
+                true => quote! { #o.map(|o| o.as_scalar_ref()) },
+            })
+            .collect_vec();
         let build_value_array = if return_types.len() == 1 {
             quote! { let [value_array] = value_arrays; }
         } else {
             quote! {
-                let bitmap = value_arrays[0].null_bitmap().clone();
                 let value_array = StructArray::new(
                     self.return_type.as_struct().clone(),
                     value_arrays.to_vec(),
-                    bitmap,
+                    Bitmap::ones(len),
                 ).into_ref();
             }
         };
@@ -961,7 +957,9 @@ impl FunctionAttr {
                 use risingwave_common::types::*;
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::util::iter_util::ZipEqFast;
-                use itertools::multizip;
+                use risingwave_expr::expr::BoxedExpression;
+                use risingwave_expr::{Result, ExprError};
+                use risingwave_expr::codegen::*;
 
                 risingwave_expr::ensure!(children.len() == #num_args);
                 let mut iter = children.into_iter();
@@ -982,7 +980,7 @@ impl FunctionAttr {
                     #(#child: BoxedExpression,)*
                     prebuilt_arg: #prebuilt_arg_type,
                 }
-                #[async_trait::async_trait]
+                #[async_trait]
                 impl risingwave_expr::table_function::TableFunction for #struct_name {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
@@ -995,24 +993,25 @@ impl FunctionAttr {
                     #[try_stream(boxed, ok = DataChunk, error = ExprError)]
                     async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
                         #(
-                        let #array_refs = self.#child.eval_checked(input).await?;
+                        let #array_refs = self.#child.eval(input).await?;
                         let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
 
                         let mut index_builder = I32ArrayBuilder::new(self.chunk_size);
                         #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
 
-                        for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()).enumerate() {
+                        for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.visibility().iter()).enumerate() {
                             if let (#(Some(#inputs),)*) = row && visible {
                                 let iter = #fn_name(#(#inputs,)* #prebuilt_arg);
                                 for output in #iter {
                                     index_builder.append(Some(i as i32));
                                     match #output {
-                                        Some((#(#outputs),*)) => { #(#builders.append(Some(#outputs.as_scalar_ref()));)* }
+                                        Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* }
                                         None => { #(#builders.append_null();)* }
                                     }
 
                                     if index_builder.len() == self.chunk_size {
+                                        let len = index_builder.len();
                                         let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
                                         let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
                                         #build_value_array
@@ -1070,7 +1069,7 @@ fn data_type(ty: &str) -> TokenStream2 {
 /// Extract multiple output types.
 ///
 /// ```ignore
-/// output_types("int32") -> ["int32"]
+/// output_types("int4") -> ["int4"]
 /// output_types("struct<key varchar, value jsonb>") -> ["varchar", "jsonb"]
 /// ```
 fn output_types(ty: &str) -> Vec<&str> {

@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use google_cloud_pubsub::client::Client;
 use google_cloud_pubsub::subscription::{SeekTo, Subscription};
 use risingwave_common::bail;
-use tonic::Code;
+use tonic_0_9::Code;
 
 use super::TaggedReceivedMessage;
 use crate::parser::ParserConfig;

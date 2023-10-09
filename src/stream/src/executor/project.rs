@@ -34,7 +34,7 @@ pub struct ProjectExecutor {
 }
 
 struct Inner {
-    ctx: ActorContextRef,
+    _ctx: ActorContextRef,
     info: ExecutorInfo,
 
     /// Expressions of the current projection.
@@ -82,7 +82,7 @@ impl ProjectExecutor {
         Self {
             input,
             inner: Inner {
-                ctx,
+                _ctx: ctx,
                 info: ExecutorInfo {
                     schema,
                     pk_indices: info.pk_indices,
@@ -138,16 +138,11 @@ impl Inner {
         let mut projected_columns = Vec::new();
 
         for expr in &self.exprs {
-            let evaluated_expr = expr
-                .eval_infallible(&data_chunk, |err| {
-                    self.ctx.on_compute_error(err, &self.info.identity)
-                })
-                .await;
+            let evaluated_expr = expr.eval_infallible(&data_chunk).await;
             projected_columns.push(evaluated_expr);
         }
         let (_, vis) = data_chunk.into_parts();
-        let vis = vis.into_visibility();
-        let new_chunk = StreamChunk::new(ops, projected_columns, vis);
+        let new_chunk = StreamChunk::with_visibility(ops, projected_columns, vis);
         Ok(Some(new_chunk))
     }
 
@@ -161,12 +156,7 @@ impl Inner {
             let out_col_idx = *out_col_idx;
             let derived_watermark = watermark
                 .clone()
-                .transform_with_expr(&self.exprs[out_col_idx], out_col_idx, |err| {
-                    self.ctx.on_compute_error(
-                        err,
-                        &(self.info.identity.to_string() + "(when computing watermark)"),
-                    )
-                })
+                .transform_with_expr(&self.exprs[out_col_idx], out_col_idx)
                 .await;
             if let Some(derived_watermark) = derived_watermark {
                 ret.push(derived_watermark);

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ffi::CStr;
+use std::ffi::CString;
 use std::path::Path;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -20,7 +20,7 @@ use std::sync::Arc;
 use chrono;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::config::HeapProfilingConfig;
-use risingwave_common::heap_profiling::AUTO_DUMP_MID_NAME;
+use risingwave_common::heap_profiling::AUTO_DUMP_SUFFIX;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::task::LocalStreamManager;
 use tikv_jemalloc_ctl::{
@@ -43,7 +43,6 @@ pub struct JemallocMemoryControl {
     jemalloc_active_mib: jemalloc_stats::active_mib,
     jemalloc_dump_mib: jemalloc_prof::dump_mib,
 
-    dump_seq: u64,
     heap_profiling_config: HeapProfilingConfig,
 }
 
@@ -73,7 +72,6 @@ impl JemallocMemoryControl {
             jemalloc_allocated_mib,
             jemalloc_active_mib,
             jemalloc_dump_mib,
-            dump_seq: 0,
             heap_profiling_config,
         }
     }
@@ -113,27 +111,25 @@ impl JemallocMemoryControl {
                 return;
             }
 
-            let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-            let file_name = format!("{}.{}.{}\0", time_prefix, AUTO_DUMP_MID_NAME, self.dump_seq,);
+            let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
+            let file_name = format!("{}.{}", time_prefix, AUTO_DUMP_SUFFIX);
 
             let file_path = Path::new(&self.heap_profiling_config.dir)
-                .join(Path::new(&file_name))
+                .join(&file_name)
                 .to_str()
-                .unwrap()
-                .to_string();
+                .expect("file path is not valid utf8")
+                .to_owned();
+            let file_path_c = CString::new(file_path).expect("0 byte in file path");
 
-            let file_path_str = Box::leak(file_path.into_boxed_str());
-            let file_path_bytes = unsafe { file_path_str.as_bytes_mut() };
-            let file_path_ptr = file_path_bytes.as_mut_ptr();
+            // FIXME(yuhao): `unsafe` here because `jemalloc_dump_mib.write` requires static lifetime
             if let Err(e) = self
                 .jemalloc_dump_mib
-                .write(CStr::from_bytes_with_nul(file_path_bytes).unwrap())
+                .write(unsafe { &*(file_path_c.as_c_str() as *const _) })
             {
                 tracing::warn!("Auto Jemalloc dump heap file failed! {:?}", e);
             } else {
                 tracing::info!("Successfully dumped heap profile to {}", file_name);
             }
-            let _ = unsafe { Box::from_raw(file_path_ptr) };
         }
     }
 }

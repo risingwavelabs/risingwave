@@ -15,7 +15,7 @@
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::sig::SigDataType;
 use risingwave_sqlparser::ast::{
     Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr,
