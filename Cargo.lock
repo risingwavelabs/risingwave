@@ -10080,6 +10080,7 @@ dependencies = [
  "axum",
  "base64 0.21.4",
  "bytes",
+ "flate2",
  "h2",
  "http",
  "http-body",
@@ -10088,12 +10089,16 @@ dependencies = [
  "percent-encoding",
  "pin-project",
  "prost 0.12.1",
+ "rustls 0.21.7",
+ "rustls-pemfile",
  "tokio",
+ "tokio-rustls 0.24.1",
  "tokio-stream",
  "tower",
  "tower-layer",
  "tower-service",
  "tracing",
+ "webpki-roots 0.25.2",
 ]
 
 [[package]]
@@ -11000,7 +11005,7 @@ dependencies = [
  "tokio-util",
  "toml_datetime",
  "toml_edit 0.19.15",
- "tonic 0.9.2",
+ "tonic 0.10.2",
  "tower",
  "tracing",
  "tracing-core",
