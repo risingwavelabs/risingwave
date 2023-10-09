@@ -93,19 +93,19 @@ impl FunctionRegistry {
 
     /// Returns a function signature with the given type, argument types, return type.
     ///
-    /// The `append_only` flag only works when both append-only and retractable version exist.
+    /// The `prefer_append_only` flag only works when both append-only and retractable version exist.
     /// Otherwise, return the signature of the only version.
     pub fn get_aggregate(
         &self,
         ty: AggregateFunctionType,
         args: &[DataType],
         ret: &DataType,
-        append_only: bool,
+        prefer_append_only: bool,
     ) -> Option<&FuncSign> {
         let v = self.0.get(&ty.into())?;
         let mut iter = v.iter().filter(|d| d.match_args_ret(args, ret));
         if iter.clone().count() == 2 {
-            iter.find(|d| d.append_only == append_only)
+            iter.find(|d| d.append_only == prefer_append_only)
         } else {
             iter.next()
         }

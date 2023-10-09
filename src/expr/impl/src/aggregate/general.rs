@@ -16,7 +16,6 @@ use std::convert::From;
 use std::ops::{BitAnd, BitOr, BitXor};
 
 use num_traits::{CheckedAdd, CheckedSub};
-use risingwave_common::types::DataType;
 use risingwave_expr::{aggregate, ExprError, Result};
 
 #[aggregate("sum(int2) -> int8")]
@@ -44,12 +43,12 @@ where
     }
 }
 
-#[aggregate("min(*) -> auto", state = "ref", type_infer = "same_as_arg0")]
+#[aggregate("min(*) -> auto", state = "ref")]
 fn min<T: Ord>(state: T, input: T) -> T {
     state.min(input)
 }
 
-#[aggregate("max(*) -> auto", state = "ref", type_infer = "same_as_arg0")]
+#[aggregate("max(*) -> auto", state = "ref")]
 fn max<T: Ord>(state: T, input: T) -> T {
     state.max(input)
 }
@@ -80,18 +79,14 @@ where
     state.bitxor(input)
 }
 
-#[aggregate("first_value(*) -> auto", state = "ref", type_infer = "same_as_arg0")]
+#[aggregate("first_value(*) -> auto", state = "ref")]
 fn first_value<T>(state: T, _: T) -> T {
     state
 }
 
-#[aggregate("last_value(*) -> auto", state = "ref", type_infer = "same_as_arg0")]
+#[aggregate("last_value(*) -> auto", state = "ref")]
 fn last_value<T>(_: T, input: T) -> T {
     input
-}
-
-fn same_as_arg0(args: &[DataType]) -> Result<DataType> {
-    Ok(args[0].clone())
 }
 
 /// Note the following corner cases:

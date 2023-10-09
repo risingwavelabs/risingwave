@@ -85,7 +85,6 @@ impl AggCall {
                 Float32 | Float64 | Int256 => Float64,
                 _ => return Err(err()),
             },
-            // Ordered-Set Aggregation
             (AggKind::Grouping, _) => Int32,
             // other functions are handled by signature map
             _ => FUNCTION_REGISTRY.get_return_type(agg_kind, args)?,
