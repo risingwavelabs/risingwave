@@ -251,7 +251,6 @@ impl ClusterController {
             .write()
             .await
             .heartbeat(worker_id, self.max_heartbeat_interval, info)
-            .await
     }
 
     pub fn start_heartbeat_checker(
@@ -402,7 +401,6 @@ impl ClusterController {
             .read()
             .await
             .get_worker_extra_info_by_id(worker_id)
-            .await
     }
 }
 
@@ -717,7 +715,7 @@ impl ClusterControllerInner {
         Ok(WorkerInfo(worker, property).into())
     }
 
-    pub async fn heartbeat(
+    pub fn heartbeat(
         &mut self,
         worker_id: WorkerId,
         ttl: Duration,
@@ -857,10 +855,7 @@ impl ClusterControllerInner {
         Ok(worker.map(|(w, p)| WorkerInfo(w, p).into()))
     }
 
-    pub async fn get_worker_extra_info_by_id(
-        &self,
-        worker_id: WorkerId,
-    ) -> Option<WorkerExtraInfo> {
+    pub fn get_worker_extra_info_by_id(&self, worker_id: WorkerId) -> Option<WorkerExtraInfo> {
         self.worker_extra_info.get(&worker_id).cloned()
     }
 }
