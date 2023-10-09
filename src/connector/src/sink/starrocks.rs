@@ -26,7 +26,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
 
-use super::doris_connector::{
+use super::doris_starrocks_connector::{
     HeaderBuilder, InserterBuilder, StarrocksInsert, StarrocksMysqlQuery, STARROCKS_DELETE_SIGN,
 };
 use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};

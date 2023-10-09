@@ -18,7 +18,7 @@ pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
 pub mod doris;
-pub mod doris_connector;
+pub mod doris_starrocks_connector;
 pub mod encoder;
 pub mod formatter;
 pub mod iceberg;

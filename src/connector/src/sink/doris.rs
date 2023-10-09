@@ -25,7 +25,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
 
-use super::doris_connector::{
+use super::doris_starrocks_connector::{
     DorisField, DorisInsert, HeaderBuilder, InserterBuilder, DORIS_DELETE_SIGN,
 };
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};

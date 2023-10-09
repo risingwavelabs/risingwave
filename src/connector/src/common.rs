@@ -37,7 +37,7 @@ use url::Url;
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
-use crate::sink::doris_connector::DorisGet;
+use crate::sink::doris_starrocks_connector::DorisGet;
 use crate::sink::SinkError;
 use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
