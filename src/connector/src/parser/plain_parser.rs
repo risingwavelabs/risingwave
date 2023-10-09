@@ -62,7 +62,7 @@ impl PlainParser {
     ) -> Result<()> {
         let accessor = self.payload_builder.generate_accessor(payload).await?;
 
-        apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer)
+        apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer).map_err(Into::into)
     }
 }
 
