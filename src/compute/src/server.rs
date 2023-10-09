@@ -296,7 +296,7 @@ pub async fn compute_node_serve(
 
     let heap_profiler = HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
     // Run a background heap profiler
-    tokio::spawn(heap_profiler.start());
+    heap_profiler.start();
 
     let watermark_epoch = memory_mgr.get_watermark_epoch();
     // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead

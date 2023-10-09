@@ -228,7 +228,7 @@ pub async fn compactor_serve(
         ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
 
     // Run a background heap profiler
-    tokio::spawn(heap_profiler.start());
+    heap_profiler.start();
 
     // use half of limit because any memory which would hold in meta-cache will be allocate by
     // limited at first.
@@ -367,7 +367,7 @@ pub async fn shared_compactor_serve(
     let monitor_srv = MonitorServiceImpl::new(await_tree_reg.clone());
 
     // Run a background heap profiler
-    tokio::spawn(heap_profiler.start());
+    heap_profiler.start();
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let compactor_context = CompactorContext {

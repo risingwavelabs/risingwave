@@ -16,6 +16,7 @@ use std::ffi::CString;
 use std::fs;
 use std::path::Path;
 
+use parking_lot::Once;
 use tikv_jemalloc_ctl::{
     epoch as jemalloc_epoch, opt as jemalloc_opt, prof as jemalloc_prof, stats as jemalloc_stats,
 };
@@ -42,8 +43,6 @@ impl HeapProfiler {
         let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
         let jemalloc_epoch_mib = jemalloc_epoch::mib().unwrap();
         let opt_prof = jemalloc_opt::prof::read().unwrap();
-
-        fs::create_dir_all(&config.dir).unwrap();
 
         Self {
             config,
@@ -101,15 +100,21 @@ impl HeapProfiler {
         })
     }
 
-    pub async fn start(self) {
-        let mut interval = time::interval(Duration::from_millis(500));
-        let mut prev_jemalloc_allocated_bytes = 0;
-        loop {
-            interval.tick().await;
-            let jemalloc_allocated_bytes =
-                self.advance_jemalloc_epoch(prev_jemalloc_allocated_bytes);
-            self.dump_heap_prof(jemalloc_allocated_bytes, prev_jemalloc_allocated_bytes);
-            prev_jemalloc_allocated_bytes = jemalloc_allocated_bytes;
-        }
+    pub fn start(self) {
+        static START: Once = Once::new();
+        START.call_once(|| {
+            fs::create_dir_all(&self.config.dir).unwrap();
+            tokio::spawn(async move {
+                let mut interval = time::interval(Duration::from_millis(500));
+                let mut prev_jemalloc_allocated_bytes = 0;
+                loop {
+                    interval.tick().await;
+                    let jemalloc_allocated_bytes =
+                        self.advance_jemalloc_epoch(prev_jemalloc_allocated_bytes);
+                    self.dump_heap_prof(jemalloc_allocated_bytes, prev_jemalloc_allocated_bytes);
+                    prev_jemalloc_allocated_bytes = jemalloc_allocated_bytes;
+                }
+            });
+        })
     }
 }
