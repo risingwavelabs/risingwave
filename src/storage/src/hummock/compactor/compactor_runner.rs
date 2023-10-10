@@ -152,17 +152,20 @@ impl CompactorRunner {
         let mut local_stats = StoreLocalStatistic::default();
 
         for table_info in sstable_infos {
-            let table = sstable_store.sstable(table_info, &mut local_stats).await?;
-            let mut range_tombstone_list = table.value().meta.monotonic_tombstone_events.clone();
-            range_tombstone_list.iter_mut().for_each(|tombstone| {
-                if filter.should_delete(FullKey::from_user_key(
-                    tombstone.event_key.left_user_key.as_ref(),
-                    tombstone.new_epoch,
-                )) {
-                    tombstone.new_epoch = HummockEpoch::MAX;
-                }
-            });
-            builder.add_delete_events(range_tombstone_list);
+            if table_info.range_tombstone_count > 0 {
+                let table = sstable_store.sstable(table_info, &mut local_stats).await?;
+                let mut range_tombstone_list =
+                    table.value().meta.monotonic_tombstone_events.clone();
+                range_tombstone_list.iter_mut().for_each(|tombstone| {
+                    if filter.should_delete(FullKey::from_user_key(
+                        tombstone.event_key.left_user_key.as_ref(),
+                        tombstone.new_epoch,
+                    )) {
+                        tombstone.new_epoch = HummockEpoch::MAX;
+                    }
+                });
+                builder.add_delete_events(range_tombstone_list);
+            }
         }
 
         let aggregator = builder.build_for_compaction();
