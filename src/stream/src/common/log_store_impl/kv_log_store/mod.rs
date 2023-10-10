@@ -101,7 +101,10 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::future::{poll_fn, Future};
+    use std::pin::pin;
     use std::sync::Arc;
+    use std::task::Poll;
 
     use risingwave_common::buffer::{Bitmap, BitmapBuilder};
     use risingwave_common::hash::VirtualNode;
@@ -744,6 +747,71 @@ mod tests {
             (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cancellation_safe() {
+        let test_env = prepare_hummock_test_env().await;
+
+        let table = gen_test_log_store_table();
+
+        test_env.register_table(table.clone()).await;
+
+        let stream_chunk1 = gen_stream_chunk(0);
+        let stream_chunk2 = gen_stream_chunk(10);
+        let bitmap = calculate_vnode_bitmap(stream_chunk1.rows().chain(stream_chunk2.rows()));
+
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(Arc::new(bitmap)),
+            0,
+        );
+        let (mut reader, mut writer) = factory.build().await;
+
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .version()
+            .max_committed_epoch
+            + 1;
+        writer
+            .init(EpochPair::new_test_epoch(epoch1))
+            .await
+            .unwrap();
+        writer.write_chunk(stream_chunk1.clone()).await.unwrap();
+        let epoch2 = epoch1 + 1;
+        writer.flush_current_epoch(epoch2, true).await.unwrap();
+
+        reader.init().await.unwrap();
+
+        {
+            let mut future = pin!(reader.next_item());
+            assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+                .await
+                .is_pending());
+        }
+
+        match reader.next_item().await.unwrap() {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    ..
+                },
+            ) => {
+                assert_eq!(epoch, epoch1);
+                assert!(check_stream_chunk_eq(&stream_chunk1, &read_stream_chunk));
+            }
+            _ => unreachable!(),
+        }
+        match reader.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(is_checkpoint)
             }
             _ => unreachable!(),
         }
