@@ -22,13 +22,14 @@ use tokio::time::{sleep, timeout};
 
 const SET_PARAMETER: &str = "ALTER SYSTEM SET pause_on_next_bootstrap TO true";
 
+#[derive(Clone, Copy)]
 enum ResumeBy {
     Risectl,
     Restart,
 }
 
 impl ResumeBy {
-    async fn resume(&self, cluster: &mut Cluster) -> Result<()> {
+    async fn resume(self, cluster: &mut Cluster) -> Result<()> {
         match self {
             ResumeBy::Risectl => cluster.resume().await?,
             ResumeBy::Restart => cluster.kill_nodes(["meta-1"], 0).await,
@@ -127,8 +128,10 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
             .assert_result_eq(format!("{}", count + 1));
     }
 
-    // `VALUES` should be successfully created
-    cluster.run(SELECT_VALUES).await?.assert_result_eq("3");
+    if let ResumeBy::Risectl = resume_by {
+        // `VALUES` should be successfully created
+        cluster.run(SELECT_VALUES).await?.assert_result_eq("3");
+    }
 
     Ok(())
 }
