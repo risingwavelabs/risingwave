@@ -219,22 +219,19 @@ public class JDBCSink extends SinkWriterBase {
         PreparedStatement insertStatement = null;
 
         while (rows.hasNext()) {
-            try (SinkRow row = rows.next()) {
-                if (row.getOp() == Data.Op.UPDATE_DELETE) {
-                    updateFlag = true;
-                    continue;
-                }
-                if (config.isUpsertSink()) {
-                    if (row.getOp() == Data.Op.DELETE) {
-                        deleteStatement = prepareDeleteStatement(row);
-                    } else {
-                        upsertStatement = prepareUpsertStatement(row);
-                    }
+            SinkRow row = rows.next();
+            if (row.getOp() == Data.Op.UPDATE_DELETE) {
+                updateFlag = true;
+                continue;
+            }
+            if (config.isUpsertSink()) {
+                if (row.getOp() == Data.Op.DELETE) {
+                    deleteStatement = prepareDeleteStatement(row);
                 } else {
-                    insertStatement = prepareInsertStatement(row);
+                    upsertStatement = prepareUpsertStatement(row);
                 }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+            } else {
+                insertStatement = prepareInsertStatement(row);
             }
         }
 

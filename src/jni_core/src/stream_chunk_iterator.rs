@@ -12,51 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_pb::data::Op;
 
-pub struct StreamChunkRow {
-    op: Op,
-    row: OwnedRow,
-}
+pub(crate) type StreamChunkRowIterator = impl Iterator<Item = (Op, OwnedRow)> + 'static;
 
-impl StreamChunkRow {
-    pub fn op(&self) -> Op {
-        self.op
-    }
-
-    pub fn row(&self) -> &OwnedRow {
-        &self.row
-    }
-}
-
-type StreamChunkRowIterator = impl Iterator<Item = StreamChunkRow> + 'static;
-
-pub struct StreamChunkIterator {
-    iter: StreamChunkRowIterator,
-    pub class_cache: Arc<crate::JavaClassMethodCache>,
-}
-
-impl StreamChunkIterator {
-    pub(crate) fn new(stream_chunk: StreamChunk) -> Self {
-        Self {
-            iter: stream_chunk
-                .rows()
-                .map(|(op, row_ref)| StreamChunkRow {
-                    op: op.to_protobuf(),
-                    row: row_ref.to_owned_row(),
-                })
-                .collect_vec()
-                .into_iter(),
-            class_cache: Default::default(),
-        }
-    }
-
-    pub(crate) fn next(&mut self) -> Option<StreamChunkRow> {
-        self.iter.next()
-    }
+pub(crate) fn into_iter(stream_chunk: StreamChunk) -> StreamChunkRowIterator {
+    stream_chunk
+        .rows()
+        .map(|(op, row_ref)| (op.to_protobuf(), row_ref.to_owned_row()))
+        .collect_vec()
+        .into_iter()
 }
