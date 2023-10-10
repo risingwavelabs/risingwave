@@ -282,7 +282,7 @@ fn infer_struct_cast_target_type(
     }
 }
 
-/// Special exprs that cannot be handled by [`infer_type_name`] and [`FuncSigMap`] are handled here.
+/// Special exprs that cannot be handled by [`infer_type_name`] and [`FunctionRegistry`] are handled here.
 /// These include variadic functions, list and struct type, as well as non-implicit cast.
 ///
 /// We should aim for enhancing the general inferring framework and reduce the special cases here.
