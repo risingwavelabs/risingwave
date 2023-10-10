@@ -170,6 +170,19 @@ impl Binder {
             }
         }
 
+        // datatype cast function
+        // only functions required by the existing PostgreSQL tool are implemented
+        #[allow(clippy::single_match)] // remove it when more cast functions needed
+        match (function_name.as_str(), inputs.as_slice()) {
+            ("date", [expr]) => {
+                return expr
+                    .clone()
+                    .cast_explicit(DataType::Date)
+                    .map_err(Into::into);
+            }
+            _ => (),
+        }
+
         self.bind_builtin_scalar_function(function_name.as_str(), inputs)
     }
 
