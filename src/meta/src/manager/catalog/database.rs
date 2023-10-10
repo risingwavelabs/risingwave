@@ -16,10 +16,12 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableOption;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source, Table, View,
+    Connection, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
+    StreamJobStatus, Table, View,
 };
 
 use super::{ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
@@ -194,18 +196,17 @@ impl DatabaseManager {
     }
 
     pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
-        if self.tables.values().any(|x| {
+        if let Some(t) = self.tables.values().find(|x| {
             x.database_id == relation_key.0
                 && x.schema_id == relation_key.1
                 && x.name.eq(&relation_key.2)
         }) {
-            let duplicated = self
-                .tables
-                .values()
-                .find(|x| x.name.eq(&relation_key.2))
-                .unwrap();
-            eprintln!("table duplicated: {:#?}", duplicated.id);
-            Err(MetaError::catalog_duplicated("table", &relation_key.2))
+            eprintln!("table duplicated: {:#?}", t.id);
+            if t.stream_job_status == StreamJobStatus::Creating as i32 {
+                bail!("table is in creating procedure: {}", t.id);
+            } else {
+                Err(MetaError::catalog_duplicated("table", &relation_key.2))
+            }
         } else if self.sources.values().any(|x| {
             x.database_id == relation_key.0
                 && x.schema_id == relation_key.1
@@ -413,10 +414,12 @@ impl DatabaseManager {
             .contains(&relation.clone())
     }
 
+    /// This is for unrecoverable jobs, which will only be in-memory.
     pub fn mark_creating(&mut self, relation: &RelationKey) {
         self.in_progress_creation_tracker.insert(relation.clone());
     }
 
+    /// This is for recoverable jobs, which will be persisted at the very beginning.
     pub fn mark_creating_streaming_job(&mut self, table_id: TableId, key: RelationKey) {
         self.in_progress_creation_streaming_job
             .insert(table_id, key);

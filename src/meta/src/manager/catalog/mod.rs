@@ -720,34 +720,28 @@ impl CatalogManager {
         user_core.ensure_user_id(table.owner)?;
         let key = (table.database_id, table.schema_id, table.name.clone());
 
-        if database_core.has_in_progress_creation(&key) {
-            bail!("table is in creating procedure: {}", table.id);
-        } else {
-            // NOTE: This MUST be after progress check.
-            // Because we persist tables, even for those in creating progress.
-            // And this will falsely indicate the table is duplicated.
-            // FIXME: Perhaps we should go further to only check against created tables here.
-            database_core.check_relation_name_duplicated(&key)?;
+        // NOTE: This MUST be after progress check.
+        // Because we persist tables, even for those in creating progress.
+        // And this will falsely indicate the table is duplicated.
+        // FIXME: Perhaps we should go further to only check against created tables here.
+        database_core.check_relation_name_duplicated(&key)?;
 
-            database_core.mark_creating(&key);
-            database_core.mark_creating_streaming_job(table.id, key);
-            let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
-            assert!(
-                !tables.contains_key(&table.id),
-                "table must not already exist in meta"
-            );
-            for table in internal_tables {
-                tables.insert(table.id, table);
-            }
-            tables.insert(table.id, table.clone());
-            commit_meta!(self, tables)?;
-
-            for &dependent_relation_id in &table.dependent_relations {
-                database_core.increase_ref_count(dependent_relation_id);
-            }
-            user_core.increase_ref(table.owner);
-            Ok(())
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        assert!(
+            !tables.contains_key(&table.id),
+            "table must not already exist in meta"
+        );
+        for table in internal_tables {
+            tables.insert(table.id, table);
         }
+        tables.insert(table.id, table.clone());
+        commit_meta!(self, tables)?;
+
+        for &dependent_relation_id in &table.dependent_relations {
+            database_core.increase_ref_count(dependent_relation_id);
+        }
+        user_core.increase_ref(table.owner);
+        Ok(())
     }
 
     fn check_table_creating(tables: &BTreeMap<TableId, Table>, table: &Table) {
@@ -883,11 +877,6 @@ impl CatalogManager {
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-
-        let key = (table.database_id, table.schema_id, table.name.clone());
-        database_core.unmark_creating(&key);
-        database_core.unmark_creating_streaming_job(table.id);
-
         let tables = &mut database_core.tables;
         if cfg!(not(test)) {
             Self::check_table_creating(tables, &table);
@@ -955,10 +944,6 @@ impl CatalogManager {
 
         let database_core = &mut core.database;
 
-        let key = (table.database_id, table.schema_id, table.name.clone());
-        database_core.unmark_creating(&key);
-        database_core.unmark_creating_streaming_job(table.id);
-
         for &dependent_relation_id in &table.dependent_relations {
             database_core.decrease_ref_count(dependent_relation_id);
         }
@@ -1012,10 +997,6 @@ impl CatalogManager {
         }
 
         let database_core = &mut core.database;
-
-        let key = (table.database_id, table.schema_id, table.name.clone());
-        database_core.unmark_creating(&key);
-        database_core.unmark_creating_streaming_job(table.id);
 
         for &dependent_relation_id in &table.dependent_relations {
             database_core.decrease_ref_count(dependent_relation_id);
