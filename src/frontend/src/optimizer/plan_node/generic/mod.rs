@@ -86,7 +86,7 @@ pub(super) use impl_distill_unit_from_fields;
 
 pub trait GenericPlanRef: Eq + Hash {
     fn schema(&self) -> &Schema;
-    fn stream_key(&self) -> &[usize];
+    fn stream_key(&self) -> Option<&[usize]>;
     fn functional_dependency(&self) -> &FunctionalDependencySet;
     fn ctx(&self) -> OptimizerContextRef;
 }
