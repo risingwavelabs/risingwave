@@ -464,6 +464,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(())
     }
 
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.state.table.try_flush().await?;
+        self.degree_state.table.try_flush().await?;
+        Ok(())
+    }
+
     /// Insert a join row
     #[allow(clippy::unused_async)]
     pub async fn insert(&mut self, key: &K, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {

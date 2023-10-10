@@ -179,7 +179,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         }
 
         let new_visibility = new_visibility.finish();
-
+        self.left_table.try_flush().await?;
         Ok((new_ops, new_visibility))
     }
 
