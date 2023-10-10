@@ -47,8 +47,8 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
     const CREATE_2: &str = "CREATE MATERIALIZED VIEW count_auction as SELECT COUNT(*) FROM auction";
     const SELECT_2: &str = "SELECT * FROM count_auction";
 
-    const CREATE_3: &str = "CREATE MATERIALIZED VIEW values as VALUES (1), (2), (3)";
-    const SELECT_3: &str = "SELECT count(*) FROM values";
+    const CREATE_VALUES: &str = "CREATE MATERIALIZED VIEW values as VALUES (1), (2), (3)";
+    const SELECT_VALUES: &str = "SELECT count(*) FROM values";
 
     let mut cluster = NexmarkCluster::new(
         Configuration {
@@ -91,9 +91,11 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
     sleep(Duration::from_secs(10)).await;
     cluster.run(SELECT_2).await?.assert_result_eq("0"); // even there's no data from source, the aggregation
                                                         // result will be 0 instead of empty or NULL
-    cluster.run(CREATE_3).await?;
-    sleep(Duration::from_secs(10)).await;
-    cluster.run(SELECT_3).await?.assert_result_eq("0"); // `VALUES` should be paused
+
+    // `VALUES` should also be paused.
+    tokio::time::timeout(Duration::from_secs(10), cluster.run(CREATE_VALUES))
+        .await
+        .expect_err("`VALUES` should be paused so creation should never complete");
 
     // DML on tables should be blocked.
     let result = timeout(Duration::from_secs(10), cluster.run(INSERT_INTO_TABLE)).await;
@@ -113,16 +115,19 @@ async fn test_impl(resume_by: ResumeBy) -> Result<()> {
     {
         let mut session = cluster.start_session();
 
-        session.run("FLUSH").await?;
+        session.flush().await?;
         let count: i64 = session.run(SELECT_COUNT_TABLE).await?.parse().unwrap();
 
         session.run(INSERT_INTO_TABLE).await?;
-        session.run("FLUSH").await?;
+        session.flush().await?;
         session
             .run(SELECT_COUNT_TABLE)
             .await?
             .assert_result_eq(format!("{}", count + 1));
     }
+
+    // `VALUES` should be successfully created
+    cluster.run(SELECT_VALUES).await?.assert_result_eq("3");
 
     Ok(())
 }
