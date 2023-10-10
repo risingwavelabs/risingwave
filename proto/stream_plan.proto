@@ -157,16 +157,16 @@ message StreamSource {
 // copy contents from StreamSource to prevent compatibility issues in the future
 message StreamFsFetch {
   uint32 source_id = 1;
-    catalog.Table state_table = 2;
-    optional uint32 row_id_index = 3;
-    repeated plan_common.ColumnCatalog columns = 4;
-    reserved "pk_column_ids";
-    reserved 5;
-    map<string, string> properties = 6;
-    catalog.StreamSourceInfo info = 7;
-    string source_name = 8;
-    // Streaming rate limit
-    optional uint32 rate_limit = 9;
+  catalog.Table state_table = 2;
+  optional uint32 row_id_index = 3;
+  repeated plan_common.ColumnCatalog columns = 4;
+  reserved "pk_column_ids";
+  reserved 5;
+  map<string, string> properties = 6;
+  catalog.StreamSourceInfo info = 7;
+  string source_name = 8;
+  // Streaming rate limit
+  optional uint32 rate_limit = 9;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves
