@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::convert::From;
-use std::ops::BitXor;
 
 use num_traits::{CheckedAdd, CheckedSub};
 use risingwave_expr::{aggregate, ExprError, Result};
@@ -51,14 +50,6 @@ fn min<T: Ord>(state: T, input: T) -> T {
 #[aggregate("max(*) -> auto", state = "ref")]
 fn max<T: Ord>(state: T, input: T) -> T {
     state.max(input)
-}
-
-#[aggregate("bit_xor(*int) -> auto")]
-fn bit_xor<T>(state: T, input: T, _retract: bool) -> T
-where
-    T: BitXor<Output = T>,
-{
-    state.bitxor(input)
 }
 
 #[aggregate("first_value(*) -> auto", state = "ref")]
