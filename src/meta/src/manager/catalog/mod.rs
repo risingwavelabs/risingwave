@@ -980,64 +980,64 @@ impl CatalogManager {
         Ok(())
     }
 
-    /// Used by CANCEL JOBS
-    /// We only need to call this for tables which are persisted, i.e. background ddl.
-    /// 1. Background ddl in creating process before recovery (managed by stream mgr).
-    /// 2. Background ddl in creating process after recovery (managed by barrier mgr).
-    /// This is because it HAS to happen before fragment clean-up.
-    pub async fn cancel_create_table_procedure_with_table_fragments(
-        &self,
-        table_id: TableId,
-        fragment: &TableFragments,
-    ) -> MetaResult<()> {
-        eprintln!("remove create table with fragment: {table_id}");
-        let core = &mut self.core.lock().await;
-        let table = {
-            let database_core = &mut core.database;
-            // FIXME: Does not exist for sink and index yet.
-            // should we persist them?
-            // Figure out what was done in `main`.
-            let tables = &mut database_core.tables;
-            let Some(table) = tables.get(&table_id).cloned() else {
-                eprintln!("Table ID: {table_id} missing when attempting to cancel job");
-                return Ok(());
-                // bail!("Table ID: {table_id} missing when attempting to cancel job")
-            };
-            table
-        };
-
-        {
-            let user_core = &mut core.user;
-            user_core.decrease_ref(table.owner);
-        }
-
-        let database_core = &mut core.database;
-
-        let key = (table.database_id, table.schema_id, table.name.clone());
-        database_core.unmark_creating(&key);
-        database_core.unmark_creating_streaming_job(table.id);
-
-        for &dependent_relation_id in &table.dependent_relations {
-            database_core.decrease_ref_count(dependent_relation_id);
-        }
-
-        let mut table_ids = vec![table.id];
-
-        let internal_table_ids = fragment.internal_table_ids();
-        table_ids.extend(internal_table_ids);
-
-        let tables = &mut database_core.tables;
-        let mut tables = BTreeMapTransaction::new(tables);
-        for table_id in table_ids {
-            let table = tables.remove(table_id);
-            assert!(table.is_some())
-        }
-        commit_meta!(self, tables)?;
-
-        let tables = &mut database_core.tables;
-        assert!(tables.get(&table.id).is_none());
-        Ok(())
-    }
+    // /// Used by CANCEL JOBS
+    // /// We only need to call this for tables which are persisted, i.e. background ddl.
+    // /// 1. Background ddl in creating process before recovery (managed by stream mgr).
+    // /// 2. Background ddl in creating process after recovery (managed by barrier mgr).
+    // /// This is because it HAS to happen before fragment clean-up.
+    // pub async fn cancel_create_table_procedure_with_table_fragments(
+    //     &self,
+    //     table_id: TableId,
+    //     fragment: &TableFragments,
+    // ) -> MetaResult<()> {
+    //     eprintln!("remove create table with fragment: {table_id}");
+    //     let core = &mut self.core.lock().await;
+    //     let table = {
+    //         let database_core = &mut core.database;
+    //         // FIXME: Does not exist for sink and index yet.
+    //         // should we persist them?
+    //         // Figure out what was done in `main`.
+    //         let tables = &mut database_core.tables;
+    //         let Some(table) = tables.get(&table_id).cloned() else {
+    //             eprintln!("Table ID: {table_id} missing when attempting to cancel job");
+    //             return Ok(());
+    //             // bail!("Table ID: {table_id} missing when attempting to cancel job")
+    //         };
+    //         table
+    //     };
+    //
+    //     {
+    //         let user_core = &mut core.user;
+    //         user_core.decrease_ref(table.owner);
+    //     }
+    //
+    //     let database_core = &mut core.database;
+    //
+    //     let key = (table.database_id, table.schema_id, table.name.clone());
+    //     database_core.unmark_creating(&key);
+    //     database_core.unmark_creating_streaming_job(table.id);
+    //
+    //     for &dependent_relation_id in &table.dependent_relations {
+    //         database_core.decrease_ref_count(dependent_relation_id);
+    //     }
+    //
+    //     let mut table_ids = vec![table.id];
+    //
+    //     let internal_table_ids = fragment.internal_table_ids();
+    //     table_ids.extend(internal_table_ids);
+    //
+    //     let tables = &mut database_core.tables;
+    //     let mut tables = BTreeMapTransaction::new(tables);
+    //     for table_id in table_ids {
+    //         let table = tables.remove(table_id);
+    //         assert!(table.is_some())
+    //     }
+    //     commit_meta!(self, tables)?;
+    //
+    //     let tables = &mut database_core.tables;
+    //     assert!(tables.get(&table.id).is_none());
+    //     Ok(())
+    // }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.
     pub async fn drop_relation(
