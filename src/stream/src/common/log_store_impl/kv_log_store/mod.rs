@@ -252,13 +252,16 @@ mod tests {
     use risingwave_storage::store::SyncResult;
     use risingwave_storage::StateStore;
 
-    use crate::common::log_store_impl::kv_log_store::test_utils::{calculate_vnode_bitmap, check_rows_eq, check_stream_chunk_eq, gen_multi_vnode_stream_chunks, gen_stream_chunk, gen_test_log_store_table, TEST_DATA_SIZE};
+    use crate::common::log_store_impl::kv_log_store::test_utils::{
+        calculate_vnode_bitmap, check_rows_eq, check_stream_chunk_eq,
+        gen_multi_vnode_stream_chunks, gen_stream_chunk, gen_test_log_store_table, TEST_DATA_SIZE,
+    };
     use crate::common::log_store_impl::kv_log_store::{KvLogStoreFactory, KvLogStoreMetrics};
 
     #[tokio::test]
     async fn test_basic() {
         for count in 0..20 {
-            test_basic_inner(count*TEST_DATA_SIZE).await
+            test_basic_inner(count * TEST_DATA_SIZE).await
         }
     }
 
@@ -350,7 +353,7 @@ mod tests {
     #[tokio::test]
     async fn test_recovery() {
         for count in 0..20 {
-            test_recovery_inner(count*TEST_DATA_SIZE).await
+            test_recovery_inner(count * TEST_DATA_SIZE).await
         }
     }
 
@@ -739,14 +742,14 @@ mod tests {
             test_env.storage.clone(),
             table.clone(),
             Some(vnodes1),
-            10*TEST_DATA_SIZE,
+            10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
         );
         let factory2 = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(vnodes2),
-            10*TEST_DATA_SIZE,
+            10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
         );
         let (mut reader1, mut writer1) = factory1.build().await;
@@ -865,7 +868,7 @@ mod tests {
             test_env.storage.clone(),
             table.clone(),
             Some(vnodes),
-            10*TEST_DATA_SIZE,
+            10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
