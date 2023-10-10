@@ -90,6 +90,7 @@ impl<S: StateStore> NowExecutor<S> {
                     }
                 };
                 last_timestamp = state_row.and_then(|row| row[0].clone());
+                paused = barrier.is_pause_on_startup();
                 initialized = true;
             } else if paused {
                 // Assert that no data is updated.
@@ -104,7 +105,7 @@ impl<S: StateStore> NowExecutor<S> {
             // Update paused state.
             if let Some(mutation) = barrier.mutation.as_deref() {
                 match mutation {
-                    Mutation::Pause | Mutation::Update { .. } => paused = true,
+                    Mutation::Pause => paused = true,
                     Mutation::Resume => paused = false,
                     _ => {}
                 }
