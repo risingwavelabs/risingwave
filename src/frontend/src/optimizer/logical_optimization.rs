@@ -240,11 +240,7 @@ static PUSH_CALC_OF_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
 static CONVERT_DISTINCT_AGG_FOR_STREAM: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Convert Distinct Aggregation",
-        vec![
-            UnionToDistinctRule::create(),
-            DistinctAggRule::create(true),
-            AggGroupBySimplifyRule::create(),
-        ],
+        vec![UnionToDistinctRule::create(), DistinctAggRule::create(true)],
         ApplyOrder::TopDown,
     )
 });
@@ -255,8 +251,15 @@ static CONVERT_DISTINCT_AGG_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::n
         vec![
             UnionToDistinctRule::create(),
             DistinctAggRule::create(false),
-            AggGroupBySimplifyRule::create(),
         ],
+        ApplyOrder::TopDown,
+    )
+});
+
+static SIMPLIFY_AGG: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Simplify Aggregation",
+        vec![AggGroupBySimplifyRule::create(), AggCallMergeRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -564,6 +567,8 @@ impl LogicalOptimizer {
             plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM)
         };
 
+        plan = plan.optimize_by_rules(&SIMPLIFY_AGG);
+
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
 
         // Do a final column pruning and predicate pushing down to clean up the plan.
@@ -635,6 +640,8 @@ impl LogicalOptimizer {
 
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
+
+        plan = plan.optimize_by_rules(&SIMPLIFY_AGG);
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
 
