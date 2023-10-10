@@ -29,7 +29,6 @@ use crate::optimizer::plan_node::{
 };
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
-
 /// `LogicalHopWindow` implements Hop Table Function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalHopWindow {

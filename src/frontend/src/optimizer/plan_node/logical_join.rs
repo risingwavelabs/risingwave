@@ -42,7 +42,6 @@ use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
-
 /// `LogicalJoin` combines two relations according to some condition.
 ///
 /// Each output row has fields from the left and right inputs. The set of output rows is a subset

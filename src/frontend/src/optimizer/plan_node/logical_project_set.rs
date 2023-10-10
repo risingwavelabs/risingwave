@@ -31,7 +31,6 @@ use crate::optimizer::plan_node::{
 };
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
-
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
 ///
 /// Different from `Project`, it supports [`TableFunction`](crate::expr::TableFunction)s.

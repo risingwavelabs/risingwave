@@ -30,7 +30,6 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substitute};
 
-
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProject {
