@@ -39,6 +39,7 @@ use crate::common::log_store_impl::kv_log_store::buffer::{
 use crate::common::log_store_impl::kv_log_store::serde::{
     merge_log_store_item_stream, KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
 };
+use crate::common::log_store_impl::kv_log_store::KvLogStoreMetrics;
 
 pub struct KvLogStoreReader<S: StateStore> {
     table_id: TableId,
@@ -66,6 +67,8 @@ pub struct KvLogStoreReader<S: StateStore> {
     latest_offset: TruncateOffset,
 
     truncate_offset: TruncateOffset,
+
+    metrics: KvLogStoreMetrics,
 }
 
 impl<S: StateStore> KvLogStoreReader<S> {
@@ -74,6 +77,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
         state_store: S,
         serde: LogStoreRowSerde,
         rx: LogStoreBufferReceiver,
+        metrics: KvLogStoreMetrics,
     ) -> Self {
         Self {
             table_id,
@@ -85,6 +89,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
             state_store_stream: None,
             latest_offset: TruncateOffset::Barrier { epoch: 0 },
             truncate_offset: TruncateOffset::Barrier { epoch: 0 },
+            metrics,
         }
     }
 
@@ -137,6 +142,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
             streams,
             self.serde.clone(),
             1024,
+            self.metrics.persistent_log_read_metrics.clone(),
         )));
         Ok(())
     }
@@ -209,6 +215,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                     let serde = self.serde.clone();
                     let state_store = self.state_store.clone();
                     let table_id = self.table_id;
+                    let read_metrics = self.metrics.flushed_buffer_read_metrics.clone();
                     async move {
                         let streams = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
                             let range_start =
@@ -246,6 +253,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                 start_seq_id,
                                 end_seq_id,
                                 item_epoch,
+                                &read_metrics,
                             )
                             .await?;
 
