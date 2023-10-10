@@ -301,6 +301,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         let mut current_epoch_row = recovered_row.clone();
         let mut last_committed_epoch_row = recovered_row;
 
+        tracing::info!(self.identity, "first barrier {:?}", barrier.epoch);
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
@@ -380,9 +381,11 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     // `current_epoch_row`.
                     // It is thus guaranteed not to commit state or produce chunks as long as
                     // no new chunks have arrived since the previous barrier.
+                    tracing::info!(self.identity, "normal barrier {:?}", barrier.epoch);
                     let curr: Datum = current_epoch_value.clone().flatten();
                     let prev: Datum = prev_epoch_value.flatten();
                     if prev != curr {
+                        tracing::info!(self.identity, "prev != curr");
                         let (range, _latest_is_lower, is_insert) = self.get_range(&curr, prev);
                         let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
 
@@ -400,21 +403,29 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         .into_iter()
                         .map(Box::pin);
 
+                        let mut row_count = 0;
+                        let mut rows_total_size = 0;
                         #[for_await]
                         for res in stream::select_all(streams) {
                             let row = res?;
-                            if let Some(chunk) = stream_chunk_builder.append_row(
-                                // All rows have a single identity at this point
-                                if is_insert { Op::Insert } else { Op::Delete },
-                                row.as_ref(),
-                            ) {
-                                yield Message::Chunk(chunk);
-                            }
+                            row_count += 1;
+                            use risingwave_common::estimate_size::EstimateSize;
+                            rows_total_size += row.into_owned_row().estimated_heap_size();
+                            // if let Some(chunk) = stream_chunk_builder.append_row(
+                            //     // All rows have a single identity at this point
+                            //     if is_insert { Op::Insert } else { Op::Delete },
+                            //     row.as_ref(),
+                            // ) {
+                            //     yield Message::Chunk(chunk);
+                            // }
                         }
 
                         if let Some(chunk) = stream_chunk_builder.take() {
                             yield Message::Chunk(chunk);
                         }
+                        tracing::info!(self.identity, "will yield row_count {}, rows_total_size {}", row_count, rows_total_size);
+                    } else {
+                        tracing::info!(self.identity, "prev == curr");
                     }
 
                     if let Some(mut watermark) = unused_clean_hint.take() {
