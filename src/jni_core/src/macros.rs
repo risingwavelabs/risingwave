@@ -171,6 +171,10 @@ macro_rules! for_all_plain_native_methods {
                 public static native byte[] recvSinkWriterRequestFromChannel(long channelPtr);
 
                 public static native boolean sendSinkWriterResponseToChannel(long channelPtr, byte[] msg);
+
+                public static native byte[] recvSinkCoordinatorRequestFromChannel(long channelPtr);
+
+                public static native boolean sendSinkCoordinatorResponseToChannel(long channelPtr, byte[] msg);
             }
             $(,$args)*
         }

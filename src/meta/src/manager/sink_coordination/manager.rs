@@ -75,11 +75,10 @@ impl SinkCoordinatorManager {
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
         Self::start_worker_with_spawn_worker(
             connector_client,
-            |writer_request, manager_request_stream, connector_client| {
+            |writer_request, manager_request_stream| {
                 tokio::spawn(CoordinatorWorker::run(
                     writer_request,
                     manager_request_stream,
-                    connector_client,
                 ))
             },
         )
@@ -186,11 +185,7 @@ enum ManagerEvent {
     },
 }
 
-trait SpawnCoordinatorFn = FnMut(
-        NewSinkWriterRequest,
-        UnboundedReceiver<NewSinkWriterRequest>,
-        Option<ConnectorClient>,
-    ) -> JoinHandle<()>
+trait SpawnCoordinatorFn = FnMut(NewSinkWriterRequest, UnboundedReceiver<NewSinkWriterRequest>) -> JoinHandle<()>
     + Send
     + 'static;
 
@@ -346,8 +341,7 @@ impl ManagerWorker {
             }
             Entry::Vacant(entry) => {
                 let (request_tx, request_rx) = unbounded_channel();
-                let connector_client = self.connector_client.clone();
-                let join_handle = spawn_coordinator_worker(request, request_rx, connector_client);
+                let join_handle = spawn_coordinator_worker(request, request_rx);
                 self.running_coordinator_worker_join_handles.push(
                     join_handle
                         .map(move |join_result| (sink_id, join_result))
@@ -452,7 +446,7 @@ mod tests {
             SinkCoordinatorManager::start_worker_with_spawn_worker(None, {
                 let param = param.clone();
                 let metadata = metadata.clone();
-                move |first_request: NewSinkWriterRequest, new_writer_rx, _| {
+                move |first_request: NewSinkWriterRequest, new_writer_rx| {
                     let param = param.clone();
                     let metadata = metadata.clone();
                     tokio::spawn(async move {
@@ -658,7 +652,7 @@ mod tests {
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker(None, {
                 let param = param.clone();
-                move |first_request: NewSinkWriterRequest, new_writer_rx, _| {
+                move |first_request: NewSinkWriterRequest, new_writer_rx| {
                     let param = param.clone();
                     tokio::spawn(async move {
                         // validate the start request
@@ -741,7 +735,7 @@ mod tests {
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker(None, {
                 let param = param.clone();
-                move |first_request: NewSinkWriterRequest, new_writer_rx, _| {
+                move |first_request: NewSinkWriterRequest, new_writer_rx| {
                     let param = param.clone();
                     tokio::spawn(async move {
                         // validate the start request

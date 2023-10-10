@@ -19,31 +19,32 @@ import com.risingwave.proto.ConnectorServiceProto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class JniSinkWriterHandler {
-    private static final Logger LOG = LoggerFactory.getLogger(JniSinkWriterHandler.class);
+public class JniSinkCoordinatorHandler {
+    private static final Logger LOG = LoggerFactory.getLogger(JniSinkCoordinatorHandler.class);
 
-    public static void runJniSinkWriterThread(long requestRxPtr, long responseTxPtr) {
+    public static void runJniSinkCoordinatorThread(long requestRxPtr, long responseTxPtr) {
         // For jni.rs
         java.lang.Thread.currentThread()
                 .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
-        JniSinkWriterResponseObserver responseObserver =
-                new JniSinkWriterResponseObserver(responseTxPtr);
-        SinkWriterStreamObserver sinkWriterStreamObserver =
-                new SinkWriterStreamObserver(responseObserver);
+        JniSinkCoordinatorResponseObserver responseObserver =
+                new JniSinkCoordinatorResponseObserver(responseTxPtr);
+        SinkCoordinatorStreamObserver sinkCoordinatorStreamObserver =
+                new SinkCoordinatorStreamObserver(responseObserver);
         try {
             byte[] requestBytes;
-            while ((requestBytes = Binding.recvSinkWriterRequestFromChannel(requestRxPtr))
+            while ((requestBytes = Binding.recvSinkCoordinatorRequestFromChannel(requestRxPtr))
                     != null) {
-                var request = ConnectorServiceProto.SinkWriterStreamRequest.parseFrom(requestBytes);
-                sinkWriterStreamObserver.onNext(request);
+                var request =
+                        ConnectorServiceProto.SinkCoordinatorStreamRequest.parseFrom(requestBytes);
+                sinkCoordinatorStreamObserver.onNext(request);
                 if (!responseObserver.isSuccess()) {
-                    throw new RuntimeException("fail to sendSinkWriterResponseToChannel");
+                    throw new RuntimeException("fail to sendSinkCoordinatorResponseToChannel");
                 }
             }
-            sinkWriterStreamObserver.onCompleted();
+            sinkCoordinatorStreamObserver.onCompleted();
         } catch (Throwable t) {
-            sinkWriterStreamObserver.onError(t);
+            sinkCoordinatorStreamObserver.onError(t);
         }
-        LOG.info("end of runJniSinkWriterThread");
+        LOG.info("end of runJniSinkCoordinatorThread");
     }
 }

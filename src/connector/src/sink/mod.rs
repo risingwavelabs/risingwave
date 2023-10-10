@@ -47,7 +47,7 @@ use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
-use risingwave_rpc_client::{ConnectorClient, MetaClient};
+use risingwave_rpc_client::MetaClient;
 use thiserror::Error;
 pub use tracing;
 
@@ -259,10 +259,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
     #[expect(clippy::unused_async)]
-    async fn new_coordinator(
-        &self,
-        _connector_client: Option<ConnectorClient>,
-    ) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
