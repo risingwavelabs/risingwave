@@ -24,14 +24,14 @@ create source mysql_mytest with (
 );
 
 statement ok
-create table products ( id INT,
+create table products_test ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
 ) from mysql_mytest table 'mytest.products';
 
 statement ok
-create table orders (
+create table orders_test (
    order_id int,
    order_date timestamp,
    customer_name string,
@@ -42,10 +42,10 @@ create table orders (
 ) from mysql_mytest table 'mytest.orders';
 
 statement ok
-create materialized view products_cnt as select count(*) as cnt from products;
+create materialized view products_test_cnt as select count(*) as cnt from products_test;
 
 statement ok
-create materialized view orders_cnt as select count(*) as cnt from orders;
+create materialized view orders_test_cnt as select count(*) as cnt from orders_test;
 
 
 # generate data to mysql
@@ -56,24 +56,24 @@ sleep 5s
 
 # check ingestion results
 query I
-SELECT * from products_cnt
+SELECT * from products_test_cnt
 ----
 9
 
 query I
-SELECT * from orders_cnt
+SELECT * from orders_test_cnt
 ----
 3
 
 query ITT
-SELECT * FROM products order by id limit 3
+SELECT * FROM products_test order by id limit 3
 ----
 101 scooter Small 2-wheel scooter
 102 car battery 12V car battery
 103 12-pack drill bits 12-pack of drill bits with sizes ranging from #40 to #3
 
 query ITTT
-SELECT order_id,order_date,customer_name,product_id FROM orders order by order_id limit 3
+SELECT order_id,order_date,customer_name,product_id FROM orders_test order by order_id limit 3
 ----
 10001 2020-07-30 10:08:22 Jark 102
 10002 2020-07-30 10:11:09 Sally 105
