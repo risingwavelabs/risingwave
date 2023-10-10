@@ -136,7 +136,7 @@ where
     }
 }
 
-pub struct MongoProjeciton<A> {
+pub struct MongoProjection<A> {
     accessor: A,
 }
 
@@ -183,13 +183,13 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> anyh
 };
     Ok(id)
 }
-impl<A> MongoProjeciton<A> {
+impl<A> MongoProjection<A> {
     pub fn new(accessor: A) -> Self {
         Self { accessor }
     }
 }
 
-impl<A> Access for MongoProjeciton<A>
+impl<A> Access for MongoProjection<A>
 where
     A: Access,
 {

@@ -40,10 +40,10 @@ impl BatchLimit {
         BatchLimit { base, logical }
     }
 
-    fn two_phase_limit(&self, input: PlanRef) -> Result<PlanRef> {
+    fn two_phase_limit(&self, new_input: PlanRef) -> Result<PlanRef> {
         let new_limit = self.logical.limit + self.logical.offset;
         let new_offset = 0;
-        let logical_partial_limit = generic::Limit::new(input, new_limit, new_offset);
+        let logical_partial_limit = generic::Limit::new(new_input.clone(), new_limit, new_offset);
         let batch_partial_limit = Self::new(logical_partial_limit);
         let any_order = Order::any();
 
@@ -52,7 +52,7 @@ impl BatchLimit {
             single_dist.enforce_if_not_satisfies(batch_partial_limit.into(), &any_order)?
         } else {
             // The input's distribution is singleton, so use one phase limit is enough.
-            return Ok(batch_partial_limit.into());
+            return Ok(self.clone_with_input(new_input).into());
         };
 
         let batch_global_limit = self.clone_with_input(ensure_single_dist);

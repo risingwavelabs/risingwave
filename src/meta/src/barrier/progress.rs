@@ -93,9 +93,7 @@ impl Progress {
         match self.states.remove(&actor).unwrap() {
             ChainState::Init => {}
             ChainState::ConsumingUpstream(_, old_consumed_rows) => {
-                if !matches!(new_state, ChainState::Done(_)) {
-                    self.consumed_rows -= old_consumed_rows;
-                }
+                self.consumed_rows -= old_consumed_rows;
             }
             ChainState::Done(_) => panic!("should not report done multiple times"),
         };

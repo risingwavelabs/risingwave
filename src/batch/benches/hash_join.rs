@@ -22,11 +22,11 @@ use risingwave_batch::task::ShutdownToken;
 use risingwave_common::catalog::schema_test_utils::field_n;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
-use risingwave_common::{enable_jemalloc_on_unix, hash};
+use risingwave_common::{enable_jemalloc, hash};
 use risingwave_expr::expr::build_from_pretty;
 use utils::bench_join;
 
-enable_jemalloc_on_unix!();
+enable_jemalloc!();
 
 fn create_hash_join_executor(
     join_type: JoinType,

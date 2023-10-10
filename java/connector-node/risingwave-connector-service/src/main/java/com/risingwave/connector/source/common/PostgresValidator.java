@@ -460,7 +460,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
-    private void alterPublicationIfNeeded() throws SQLException {
+    protected void alterPublicationIfNeeded() throws SQLException {
         String alterPublicationSql =
                 String.format(
                         "ALTER PUBLICATION %s ADD TABLE %s", pubName, schemaName + "." + tableName);

@@ -134,7 +134,7 @@ impl MergeExecutor {
                 Message::Chunk(chunk) => {
                     self.metrics
                         .actor_in_record_cnt
-                        .with_label_values(&[&actor_id_str])
+                        .with_label_values(&[&actor_id_str, &fragment_id_str])
                         .inc_by(chunk.cardinality() as _);
                 }
                 Message::Barrier(barrier) => {

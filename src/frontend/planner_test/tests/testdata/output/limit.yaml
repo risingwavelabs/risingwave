@@ -84,6 +84,15 @@
     └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 1, offset: 0 }
       └─StreamValues { rows: [[1:Int32, 0:Int64]] }
 - sql: |
+    select 1 c limit 1 offset 2
+  batch_plan: |-
+    BatchLimit { limit: 1, offset: 2 }
+    └─BatchValues { rows: [[1:Int32]] }
+  stream_plan: |-
+    StreamMaterialize { columns: [c, _row_id(hidden)], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamTopN [append_only] { order: [1:Int32 ASC], limit: 1, offset: 2 }
+      └─StreamValues { rows: [[1:Int32, 0:Int64]] }
+- sql: |
     select 1 c order by 1 limit 1
   batch_plan: |-
     BatchTopN { order: [1:Int32 ASC], limit: 1, offset: 0 }

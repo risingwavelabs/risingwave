@@ -37,9 +37,11 @@ pub struct ActorContext {
     pub id: ActorId,
     pub fragment_id: u32,
 
+    // TODO(eric): these seem to be useless now?
     last_mem_val: Arc<AtomicUsize>,
     cur_mem_val: Arc<AtomicUsize>,
     total_mem_val: Arc<TrAdder<i64>>,
+
     pub streaming_metrics: Arc<StreamingMetrics>,
     pub error_suppressor: Arc<Mutex<ErrorSuppressor>>,
 }
@@ -78,7 +80,8 @@ impl ActorContext {
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
-        tracing::error!("Compute error: {}, executor: {identity}", err);
+        tracing::error!(identity, %err, "failed to evaluate expression");
+
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
         let mut err_str = err.to_string();
 

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, Mutable, ValueAccess};
@@ -21,9 +22,7 @@ use crate::parser::canal::operators::*;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::unified::ChangeEventOperation;
-use crate::parser::{
-    ByteStreamSourceParser, JsonProperties, SourceStreamChunkRowWriter, WriteGuard,
-};
+use crate::parser::{ByteStreamSourceParser, JsonProperties, SourceStreamChunkRowWriter};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const DATA: &str = "data";
@@ -55,7 +54,7 @@ impl CanalJsonParser {
         &self,
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
@@ -91,24 +90,23 @@ impl CanalJsonParser {
                     "'data' is missing for creating event".to_string(),
                 ))
             })?;
+
         let mut errors = Vec::new();
-        let mut guard = None;
         for event in events.drain(..) {
             let accessor = JsonAccess::new_with_options(event, &JsonParseOptions::CANAL);
             match apply_row_operation_on_stream_chunk_writer((op, accessor), &mut writer) {
-                Ok(this_guard) => guard = Some(this_guard),
+                Ok(_) => {}
                 Err(err) => errors.push(err),
             }
         }
-        if let Some(guard) = guard {
-            if !errors.is_empty() {
-                tracing::error!(?errors, "failed to parse some columns");
-            }
-            Ok(guard)
+
+        if errors.is_empty() {
+            Ok(())
         } else {
             Err(RwError::from(ErrorCode::InternalError(format!(
-                "failed to parse all columns: {:?}",
-                errors
+                "failed to parse {} row(s) in a single canal json message: {}",
+                errors.len(),
+                errors.iter().join(", ")
             ))))
         }
     }
@@ -128,7 +126,7 @@ impl ByteStreamSourceParser for CanalJsonParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         only_parse_payload!(self, payload, writer)
     }
 }

@@ -20,9 +20,9 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parse_display::{Display, FromStr};
 use risingwave_common::bail;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_common::util::value_encoding;
+use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_pb::expr::agg_call::PbType;
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 
@@ -68,7 +68,7 @@ impl AggCall {
             })
             .collect();
         let filter = match agg_call.filter {
-            Some(ref pb_filter) => Some(build_from_prost(pb_filter)?.into()),
+            Some(ref pb_filter) => Some(build_from_prost(pb_filter)?.into()), /* TODO: non-strict filter in streaming */
             None => None,
         };
         let direct_args = agg_call
@@ -78,11 +78,7 @@ impl AggCall {
                 let data_type = DataType::from(arg.get_type().unwrap());
                 LiteralExpression::new(
                     data_type.clone(),
-                    value_encoding::deserialize_datum(
-                        arg.get_datum().unwrap().get_body().as_slice(),
-                        &data_type,
-                    )
-                    .unwrap(),
+                    Datum::from_protobuf(arg.get_datum().unwrap(), &data_type).unwrap(),
                 )
             })
             .collect_vec();

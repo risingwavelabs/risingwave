@@ -338,6 +338,7 @@ impl FunctionAttr {
         } else if (types::is_primitive(&self.ret) || self.ret == "boolean")
             && user_fn.is_pure()
             && !variadic
+            && self.prebuild.is_none()
         {
             // SIMD optimization for primitive types
             match self.args.len() {
