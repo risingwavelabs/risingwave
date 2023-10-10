@@ -29,10 +29,11 @@ enum ResumeBy {
 
 impl ResumeBy {
     async fn resume(&self, cluster: &mut Cluster) -> Result<()> {
-        Ok(match self {
+        match self {
             ResumeBy::Risectl => cluster.resume().await?,
             ResumeBy::Restart => cluster.kill_nodes(["meta-1"], 0).await,
-        })
+        };
+        Ok(())
     }
 }
 
