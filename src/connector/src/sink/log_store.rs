@@ -133,6 +133,8 @@ pub trait LogReader: Send + Sized + 'static {
     fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
     /// Emit the next item.
+    ///
+    /// The implementation should ensure that the future is cancellation safe.
     fn next_item(
         &mut self,
     ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_;

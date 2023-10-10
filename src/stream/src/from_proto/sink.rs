@@ -148,12 +148,13 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     &sink_param,
                     connector,
                 );
+                // TODO: support setting max row count in config
                 dispatch_state_store!(params.env.state_store(), state_store, {
                     let factory = KvLogStoreFactory::new(
                         state_store,
                         node.table.as_ref().unwrap().clone(),
                         params.vnode_bitmap.clone().map(Arc::new),
-                        32,
+                        65536,
                         metrics,
                     );
 
