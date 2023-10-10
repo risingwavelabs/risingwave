@@ -54,8 +54,8 @@ struct LogStoreBufferInner {
     unconsumed_queue: VecDeque<(u64, LogStoreBufferItem)>,
     /// Items already read by log reader by not truncated. Newer item at the front
     consumed_queue: VecDeque<(u64, LogStoreBufferItem)>,
-    stream_chunk_count: usize,
-    max_stream_chunk_count: usize,
+    row_count: usize,
+    max_row_count: usize,
 
     updated_truncation: Option<ReaderTruncationOffsetType>,
 
@@ -64,12 +64,15 @@ struct LogStoreBufferInner {
 
 impl LogStoreBufferInner {
     fn can_add_stream_chunk(&self) -> bool {
-        self.stream_chunk_count < self.max_stream_chunk_count
+        self.row_count < self.max_row_count
     }
 
     fn add_item(&mut self, epoch: u64, item: LogStoreBufferItem) {
         if let LogStoreBufferItem::StreamChunk { .. } = item {
             unreachable!("StreamChunk should call try_add_item")
+        }
+        if let LogStoreBufferItem::Barrier { .. } = &item {
+            self.next_chunk_id = 0;
         }
         self.unconsumed_queue.push_front((epoch, item));
     }
@@ -86,7 +89,7 @@ impl LogStoreBufferInner {
         } else {
             let chunk_id = self.next_chunk_id;
             self.next_chunk_id += 1;
-            self.stream_chunk_count += 1;
+            self.row_count += chunk.cardinality();
             self.unconsumed_queue.push_front((
                 epoch,
                 LogStoreBufferItem::StreamChunk {
@@ -321,6 +324,7 @@ impl LogStoreBufferReceiver {
                     chunk_id,
                     flushed,
                     end_seq_id,
+                    chunk,
                     ..
                 } => {
                     let chunk_offset = TruncateOffset::Chunk {
@@ -330,7 +334,7 @@ impl LogStoreBufferReceiver {
                     let flushed = *flushed;
                     let end_seq_id = *end_seq_id;
                     if chunk_offset <= offset {
-                        inner.stream_chunk_count -= 1;
+                        inner.row_count -= chunk.cardinality();
                         inner.consumed_queue.pop_back();
                         if flushed {
                             latest_offset = Some((epoch, Some(end_seq_id)));
@@ -377,13 +381,13 @@ impl LogStoreBufferReceiver {
 }
 
 pub(crate) fn new_log_store_buffer(
-    max_stream_chunk_count: usize,
+    max_row_count: usize,
 ) -> (LogStoreBufferSender, LogStoreBufferReceiver) {
     let buffer = SharedMutex::new(LogStoreBufferInner {
         unconsumed_queue: VecDeque::new(),
         consumed_queue: VecDeque::new(),
-        stream_chunk_count: 0,
-        max_stream_chunk_count,
+        row_count: 0,
+        max_row_count,
         updated_truncation: None,
         next_chunk_id: 0,
     });
