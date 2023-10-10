@@ -836,7 +836,8 @@ impl HummockManager {
         }
 
         let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic)
-            || matches!(selector.task_type(), compact_task::TaskType::Emergency);
+            || matches!(selector.task_type(), compact_task::TaskType::Emergency)
+            || matches!(selector.task_type(), compact_task::TaskType::Tombstone);
 
         let mut stats = LocalSelectorStatistic::default();
         let member_table_ids = &current_version
@@ -3016,6 +3017,8 @@ impl CompactionState {
             Some(compact_task::TaskType::SpaceReclaim)
         } else if guard.contains(&(group, compact_task::TaskType::Ttl)) {
             Some(compact_task::TaskType::Ttl)
+        } else if guard.contains(&(group, compact_task::TaskType::Tombstone)) {
+            Some(compact_task::TaskType::Tombstone)
         } else if guard.contains(&(group, compact_task::TaskType::Dynamic)) {
             Some(compact_task::TaskType::Dynamic)
         } else {
