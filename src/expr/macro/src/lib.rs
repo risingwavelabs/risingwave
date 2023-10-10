@@ -15,10 +15,14 @@
 #![feature(lint_reasons)]
 #![feature(let_chains)]
 
+use context::DefineContextAttr;
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
-use syn::{Error, Result};
+use proc_macro2::{Ident, TokenStream as TokenStream2};
+use syn::{Error, ItemFn, Result, Type, Visibility};
 
+use crate::context::{generate_captured_function, CaptureContextAttr};
+
+mod context;
 mod gen;
 mod parse;
 mod types;
@@ -601,5 +605,36 @@ impl UserFunctionAttr {
             && !self.context
             && !self.arg_option
             && self.return_type_kind == ReturnTypeKind::T
+    }
+}
+
+/// Define the context variables which can be used by risingwave expressions.
+#[proc_macro]
+pub fn define_context(def: TokenStream) -> TokenStream {
+    fn inner(def: TokenStream) -> Result<TokenStream2> {
+        let attr: DefineContextAttr = syn::parse(def)?;
+        attr.gen()
+    }
+
+    match inner(def) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+/// Capture the context from the local context to the function impl.
+/// TODO: The macro wil be merged to [`#[function(.., capture_context(..))]`](function) later.
+///
+/// Currently, we should use the macro separately with a simple wrapper.
+#[proc_macro_attribute]
+pub fn capture_context(attr: TokenStream, item: TokenStream) -> TokenStream {
+    fn inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream2> {
+        let attr: CaptureContextAttr = syn::parse(attr)?;
+        let user_fn: ItemFn = syn::parse(item)?;
+        generate_captured_function(attr, user_fn)
+    }
+    match inner(attr, item) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
     }
 }

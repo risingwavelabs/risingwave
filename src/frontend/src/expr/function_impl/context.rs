@@ -12,51 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::ExprError;
-
-pub(super) struct ContextUnavailable(&'static str);
-
-impl From<ContextUnavailable> for ExprError {
-    fn from(e: ContextUnavailable) -> Self {
-        ExprError::Context(e.0)
-    }
-}
-
-macro_rules! define_context {
-    ($($name:ident : $ty:ty),*) => {
-        mod local_keys {
-            tokio::task_local! {
-                $(
-                    pub(super) static $name: $ty
-                ),*
-            }
-        }
-
-        $(
-            // The struct is similar to a global variable, so we use upper case here.
-            #[allow(non_camel_case_types)]
-            pub struct $name;
-
-            impl $name {
-                /// A simple wrapper around [`LocalKey::try_with`], and only the `function_impl` mod can access the inner value.
-                pub(super) fn try_with<F, R>(self, f: F) -> Result<R, ContextUnavailable>
-                where
-                    F: FnOnce(&$ty) -> R
-                {
-                    local_keys::$name.try_with(f).map_err(|_| ContextUnavailable(stringify!($name)))
-                }
-
-                pub fn scope<F>(self, value: $ty, f: F) -> tokio::task::futures::TaskLocalFuture<$ty, F>
-                where
-                    F: std::future::Future
-                {
-                    local_keys::$name.scope(value, f)
-                }
-            }
-        )*
-    };
-}
+use risingwave_expr::{define_context, ExprError};
 
 define_context! {
-    CATALOG_READER: crate::catalog::CatalogReader
+    CATALOG_READER: crate::catalog::CatalogReader,
 }

@@ -21,6 +21,20 @@ use thiserror::Error;
 /// A specialized Result type for expression operations.
 pub type Result<T> = std::result::Result<T, ExprError>;
 
+pub struct ContextUnavailable(&'static str);
+
+impl ContextUnavailable {
+    pub fn new(field: &'static str) -> Self {
+        Self(field)
+    }
+}
+
+impl From<ContextUnavailable> for ExprError {
+    fn from(e: ContextUnavailable) -> Self {
+        ExprError::Context(e.0)
+    }
+}
+
 /// The error type for expression operations.
 #[derive(Error, Debug)]
 pub enum ExprError {

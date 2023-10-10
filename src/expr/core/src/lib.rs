@@ -26,6 +26,7 @@ extern crate self as risingwave_expr;
 pub mod aggregate;
 #[doc(hidden)]
 pub mod codegen;
+pub mod context;
 mod error;
 pub mod expr;
 pub mod scalar;
@@ -33,6 +34,6 @@ pub mod sig;
 pub mod table_function;
 pub mod window_function;
 
-pub use error::{ExprError, Result};
+pub use error::{ContextUnavailable, ExprError, Result};
 pub use risingwave_common::{bail, ensure};
 pub use risingwave_expr_macro::*;
