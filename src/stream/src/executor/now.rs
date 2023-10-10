@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+use std::ops::Bound::Unbounded;
+
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::row;
+use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -80,7 +83,10 @@ impl<S: StateStore> NowExecutor<S> {
                 // Handle the first barrier.
                 state_table.init_epoch(barrier.epoch);
                 let state_row = {
-                    let data_iter = state_table.iter_row(Default::default()).await?;
+                    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
+                    let data_iter = state_table
+                        .prefix_iter_row(row::empty(), sub_range, Default::default())
+                        .await?;
                     pin_mut!(data_iter);
                     if let Some(keyed_row) = data_iter.next().await {
                         Some(keyed_row?)

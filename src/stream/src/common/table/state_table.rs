@@ -1088,16 +1088,6 @@ where
     S: StateStore,
     SD: ValueRowSerde,
 {
-    /// This function scans rows from the relational table.
-    pub async fn iter_row(
-        &self,
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
-        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
-        self.prefix_iter_row(row::empty(), sub_range, prefetch_options)
-            .await
-    }
-
     /// This function scans rows from the relational table with specific `pk_range` under the same
     /// `vnode`.
     pub async fn vnode_iter_row(

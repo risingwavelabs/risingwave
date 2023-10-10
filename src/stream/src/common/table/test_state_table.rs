@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
+use std::ops::Bound::{self, *};
 
 use futures::{pin_mut, StreamExt};
 use risingwave_common::array::{Op, StreamChunk};
@@ -577,9 +577,12 @@ async fn test_state_table_iter_with_value_indices() {
         Some(99_i32.into()),
         Some(999_i32.into()),
     ]));
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     {
-        let iter = state_table.iter_row(Default::default()).await.unwrap();
+        let iter = state_table
+            .prefix_iter_row(row::empty(), sub_range, Default::default())
+            .await
+            .unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -634,7 +637,10 @@ async fn test_state_table_iter_with_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter_row(Default::default()).await.unwrap();
+    let iter = state_table
+        .prefix_iter_row(row::empty(), sub_range, Default::default())
+        .await
+        .unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -738,9 +744,12 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         Some(99_i32.into()),
         Some(999_i32.into()),
     ]));
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     {
-        let iter = state_table.iter_row(Default::default()).await.unwrap();
+        let iter = state_table
+            .prefix_iter_row(row::empty(), sub_range, Default::default())
+            .await
+            .unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -816,7 +825,10 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter_row(Default::default()).await.unwrap();
+    let iter = state_table
+        .prefix_iter_row(row::empty(), sub_range, Default::default())
+        .await
+        .unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -1001,9 +1013,13 @@ async fn test_state_table_write_chunk() {
     );
 
     state_table.write_chunk(chunk);
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .prefix_iter_row(
+            row::empty(),
+            sub_range,
+            PrefetchOptions::new_for_exhaust_iter(),
+        )
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1115,9 +1131,13 @@ async fn test_state_table_write_chunk_visibility() {
         StreamChunk::with_visibility(ops, columns, Bitmap::from_iter([true, true, true, false]));
 
     state_table.write_chunk(chunk);
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .prefix_iter_row(
+            row::empty(),
+            sub_range,
+            PrefetchOptions::new_for_exhaust_iter(),
+        )
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1227,9 +1247,13 @@ async fn test_state_table_write_chunk_value_indices() {
     );
 
     state_table.write_chunk(chunk);
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .prefix_iter_row(
+            row::empty(),
+            sub_range,
+            PrefetchOptions::new_for_exhaust_iter(),
+        )
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1509,9 +1533,13 @@ async fn test_state_table_watermark_cache_ignore_null() {
     let chunk = StreamChunk::from_rows(&rows, &data_types);
 
     state_table.write_chunk(chunk);
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let inserted_rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .prefix_iter_row(
+            row::empty(),
+            sub_range,
+            PrefetchOptions::new_for_exhaust_iter(),
+        )
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1796,9 +1824,13 @@ async fn test_state_table_watermark_cache_refill() {
     for row in &rows {
         state_table.insert(row);
     }
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let inserted_rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .prefix_iter_row(
+            row::empty(),
+            sub_range,
+            PrefetchOptions::new_for_exhaust_iter(),
+        )
         .await
         .unwrap()
         .collect::<Vec<_>>()
