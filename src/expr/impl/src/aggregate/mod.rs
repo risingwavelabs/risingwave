@@ -14,6 +14,7 @@
 
 mod approx_count_distinct;
 mod array_agg;
+mod bit_and;
 mod bool_and;
 mod bool_or;
 mod general;

@@ -675,10 +675,17 @@ impl FunctionAttr {
                 }
                 1 => {
                     let first_state = if self.init_state.is_some() {
+                        // for count, the state will never be None
                         quote! { unreachable!() }
                     } else if let Some(s) = &self.state && s == "ref" {
                         // for min/max/first/last, the state is the first value
                         quote! { Some(v0) }
+                    } else if let AggregateFnOrImpl::Impl(impl_) = user_fn && impl_.create_state.is_some() {
+                        // use user-defined create_state function
+                        quote! {{
+                            let state = self.function.create_state();
+                            #next_state
+                        }}
                     } else {
                         quote! {{
                             let state = #state_type::default();

@@ -147,6 +147,7 @@ impl Parse for AggregateImpl {
             retract: parse_function("retract"),
             merge: parse_function("merge"),
             finalize: parse_function("finalize"),
+            create_state: parse_function("create_state"),
             encode_state: parse_function("encode_state"),
             decode_state: parse_function("decode_state"),
         })

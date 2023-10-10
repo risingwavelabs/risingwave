@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::convert::From;
-use std::ops::{BitAnd, BitOr, BitXor};
+use std::ops::{BitOr, BitXor};
 
 use num_traits::{CheckedAdd, CheckedSub};
 use risingwave_expr::{aggregate, ExprError, Result};
@@ -51,16 +51,6 @@ fn min<T: Ord>(state: T, input: T) -> T {
 #[aggregate("max(*) -> auto", state = "ref")]
 fn max<T: Ord>(state: T, input: T) -> T {
     state.max(input)
-}
-
-// XXX: state = "ref" is required so that
-// for the first non-null value, the state is set to that value.
-#[aggregate("bit_and(*int) -> auto", state = "ref")]
-fn bit_and<T>(state: T, input: T) -> T
-where
-    T: BitAnd<Output = T>,
-{
-    state.bitand(input)
 }
 
 #[aggregate("bit_or(*int) -> auto")]
