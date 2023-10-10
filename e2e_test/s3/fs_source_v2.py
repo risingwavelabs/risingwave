@@ -78,10 +78,8 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt):
         s3.bucket_name = '{config['S3_BUCKET']}',
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'http://{config['S3_ENDPOINT']}'
+        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
     ) FORMAT PLAIN ENCODE {_encode()};''')
-
-    # TODO: http -> https
 
     total_rows = file_num * item_num_per_file
     MAX_RETRIES = 40
@@ -116,7 +114,7 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt):
 
 
 if __name__ == "__main__":
-    FILE_NUM = 4001 # TODO: 10001
+    FILE_NUM = 4001
     ITEM_NUM_PER_FILE = 2
     data = gen_data(FILE_NUM, ITEM_NUM_PER_FILE)
 
@@ -129,19 +127,12 @@ if __name__ == "__main__":
     assert fmt in FORMATTER, f"Unsupported format: {fmt}"
     formatted_files = FORMATTER[fmt](data)
 
-    # config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
-    config = { # TODO: delete
-        'S3_ENDPOINT': '[::1]:9090',
-        'S3_ACCESS_KEY': 'any',
-        'S3_SECRET_KEY': 'any',
-        'S3_BUCKET': 'test',
-        'S3_REGION': 'us-east-1',
-    }
+    config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
         config["S3_ENDPOINT"],
         access_key=config["S3_ACCESS_KEY"],
         secret_key=config["S3_SECRET_KEY"],
-        secure=False # TODO: true
+        secure=True,
     )
     run_id = str(random.randint(1000, 9999))
     _local = lambda idx: f'data_{idx}.{fmt}'
