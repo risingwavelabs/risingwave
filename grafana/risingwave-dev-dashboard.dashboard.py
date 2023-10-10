@@ -1086,42 +1086,34 @@ def section_streaming_actors(outer_panels):
                             f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
                             "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Distinct agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Stream group top n cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_appendonly_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Stream group top n appendonly cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_lookup_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Stream lookup cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_temporal_join_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Stream temporal join cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-
                         panels.target(
                             f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "materialize executor cache miss ratio - table {{table_id}} actor {{actor_id}}  {{instance}}",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_over_window_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_over_window_cache_lookup_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Over window cache miss ratio - table {{table_id}} actor {{actor_id}} ",
@@ -1205,22 +1197,37 @@ def section_streaming_actors(outer_panels):
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
                             "stream agg total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
-                        # TODO(kexiang): why others only include the miss counts?
                         panels.target(
                             f"rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])",
-                            "Distinct agg cache miss - table {{table_id}} actor {{actor_id}}",
+                            "distinct agg cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])",
+                            "distinct agg total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])",
-                            "Group top n cache miss - table {{table_id}} actor {{actor_id}}",
+                            "group top n cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_group_top_n_total_query_cache_count')}[$__rate_interval])",
+                            "group top n total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])",
-                            "Group top n appendonly cache miss - table {{table_id}} actor {{actor_id}}",
+                            "group top n appendonly cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_group_top_n_appendonly_total_query_cache_count')}[$__rate_interval])",
+                            "group top n appendonly total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])",
-                            "Lookup executor cache miss - table {{table_id}} actor {{actor_id}}",
+                            "lookup executor cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_lookup_total_query_cache_count')}[$__rate_interval])",
+                            "lookup executor total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
                     ],
                 ),
