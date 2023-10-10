@@ -72,7 +72,7 @@ mod tests {
     async fn test_drop_sink_handler() {
         let sql_create_table = "create table t (v1 smallint primary key);";
         let sql_create_mv = "create materialized view mv as select v1 from t;";
-        let sql_create_sink = "create sink snk from mv with( connector = 'mysql')";
+        let sql_create_sink = "create sink snk from mv with( connector = 'kafka')";
         let sql_drop_sink = "drop sink snk;";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql_create_table).await.unwrap();
