@@ -108,6 +108,7 @@ impl TombstoneReclaimCompactionPicker {
                         }
                     }
                     if pending_compact {
+                        state.last_level += 1;
                         continue;
                     }
                     InputLevel {

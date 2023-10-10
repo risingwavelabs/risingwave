@@ -423,7 +423,12 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         if let Some(chunk) = stream_chunk_builder.take() {
                             yield Message::Chunk(chunk);
                         }
-                        tracing::info!(self.identity, "will yield row_count {}, rows_total_size {}", row_count, rows_total_size);
+                        tracing::info!(
+                            self.identity,
+                            "will yield row_count {}, rows_total_size {}",
+                            row_count,
+                            rows_total_size
+                        );
                     } else {
                         tracing::info!(self.identity, "prev == curr");
                     }
