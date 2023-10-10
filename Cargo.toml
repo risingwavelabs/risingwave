@@ -93,7 +93,7 @@ aws-smithy-http = "0.55"
 aws-smithy-types = "0.55"
 aws-endpoint = "0.55"
 aws-types = "0.55"
-etcd-client = { package = "madsim-etcd-client", version = "0.3" }
+etcd-client = { package = "madsim-etcd-client", version = "0.4" }
 futures-async-stream = "0.2"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim.git", rev = "fedb1e3", features = [
@@ -231,4 +231,4 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 # patch: unlimit 4MB message size for grpc client
-etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "d55550a" }
+etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }

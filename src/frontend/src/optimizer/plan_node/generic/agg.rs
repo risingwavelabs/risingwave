@@ -90,7 +90,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         self.ctx().session_ctx().config().get_force_two_phase_agg()
     }
 
-    fn two_phase_agg_enabled(&self) -> bool {
+    pub fn two_phase_agg_enabled(&self) -> bool {
         self.enable_two_phase
     }
 
@@ -343,7 +343,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         window_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
         let in_fields = self.input.schema().fields().to_vec();
-        let in_pks = self.input.stream_key().to_vec();
+        let in_pks = self.input.stream_key().unwrap().to_vec();
         let in_append_only = self.input.append_only();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
 

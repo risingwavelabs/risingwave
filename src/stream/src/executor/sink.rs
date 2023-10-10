@@ -22,11 +22,10 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::{merge_chunk_row, Op, StreamChunk, StreamChunkCompactor};
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::log_store::{
-    LogReader, LogStoreFactory, LogStoreTransformChunkLogReader, LogWriter,
+    LogReader, LogReaderExt, LogStoreFactory, LogWriter, LogWriterExt,
 };
 use risingwave_connector::sink::{
     build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
@@ -121,7 +120,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let write_log_stream = Self::execute_write_log(
             self.input,
             stream_key,
-            self.log_writer,
+            self.log_writer
+                .monitored(self.sink_writer_param.sink_metrics.clone()),
             self.sink_param.sink_id,
             self.sink_param.sink_type,
             self.actor_context,
@@ -155,9 +155,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         let epoch_pair = barrier.epoch;
 
-        log_writer
-            .init(EpochPair::new_test_epoch(epoch_pair.curr))
-            .await?;
+        log_writer.init(epoch_pair).await?;
 
         // Propagate the first barrier
         yield Message::Barrier(barrier);
@@ -293,7 +291,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         columns: Vec<ColumnCatalog>,
         sink_writer_param: SinkWriterParam,
     ) -> StreamExecutorResult<Message> {
-        let sink_metrics = sink_writer_param.sink_metrics.clone();
+        let metrics = sink_writer_param.sink_metrics.clone();
         let log_sinker = sink.new_log_sinker(sink_writer_param).await?;
 
         let visible_columns = columns
@@ -302,18 +300,17 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
             .collect_vec();
 
-        let log_reader = log_reader.transform_chunk(move |chunk| {
-            sink_metrics
-                .connector_sink_rows_received
-                .inc_by(chunk.cardinality() as u64);
-            if visible_columns.len() != columns.len() {
-                // Do projection here because we may have columns that aren't visible to
-                // the downstream.
-                chunk.project(&visible_columns)
-            } else {
-                chunk
-            }
-        });
+        let log_reader = log_reader
+            .transform_chunk(move |chunk| {
+                if visible_columns.len() != columns.len() {
+                    // Do projection here because we may have columns that aren't visible to
+                    // the downstream.
+                    chunk.project(&visible_columns)
+                } else {
+                    chunk
+                }
+            })
+            .monitored(metrics);
 
         log_sinker.consume_log_and_sink(log_reader).await?;
         Err(anyhow!("end of stream").into())

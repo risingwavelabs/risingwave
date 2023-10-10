@@ -493,12 +493,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } else {
             // emit on update
             // TODO(wrj,rc): we may need to parallelize it and set a reasonable concurrency limit.
-            for mut agg_group in vars
-                .dirty_groups
-                .values_mut()
-                // SAFETY: we access the values in `dirty_groups` one by one, so it's safe to deref the `UnsafeMutGuard`
-                .map(|mut g| unsafe { g.as_mut_guard() })
-            {
+            for mut agg_group in vars.dirty_groups.values_mut() {
                 let agg_group = agg_group.as_mut();
                 let change = agg_group
                     .build_change(&this.storages, &this.agg_funcs)

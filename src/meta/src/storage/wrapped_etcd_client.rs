@@ -82,7 +82,7 @@ impl EtcdRefreshClient {
     fn should_refresh(err: &etcd_client::Error) -> bool {
         match err {
             etcd_client::Error::GRpcStatus(status) => {
-                status.code() == tonic_0_9::Code::Unauthenticated
+                status.code() == tonic::Code::Unauthenticated
                     && status.message().contains("invalid auth token")
             }
             _ => false,

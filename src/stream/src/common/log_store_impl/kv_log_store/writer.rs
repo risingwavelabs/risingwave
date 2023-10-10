@@ -19,6 +19,7 @@ use bytes::Bytes;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
@@ -26,7 +27,9 @@ use risingwave_storage::store::{InitOptions, LocalStateStore};
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
-use crate::common::log_store_impl::kv_log_store::{SeqIdType, FIRST_SEQ_ID};
+use crate::common::log_store_impl::kv_log_store::{
+    FlushInfo, KvLogStoreMetrics, SeqIdType, FIRST_SEQ_ID,
+};
 
 pub struct KvLogStoreWriter<LS: LocalStateStore> {
     _table_id: TableId,
@@ -38,6 +41,8 @@ pub struct KvLogStoreWriter<LS: LocalStateStore> {
     serde: LogStoreRowSerde,
 
     tx: LogStoreBufferSender,
+
+    metrics: KvLogStoreMetrics,
 }
 
 impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
@@ -46,6 +51,7 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
         state_store: LS,
         serde: LogStoreRowSerde,
         tx: LogStoreBufferSender,
+        metrics: KvLogStoreMetrics,
     ) -> Self {
         Self {
             _table_id: table_id,
@@ -53,6 +59,7 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
             state_store,
             serde,
             tx,
+            metrics,
         }
     }
 }
@@ -82,13 +89,16 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
             // When enter this branch, the chunk cannot be added directly, and should be add to
             // state store and flush
             let mut vnode_bitmap_builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            let mut flush_info = FlushInfo::new();
             for (i, (op, row)) in chunk.rows().enumerate() {
                 let seq_id = start_seq_id + (i as SeqIdType);
                 assert!(seq_id <= end_seq_id);
                 let (vnode, key, value) = self.serde.serialize_data_row(epoch, seq_id, op, row);
                 vnode_bitmap_builder.set(vnode.to_index(), true);
+                flush_info.flush_one(key.estimated_size() + value.estimated_size());
                 self.state_store.insert(key, value, None)?;
             }
+            flush_info.report(&self.metrics);
             self.state_store.flush(Vec::new()).await?;
 
             let vnode_bitmap = vnode_bitmap_builder.finish();
@@ -104,8 +114,10 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         is_checkpoint: bool,
     ) -> LogStoreResult<()> {
         let epoch = self.state_store.epoch();
+        let mut flush_info = FlushInfo::new();
         for vnode in self.serde.vnodes().iter_vnodes() {
             let (key, value) = self.serde.serialize_barrier(epoch, vnode, is_checkpoint);
+            flush_info.flush_one(key.estimated_size() + value.estimated_size());
             self.state_store.insert(key, value, None)?;
         }
         self.tx
@@ -114,10 +126,12 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                     let seq_id = start_seq_id + (i as SeqIdType);
                     assert!(seq_id <= end_seq_id);
                     let (_, key, value) = self.serde.serialize_data_row(epoch, seq_id, op, row);
+                    flush_info.flush_one(key.estimated_size() + value.estimated_size());
                     self.state_store.insert(key, value, None)?;
                 }
                 Ok(())
             })?;
+        flush_info.report(&self.metrics);
         let mut delete_range = Vec::with_capacity(self.serde.vnodes().count_ones());
         if let Some(truncation_offset) = self.tx.pop_truncation() {
             for vnode in self.serde.vnodes().iter_vnodes() {
