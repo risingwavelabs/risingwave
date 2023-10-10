@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 
-use super::{MutGuard, UnsafeMutGuard};
+use super::{AtomicMutGuard, MutGuard};
 use crate::estimate_size::{EstimateSize, KvSize};
 
 pub struct EstimatedHashMap<K, V> {
@@ -63,10 +63,11 @@ where
             .map(|v| MutGuard::new(v, &mut self.heap_size))
     }
 
-    pub fn values_mut(&mut self) -> impl Iterator<Item = UnsafeMutGuard<V>> + '_ {
+    pub fn values_mut(&mut self) -> impl Iterator<Item = AtomicMutGuard<'_, V>> + '_ {
+        let heap_size = &self.heap_size;
         self.inner
             .values_mut()
-            .map(|v| UnsafeMutGuard::new(v, &mut self.heap_size))
+            .map(move |v| AtomicMutGuard::new(v, heap_size))
     }
 
     pub fn drain(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
