@@ -66,8 +66,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY))
             })?;
 
-            use risingwave_connector::sink::Sink;
-
             match_sink_name_str!(
                 sink_type.to_lowercase().as_str(),
                 SinkType,
