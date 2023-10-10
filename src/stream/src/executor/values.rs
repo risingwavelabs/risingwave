@@ -25,8 +25,8 @@ use risingwave_expr::expr::BoxedExpression;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{
-    ActorContextRef, Barrier, BoxedMessageStream, Executor, Message, Mutation, PkIndices,
-    PkIndicesRef, StreamExecutorError,
+    ActorContextRef, Barrier, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
+    StreamExecutorError,
 };
 use crate::task::CreateMviewProgress;
 
