@@ -1,5 +1,3 @@
-# Disabled, see https://github.com/risingwavelabs/risingwave/issues/10887
-
 statement ok
 create table t (ts timestamp);
 
