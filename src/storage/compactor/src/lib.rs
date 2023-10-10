@@ -77,6 +77,11 @@ pub struct CompactorOpts {
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
 
+    /// Enable heap profile dump when memory usage is high.
+    #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
+    #[override_opts(path = server.heap_profiling.dir)]
+    pub heap_profiling_dir: Option<String>,
+
     #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
     #[override_opts(path = storage.object_store_streaming_read_timeout_ms)]
     pub object_store_streaming_read_timeout_ms: Option<u64>,

@@ -25,13 +25,12 @@ public class StreamChunkDemo {
         try (StreamChunkIterator iter = new StreamChunkIterator(payload)) {
             int count = 0;
             while (true) {
-                try (StreamChunkRow row = iter.next()) {
-                    if (row == null) {
-                        break;
-                    }
-                    count += 1;
-                    validateRow(row);
+                StreamChunkRow row = iter.next();
+                if (row == null) {
+                    break;
                 }
+                count += 1;
+                validateRow(row);
             }
             int expectedCount = 30000;
             if (count != expectedCount) {
