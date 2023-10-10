@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::mem;
 
 use anyhow::anyhow;
 use futures::stream::select;
@@ -20,13 +20,12 @@ use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
-use risingwave_common::array::{merge_chunk_row, Op, StreamChunk};
+use risingwave_common::array::{merge_chunk_row, Op, StreamChunk, StreamChunkCompactor};
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::catalog::SinkType;
+use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::log_store::{
-    LogReader, LogStoreFactory, LogStoreTransformChunkLogReader, LogWriter,
+    LogReader, LogReaderExt, LogStoreFactory, LogWriter, LogWriterExt,
 };
 use risingwave_connector::sink::{
     build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
@@ -34,12 +33,10 @@ use risingwave_connector::sink::{
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message, PkIndices};
-use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{expect_first_barrier, ActorContextRef, BoxedMessageStream};
 
 pub struct SinkExecutor<F: LogStoreFactory> {
     input: BoxedExecutor,
-    _metrics: Arc<StreamingMetrics>,
     sink: SinkImpl,
     identity: String,
     pk_indices: PkIndices,
@@ -65,11 +62,23 @@ fn force_append_only(c: StreamChunk) -> StreamChunk {
     c.into()
 }
 
+// Drop all the INSERT messages in this chunk and convert UPDATE DELETE into DELETE.
+fn force_delete_only(c: StreamChunk) -> StreamChunk {
+    let mut c: StreamChunkMut = c.into();
+    for (_, mut r) in c.to_rows_mut() {
+        match r.op() {
+            Op::Delete => {}
+            Op::Insert | Op::UpdateInsert => r.set_vis(false),
+            Op::UpdateDelete => r.set_op(Op::Delete),
+        }
+    }
+    c.into()
+}
+
 impl<F: LogStoreFactory> SinkExecutor<F> {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         input: BoxedExecutor,
-        metrics: Arc<StreamingMetrics>,
         sink_writer_param: SinkWriterParam,
         sink_param: SinkParam,
         columns: Vec<ColumnCatalog>,
@@ -86,7 +95,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .collect();
         Ok(Self {
             input,
-            _metrics: metrics,
             sink,
             identity: format!("SinkExecutor {:X?}", sink_writer_param.executor_id),
             pk_indices,
@@ -101,12 +109,23 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     }
 
     fn execute_inner(self) -> BoxedMessageStream {
+        let stream_key = self.pk_indices;
+
+        let stream_key_sink_pk_mismatch = {
+            stream_key
+                .iter()
+                .any(|i| !self.sink_param.downstream_pk.contains(i))
+        };
+
         let write_log_stream = Self::execute_write_log(
             self.input,
-            self.pk_indices,
-            self.log_writer,
+            stream_key,
+            self.log_writer
+                .monitored(self.sink_writer_param.sink_metrics.clone()),
+            self.sink_param.sink_id,
             self.sink_param.sink_type,
             self.actor_context,
+            stream_key_sink_pk_mismatch,
         );
 
         dispatch_sink!(self.sink, sink, {
@@ -125,8 +144,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input: BoxedExecutor,
         stream_key: PkIndices,
         mut log_writer: impl LogWriter,
+        sink_id: SinkId,
         sink_type: SinkType,
         actor_context: ActorContextRef,
+        stream_key_sink_pk_mismatch: bool,
     ) {
         let mut input = input.execute();
 
@@ -134,43 +155,131 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         let epoch_pair = barrier.epoch;
 
-        log_writer
-            .init(EpochPair::new_test_epoch(epoch_pair.curr))
-            .await?;
+        log_writer.init(epoch_pair).await?;
 
         // Propagate the first barrier
         yield Message::Barrier(barrier);
 
-        #[for_await]
-        for msg in input {
-            match msg? {
-                Message::Watermark(w) => yield Message::Watermark(w),
-                Message::Chunk(chunk) => {
-                    // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
-                    // V->V).
-                    let chunk = merge_chunk_row(chunk, &stream_key);
-                    let chunk = if sink_type == SinkType::ForceAppendOnly {
-                        // Force append-only by dropping UPDATE/DELETE messages. We do this when the
-                        // user forces the sink to be append-only while it is actually not based on
-                        // the frontend derivation result.
-                        force_append_only(chunk)
-                    } else {
-                        chunk
-                    };
+        // for metrics
+        let sink_id_str = sink_id.to_string();
+        let actor_id_str = actor_context.id.to_string();
+        let fragment_id_str = actor_context.fragment_id.to_string();
 
-                    log_writer.write_chunk(chunk.clone()).await?;
+        // When stream key is different from the user defined primary key columns for sinks. The operations could be out of order
+        // stream key: a,b
+        // sink pk: a
 
-                    // Use original chunk instead of the reordered one as the executor output.
-                    yield Message::Chunk(chunk);
-                }
-                Message::Barrier(barrier) => {
-                    log_writer
-                        .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
-                        .await?;
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_context.id) {
-                        log_writer.update_vnode_bitmap(vnode_bitmap);
+        // original:
+        // (1,1) -> (1,2)
+        // (1,2) -> (1,3)
+
+        // mv fragment 1:
+        // delete (1,1)
+
+        // mv fragment 2:
+        // insert (1,2)
+        // delete (1,2)
+
+        // mv fragment 3:
+        // insert (1,3)
+
+        // merge to sink fragment:
+        // insert (1,3)
+        // insert (1,2)
+        // delete (1,2)
+        // delete (1,1)
+        // So we do additional compaction in the sink executor per barrier.
+
+        //     1. compact all the chanes with the stream key.
+        //     2. sink all the delete events and then sink all insert evernt.
+
+        // after compacting with the stream key, the two event with the same used defined sink pk must have different stream key.
+        // So the delete event is not to delete the inserted record in our internal streaming SQL semantic.
+        if stream_key_sink_pk_mismatch && sink_type != SinkType::AppendOnly {
+            let mut chunk_buffer = StreamChunkCompactor::new(stream_key.clone());
+            let mut watermark = None;
+            #[for_await]
+            for msg in input {
+                match msg? {
+                    Message::Watermark(w) => watermark = Some(w),
+                    Message::Chunk(c) => {
+                        actor_context
+                            .streaming_metrics
+                            .sink_input_row_count
+                            .with_label_values(&[&sink_id_str, &actor_id_str, &fragment_id_str])
+                            .inc_by(c.capacity() as u64);
+
+                        chunk_buffer.push_chunk(c);
                     }
-                    yield Message::Barrier(barrier);
+                    Message::Barrier(barrier) => {
+                        let mut delete_chunks = vec![];
+                        let mut insert_chunks = vec![];
+                        for c in mem::replace(
+                            &mut chunk_buffer,
+                            StreamChunkCompactor::new(stream_key.clone()),
+                        )
+                        .into_compacted_chunks()
+                        {
+                            if sink_type != SinkType::ForceAppendOnly {
+                                // Force append-only by dropping UPDATE/DELETE messages. We do this when the
+                                // user forces the sink to be append-only while it is actually not based on
+                                // the frontend derivation result.
+                                delete_chunks.push(force_delete_only(c.clone()));
+                            }
+                            insert_chunks.push(force_append_only(c));
+                        }
+
+                        for c in delete_chunks.into_iter().chain(insert_chunks.into_iter()) {
+                            log_writer.write_chunk(c.clone()).await?;
+                            yield Message::Chunk(c);
+                        }
+                        if let Some(w) = mem::take(&mut watermark) {
+                            yield Message::Watermark(w)
+                        }
+                        log_writer
+                            .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
+                            .await?;
+                        if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_context.id)
+                        {
+                            log_writer.update_vnode_bitmap(vnode_bitmap);
+                        }
+                        yield Message::Barrier(barrier);
+                    }
+                }
+            }
+        } else {
+            #[for_await]
+            for msg in input {
+                match msg? {
+                    Message::Watermark(w) => yield Message::Watermark(w),
+                    Message::Chunk(chunk) => {
+                        // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE
+                        // V->V).
+                        let chunk = merge_chunk_row(chunk, &stream_key);
+                        let chunk = if sink_type == SinkType::ForceAppendOnly {
+                            // Force append-only by dropping UPDATE/DELETE messages. We do this when the
+                            // user forces the sink to be append-only while it is actually not based on
+                            // the frontend derivation result.
+                            force_append_only(chunk)
+                        } else {
+                            chunk
+                        };
+
+                        log_writer.write_chunk(chunk.clone()).await?;
+
+                        // Use original chunk instead of the reordered one as the executor output.
+                        yield Message::Chunk(chunk);
+                    }
+                    Message::Barrier(barrier) => {
+                        log_writer
+                            .flush_current_epoch(barrier.epoch.curr, barrier.kind.is_checkpoint())
+                            .await?;
+                        if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_context.id)
+                        {
+                            log_writer.update_vnode_bitmap(vnode_bitmap);
+                        }
+                        yield Message::Barrier(barrier);
+                    }
                 }
             }
         }
@@ -182,6 +291,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         columns: Vec<ColumnCatalog>,
         sink_writer_param: SinkWriterParam,
     ) -> StreamExecutorResult<Message> {
+        let metrics = sink_writer_param.sink_metrics.clone();
         let log_sinker = sink.new_log_sinker(sink_writer_param).await?;
 
         let visible_columns = columns
@@ -190,15 +300,17 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
             .collect_vec();
 
-        let log_reader = log_reader.transform_chunk(move |chunk| {
-            if visible_columns.len() != columns.len() {
-                // Do projection here because we may have columns that aren't visible to
-                // the downstream.
-                chunk.project(&visible_columns)
-            } else {
-                chunk
-            }
-        });
+        let log_reader = log_reader
+            .transform_chunk(move |chunk| {
+                if visible_columns.len() != columns.len() {
+                    // Do projection here because we may have columns that aren't visible to
+                    // the downstream.
+                    chunk.project(&visible_columns)
+                } else {
+                    chunk
+                }
+            })
+            .monitored(metrics);
 
         log_sinker.consume_log_and_sink(log_reader).await?;
         Err(anyhow!("end of stream").into())
@@ -301,14 +413,14 @@ mod test {
                 .collect(),
             downstream_pk: pk.clone(),
             sink_type: SinkType::ForceAppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
 
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
-            Arc::new(StreamingMetrics::unused()),
-            SinkWriterParam::default(),
+            SinkWriterParam::for_test(),
             sink_param,
             columns.clone(),
             ActorContext::create(0),
@@ -344,6 +456,147 @@ mod test {
                 + 5 6 7",
             )
         );
+
+        // Should not receive the third stream chunk message because the force-append-only sink
+        // executor will drop all DELETE messages.
+
+        // The last barrier message.
+        executor.next().await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn stream_key_sink_pk_mismatch() {
+        use risingwave_common::array::stream_chunk::StreamChunk;
+        use risingwave_common::array::StreamChunkTestExt;
+        use risingwave_common::types::DataType;
+
+        use crate::executor::Barrier;
+
+        let properties = maplit::hashmap! {
+            "connector".into() => "blackhole".into(),
+        };
+
+        // We have two visible columns and one hidden column. The hidden column will be pruned out
+        // within the sink executor.
+        let columns = vec![
+            ColumnCatalog {
+                column_desc: ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),
+                is_hidden: true,
+            },
+        ];
+        let schema: Schema = columns
+            .iter()
+            .map(|column| Field::from(column.column_desc.clone()))
+            .collect();
+
+        let mock = MockSource::with_messages(
+            schema,
+            vec![0, 1],
+            vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                    " I I I
+                    + 1 1 10",
+                ))),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                    " I I I
+                    + 1 3 30",
+                ))),
+                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                    " I I I
+                    + 1 2 20
+                    - 1 2 20",
+                ))),
+                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                    " I I I
+                    - 1 1 10",
+                ))),
+                Message::Barrier(Barrier::new_test_barrier(3)),
+            ],
+        );
+
+        let sink_param = SinkParam {
+            sink_id: 0.into(),
+            properties,
+            columns: columns
+                .iter()
+                .filter(|col| !col.is_hidden)
+                .map(|col| col.column_desc.clone())
+                .collect(),
+            downstream_pk: vec![0],
+            sink_type: SinkType::Upsert,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let sink_executor = SinkExecutor::new(
+            Box::new(mock),
+            SinkWriterParam::for_test(),
+            sink_param,
+            columns.clone(),
+            ActorContext::create(0),
+            BoundedInMemLogStoreFactory::new(1),
+            vec![0, 1],
+        )
+        .await
+        .unwrap();
+
+        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+
+        // Barrier message.
+        executor.next().await.unwrap().unwrap();
+
+        let chunk_msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
+
+        let chunk_msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk_msg.into_chunk().unwrap().compact(),
+            StreamChunk::from_pretty(
+                " I I I
+                + 1 1 10",
+            )
+        );
+
+        // Barrier message.
+        executor.next().await.unwrap().unwrap();
+
+        let chunk_msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
+        let chunk_msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
+
+        let chunk_msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk_msg.into_chunk().unwrap().compact(),
+            StreamChunk::from_pretty(
+                " I I I
+                - 1 1 10",
+            )
+        );
+
+        let chunk_msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk_msg.into_chunk().unwrap().compact(),
+            StreamChunk::from_pretty(
+                " I I I
+                + 1 3 30",
+            )
+        );
+        let chunk_msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
+        let chunk_msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(chunk_msg.into_chunk().unwrap().cardinality(), 0);
 
         // Should not receive the third stream chunk message because the force-append-only sink
         // executor will drop all DELETE messages.
@@ -399,14 +652,14 @@ mod test {
                 .collect(),
             downstream_pk: pk.clone(),
             sink_type: SinkType::ForceAppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
 
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
-            Arc::new(StreamingMetrics::unused()),
-            SinkWriterParam::default(),
+            SinkWriterParam::for_test(),
             sink_param,
             columns,
             ActorContext::create(0),

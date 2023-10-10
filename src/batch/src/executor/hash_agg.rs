@@ -24,7 +24,7 @@ use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{AggCall, AggregateState, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 

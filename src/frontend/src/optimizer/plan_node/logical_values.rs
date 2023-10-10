@@ -50,7 +50,7 @@ impl LogicalValues {
             }
         }
         let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
+        let base = PlanBase::new_logical(ctx, schema, None, functional_dependency);
         Self {
             rows: rows.into(),
             base,
@@ -70,7 +70,7 @@ impl LogicalValues {
             }
         }
         let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![pk_index], functional_dependency);
+        let base = PlanBase::new_logical(ctx, schema, Some(vec![pk_index]), functional_dependency);
         Self {
             rows: rows.into(),
             base,

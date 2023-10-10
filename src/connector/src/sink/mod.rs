@@ -39,10 +39,12 @@ use std::future::Future;
 use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use prometheus::{Histogram, HistogramOpts};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
+use risingwave_common::metrics::{
+    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
+};
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
@@ -50,7 +52,7 @@ use risingwave_rpc_client::{ConnectorClient, MetaClient};
 use thiserror::Error;
 pub use tracing;
 
-use self::catalog::SinkType;
+use self::catalog::{SinkFormatDesc, SinkType};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::LogReader;
@@ -134,6 +136,7 @@ pub struct SinkParam {
     pub columns: Vec<ColumnDesc>,
     pub downstream_pk: Vec<usize>,
     pub sink_type: SinkType,
+    pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
     pub sink_from_name: String,
 }
@@ -141,6 +144,17 @@ pub struct SinkParam {
 impl SinkParam {
     pub fn from_proto(pb_param: PbSinkParam) -> Self {
         let table_schema = pb_param.table_schema.expect("should contain table schema");
+        let format_desc = match pb_param.format_desc {
+            Some(f) => f.try_into().ok(),
+            None => {
+                let connector = pb_param.properties.get(CONNECTOR_TYPE_KEY);
+                let r#type = pb_param.properties.get(SINK_TYPE_OPTION);
+                match (connector, r#type) {
+                    (Some(c), Some(t)) => SinkFormatDesc::from_legacy_type(c, t).ok().flatten(),
+                    _ => None,
+                }
+            }
+        };
         Self {
             sink_id: SinkId::from(pb_param.sink_id),
             properties: pb_param.properties,
@@ -151,8 +165,9 @@ impl SinkParam {
                 .map(|i| *i as usize)
                 .collect(),
             sink_type: SinkType::from_proto(
-                PbSinkType::from_i32(pb_param.sink_type).expect("should be able to convert"),
+                PbSinkType::try_from(pb_param.sink_type).expect("should be able to convert"),
             ),
+            format_desc,
             db_name: pb_param.db_name,
             sink_from_name: pb_param.sink_from_name,
         }
@@ -167,6 +182,7 @@ impl SinkParam {
                 pk_indices: self.downstream_pk.iter().map(|i| *i as u32).collect(),
             }),
             sink_type: self.sink_type.to_proto().into(),
+            format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
         }
@@ -191,6 +207,7 @@ impl From<SinkCatalog> for SinkParam {
             columns,
             downstream_pk: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
+            format_desc: sink_catalog.format_desc,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
         }
@@ -199,27 +216,48 @@ impl From<SinkCatalog> for SinkParam {
 
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration_metrics: Histogram,
+    pub sink_commit_duration_metrics: LabelGuardedHistogram,
+    pub connector_sink_rows_received: LabelGuardedIntCounter,
+    pub log_store_first_write_epoch: LabelGuardedIntGauge,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge,
+    pub log_store_write_rows: LabelGuardedIntCounter,
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge,
+    pub log_store_read_rows: LabelGuardedIntCounter,
 }
 
-impl Default for SinkMetrics {
-    fn default() -> Self {
+impl SinkMetrics {
+    fn for_test() -> Self {
         SinkMetrics {
-            sink_commit_duration_metrics: Histogram::with_opts(HistogramOpts::new(
-                "unused", "unused",
-            ))
-            .unwrap(),
+            sink_commit_duration_metrics: LabelGuardedHistogram::test_histogram(),
+            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
+            log_store_first_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
+            log_store_latest_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
+            log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
+            log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
+            log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
         }
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct SinkWriterParam {
     pub connector_params: ConnectorParams,
     pub executor_id: u64,
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<MetaClient>,
     pub sink_metrics: SinkMetrics,
+}
+
+impl SinkWriterParam {
+    pub fn for_test() -> Self {
+        SinkWriterParam {
+            connector_params: Default::default(),
+            executor_id: Default::default(),
+            vnode_bitmap: Default::default(),
+            meta_client: Default::default(),
+            sink_metrics: SinkMetrics::for_test(),
+        }
+    }
 }
 
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
@@ -358,6 +396,12 @@ pub enum SinkError {
     Pulsar(anyhow::Error),
     #[error("Internal error: {0}")]
     Internal(anyhow::Error),
+}
+
+impl From<icelake::Error> for SinkError {
+    fn from(value: icelake::Error) -> Self {
+        SinkError::Iceberg(anyhow_error!("{}", value))
+    }
 }
 
 impl From<RpcError> for SinkError {

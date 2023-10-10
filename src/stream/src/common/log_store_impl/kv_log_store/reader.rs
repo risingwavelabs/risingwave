@@ -35,8 +35,9 @@ use crate::common::log_store_impl::kv_log_store::buffer::{
     LogStoreBufferItem, LogStoreBufferReceiver,
 };
 use crate::common::log_store_impl::kv_log_store::serde::{
-    new_log_store_item_stream, KvLogStoreItem, LogStoreItemStream, LogStoreRowSerde,
+    merge_log_store_item_stream, KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
 };
+use crate::common::log_store_impl::kv_log_store::KvLogStoreMetrics;
 
 pub struct KvLogStoreReader<S: StateStore> {
     table_id: TableId,
@@ -51,11 +52,13 @@ pub struct KvLogStoreReader<S: StateStore> {
     first_write_epoch: Option<u64>,
 
     /// `Some` means consuming historical log data
-    state_store_stream: Option<Pin<Box<LogStoreItemStream<S::IterStream>>>>,
+    state_store_stream: Option<Pin<Box<LogStoreItemMergeStream<S::IterStream>>>>,
 
     latest_offset: TruncateOffset,
 
     truncate_offset: TruncateOffset,
+
+    metrics: KvLogStoreMetrics,
 }
 
 impl<S: StateStore> KvLogStoreReader<S> {
@@ -64,6 +67,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
         state_store: S,
         serde: LogStoreRowSerde,
         rx: LogStoreBufferReceiver,
+        metrics: KvLogStoreMetrics,
     ) -> Self {
         Self {
             table_id,
@@ -74,6 +78,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
             state_store_stream: None,
             latest_offset: TruncateOffset::Barrier { epoch: 0 },
             truncate_offset: TruncateOffset::Barrier { epoch: 0 },
+            metrics,
         }
     }
 }
@@ -108,10 +113,11 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
             "should not init twice"
         );
         // TODO: set chunk size by config
-        self.state_store_stream = Some(Box::pin(new_log_store_item_stream(
+        self.state_store_stream = Some(Box::pin(merge_log_store_item_stream(
             streams,
             self.serde.clone(),
             1024,
+            self.metrics.persistent_log_read_metrics.clone(),
         )));
         Ok(())
     }
@@ -196,7 +202,13 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                 let combined_stream = select_all(streams);
                 let chunk = self
                     .serde
-                    .deserialize_stream_chunk(combined_stream, start_seq_id, end_seq_id, item_epoch)
+                    .deserialize_stream_chunk(
+                        combined_stream,
+                        start_seq_id,
+                        end_seq_id,
+                        item_epoch,
+                        &self.metrics.flushed_buffer_read_metrics,
+                    )
                     .await?;
                 let offset = TruncateOffset::Chunk {
                     epoch: item_epoch,

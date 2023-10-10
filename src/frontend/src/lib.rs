@@ -35,6 +35,9 @@
 #![feature(async_fn_in_trait)]
 #![recursion_limit = "256"]
 
+#[cfg(test)]
+risingwave_expr_impl::enable!();
+
 #[macro_use]
 mod catalog;
 pub use catalog::TableCatalog;

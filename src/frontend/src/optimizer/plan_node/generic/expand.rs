@@ -61,7 +61,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
         let input_schema_len = self.input.schema().len();
         let mut pk_indices = self
             .input
-            .stream_key()
+            .stream_key()?
             .iter()
             .map(|&pk| pk + input_schema_len)
             .collect_vec();

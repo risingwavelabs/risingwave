@@ -100,7 +100,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
     fn stream_key(&self) -> Option<Vec<usize>> {
         let i2o = self.i2o_col_mapping();
         self.input
-            .stream_key()
+            .stream_key()?
             .iter()
             .map(|pk_col| i2o.try_map(*pk_col))
             .collect::<Option<Vec<_>>>()

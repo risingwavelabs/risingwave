@@ -53,9 +53,7 @@ impl CompactorService {
                 config.listen_address, config.exporter_port
             ))
             .arg("--advertise-addr")
-            .arg(format!("{}:{}", config.address, config.port))
-            .arg("--metrics-level")
-            .arg("info");
+            .arg(format!("{}:{}", config.address, config.port));
         if let Some(compaction_worker_threads_number) =
             config.compaction_worker_threads_number.as_ref()
         {
@@ -93,10 +91,9 @@ impl Task for CompactorService {
 
         if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
-            cmd.env(
-                "MALLOC_CONF",
-                "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compactor",
-            );
+            let conf = "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compactor";
+            cmd.env("_RJEM_MALLOC_CONF", conf); // prefixed for macos
+            cmd.env("MALLOC_CONF", conf); // unprefixed for linux
         }
 
         cmd.arg("--config-path")
