@@ -92,7 +92,7 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt):
             break
         print(f"[retry {retry_no}] Now got {result[0]} rows in table, {total_rows} expected, wait 30s")
         sleep(30)
-    
+
     stmt = f'select count(*), sum(id), sum(sex), sum(mark) from {_table()}'
     print(f'Execute {stmt}')
     cur.execute(stmt)

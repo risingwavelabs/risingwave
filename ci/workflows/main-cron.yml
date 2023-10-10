@@ -358,7 +358,7 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     retry: *auto-retry
-  
+
   - label: "S3_v2 source check on AWS (json parser)"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_v2.py json'"
     depends_on: build
