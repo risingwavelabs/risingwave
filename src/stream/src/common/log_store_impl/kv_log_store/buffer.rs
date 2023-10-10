@@ -57,7 +57,7 @@ struct LogStoreBufferInner {
     stream_chunk_count: usize,
     max_stream_chunk_count: usize,
 
-    updated_truncation: Option<ReaderTruncationOffsetType>,
+    truncation_list: VecDeque<ReaderTruncationOffsetType>,
 
     next_chunk_id: ChunkId,
 }
@@ -244,8 +244,13 @@ impl LogStoreBufferSender {
         self.update_notify.notify_waiters();
     }
 
-    pub(crate) fn pop_truncation(&self) -> Option<ReaderTruncationOffsetType> {
-        self.buffer.inner().updated_truncation.take()
+    pub(crate) fn pop_truncation(&self, curr_epoch: u64) -> Option<ReaderTruncationOffsetType> {
+        let mut inner = self.buffer.inner();
+        let mut ret = None;
+        while let Some((epoch, _)) = inner.truncation_list.front() && *epoch < curr_epoch {
+            ret = inner.truncation_list.pop_front();
+        }
+        ret
     }
 
     pub(crate) fn flush_all_unflushed(
@@ -370,8 +375,12 @@ impl LogStoreBufferReceiver {
                 }
             }
         }
-        if let Some(offset) = latest_offset {
-            inner.updated_truncation = Some(offset);
+        if let Some((epoch, seq_id)) = latest_offset {
+            if let Some((prev_epoch, ref mut prev_seq_id)) = inner.truncation_list.back_mut() && *prev_epoch == epoch {
+                *prev_seq_id = seq_id;
+            } else {
+                inner.truncation_list.push_back((epoch, seq_id));
+            }
         }
     }
 }
@@ -384,7 +393,7 @@ pub(crate) fn new_log_store_buffer(
         consumed_queue: VecDeque::new(),
         stream_chunk_count: 0,
         max_stream_chunk_count,
-        updated_truncation: None,
+        truncation_list: VecDeque::new(),
         next_chunk_id: 0,
     });
     let update_notify = Arc::new(Notify::new());
