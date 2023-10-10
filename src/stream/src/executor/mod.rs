@@ -332,13 +332,7 @@ impl Barrier {
         }
     }
 
-    /// Whether this barrier is for configuration change. Used for source executor initialization.
-    pub fn is_update(&self) -> bool {
-        matches!(self.mutation.as_deref(), Some(Mutation::Update { .. }))
-    }
-
-    /// Whether this barrier is for resume. Used for now executor to determine whether to yield a
-    /// chunk and a watermark before this barrier.
+    /// Whether this barrier is for resume.
     pub fn is_resume(&self) -> bool {
         matches!(self.mutation.as_deref(), Some(Mutation::Resume))
     }
