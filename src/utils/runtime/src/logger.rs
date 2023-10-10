@@ -28,27 +28,33 @@ use tracing_subscriber::{filter, EnvFilter};
 const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
 const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
 
+/// Default level for logging, depending on the deployment and `debug_assertions` flag.
+///
+/// Can be overridden by `RUST_LOG` env var and [`LoggerSettings`].
+fn default_level() -> Level {
+    match Deployment::current() {
+        Deployment::Ci => Level::INFO,
+        _ => {
+            if cfg!(debug_assertions) {
+                Level::DEBUG
+            } else {
+                Level::INFO
+            }
+        }
+    }
+}
+
 /// Configure log targets for some `RisingWave` crates.
 ///
-/// Other RisingWave crates will follow the default level (`DEBUG` or `INFO` according to
-/// the `debug_assertions` and `is_ci` flag).
+/// Other RisingWave crates (like `stream` and `storage`) will follow the [`default_level`].
 fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets {
     targets
-        // force a lower level for important logs
-        .with_target("risingwave_stream", Level::DEBUG)
-        .with_target("risingwave_storage", Level::DEBUG)
         // force a higher level for noisy logs
         .with_target("risingwave_sqlparser", Level::INFO)
         .with_target("pgwire", Level::INFO)
         .with_target(PGWIRE_QUERY_LOG, Level::OFF)
-        // force a higher level for foyer logs
-        .with_target("foyer", Level::WARN)
-        .with_target("foyer_common", Level::WARN)
-        .with_target("foyer_intrusive", Level::WARN)
-        .with_target("foyer_memory", Level::WARN)
-        .with_target("foyer_storage", Level::WARN)
-        // disable events that are too verbose
-        .with_target("events", Level::ERROR)
+        // events are disabled unless `RUST_LOG` overrides
+        .with_target("events", Level::OFF)
 }
 
 pub struct LoggerSettings {
@@ -160,6 +166,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     // Default filter for logging to stdout and tracing.
     let default_filter = {
         let mut filter = filter::Targets::new()
+            .with_target("foyer", Level::WARN)
             .with_target("aws_sdk_ec2", Level::INFO)
             .with_target("aws_sdk_s3", Level::INFO)
             .with_target("aws_config", Level::WARN)
@@ -178,16 +185,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         filter = configure_risingwave_targets_fmt(filter);
 
         // For all other crates
-        filter = filter.with_default(match Deployment::current() {
-            Deployment::Ci => Level::INFO,
-            _ => {
-                if cfg!(debug_assertions) {
-                    Level::DEBUG
-                } else {
-                    Level::INFO
-                }
-            }
-        });
+        filter = filter.with_default(default_level());
 
         // Overrides from settings
         filter = filter.with_targets(settings.targets);
