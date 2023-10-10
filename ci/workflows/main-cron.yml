@@ -309,7 +309,7 @@ steps:
     retry: *auto-retry
 
   - label: "S3 source check on AWS (json parser)"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s run"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s run.py"
     depends_on: build
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -326,7 +326,7 @@ steps:
     retry: *auto-retry
 
   - label: "S3 source check on AWS (json parser)"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s json_file"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s json_file.py"
     depends_on: build
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -343,7 +343,41 @@ steps:
     retry: *auto-retry
 
   - label: "S3 source check on AWS (csv parser)"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s run_csv"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s run_csv.py"
+    depends_on: build
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 25
+    retry: *auto-retry
+
+  - label: "S3_v2 source check on AWS (json parser)"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_v2.py json'"
+    depends_on: build
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 25
+    retry: *auto-retry
+
+  - label: "S3_v2 source check on AWS (csv parser)"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_v2.py csv_without_header'"
     depends_on: build
     plugins:
       - seek-oss/aws-sm#v2.3.1:
