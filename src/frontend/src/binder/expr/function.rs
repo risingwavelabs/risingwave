@@ -170,19 +170,6 @@ impl Binder {
             }
         }
 
-        // datatype cast function
-        // only functions required by the existing PostgreSQL tool are implemented
-        #[allow(clippy::single_match)] // remove it when more cast functions needed
-        match (function_name.as_str(), inputs.as_slice()) {
-            ("date", [expr]) => {
-                return expr
-                    .clone()
-                    .cast_explicit(DataType::Date)
-                    .map_err(Into::into);
-            }
-            _ => (),
-        }
-
         self.bind_builtin_scalar_function(function_name.as_str(), inputs)
     }
 
@@ -1175,6 +1162,12 @@ impl Binder {
                 ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
                 // TODO: implement pg_sleep_until
                 // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
+
+                // cast functions
+                // only functions required by the existing PostgreSQL tool are implemented
+                ("date", guard_by_len(1, raw(|_binder, inputs| {
+                    inputs[0].clone().cast_explicit(DataType::Date).map_err(Into::into)
+                }))),
             ]
             .into_iter()
             .collect()

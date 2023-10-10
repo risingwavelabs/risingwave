@@ -36,5 +36,5 @@ select date('00-00-33');
 query error cannot cast type "integer" to "date" in Explicit context
 select date(1);
 
-query error Feature is not yet implemented: unsupported function: "date"
+query error unexpected arguments number
 select date();
