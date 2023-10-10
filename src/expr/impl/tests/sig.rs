@@ -59,21 +59,21 @@ fn test_func_sig_map() {
     // handle them specially without relying on FuncSigMap.
     let expected = expect_test::expect![[r#"
         [
-            "cast(anyarray) -> varchar/anyarray",
-            "cast(bigint) -> rw_int256/integer/smallint/numeric/double precision/real/varchar",
-            "cast(boolean) -> integer/varchar",
-            "cast(date) -> timestamp/varchar",
-            "cast(double precision) -> numeric/real/bigint/integer/smallint/varchar",
-            "cast(integer) -> rw_int256/smallint/numeric/double precision/real/bigint/boolean/varchar",
-            "cast(interval) -> time/varchar",
-            "cast(jsonb) -> boolean/double precision/real/numeric/bigint/integer/smallint/varchar",
-            "cast(numeric) -> double precision/real/bigint/integer/smallint/varchar",
-            "cast(real) -> numeric/bigint/integer/smallint/double precision/varchar",
-            "cast(rw_int256) -> double precision/varchar",
-            "cast(smallint) -> rw_int256/numeric/double precision/real/bigint/integer/varchar",
-            "cast(time) -> interval/varchar",
-            "cast(timestamp) -> time/date/varchar",
-            "cast(varchar) -> jsonb/interval/timestamp/time/date/rw_int256/real/double precision/numeric/smallint/integer/bigint/varchar/boolean/bytea/anyarray",
+            "cast(anyarray) -> character varying/anyarray",
+            "cast(bigint) -> rw_int256/integer/smallint/numeric/double precision/real/character varying",
+            "cast(boolean) -> integer/character varying",
+            "cast(character varying) -> jsonb/interval/timestamp without time zone/time without time zone/date/rw_int256/real/double precision/numeric/smallint/integer/bigint/character varying/boolean/bytea/anyarray",
+            "cast(date) -> timestamp without time zone/character varying",
+            "cast(double precision) -> numeric/real/bigint/integer/smallint/character varying",
+            "cast(integer) -> rw_int256/smallint/numeric/double precision/real/bigint/boolean/character varying",
+            "cast(interval) -> time without time zone/character varying",
+            "cast(jsonb) -> boolean/double precision/real/numeric/bigint/integer/smallint/character varying",
+            "cast(numeric) -> double precision/real/bigint/integer/smallint/character varying",
+            "cast(real) -> numeric/bigint/integer/smallint/double precision/character varying",
+            "cast(rw_int256) -> double precision/character varying",
+            "cast(smallint) -> rw_int256/numeric/double precision/real/bigint/integer/character varying",
+            "cast(time without time zone) -> interval/character varying",
+            "cast(timestamp without time zone) -> time without time zone/date/character varying",
         ]
     "#]];
     expected.assert_debug_eq(&duplicated);
