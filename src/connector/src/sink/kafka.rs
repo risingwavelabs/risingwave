@@ -36,6 +36,7 @@ use super::{
     SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
+use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::writer::{
     FormattedSink, LogSinkerOf, SinkWriterExt, SinkWriterV1, SinkWriterV1Adapter,
@@ -304,6 +305,10 @@ impl Sink for KafkaSink {
     type LogSinker = LogSinkerOf<SinkWriterV1Adapter<KafkaSinkWriter>>;
 
     const SINK_NAME: &'static str = KAFKA_SINK;
+
+    fn default_sink_decouple(desc: &SinkDesc) -> bool {
+        desc.sink_type.is_append_only()
+    }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(SinkWriterV1Adapter::new(

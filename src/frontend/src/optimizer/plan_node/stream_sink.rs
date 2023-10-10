@@ -396,7 +396,7 @@ impl StreamNode for StreamSink {
                             "have checked connector is contained when create the `StreamSink`"
                         ).to_lowercase().as_str(),
                         SinkTypeName,
-                        SinkTypeName::default_sink_decouple(),
+                        SinkTypeName::default_sink_decouple(&self.sink_desc),
                         |_unsupported| unreachable!(
                             "have checked connector is supported when create the `StreamSink`"
                         )

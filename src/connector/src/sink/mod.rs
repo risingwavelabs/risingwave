@@ -51,6 +51,7 @@ use thiserror::Error;
 pub use tracing;
 
 use self::catalog::SinkType;
+use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::LogReader;
 use crate::sink::writer::SinkWriter;
@@ -226,7 +227,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
-    fn default_sink_decouple() -> bool {
+    fn default_sink_decouple(_desc: &SinkDesc) -> bool {
         false
     }
 
