@@ -236,6 +236,10 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+    use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_connector::sink::log_store::{
         LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
@@ -246,7 +250,8 @@ mod tests {
     use risingwave_storage::StateStore;
 
     use crate::common::log_store_impl::kv_log_store::test_utils::{
-        gen_stream_chunk, gen_test_log_store_table,
+        calculate_vnode_bitmap, check_rows_eq, check_stream_chunk_eq,
+        gen_multi_vnode_stream_chunks, gen_stream_chunk, gen_test_log_store_table,
     };
     use crate::common::log_store_impl::kv_log_store::{KvLogStoreFactory, KvLogStoreMetrics};
 
@@ -264,17 +269,18 @@ mod tests {
 
         test_env.register_table(table.clone()).await;
 
+        let stream_chunk1 = gen_stream_chunk(0);
+        let stream_chunk2 = gen_stream_chunk(10);
+        let bitmap = calculate_vnode_bitmap(stream_chunk1.rows().chain(stream_chunk2.rows()));
+
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            None,
+            Some(Arc::new(bitmap)),
             max_stream_chunk_count,
             KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
-
-        let stream_chunk1 = gen_stream_chunk(0);
-        let stream_chunk2 = gen_stream_chunk(10);
 
         let epoch1 = test_env
             .storage
@@ -308,7 +314,7 @@ mod tests {
                 },
             ) => {
                 assert_eq!(epoch, epoch1);
-                assert_eq!(stream_chunk1, read_stream_chunk);
+                assert!(check_stream_chunk_eq(&stream_chunk1, &read_stream_chunk));
             }
             _ => unreachable!(),
         }
@@ -328,7 +334,7 @@ mod tests {
                 },
             ) => {
                 assert_eq!(epoch, epoch2);
-                assert_eq!(stream_chunk2, read_stream_chunk);
+                assert!(check_stream_chunk_eq(&stream_chunk2, &read_stream_chunk));
             }
             _ => unreachable!(),
         }
@@ -355,17 +361,19 @@ mod tests {
 
         test_env.register_table(table.clone()).await;
 
+        let stream_chunk1 = gen_stream_chunk(0);
+        let stream_chunk2 = gen_stream_chunk(10);
+        let bitmap = calculate_vnode_bitmap(stream_chunk1.rows().chain(stream_chunk2.rows()));
+        let bitmap = Arc::new(bitmap);
+
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            None,
+            Some(bitmap.clone()),
             max_stream_chunk_count,
             KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
-
-        let stream_chunk1 = gen_stream_chunk(0);
-        let stream_chunk2 = gen_stream_chunk(10);
 
         let epoch1 = test_env
             .storage
@@ -396,7 +404,7 @@ mod tests {
                 },
             ) => {
                 assert_eq!(epoch, epoch1);
-                assert_eq!(stream_chunk1, read_stream_chunk);
+                assert!(check_stream_chunk_eq(&stream_chunk1, &read_stream_chunk));
             }
             _ => unreachable!(),
         }
@@ -416,7 +424,7 @@ mod tests {
                 },
             ) => {
                 assert_eq!(epoch, epoch2);
-                assert_eq!(stream_chunk2, read_stream_chunk);
+                assert!(check_stream_chunk_eq(&stream_chunk2, &read_stream_chunk));
             }
             _ => unreachable!(),
         }
@@ -447,7 +455,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            None,
+            Some(bitmap),
             max_stream_chunk_count,
             KvLogStoreMetrics::for_test(),
         );
@@ -466,7 +474,7 @@ mod tests {
                 },
             ) => {
                 assert_eq!(epoch, epoch1);
-                assert_eq!(stream_chunk1, read_stream_chunk);
+                assert!(check_stream_chunk_eq(&stream_chunk1, &read_stream_chunk));
             }
             _ => unreachable!(),
         }
@@ -486,7 +494,7 @@ mod tests {
                 },
             ) => {
                 assert_eq!(epoch, epoch2);
-                assert_eq!(stream_chunk2, read_stream_chunk);
+                assert!(check_stream_chunk_eq(&stream_chunk2, &read_stream_chunk));
             }
             _ => unreachable!(),
         }
@@ -513,18 +521,27 @@ mod tests {
 
         test_env.register_table(table.clone()).await;
 
+        let stream_chunk1_1 = gen_stream_chunk(0);
+        let stream_chunk1_2 = gen_stream_chunk(10);
+        let stream_chunk2 = gen_stream_chunk(20);
+        let stream_chunk3 = gen_stream_chunk(20);
+        let bitmap = calculate_vnode_bitmap(
+            stream_chunk1_1
+                .rows()
+                .chain(stream_chunk1_2.rows())
+                .chain(stream_chunk2.rows())
+                .chain(stream_chunk3.rows()),
+        );
+        let bitmap = Arc::new(bitmap);
+
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            None,
+            Some(bitmap.clone()),
             max_stream_chunk_count,
             KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
-
-        let stream_chunk1_1 = gen_stream_chunk(0);
-        let stream_chunk1_2 = gen_stream_chunk(10);
-        let stream_chunk2 = gen_stream_chunk(20);
 
         let epoch1 = test_env
             .storage
@@ -554,7 +571,7 @@ mod tests {
                 },
             ) => {
                 assert_eq!(epoch, epoch1);
-                assert_eq!(stream_chunk1_1, read_stream_chunk);
+                assert!(check_stream_chunk_eq(&stream_chunk1_1, &read_stream_chunk));
                 chunk_id
             }
             _ => unreachable!(),
@@ -568,7 +585,7 @@ mod tests {
                 },
             ) => {
                 assert_eq!(epoch, epoch1);
-                assert_eq!(stream_chunk1_2, read_stream_chunk);
+                assert!(check_stream_chunk_eq(&stream_chunk1_2, &read_stream_chunk));
                 chunk_id
             }
             _ => unreachable!(),
@@ -591,7 +608,7 @@ mod tests {
                 },
             ) => {
                 assert_eq!(epoch, epoch2);
-                assert_eq!(stream_chunk2, read_stream_chunk);
+                assert!(check_stream_chunk_eq(&stream_chunk2, &read_stream_chunk));
             }
             _ => unreachable!(),
         }
@@ -630,7 +647,7 @@ mod tests {
         let factory = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
-            None,
+            Some(bitmap),
             max_stream_chunk_count,
             KvLogStoreMetrics::for_test(),
         );
@@ -640,7 +657,7 @@ mod tests {
             .init(EpochPair::new_test_epoch(epoch3))
             .await
             .unwrap();
-        let stream_chunk3 = gen_stream_chunk(30);
+
         writer.write_chunk(stream_chunk3.clone()).await.unwrap();
 
         reader.init().await.unwrap();
@@ -653,7 +670,7 @@ mod tests {
                 },
             ) => {
                 assert_eq!(epoch, epoch1);
-                assert_eq!(stream_chunk1_2, read_stream_chunk);
+                assert!(check_stream_chunk_eq(&stream_chunk1_2, &read_stream_chunk));
             }
             _ => unreachable!(),
         }
@@ -673,7 +690,7 @@ mod tests {
                 },
             ) => {
                 assert_eq!(epoch, epoch2);
-                assert_eq!(stream_chunk2, read_stream_chunk);
+                assert!(check_stream_chunk_eq(&stream_chunk2, &read_stream_chunk));
             }
             _ => unreachable!(),
         }
@@ -693,7 +710,195 @@ mod tests {
                 },
             ) => {
                 assert_eq!(epoch, epoch3);
-                assert_eq!(stream_chunk3, read_stream_chunk);
+                assert!(check_stream_chunk_eq(&stream_chunk3, &read_stream_chunk));
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_vnode_recover() {
+        let test_env = prepare_hummock_test_env().await;
+
+        let table = gen_test_log_store_table();
+
+        test_env.register_table(table.clone()).await;
+
+        fn build_bitmap(indexes: impl Iterator<Item = usize>) -> Arc<Bitmap> {
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            for i in indexes {
+                builder.set(i, true);
+            }
+            Arc::new(builder.finish())
+        }
+
+        let vnodes1 = build_bitmap((0..VirtualNode::COUNT).filter(|i| i % 2 == 0));
+        let vnodes2 = build_bitmap((0..VirtualNode::COUNT).filter(|i| i % 2 == 1));
+
+        let factory1 = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(vnodes1),
+            10,
+            KvLogStoreMetrics::for_test(),
+        );
+        let factory2 = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(vnodes2),
+            10,
+            KvLogStoreMetrics::for_test(),
+        );
+        let (mut reader1, mut writer1) = factory1.build().await;
+        let (mut reader2, mut writer2) = factory2.build().await;
+
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .version()
+            .max_committed_epoch
+            + 1;
+        writer1
+            .init(EpochPair::new_test_epoch(epoch1))
+            .await
+            .unwrap();
+        writer2
+            .init(EpochPair::new_test_epoch(epoch1))
+            .await
+            .unwrap();
+        reader1.init().await.unwrap();
+        reader2.init().await.unwrap();
+        let [chunk1_1, chunk1_2] = gen_multi_vnode_stream_chunks::<2>(0, 100);
+        writer1.write_chunk(chunk1_1.clone()).await.unwrap();
+        writer2.write_chunk(chunk1_2.clone()).await.unwrap();
+        let epoch2 = epoch1 + 1;
+        writer1.flush_current_epoch(epoch2, false).await.unwrap();
+        writer2.flush_current_epoch(epoch2, false).await.unwrap();
+        let [chunk2_1, chunk2_2] = gen_multi_vnode_stream_chunks::<2>(200, 100);
+        writer1.write_chunk(chunk2_1.clone()).await.unwrap();
+        writer2.write_chunk(chunk2_2.clone()).await.unwrap();
+
+        match reader1.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(check_stream_chunk_eq(&chunk1_1, &chunk));
+            }
+            _ => unreachable!(),
+        };
+        match reader1.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(!is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+
+        match reader2.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(check_stream_chunk_eq(&chunk1_2, &chunk));
+            }
+            _ => unreachable!(),
+        }
+        match reader2.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(!is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+
+        // Only reader1 will truncate
+        reader1
+            .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+            .await
+            .unwrap();
+
+        match reader1.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(check_stream_chunk_eq(&chunk2_1, &chunk));
+            }
+            _ => unreachable!(),
+        }
+        match reader2.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(check_stream_chunk_eq(&chunk2_2, &chunk));
+            }
+            _ => unreachable!(),
+        }
+
+        let epoch3 = epoch2 + 1;
+        writer1.flush_current_epoch(epoch3, true).await.unwrap();
+        writer2.flush_current_epoch(epoch3, true).await.unwrap();
+
+        match reader1.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+        match reader2.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+
+        // Truncation of reader1 on epoch1 should work because it is before this sync
+        test_env.storage.seal_epoch(epoch1, false);
+        test_env.commit_epoch(epoch2).await;
+        test_env
+            .storage
+            .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
+            .await
+            .unwrap();
+
+        // Recovery
+        test_env.storage.clear_shared_buffer().await.unwrap();
+
+        let vnodes = build_bitmap(0..VirtualNode::COUNT);
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(vnodes),
+            10,
+            KvLogStoreMetrics::for_test(),
+        );
+        let (mut reader, mut writer) = factory.build().await;
+        writer.init(EpochPair::new(epoch3, epoch2)).await.unwrap();
+        reader.init().await.unwrap();
+        match reader.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(check_stream_chunk_eq(&chunk1_2, &chunk));
+            }
+            _ => unreachable!(),
+        }
+        match reader.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(!is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+        match reader.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(check_rows_eq(
+                    chunk2_1.rows().chain(chunk2_2.rows()),
+                    chunk.rows()
+                ));
+            }
+            _ => unreachable!(),
+        }
+        match reader.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch2);
+                assert!(is_checkpoint);
             }
             _ => unreachable!(),
         }

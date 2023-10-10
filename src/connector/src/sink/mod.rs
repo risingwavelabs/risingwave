@@ -163,7 +163,7 @@ impl SinkParam {
                 .map(|i| *i as usize)
                 .collect(),
             sink_type: SinkType::from_proto(
-                PbSinkType::from_i32(pb_param.sink_type).expect("should be able to convert"),
+                PbSinkType::try_from(pb_param.sink_type).expect("should be able to convert"),
             ),
             format_desc,
             db_name: pb_param.db_name,

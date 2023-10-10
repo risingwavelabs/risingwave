@@ -13,11 +13,14 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::fmt::Debug;
-use std::future::Future;
+use std::future::{poll_fn, Future};
 use std::sync::Arc;
+use std::task::Poll;
 
 use anyhow::anyhow;
+use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
@@ -287,9 +290,196 @@ where
     }
 }
 
+enum DeliveryFutureManagerItem<F> {
+    Chunk {
+        chunk_id: ChunkId,
+        // earlier future at the front
+        futures: VecDeque<F>,
+    },
+    Barrier,
+}
+
+pub struct DeliveryFutureManager<F> {
+    future_count: usize,
+    max_future_count: usize,
+    // earlier items at the front
+    items: VecDeque<(u64, DeliveryFutureManagerItem<F>)>,
+}
+
+impl<F> DeliveryFutureManager<F> {
+    pub fn new(max_future_count: usize) -> Self {
+        Self {
+            future_count: 0,
+            max_future_count,
+            items: Default::default(),
+        }
+    }
+
+    pub fn add_barrier(&mut self, epoch: u64) {
+        if let Some((item_epoch, last_item)) = self.items.back() {
+            match last_item {
+                DeliveryFutureManagerItem::Chunk { .. } => {
+                    assert_eq!(*item_epoch, epoch)
+                }
+                DeliveryFutureManagerItem::Barrier => {
+                    assert!(
+                        epoch > *item_epoch,
+                        "new barrier epoch {} should be greater than prev barrier {}",
+                        epoch,
+                        item_epoch
+                    );
+                }
+            }
+        }
+        self.items
+            .push_back((epoch, DeliveryFutureManagerItem::Barrier));
+    }
+
+    pub fn start_write_chunk(
+        &mut self,
+        epoch: u64,
+        chunk_id: ChunkId,
+    ) -> DeliveryFutureManagerAddFuture<'_, F> {
+        if let Some((item_epoch, item)) = self.items.back() {
+            match item {
+                DeliveryFutureManagerItem::Chunk {
+                    chunk_id: item_chunk_id,
+                    ..
+                } => {
+                    assert_eq!(epoch, *item_epoch);
+                    assert!(
+                        chunk_id > *item_chunk_id,
+                        "new chunk id {} should be greater than prev chunk id {}",
+                        chunk_id,
+                        item_chunk_id
+                    );
+                }
+                DeliveryFutureManagerItem::Barrier => {
+                    assert!(
+                        epoch > *item_epoch,
+                        "new chunk epoch {} should be greater than prev barrier: {}",
+                        epoch,
+                        item_epoch
+                    );
+                }
+            }
+        }
+        self.items.push_back((
+            epoch,
+            DeliveryFutureManagerItem::Chunk {
+                chunk_id,
+                futures: VecDeque::new(),
+            },
+        ));
+        DeliveryFutureManagerAddFuture(self)
+    }
+}
+
+pub struct DeliveryFutureManagerAddFuture<'a, F>(&'a mut DeliveryFutureManager<F>);
+
+impl<'a, F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManagerAddFuture<'a, F> {
+    /// Add a new future to the latest started written chunk.
+    /// The returned bool value indicate whether we have awaited on any previous futures.
+    pub async fn add_future_may_await(&mut self, future: F) -> Result<bool, F::Error> {
+        let mut has_await = false;
+        while self.0.future_count >= self.0.max_future_count {
+            self.await_one_delivery().await?;
+            has_await = true;
+        }
+        match self.0.items.back_mut() {
+            Some((_, DeliveryFutureManagerItem::Chunk { futures, .. })) => {
+                futures.push_back(future);
+                self.0.future_count += 1;
+                Ok(has_await)
+            }
+            _ => unreachable!("should add future only after add a new chunk"),
+        }
+    }
+
+    pub async fn await_one_delivery(&mut self) -> Result<(), F::Error> {
+        for (_, item) in &mut self.0.items {
+            if let DeliveryFutureManagerItem::Chunk {futures, ..} = item && let Some(mut delivery_future) = futures.pop_front() {
+                self.0.future_count -= 1;
+                return poll_fn(|cx| delivery_future.try_poll_unpin(cx)).await;
+            } else {
+                continue;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn future_count(&self) -> usize {
+        self.0.future_count
+    }
+
+    pub fn max_future_count(&self) -> usize {
+        self.0.max_future_count
+    }
+}
+
+impl<F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManager<F> {
+    pub fn next_truncate_offset(
+        &mut self,
+    ) -> impl Future<Output = Result<TruncateOffset, F::Error>> + '_ {
+        poll_fn(move |cx| {
+            let mut latest_offset: Option<TruncateOffset> = None;
+            'outer: while let Some((epoch, item)) = self.items.front_mut() {
+                match item {
+                    DeliveryFutureManagerItem::Chunk { chunk_id, futures } => {
+                        while let Some(future) = futures.front_mut() {
+                            match future.try_poll_unpin(cx) {
+                                Poll::Ready(result) => match result {
+                                    Ok(()) => {
+                                        self.future_count -= 1;
+                                        futures.pop_front();
+                                    }
+                                    Err(e) => {
+                                        return Poll::Ready(Err(e));
+                                    }
+                                },
+                                Poll::Pending => {
+                                    break 'outer;
+                                }
+                            }
+                        }
+
+                        // when we reach here, there must not be any pending or error future.
+                        // Which means all futures of this stream chunk have been finished
+                        assert!(futures.is_empty());
+                        latest_offset = Some(TruncateOffset::Chunk {
+                            epoch: *epoch,
+                            chunk_id: *chunk_id,
+                        });
+                        self.items.pop_front().expect("items not empty");
+                    }
+                    DeliveryFutureManagerItem::Barrier => {
+                        latest_offset = Some(TruncateOffset::Barrier { epoch: *epoch });
+                        self.items.pop_front().expect("items not empty");
+                        // Barrier will be yielded anyway
+                        break 'outer;
+                    }
+                }
+            }
+            if let Some(offset) = latest_offset {
+                Poll::Ready(Ok(offset))
+            } else {
+                Poll::Pending
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::sink::log_store::TruncateOffset;
+    use std::future::{poll_fn, Future};
+    use std::pin::pin;
+    use std::task::Poll;
+
+    use futures::{FutureExt, TryFuture};
+    use tokio::sync::oneshot;
+    use tokio::sync::oneshot::Receiver;
+
+    use crate::sink::log_store::{DeliveryFutureManager, TruncateOffset};
 
     #[test]
     fn test_truncate_offset_cmp() {
@@ -339,5 +529,221 @@ mod tests {
             } > TruncateOffset::Barrier { epoch: 1 }
         );
         assert!(TruncateOffset::Barrier { epoch: 2 } > TruncateOffset::Barrier { epoch: 1 });
+    }
+
+    type TestFuture = impl TryFuture<Ok = (), Error = anyhow::Error> + Unpin + 'static;
+    fn to_test_future(rx: Receiver<anyhow::Result<()>>) -> TestFuture {
+        async move { rx.await.unwrap() }.boxed()
+    }
+
+    #[tokio::test]
+    async fn test_empty() {
+        let mut manager = DeliveryFutureManager::<TestFuture>::new(2);
+        let mut future = pin!(manager.next_truncate_offset());
+        assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+            .await
+            .is_pending());
+    }
+
+    #[tokio::test]
+    async fn test_future_delivery_manager_basic() {
+        let mut manager = DeliveryFutureManager::new(2);
+        let epoch1 = 233;
+        let chunk_id1 = 1;
+        let (tx1_1, rx1_1) = oneshot::channel();
+        let mut write_chunk = manager.start_write_chunk(epoch1, chunk_id1);
+        assert!(!write_chunk
+            .add_future_may_await(to_test_future(rx1_1))
+            .await
+            .unwrap());
+        assert_eq!(manager.future_count, 1);
+        {
+            let mut next_truncate_offset = pin!(manager.next_truncate_offset());
+            assert!(
+                poll_fn(|cx| Poll::Ready(next_truncate_offset.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            tx1_1.send(Ok(())).unwrap();
+            assert_eq!(
+                next_truncate_offset.await.unwrap(),
+                TruncateOffset::Chunk {
+                    epoch: epoch1,
+                    chunk_id: chunk_id1
+                }
+            );
+        }
+        assert_eq!(manager.future_count, 0);
+        manager.add_barrier(epoch1);
+        assert_eq!(
+            manager.next_truncate_offset().await.unwrap(),
+            TruncateOffset::Barrier { epoch: epoch1 }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_future_delivery_manager_compress_chunk() {
+        let mut manager = DeliveryFutureManager::new(10);
+        let epoch1 = 233;
+        let chunk_id1 = 1;
+        let chunk_id2 = chunk_id1 + 1;
+        let chunk_id3 = chunk_id2 + 1;
+        let (tx1_1, rx1_1) = oneshot::channel();
+        let (tx1_2, rx1_2) = oneshot::channel();
+        let (tx1_3, rx1_3) = oneshot::channel();
+        let epoch2 = epoch1 + 1;
+        let (tx2_1, rx2_1) = oneshot::channel();
+        assert!(!manager
+            .start_write_chunk(epoch1, chunk_id1)
+            .add_future_may_await(to_test_future(rx1_1))
+            .await
+            .unwrap());
+        assert!(!manager
+            .start_write_chunk(epoch1, chunk_id2)
+            .add_future_may_await(to_test_future(rx1_2))
+            .await
+            .unwrap());
+        assert!(!manager
+            .start_write_chunk(epoch1, chunk_id3)
+            .add_future_may_await(to_test_future(rx1_3))
+            .await
+            .unwrap());
+        manager.add_barrier(epoch1);
+        assert!(!manager
+            .start_write_chunk(epoch2, chunk_id1)
+            .add_future_may_await(to_test_future(rx2_1))
+            .await
+            .unwrap());
+        assert_eq!(manager.future_count, 4);
+        {
+            let mut next_truncate_offset = pin!(manager.next_truncate_offset());
+            assert!(
+                poll_fn(|cx| Poll::Ready(next_truncate_offset.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            tx1_2.send(Ok(())).unwrap();
+            assert!(
+                poll_fn(|cx| Poll::Ready(next_truncate_offset.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            tx1_1.send(Ok(())).unwrap();
+            // The offset of chunk1 and chunk2 are compressed
+            assert_eq!(
+                next_truncate_offset.await.unwrap(),
+                TruncateOffset::Chunk {
+                    epoch: epoch1,
+                    chunk_id: chunk_id2
+                }
+            );
+        }
+        assert_eq!(manager.future_count, 2);
+        {
+            let mut next_truncate_offset = pin!(manager.next_truncate_offset());
+            assert!(
+                poll_fn(|cx| Poll::Ready(next_truncate_offset.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
+            tx1_3.send(Ok(())).unwrap();
+            tx2_1.send(Ok(())).unwrap();
+            // Emit barrier though later chunk has finished.
+            assert_eq!(
+                next_truncate_offset.await.unwrap(),
+                TruncateOffset::Barrier { epoch: epoch1 }
+            );
+        }
+        assert_eq!(manager.future_count, 1);
+        assert_eq!(
+            manager.next_truncate_offset().await.unwrap(),
+            TruncateOffset::Chunk {
+                epoch: epoch2,
+                chunk_id: chunk_id1
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_future_delivery_manager_await_future() {
+        let mut manager = DeliveryFutureManager::new(2);
+        let epoch = 233;
+        let chunk_id1 = 1;
+        let chunk_id2 = chunk_id1 + 1;
+        let (tx1_1, rx1_1) = oneshot::channel();
+        let (tx1_2, rx1_2) = oneshot::channel();
+        let (tx2_1, rx2_1) = oneshot::channel();
+        let (tx2_2, rx2_2) = oneshot::channel();
+
+        {
+            let mut write_chunk = manager.start_write_chunk(epoch, chunk_id1);
+            assert!(!write_chunk
+                .add_future_may_await(to_test_future(rx1_1))
+                .await
+                .unwrap());
+            assert!(!write_chunk
+                .add_future_may_await(to_test_future(rx1_2))
+                .await
+                .unwrap());
+            assert_eq!(manager.future_count, 2);
+        }
+
+        {
+            let mut write_chunk = manager.start_write_chunk(epoch, chunk_id2);
+            {
+                let mut future1 = pin!(write_chunk.add_future_may_await(to_test_future(rx2_1)));
+                assert!(poll_fn(|cx| Poll::Ready(future1.as_mut().poll(cx)))
+                    .await
+                    .is_pending());
+                tx1_1.send(Ok(())).unwrap();
+                assert!(future1.await.unwrap());
+            }
+            assert_eq!(2, write_chunk.future_count());
+            {
+                let mut future2 = pin!(write_chunk.add_future_may_await(to_test_future(rx2_2)));
+                assert!(poll_fn(|cx| Poll::Ready(future2.as_mut().poll(cx)))
+                    .await
+                    .is_pending());
+                tx1_2.send(Ok(())).unwrap();
+                assert!(future2.await.unwrap());
+            }
+            assert_eq!(2, write_chunk.future_count());
+            {
+                let mut future3 = pin!(write_chunk.await_one_delivery());
+                assert!(poll_fn(|cx| Poll::Ready(future3.as_mut().poll(cx)))
+                    .await
+                    .is_pending());
+                tx2_1.send(Ok(())).unwrap();
+                future3.await.unwrap();
+            }
+            assert_eq!(1, write_chunk.future_count());
+        }
+
+        assert_eq!(
+            manager.next_truncate_offset().await.unwrap(),
+            TruncateOffset::Chunk {
+                epoch,
+                chunk_id: chunk_id1
+            }
+        );
+
+        assert_eq!(1, manager.future_count);
+
+        {
+            let mut future = pin!(manager.next_truncate_offset());
+            assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+                .await
+                .is_pending());
+            tx2_2.send(Ok(())).unwrap();
+            assert_eq!(
+                future.await.unwrap(),
+                TruncateOffset::Chunk {
+                    epoch,
+                    chunk_id: chunk_id2
+                }
+            );
+        }
+
+        assert_eq!(0, manager.future_count);
     }
 }
