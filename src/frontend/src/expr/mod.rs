@@ -66,8 +66,8 @@ pub use session_timezone::SessionTimezone;
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{
-    align_types, all_functions, cast_map_array, cast_ok, cast_sigs, infer_some_all, infer_type,
-    least_restrictive, CastContext, CastSig, FuncSign,
+    align_types, cast_map_array, cast_ok, cast_sigs, infer_some_all, infer_type, least_restrictive,
+    CastContext, CastSig, FuncSign,
 };
 pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;

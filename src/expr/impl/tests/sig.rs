@@ -17,12 +17,12 @@ use std::collections::HashMap;
 risingwave_expr_impl::enable!();
 
 use itertools::Itertools;
-use risingwave_expr::sig::{scalar_functions, FuncName, FuncSign, SigDataType};
+use risingwave_expr::sig::{FuncName, FuncSign, SigDataType, FUNCTION_REGISTRY};
 #[test]
 fn test_func_sig_map() {
     // convert FUNC_SIG_MAP to a more convenient map for testing
     let mut new_map: HashMap<FuncName, HashMap<Vec<SigDataType>, Vec<FuncSign>>> = HashMap::new();
-    for sig in scalar_functions() {
+    for sig in FUNCTION_REGISTRY.iter_scalars() {
         // exclude deprecated functions
         if sig.deprecated {
             continue;

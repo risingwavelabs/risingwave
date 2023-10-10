@@ -17,7 +17,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::{DataType, DataTypeName, StructType};
 use risingwave_expr::sig::cast::cast_sigs;
-use risingwave_expr::sig::{aggregate_functions, scalar_functions};
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_sqlparser::ast::{Expr, Ident, OrderByExpr, Value};
 
 use crate::sql_gen::types::data_type_to_ast_data_type;
@@ -303,7 +303,8 @@ pub(crate) fn sql_null() -> Expr {
 // Add variadic function signatures. Can add these functions
 // to a FUNC_TABLE too.
 pub fn print_function_table() -> String {
-    let func_str = scalar_functions()
+    let func_str = FUNCTION_REGISTRY
+        .iter_scalars()
         .map(|sign| {
             format!(
                 "{}({}) -> {}",
@@ -314,7 +315,8 @@ pub fn print_function_table() -> String {
         })
         .join("\n");
 
-    let agg_func_str = aggregate_functions()
+    let agg_func_str = FUNCTION_REGISTRY
+        .iter_aggregates()
         .map(|sign| {
             format!(
                 "{}({}) -> {}",

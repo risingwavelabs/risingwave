@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::sig::cast::{cast_sigs, CastContext, CastSig as RwCastSig};
-use risingwave_expr::sig::{aggregate_functions, scalar_functions, FuncSign};
+use risingwave_expr::sig::{FuncSign, FUNCTION_REGISTRY};
 use risingwave_frontend::expr::ExprType;
 use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType, StructField};
 
@@ -120,7 +120,8 @@ static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
 pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSign>>> =
     LazyLock::new(|| {
         let mut funcs = HashMap::<DataType, Vec<&'static FuncSign>>::new();
-        scalar_functions()
+        FUNCTION_REGISTRY
+            .iter_scalars()
             .filter(|func| {
                 func.inputs_type
                     .iter()
@@ -142,7 +143,8 @@ pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSign>>
 /// Set of invariant functions
 // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
 pub(crate) static INVARIANT_FUNC_SET: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
-    scalar_functions()
+    FUNCTION_REGISTRY
+        .iter_scalars()
         .map(|sig| sig.name.as_scalar())
         .counts()
         .into_iter()
@@ -156,7 +158,8 @@ pub(crate) static INVARIANT_FUNC_SET: LazyLock<HashSet<ExprType>> = LazyLock::ne
 pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSign>>> =
     LazyLock::new(|| {
         let mut funcs = HashMap::<DataType, Vec<&'static FuncSign>>::new();
-        aggregate_functions()
+        FUNCTION_REGISTRY
+            .iter_aggregates()
             .filter(|func| {
                 func.inputs_type
                     .iter()
@@ -245,7 +248,8 @@ pub(crate) static BINARY_INEQUALITY_OP_TABLE: LazyLock<
     HashMap<(DataType, DataType), Vec<BinaryOperator>>,
 > = LazyLock::new(|| {
     let mut funcs = HashMap::<(DataType, DataType), Vec<BinaryOperator>>::new();
-    scalar_functions()
+    FUNCTION_REGISTRY
+        .iter_scalars()
         .filter(|func| {
             !FUNC_BAN_LIST.contains(&func.name.as_scalar())
                 && func.ret_type == DataType::Boolean.into()

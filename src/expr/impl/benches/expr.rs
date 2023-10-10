@@ -28,7 +28,7 @@ use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::*;
 use risingwave_expr::aggregate::{build_append_only, AggArgs, AggCall, AggKind};
 use risingwave_expr::expr::*;
-use risingwave_expr::sig::{aggregate_functions, scalar_functions};
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node::PbType;
 
@@ -273,7 +273,9 @@ fn bench_expr(c: &mut Criterion) {
             .iter(|| extract.eval(&input))
     });
 
-    let sigs = scalar_functions().sorted_by_cached_key(|sig| format!("{sig:?}"));
+    let sigs = FUNCTION_REGISTRY
+        .iter_scalars()
+        .sorted_by_cached_key(|sig| format!("{sig:?}"));
     'sig: for sig in sigs {
         if (sig.inputs_type.iter())
             .chain([&sig.ret_type])
@@ -355,7 +357,9 @@ fn bench_expr(c: &mut Criterion) {
         });
     }
 
-    let sigs = aggregate_functions().sorted_by_cached_key(|sig| format!("{sig:?}"));
+    let sigs = FUNCTION_REGISTRY
+        .iter_aggregates()
+        .sorted_by_cached_key(|sig| format!("{sig:?}"));
     for sig in sigs {
         if matches!(
             sig.name.as_aggregate(),

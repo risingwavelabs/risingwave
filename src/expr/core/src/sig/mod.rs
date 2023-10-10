@@ -42,21 +42,6 @@ pub static FUNCTION_REGISTRY: LazyLock<FunctionRegistry> = LazyLock::new(|| unsa
     map
 });
 
-/// Returns an iterator of all function signatures.
-pub fn all_functions() -> impl Iterator<Item = &'static FuncSign> {
-    FUNCTION_REGISTRY.0.values().flatten()
-}
-
-/// Returns an iterator of all scalar functions.
-pub fn scalar_functions() -> impl Iterator<Item = &'static FuncSign> {
-    all_functions().filter(|d| d.is_scalar())
-}
-
-/// Returns an iterator of all aggregate functions.
-pub fn aggregate_functions() -> impl Iterator<Item = &'static FuncSign> {
-    all_functions().filter(|d| d.is_aggregate())
-}
-
 /// A set of function signatures.
 #[derive(Default, Clone, Debug)]
 pub struct FunctionRegistry(HashMap<FuncName, Vec<FuncSign>>);
@@ -127,6 +112,21 @@ impl FunctionRegistry {
             .find(|d| d.match_args(args))
             .ok_or_else(|| ExprError::UnsupportedFunction(name.to_string()))?;
         (sig.type_infer)(args)
+    }
+
+    /// Returns an iterator of all function signatures.
+    pub fn iter(&self) -> impl Iterator<Item = &FuncSign> {
+        self.0.values().flatten()
+    }
+
+    /// Returns an iterator of all scalar functions.
+    pub fn iter_scalars(&self) -> impl Iterator<Item = &FuncSign> {
+        self.iter().filter(|d| d.is_scalar())
+    }
+
+    /// Returns an iterator of all aggregate functions.
+    pub fn iter_aggregates(&self) -> impl Iterator<Item = &FuncSign> {
+        self.iter().filter(|d| d.is_aggregate())
     }
 }
 
@@ -415,5 +415,5 @@ pub unsafe fn _register(sig: FuncSign) {
 ///
 /// `#[function]` macro will generate a `#[ctor]` function to register the signature into this
 /// vector. The calls are guaranteed to be sequential. The vector will be drained and moved into
-/// `FUNC_SIG_MAP` on the first access of `FUNC_SIG_MAP`.
+/// `FUNCTION_REGISTRY` on the first access of `FUNCTION_REGISTRY`.
 static mut FUNCTION_REGISTRY_INIT: Vec<FuncSign> = Vec::new();
