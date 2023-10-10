@@ -20,6 +20,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
@@ -38,10 +39,7 @@ use risingwave_storage::hummock::multi_builder::{
 use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
-use risingwave_storage::hummock::{
-    CachePolicy, CompactionDeleteRanges, FileCache, SstableBuilder, SstableBuilderOptions,
-    SstableIterator, SstableStore, SstableWriterOptions, Xor16FilterBuilder,
-};
+use risingwave_storage::hummock::{CachePolicy, CompactionDeleteRangeIterator, FileCache, SstableBuilder, SstableBuilderOptions, SstableIterator, SstableStore, SstableWriterOptions, Xor16FilterBuilder};
 use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
 
 pub fn mock_sstable_store() -> SstableStoreRef {
@@ -195,7 +193,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
     };
     compact_and_build_sst(
         &mut builder,
-        Arc::new(CompactionDeleteRanges::default()),
+        CompactionDeleteRangeIterator::new(HummockEpoch::MAX),
         &task_config,
         Arc::new(CompactorMetrics::unused()),
         iter,

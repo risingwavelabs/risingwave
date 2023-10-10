@@ -27,17 +27,14 @@ use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
-    create_monotonic_events, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
+    HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
     DEFAULT_RESTART_INTERVAL,
 };
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, DeleteRangeTombstone, FilterBuilder, LruCache, Sstable,
-    SstableBuilder, SstableBuilderOptions, SstableStoreRef, SstableWriter, Xor16FilterBuilder,
-};
+use crate::hummock::{BlockedXor16FilterBuilder, CachePolicy, create_monotonic_events, DeleteRangeTombstone, FilterBuilder, LruCache, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef, SstableWriter, Xor16FilterBuilder};
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
 use crate::storage_value::StorageValue;

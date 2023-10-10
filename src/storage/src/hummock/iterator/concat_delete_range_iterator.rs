@@ -186,14 +186,11 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::test_user_key;
-    use crate::hummock::{
-        create_monotonic_events, CompactionDeleteRangesBuilder, DeleteRangeTombstone,
-        SstableBuilder, SstableBuilderOptions, SstableWriterOptions,
-    };
+    use crate::hummock::{create_monotonic_events, CompactionDeleteRangesBuilder, DeleteRangeTombstone, SstableBuilder, SstableBuilderOptions, SstableWriterOptions, CompactionDeleteRangeIterator};
 
     #[tokio::test]
     async fn test_concat_iterator() {
-        let mut builder = CompactionDeleteRangesBuilder::default();
+        let mut builder = CompactionDeleteRangeIterator::default();
         let sstable_store = mock_sstable_store();
         let table_id = TableId::new(0);
         let data = vec![

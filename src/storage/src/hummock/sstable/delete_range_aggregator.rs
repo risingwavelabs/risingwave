@@ -15,18 +15,21 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
+use std::ops::Bound;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
 #[cfg(any(test, feature = "test"))]
 use super::DeleteRangeTombstone;
 use super::MonotonicDeleteEvent;
-use crate::hummock::iterator::DeleteRangeIterator;
+use crate::hummock::iterator::{DeleteRangeIterator, ForwardMergeRangeIterator};
 use crate::hummock::sstable_store::TableHolder;
 use crate::hummock::{HummockResult, Sstable};
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 
 pub struct SortedBoundary {
     sequence: HummockEpoch,
@@ -57,7 +60,7 @@ impl Ord for SortedBoundary {
 
 #[derive(Default)]
 pub struct CompactionDeleteRangesBuilder {
-    events: Vec<Vec<MonotonicDeleteEvent>>,
+    iter: ForwardMergeRangeIterator,
 }
 
 #[derive(Clone)]
@@ -110,134 +113,54 @@ pub(crate) fn apply_event(epochs: &mut BTreeSet<HummockEpoch>, event: &Compactio
     }
 }
 
-#[derive(Clone, Default)]
-pub struct CompactionDeleteRanges {
-    events: Vec<CompactionDeleteRangeEvent>,
-}
-
 impl CompactionDeleteRangesBuilder {
-    pub fn add_delete_events(&mut self, data: Vec<MonotonicDeleteEvent>) {
-        self.events.push(data);
+    pub fn add_delete_events(&mut self, epoch: HummockEpoch, table_id: TableId, delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>) {
+        let size = SharedBufferBatch::measure_delete_range_size(&delete_ranges);
+        let batch = SharedBufferBatch::build_shared_buffer_batch(epoch, vec![], size, delete_ranges, table_id, None, None);
+        self.iter.add_batch_iter(batch.delete_range_iter());
     }
 
-    /// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges
-    /// `{ [0, wmk1) in epoch1, [wmk1, wmk2) in epoch2, [wmk2, wmk3) in epoch3 }`
-    /// can be transformed into events below:
-    /// `{ <0, +epoch1> <wmk1, -epoch1> <wmk1, +epoch2> <wmk2, -epoch2> <wmk2, +epoch3> <wmk3,
-    /// -epoch3> }`
-    #[cfg(any(test, feature = "test"))]
-    pub(crate) fn build_events(
-        delete_tombstones: &Vec<DeleteRangeTombstone>,
-    ) -> Vec<CompactionDeleteRangeEvent> {
-        let tombstone_len = delete_tombstones.len();
-        let mut events = Vec::with_capacity(tombstone_len * 2);
-        for DeleteRangeTombstone {
-            start_user_key,
-            end_user_key,
-            sequence,
-        } in delete_tombstones
-        {
-            events.push((start_user_key, 1, *sequence));
-            events.push((end_user_key, 0, *sequence));
-        }
-        events.sort();
-
-        let mut result = Vec::with_capacity(events.len());
-        for (user_key, group) in &events.into_iter().group_by(|(user_key, _, _)| *user_key) {
-            let (mut exit, mut enter) = (vec![], vec![]);
-            for (_, op, sequence) in group {
-                match op {
-                    0 => exit.push(TombstoneEnterExitEvent {
-                        tombstone_epoch: sequence,
-                    }),
-                    1 => {
-                        enter.push(TombstoneEnterExitEvent {
-                            tombstone_epoch: sequence,
-                        });
-                    }
-                    _ => unreachable!(),
-                }
-            }
-            result.push((user_key.clone(), exit, enter));
-        }
-
-        result
-    }
-
-    pub(crate) fn build_for_compaction(self) -> Arc<CompactionDeleteRanges> {
-        let mut ret = BTreeMap::<
-            PointRange<Vec<u8>>,
-            (Vec<TombstoneEnterExitEvent>, Vec<TombstoneEnterExitEvent>),
-        >::default();
-        for monotonic_deletes in self.events {
-            let mut last_exit_epoch = HummockEpoch::MAX;
-            for delete_event in monotonic_deletes {
-                if last_exit_epoch != HummockEpoch::MAX {
-                    let entry = ret.entry(delete_event.event_key.clone()).or_default();
-                    entry.0.push(TombstoneEnterExitEvent {
-                        tombstone_epoch: last_exit_epoch,
-                    });
-                }
-                if delete_event.new_epoch != HummockEpoch::MAX {
-                    let entry = ret.entry(delete_event.event_key).or_default();
-                    entry.1.push(TombstoneEnterExitEvent {
-                        tombstone_epoch: delete_event.new_epoch,
-                    });
-                }
-                last_exit_epoch = delete_event.new_epoch;
-            }
-        }
-        let events = ret
-            .into_iter()
-            .map(|(k, (exits, enters))| (k, exits, enters))
-            .collect_vec();
-
-        Arc::new(CompactionDeleteRanges { events })
+    pub(crate) fn build_for_compaction(self) -> CompactionDeleteRangeIterator {
+        CompactionDeleteRangeIterator::new(self.iter)
     }
 }
 
-impl CompactionDeleteRanges {
-    pub(crate) fn iter(self: &Arc<Self>) -> CompactionDeleteRangeIterator {
-        CompactionDeleteRangeIterator {
-            events: self.clone(),
-            seek_idx: 0,
-            epochs: BTreeSet::default(),
-        }
+pub struct CompactionDeleteRangeIterator {
+    inner: ForwardMergeRangeIterator,
+}
+
+impl CompactionDeleteRangeIterator {
+    pub fn new(inner: ForwardMergeRangeIterator) -> Self {
+        Self::new(inner)
     }
 
-    /// the `largest_user_key` is always exclusive
+    pub(crate) async fn next(&mut self) -> HummockResult<()> {
+        self.inner.next().await
+    }
+
     #[cfg(test)]
-    pub(crate) fn get_tombstone_between(
-        &self,
+    pub async fn get_tombstone_between(
+        self,
         smallest_user_key: UserKey<&[u8]>,
         largest_user_key: UserKey<&[u8]>,
-    ) -> Vec<MonotonicDeleteEvent> {
-        if self.events.is_empty() {
-            return vec![];
-        }
-
+    ) -> HummockResult<Vec<MonotonicDeleteEvent>> {
+        let mut iter = self;
+        iter.seek(smallest_user_key).await?;
         let extended_smallest_user_key = PointRange::from_user_key(smallest_user_key, false);
         let extended_largest_user_key = PointRange::from_user_key(largest_user_key, false);
-
-        let mut monotonic_events = Vec::with_capacity(self.events.len());
-        let mut epochs = BTreeSet::new();
-        let mut idx = 0;
-        while idx < self.events.len() {
-            if self.events[idx].0.as_ref().gt(&extended_smallest_user_key) {
-                if let Some(epoch) = epochs.first() {
-                    monotonic_events.push(MonotonicDeleteEvent {
-                        event_key: extended_smallest_user_key.to_vec(),
-                        new_epoch: *epoch,
-                    });
-                }
-                break;
-            }
-            apply_event(&mut epochs, &self.events[idx]);
-            idx += 1;
+        let mut monotonic_events =vec![];
+        if iter.earliest_epoch() != HummockEpoch::MAX {
+            monotonic_events
+                .push(MonotonicDeleteEvent {
+                    event_key: extended_smallest_user_key.to_vec()
+                    new_epoch: iter.earliest_epoch(),
+                })
+                .await?;
         }
-        while idx < self.events.len() {
+
+        while iter.is_valid() {
             if !extended_largest_user_key.is_empty()
-                && self.events[idx].0.as_ref().ge(&extended_largest_user_key)
+                && iter.key().ge(&extended_largest_user_key)
             {
                 if !monotonic_events.is_empty() {
                     monotonic_events.push(MonotonicDeleteEvent {
@@ -247,13 +170,14 @@ impl CompactionDeleteRanges {
                 }
                 break;
             }
-            apply_event(&mut epochs, &self.events[idx]);
+
             monotonic_events.push(MonotonicDeleteEvent {
-                event_key: self.events[idx].0.clone(),
-                new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
+               event_key: iter.key().to_vec(),
+                new_epoch: iter.earliest_epoch(),
             });
-            idx += 1;
+            iter.next().await?;
         }
+
         monotonic_events.dedup_by(|a, b| {
             a.event_key.left_user_key.table_id == b.event_key.left_user_key.table_id
                 && a.new_epoch == b.new_epoch
@@ -268,90 +192,51 @@ impl CompactionDeleteRanges {
                 HummockEpoch::MAX
             );
         }
-        monotonic_events
-    }
-
-    pub(crate) fn into_events(self) -> Vec<CompactionDeleteRangeEvent> {
-        self.events
-    }
-}
-
-pub(crate) struct CompactionDeleteRangeIterator {
-    events: Arc<CompactionDeleteRanges>,
-    seek_idx: usize,
-    /// The correctness of the algorithm needs to be guaranteed by "the epoch of the
-    /// intervals covering each other must be different".
-    epochs: BTreeSet<HummockEpoch>,
-}
-
-impl CompactionDeleteRangeIterator {
-    fn apply(&mut self, idx: usize) {
-        apply_event(&mut self.epochs, &self.events.events[idx]);
-    }
-
-    pub(crate) fn next(&mut self) {
-        self.seek_idx += 1;
+        Ok(monotonic_events)
     }
 
     /// Return the earliest range-tombstone which deletes target-key.
     /// Target-key must be given in order.
-    pub(crate) fn earliest_delete_which_can_see_key(
+    #[cfg(test)]
+    pub async fn earliest_delete_which_can_see_key(
         &mut self,
         target_user_key: UserKey<&[u8]>,
         epoch: HummockEpoch,
-    ) -> HummockEpoch {
+    ) -> HummockResult<HummockEpoch> {
         let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
-        while let Some((extended_user_key, ..)) = self.events.events.get(self.seek_idx)
-            && extended_user_key.as_ref().le(&target_extended_user_key)
+        while self.inner.is_valid()
+            && self
+                .inner
+                .next_extended_user_key()
+                .le(&target_extended_user_key)
         {
-            self.apply(self.seek_idx);
-            self.seek_idx += 1;
+            self.inner.next().await?;
         }
-        self.earliest_delete_since(epoch)
+        Ok(self.earliest_delete_since(epoch))
     }
 
-    pub fn update_range(&mut self) {
-        self.apply(self.seek_idx);
-    }
-
-    pub fn key(&self) -> &PointRange<Vec<u8>> {
-        &self.events.events[self.seek_idx].0
+    pub fn key(&self) -> PointRange<&[u8]> {
+        self.inner.next_extended_user_key()
     }
 
     pub(crate) fn is_valid(&self) -> bool {
-        self.seek_idx < self.events.events.len()
+        self.inner.is_valid()
     }
 
     pub(crate) fn earliest_epoch(&self) -> HummockEpoch {
-        self.epochs
-            .first()
-            .map_or(HummockEpoch::MAX, |epoch| *epoch)
+        self.inner.earliest_epoch()
     }
 
     pub(crate) fn earliest_delete_since(&self, epoch: HummockEpoch) -> HummockEpoch {
-        self.epochs
-            .range(epoch..)
-            .next()
-            .map_or(HummockEpoch::MAX, |ret| *ret)
+        self.inner.earliest_delete_since(epoch)
     }
 
-    pub(crate) fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
-        let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
-        self.seek_idx = self
-            .events
-            .events
-            .partition_point(|(extended_user_key, ..)| {
-                extended_user_key.as_ref().le(&target_extended_user_key)
-            });
-        self.epochs.clear();
-        for idx in 0..self.seek_idx {
-            self.apply(idx);
-        }
+    pub async fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> HummockResult<()> {
+        self.inner.seek(target_user_key).await
     }
 
-    pub(crate) fn rewind(&mut self) {
-        self.seek_idx = 0;
-        self.epochs.clear();
+    pub async fn rewind(&mut self) -> HummockResult<()> {
+        self.inner.rewind().await
     }
 }
 
@@ -449,6 +334,7 @@ pub fn get_min_delete_range_epoch_from_sstable(
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::TableKey;
 
@@ -460,54 +346,52 @@ mod tests {
     };
     use crate::hummock::test_utils::test_user_key;
 
-    #[test]
-    pub fn test_compaction_delete_range_iterator() {
+    #[tokio::test]
+    pub async fn test_compaction_delete_range_iterator() {
         let mut builder = CompactionDeleteRangesBuilder::default();
         let table_id = TableId::default();
-        let data = vec![
-            DeleteRangeTombstone::new_for_test(
-                table_id,
-                b"aaaaaa".to_vec(),
-                b"bbbccc".to_vec(),
-                12,
-            ),
-            DeleteRangeTombstone::new_for_test(table_id, b"aaaaaa".to_vec(), b"bbbddd".to_vec(), 9),
-            DeleteRangeTombstone::new_for_test(table_id, b"bbbfff".to_vec(), b"ffffff".to_vec(), 9),
-            DeleteRangeTombstone::new_for_test(table_id, b"gggggg".to_vec(), b"hhhhhh".to_vec(), 9),
-            DeleteRangeTombstone::new(
-                table_id,
-                b"bbbeee".to_vec(),
-                true,
-                b"eeeeee".to_vec(),
-                true,
-                8,
-            ),
-            DeleteRangeTombstone::new_for_test(
-                table_id,
-                b"bbbaab".to_vec(),
-                b"bbbdddf".to_vec(),
-                6,
-            ),
-            DeleteRangeTombstone {
-                start_user_key: PointRange::from_user_key(
-                    UserKey::new(table_id, TableKey(b"hhhhhh".to_vec())),
-                    true,
-                ),
-                end_user_key: PointRange::from_user_key(
-                    UserKey::new(TableId::new(table_id.table_id() + 1), TableKey::default()),
-                    false,
-                ),
-                sequence: 7,
-            },
-        ];
-        for range in data {
-            builder.add_delete_events(create_monotonic_events(vec![range]));
-        }
-        let compaction_delete_ranges = builder.build_for_compaction();
-        let mut iter = compaction_delete_ranges.iter();
+        builder.add_delete_events(
+            9,
+            table_id,
+            vec![
+                (Bound::Included(Bytes::copy_from_slice(b"aaaaaa")), Bound::Excluded(Bytes::copy_from_slice(b"bbbddd"))),
+                (Bound::Included(Bytes::copy_from_slice(b"bbbfff")), Bound::Excluded(Bytes::copy_from_slice(b"ffffff"))),
+                (Bound::Included(Bytes::copy_from_slice(b"gggggg")), Bound::Excluded(Bytes::copy_from_slice(b"hhhhhh"))),
+            ],
+        );
+        builder.add_delete_events(
+            12,
+            table_id,
+            vec![
+                (Bound::Included(Bytes::copy_from_slice(b"aaaaaa")), Bound::Excluded(Bytes::copy_from_slice(b"bbbccc"))),
+            ],
+        );
+        builder.add_delete_events(
+            8,
+            table_id,
+            vec![
+                (Bound::Excluded(Bytes::copy_from_slice(b"bbbeee")), Bound::Included(Bytes::copy_from_slice(b"eeeeee"))),
+            ],
+        );
+        builder.add_delete_events(
+            6,
+            table_id,
+            vec![
+                (Bound::Included(Bytes::copy_from_slice(b"bbbaab")), Bound::Excluded(Bytes::copy_from_slice(b"bbbdddf"))),
+            ],
+        );
+        builder.add_delete_events(
+            7,
+            table_id,
+            vec![
+                (Bound::Excluded(Bytes::copy_from_slice(b"bbbaab")), Bound::Unbounded),
+            ],
+        );
+        let mut iter = builder.build_for_compaction();
+        iter.await.unwrap();
 
         assert_eq!(
-            iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 13),
+            iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 13).await.unwrap(),
             HummockEpoch::MAX
         );
         assert_eq!(
@@ -585,6 +469,23 @@ mod tests {
         for range in data {
             builder.add_delete_events(create_monotonic_events(vec![range]));
         }
+        builder.add_delete_events(
+            13,
+            table_id,
+            vec![(Bound::Included(Bytes::copy_from_slice(b"aaaa")), Bound::Excluded(Bytes::copy_from_slice("cccc")))]);
+        builder.add_delete_events(
+            10,
+            table_id,
+            vec![(Bound::Excluded(Bytes::copy_from_slice(b"cccc")), Bound::Excluded(Bytes::copy_from_slice("dddd")))]);
+        builder.add_delete_events(
+            12,
+            table_id,
+            vec![(Bound::Included(Bytes::copy_from_slice(b"cccc")), Bound::Included(Bytes::copy_from_slice("eeee")))]);
+        builder.add_delete_events(
+            15,
+            table_id,
+            vec![(Bound::Excluded(Bytes::copy_from_slice(b"eeee")),
+                  Bound::Excluded(Bytes::copy_from_slice("ffff")))]);
         let compaction_delete_range = builder.build_for_compaction();
         let split_ranges = compaction_delete_range.get_tombstone_between(
             test_user_key(b"bbbb").as_ref(),

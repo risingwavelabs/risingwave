@@ -433,6 +433,7 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Bound;
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
@@ -443,9 +444,10 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
     use crate::hummock::{
-        create_monotonic_events, CompactionDeleteRangesBuilder, DeleteRangeTombstone,
+        create_monotonic_events, DeleteRangeTombstone,
         SstableBuilderOptions, DEFAULT_RESTART_INTERVAL,
     };
+    use crate::hummock::sstable::delete_range_aggregator::CompactionDeleteRangesBuilder;
 
     #[tokio::test]
     async fn test_empty() {
@@ -559,35 +561,23 @@ mod tests {
         let opts = default_builder_opt_for_test();
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
-        let events = create_monotonic_events(vec![
-            DeleteRangeTombstone::new(
-                table_id,
-                [VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"]
-                    .concat()
-                    .to_vec(),
-                false,
-                [VirtualNode::ZERO.to_be_bytes().as_slice(), b"kkk"]
-                    .concat()
-                    .to_vec(),
-                false,
-                100,
-            ),
-            DeleteRangeTombstone::new(
-                table_id,
-                [VirtualNode::ZERO.to_be_bytes().as_slice(), b"aaa"]
-                    .concat()
-                    .to_vec(),
-                false,
-                [VirtualNode::ZERO.to_be_bytes().as_slice(), b"ddd"]
-                    .concat()
-                    .to_vec(),
-                false,
-                200,
-            ),
+        builder.add_delete_events(100, table_id, vec![
+            (Bound::Included(Bytes::copy_from_slice(&[VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"]
+                .concat())),
+            Bound::Excluded(
+                Bytes::copy_from_slice(&[VirtualNode::ZERO.to_be_bytes().as_slice(), b"kkk"]
+                    .concat())
+            ))
         ]);
-        builder.add_delete_events(events);
-        let agg = builder.build_for_compaction();
-        let mut del_iter = agg.iter();
+        builder.add_delete_events(200, table_id, vec![
+            (Bound::Included(Bytes::copy_from_slice(&[VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"]
+                .concat())),
+             Bound::Excluded(
+                 Bytes::copy_from_slice(&[VirtualNode::ZERO.to_be_bytes().as_slice(), b"dd"]
+                     .concat())
+             ))
+        ]);
+        let del_iter = builder.build_for_compaction();
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
@@ -603,7 +593,6 @@ mod tests {
         );
         let target_extended_user_key = PointRange::from_user_key(full_key.user_key.as_ref(), false);
         while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
-            del_iter.update_range();
             builder
                 .add_monotonic_delete(MonotonicDeleteEvent {
                     event_key: del_iter.key().clone(),
@@ -611,14 +600,13 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            del_iter.next();
+            del_iter.next().await?;
         }
         builder
             .add_full_key(full_key.to_ref(), HummockValue::put(b"v"), false)
             .await
             .unwrap();
         while del_iter.is_valid() {
-            del_iter.update_range();
             builder
                 .add_monotonic_delete(MonotonicDeleteEvent {
                     event_key: del_iter.key().clone(),
@@ -626,7 +614,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            del_iter.next();
+            del_iter.next().await?;
         }
         let mut sst_infos = builder.finish().await.unwrap();
         let key_range = sst_infos
