@@ -19,12 +19,20 @@ use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_vec_with_registry, register_histogram_with_registry,
     register_int_counter_vec_with_registry, register_int_counter_with_registry,
-    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
-    HistogramVec, IntCounter, IntGauge, Registry,
+    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram, IntCounter,
+    IntGauge, Registry,
 };
 use risingwave_common::config::MetricLevel;
-use risingwave_common::metrics::RelabeledHistogramVec;
+use risingwave_common::metrics::{
+    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
+    RelabeledHistogramVec,
+};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::{
+    register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry,
+};
+use risingwave_connector::sink::SinkMetrics;
 
 #[derive(Clone)]
 pub struct StreamingMetrics {
@@ -130,8 +138,18 @@ pub struct StreamingMetrics {
     /// The progress made by the earliest in-flight barriers in the local barrier manager.
     pub barrier_manager_progress: IntCounter,
 
-    pub sink_commit_duration: HistogramVec,
-    pub connector_sink_rows_received: GenericCounterVec<AtomicU64>,
+    // Sink related metrics
+    pub sink_commit_duration: LabelGuardedHistogramVec<3>,
+    pub connector_sink_rows_received: LabelGuardedIntCounterVec<2>,
+    pub log_store_first_write_epoch: LabelGuardedIntGaugeVec<3>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGaugeVec<3>,
+    pub log_store_write_rows: LabelGuardedIntCounterVec<3>,
+    pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<3>,
+    pub log_store_read_rows: LabelGuardedIntCounterVec<3>,
+    pub kv_log_store_storage_write_count: LabelGuardedIntCounterVec<3>,
+    pub kv_log_store_storage_write_size: LabelGuardedIntCounterVec<3>,
+    pub kv_log_store_storage_read_count: LabelGuardedIntCounterVec<4>,
+    pub kv_log_store_storage_read_size: LabelGuardedIntCounterVec<4>,
 
     // Memory management
     // FIXME(yuhao): use u64 here
@@ -735,18 +753,90 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let sink_commit_duration = register_histogram_vec_with_registry!(
+        let sink_commit_duration = register_guarded_histogram_vec_with_registry!(
             "sink_commit_duration",
             "Duration of commit op in sink",
-            &["executor_id", "connector"],
+            &["executor_id", "connector", "sink_id"],
             registry
         )
         .unwrap();
 
-        let connector_sink_rows_received = register_int_counter_vec_with_registry!(
+        let connector_sink_rows_received = register_guarded_int_counter_vec_with_registry!(
             "connector_sink_rows_received",
             "Number of rows received by sink",
             &["connector_type", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_first_write_epoch = register_guarded_int_gauge_vec_with_registry!(
+            "log_store_first_write_epoch",
+            "The first write epoch of log store",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_latest_write_epoch = register_guarded_int_gauge_vec_with_registry!(
+            "log_store_latest_write_epoch",
+            "The latest write epoch of log store",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_write_rows = register_guarded_int_counter_vec_with_registry!(
+            "log_store_write_rows",
+            "The write rate of rows",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_latest_read_epoch = register_guarded_int_gauge_vec_with_registry!(
+            "log_store_latest_read_epoch",
+            "The latest read epoch of log store",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_read_rows = register_guarded_int_counter_vec_with_registry!(
+            "log_store_read_rows",
+            "The read rate of rows",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let kv_log_store_storage_write_count = register_guarded_int_counter_vec_with_registry!(
+            "kv_log_store_storage_write_count",
+            "Write row count throughput of kv log store",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let kv_log_store_storage_write_size = register_guarded_int_counter_vec_with_registry!(
+            "kv_log_store_storage_write_size",
+            "Write size throughput of kv log store",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let kv_log_store_storage_read_count = register_guarded_int_counter_vec_with_registry!(
+            "kv_log_store_storage_read_count",
+            "Write row count throughput of kv log store",
+            &["executor_id", "connector", "sink_id", "read_type"],
+            registry
+        )
+        .unwrap();
+
+        let kv_log_store_storage_read_size = register_guarded_int_counter_vec_with_registry!(
+            "kv_log_store_storage_read_size",
+            "Write size throughput of kv log store",
+            &["executor_id", "connector", "sink_id", "read_type"],
             registry
         )
         .unwrap();
@@ -917,6 +1007,15 @@ impl StreamingMetrics {
             barrier_manager_progress,
             sink_commit_duration,
             connector_sink_rows_received,
+            log_store_first_write_epoch,
+            log_store_latest_write_epoch,
+            log_store_write_rows,
+            log_store_latest_read_epoch,
+            log_store_read_rows,
+            kv_log_store_storage_write_count,
+            kv_log_store_storage_write_size,
+            kv_log_store_storage_read_count,
+            kv_log_store_storage_read_size,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,
             lru_runtime_loop_count,
@@ -935,5 +1034,43 @@ impl StreamingMetrics {
     /// Create a new `StreamingMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         global_streaming_metrics(MetricLevel::Disabled)
+    }
+
+    pub fn new_sink_metrics(
+        &self,
+        identity: &str,
+        sink_id_str: &str,
+        connector: &str,
+    ) -> SinkMetrics {
+        let label_list = [identity, connector, sink_id_str];
+        let sink_commit_duration_metrics = self.sink_commit_duration.with_label_values(&label_list);
+        let connector_sink_rows_received = self
+            .connector_sink_rows_received
+            .with_label_values(&[connector, sink_id_str]);
+
+        let log_store_latest_read_epoch = self
+            .log_store_latest_read_epoch
+            .with_label_values(&label_list);
+
+        let log_store_latest_write_epoch = self
+            .log_store_latest_write_epoch
+            .with_label_values(&label_list);
+
+        let log_store_first_write_epoch = self
+            .log_store_first_write_epoch
+            .with_label_values(&label_list);
+
+        let log_store_write_rows = self.log_store_write_rows.with_label_values(&label_list);
+        let log_store_read_rows = self.log_store_read_rows.with_label_values(&label_list);
+
+        SinkMetrics {
+            sink_commit_duration_metrics,
+            connector_sink_rows_received,
+            log_store_first_write_epoch,
+            log_store_latest_write_epoch,
+            log_store_write_rows,
+            log_store_latest_read_epoch,
+            log_store_read_rows,
+        }
     }
 }

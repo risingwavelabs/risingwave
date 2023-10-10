@@ -3240,6 +3240,142 @@ def section_connector_node(outer_panels):
         )
     ]
 
+def section_sink_metrics(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Sink Metrics",
+            [
+                panels.timeseries_latency(
+                    "Commit Duration",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('sink_commit_duration_bucket')}[$__rate_interval])) by (le, connector, sink_id))",
+                                f"p{legend}" + " @ {{connector}} {{sink_id}}",
+                            ),
+                            [50, 99, "max"],
+                        ),
+                        panels.target(
+                            f"sum by(le, connector, sink_id)(rate({metric('sink_commit_duration_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('sink_commit_duration_count')}[$__rate_interval]))",
+                            "avg - {{connector}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_id(
+                    "Log Store Read/Write Epoch",
+                    "",
+                    [
+                        panels.target(f"{metric('log_store_latest_write_epoch')}",
+                                      "latest write epoch @ {{connector}} {{sink_id}} {{executor_id}}"),
+                        panels.target(f"{metric('log_store_latest_read_epoch')}",
+                                      "latest read epoch @ {{connector}} {{sink_id}} {{executor_id}}"),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Log Store Lag",
+                    "",
+                    [
+                        panels.target(f"(max({metric('log_store_latest_write_epoch')}) by (connector, sink_id, executor_id)"
+                                      + f"- max({metric('log_store_latest_read_epoch')}) by (connector, sink_id, executor_id)) / (2^16) / 1000",
+                                      "Consume lag @ {{connector}} {{sink_id}} {{executor_id}}"
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Log Store Consume Persistent Log Lag",
+                    "",
+                    [
+                        panels.target(f"clamp_min((max({metric('log_store_first_write_epoch')}) by (connector, sink_id, executor_id)"
+                                      + f"- max({metric('log_store_latest_read_epoch')}) by (connector, sink_id, executor_id)) / (2^16) / 1000, 0)",
+                                      "Consume persistent log lag @ {{connector}} {{sink_id}} {{executor_id}}"
+                                      ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Log Store Consume Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('log_store_read_rows')}[$__rate_interval])) by (connector, sink_id)",
+                            "sink={{connector}} {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Executor Log Store Consume Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('log_store_read_rows')}[$__rate_interval])) by (instance, connector, sink_id, executor_id)",
+                            "sink={{connector}} {{sink_id}} @ {{executor_id}} {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Log Store Write Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by (connector, sink_id)",
+                            "sink={{connector}} {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Executor Log Store Write Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by (instance, connector, sink_id, executor_id)",
+                            "sink={{connector}} {{sink_id}} @ {{executor_id}} {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Kv Log Store Read Storage Row Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('kv_log_store_storage_read_count')}[$__rate_interval])) by (executor_id, connector, sink_id)",
+                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Kv Log Store Read Storage Size",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('kv_log_store_storage_read_size')}[$__rate_interval])) by (executor_id, connector, sink_id)",
+                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ]
+                ),
+                panels.timeseries_ops(
+                    "Kv Log Store Write Storage Row Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('kv_log_store_storage_write_count')}[$__rate_interval])) by (executor_id, connector, sink_id)",
+                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Kv Log Store Write Storage Size",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('kv_log_store_storage_write_size')}[$__rate_interval])) by (executor_id, connector, sink_id)",
+                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ]
+                ),
+            ],
+        )
+    ]
 
 def section_network_connection(outer_panels):
     panels = outer_panels.sub_panel()
@@ -3554,6 +3690,7 @@ dashboard = Dashboard(
         *section_frontend(panels),
         *section_memory_manager(panels),
         *section_connector_node(panels),
+        *section_sink_metrics(panels),
         *section_kafka_native_metrics(panels),
         *section_network_connection(panels)
     ],

@@ -39,11 +39,12 @@ use std::future::Future;
 use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use prometheus::core::{AtomicU64, GenericCounter};
-use prometheus::{Histogram, HistogramOpts, Opts};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
+use risingwave_common::metrics::{
+    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
+};
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
@@ -213,19 +214,25 @@ impl From<SinkCatalog> for SinkParam {
 
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration_metrics: Histogram,
-    pub connector_sink_rows_received: GenericCounter<AtomicU64>,
+    pub sink_commit_duration_metrics: LabelGuardedHistogram,
+    pub connector_sink_rows_received: LabelGuardedIntCounter,
+    pub log_store_first_write_epoch: LabelGuardedIntGauge,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge,
+    pub log_store_write_rows: LabelGuardedIntCounter,
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge,
+    pub log_store_read_rows: LabelGuardedIntCounter,
 }
 
 impl SinkMetrics {
     fn for_test() -> Self {
         SinkMetrics {
-            sink_commit_duration_metrics: Histogram::with_opts(HistogramOpts::new(
-                "unused", "unused",
-            ))
-            .unwrap(),
-            connector_sink_rows_received: GenericCounter::with_opts(Opts::new("unused", "unused"))
-                .unwrap(),
+            sink_commit_duration_metrics: LabelGuardedHistogram::test_histogram(),
+            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
+            log_store_first_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
+            log_store_latest_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
+            log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
+            log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
+            log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
         }
     }
 }
