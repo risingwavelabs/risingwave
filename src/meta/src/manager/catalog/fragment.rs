@@ -539,6 +539,8 @@ impl FragmentManager {
 
     /// Drop table fragments info and remove downstream actor infos in fragments from its dependent
     /// tables.
+    /// If table fragments already deleted, this should just be noop,
+    /// the delete function (`table_fragments.remove`) will not return an error.
     pub async fn drop_table_fragments_vec(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
         // println!("to_delete table ids: {:#?}", table_ids);
         let mut guard = self.core.write().await;

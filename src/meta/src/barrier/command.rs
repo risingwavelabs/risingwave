@@ -665,16 +665,15 @@ impl CommandContext {
 
             Command::CancelStreamingJob(table_fragments) => {
                 let node_actors = table_fragments.worker_actor_ids();
-                // FIXME: Should invoke this in job managers (StreamManager and BarrierManager)?
                 self.clean_up(node_actors).await?;
-                // Both table and fragment will be cleaned up externally.
+                // FIXME(kwannoel): stream_manager and barrier_manager will call these two methods too.
+                // can they just be removed?
                 self.catalog_manager
                     .cancel_create_table_procedure_with_table_fragments(
                         table_fragments.table_id().table_id,
                         table_fragments,
                     )
                     .await?;
-                // Drop fragment info in meta store.
                 self.fragment_manager
                     .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
                         table_fragments.table_id(),
