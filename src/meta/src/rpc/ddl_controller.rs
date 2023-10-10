@@ -323,7 +323,7 @@ impl DdlController {
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         // 1. Drop source in catalog.
-        let (version, streaming_job_ids)  = self
+        let (version, streaming_job_ids) = self
             .catalog_manager
             .drop_relation(
                 RelationIdEnum::Source(source_id),
