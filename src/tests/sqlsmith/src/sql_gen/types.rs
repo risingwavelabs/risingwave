@@ -126,6 +126,7 @@ pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSign>>
                     .iter()
                     .all(|t| t.is_exact() && t.as_exact() != &DataType::Timestamptz)
                     && func.ret_type.is_exact()
+                    && func.ret_type.as_exact() != &DataType::Serial
                     && !FUNC_BAN_LIST.contains(&func.name.as_scalar())
                     && !func.deprecated // deprecated functions are not accepted by frontend
             })
@@ -161,6 +162,7 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSi
                     .iter()
                     .all(|t| t.is_exact() && t.as_exact() != &DataType::Timestamptz)
                     && func.ret_type.is_exact()
+                    && func.ret_type.as_exact() != &DataType::Serial
                     // Ignored functions
                     && ![
                         AggKind::Sum0, // Used internally
