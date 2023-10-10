@@ -19,13 +19,10 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
-use foyer::common::code::Key;
-use futures::future::try_join_all;
 use futures::{future, StreamExt};
 use itertools::Itertools;
 use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
 use risingwave_common::config::StorageMemoryConfig;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
@@ -529,83 +526,6 @@ impl SstableStore {
 
     pub fn data_file_cache(&self) -> &FileCache<SstableBlockIndex, Box<Block>> {
         &self.data_file_cache
-    }
-
-    pub async fn fill_data_file_cache(&self, sst: &Sstable) -> HummockResult<()> {
-        let object_id = sst.id;
-
-        if let Some(filter) = self.recent_filter.as_ref() {
-            filter.insert(object_id);
-        }
-
-        const STEP: usize = 16;
-        const ADMIT_THRESHOLD: f64 = 0.5;
-
-        let mut tasks = vec![];
-
-        for block_index_start in (0..sst.block_count()).step_by(STEP) {
-            let block_index_end = std::cmp::min(block_index_start + STEP, sst.block_count());
-
-            let (range_first, _) = sst.calculate_block_info(block_index_start);
-            let (range_last, _) = sst.calculate_block_info(block_index_end - 1);
-            let range = range_first.start..range_last.end;
-
-            let mut writers = Vec::with_capacity(block_index_end - block_index_start);
-            let mut ranges = Vec::with_capacity(block_index_end - block_index_start);
-            let mut admits = 0;
-
-            for block_index in block_index_start..block_index_end {
-                let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
-                let key = SstableBlockIndex {
-                    sst_id: object_id,
-                    block_idx: block_index as u64,
-                };
-                let mut writer = self
-                    .data_file_cache
-                    .writer(key, key.serialized_len() + uncompressed_capacity);
-
-                if writer.judge() {
-                    admits += 1;
-                }
-
-                writers.push(writer);
-                ranges.push(range);
-            }
-
-            if admits as f64 / writers.len() as f64 >= ADMIT_THRESHOLD {
-                let task = async move {
-                    let data = self
-                        .store
-                        .read(&self.get_sst_data_path(object_id), range.clone())
-                        .await?;
-                    let mut futures = vec![];
-                    for (writer, r) in writers.into_iter().zip_eq_fast(ranges) {
-                        let offset = r.start - range.start;
-                        let len = r.end - r.start;
-                        let bytes = data.slice(offset..offset + len);
-
-                        let future = async move {
-                            let block = Block::decode(
-                                bytes,
-                                writer.weight() - writer.key().serialized_len(),
-                            )?;
-                            let block = Box::new(block);
-                            writer.finish(block).await.map_err(HummockError::file_cache)
-                        };
-                        futures.push(future);
-                    }
-                    try_join_all(futures)
-                        .await
-                        .map_err(HummockError::file_cache)?;
-                    Ok::<_, HummockError>(())
-                };
-                tasks.push(task);
-            }
-        }
-
-        try_join_all(tasks).await?;
-
-        Ok(())
     }
 }
 

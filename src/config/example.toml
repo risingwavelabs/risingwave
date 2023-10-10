@@ -150,6 +150,8 @@ allocation_timeout_ms = 10
 data_refill_levels = []
 timeout_ms = 6000
 concurrency = 10
+unit = 64
+threshold = 0.5
 recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
 

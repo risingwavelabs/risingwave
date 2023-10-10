@@ -595,6 +595,12 @@ pub struct CacheRefillConfig {
     #[serde(default = "default::cache_refill::concurrency")]
     pub concurrency: usize,
 
+    #[serde(default = "default::cache_refill::unit")]
+    pub unit: usize,
+
+    #[serde(default = "default::cache_refill::threshold")]
+    pub threshold: f64,
+
     #[serde(default = "default::cache_refill::recent_filter_layers")]
     pub recent_filter_layers: usize,
 
@@ -1176,6 +1182,14 @@ pub mod default {
 
         pub fn concurrency() -> usize {
             10
+        }
+
+        pub fn unit() -> usize {
+            64
+        }
+
+        pub fn threshold() -> f64 {
+            0.5
         }
 
         pub fn recent_filter_layers() -> usize {
