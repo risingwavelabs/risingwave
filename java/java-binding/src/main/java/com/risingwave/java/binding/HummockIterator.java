@@ -21,13 +21,13 @@ public class HummockIterator implements AutoCloseable {
     private boolean isClosed;
 
     public HummockIterator(ReadPlan readPlan) {
-        this.pointer = Binding.hummockIteratorNew(readPlan.toByteArray());
+        this.pointer = Binding.iteratorNewHummock(readPlan.toByteArray());
         this.isClosed = false;
     }
 
     public KeyedRow next() {
-        long pointer = Binding.hummockIteratorNext(this.pointer);
-        if (pointer == 0) {
+        boolean hasNext = Binding.iteratorNext(this.pointer);
+        if (!hasNext) {
             return null;
         }
         return new KeyedRow(pointer);
@@ -37,7 +37,7 @@ public class HummockIterator implements AutoCloseable {
     public void close() {
         if (!isClosed) {
             isClosed = true;
-            Binding.hummockIteratorClose(pointer);
+            Binding.iteratorClose(pointer);
         }
     }
 }
