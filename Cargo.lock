@@ -3013,7 +3013,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=8933a3d#8933a3deb84de7595782eef6aedd68ccd4eb5c13"
+source = "git+https://github.com/mrcroxx/foyer?rev=feb1306#feb1306033b88a595127afa0ab1e3a9dce80b907"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -3024,21 +3024,21 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=8933a3d#8933a3deb84de7595782eef6aedd68ccd4eb5c13"
+source = "git+https://github.com/mrcroxx/foyer?rev=feb1306#feb1306033b88a595127afa0ab1e3a9dce80b907"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
+ "madsim-tokio",
  "parking_lot 0.12.1",
  "paste",
  "rand",
- "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=8933a3d#8933a3deb84de7595782eef6aedd68ccd4eb5c13"
+source = "git+https://github.com/mrcroxx/foyer?rev=feb1306#feb1306033b88a595127afa0ab1e3a9dce80b907"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -3055,7 +3055,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=8933a3d#8933a3deb84de7595782eef6aedd68ccd4eb5c13"
+source = "git+https://github.com/mrcroxx/foyer?rev=feb1306#feb1306033b88a595127afa0ab1e3a9dce80b907"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -3069,6 +3069,7 @@ dependencies = [
  "futures",
  "itertools 0.11.0",
  "libc",
+ "madsim-tokio",
  "memoffset",
  "nix 0.27.1",
  "parking_lot 0.12.1",
@@ -3076,7 +3077,6 @@ dependencies = [
  "prometheus",
  "rand",
  "thiserror",
- "tokio",
  "tracing",
  "twox-hash",
 ]
@@ -3084,7 +3084,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=8933a3d#8933a3deb84de7595782eef6aedd68ccd4eb5c13"
+source = "git+https://github.com/mrcroxx/foyer?rev=feb1306#feb1306033b88a595127afa0ab1e3a9dce80b907"
 dependencies = [
  "crossbeam-utils",
  "either",
@@ -3102,8 +3102,8 @@ dependencies = [
  "quote",
  "rand",
  "regex",
- "regex-automata 0.3.8",
- "regex-syntax 0.7.5",
+ "regex-automata 0.4.1",
+ "regex-syntax 0.8.0",
  "syn 2.0.37",
  "tokio",
  "tracing",
@@ -6695,6 +6695,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-automata"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "465c6fc0621e4abc4187a2bda0937bfd4f722c2730b29562e19689ea796c9a4b"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-syntax 0.8.0",
+]
+
+[[package]]
 name = "regex-syntax"
 version = "0.6.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6705,6 +6716,12 @@ name = "regex-syntax"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbb5fb1acd8a1a18b3dd5be62d25485eb770e05afb408a9627d14d451bae12da"
+
+[[package]]
+name = "regex-syntax"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3cbb081b9784b07cceb8824c8583f86db4814d172ab043f3c23f7dc600bf83d"
 
 [[package]]
 name = "rend"
