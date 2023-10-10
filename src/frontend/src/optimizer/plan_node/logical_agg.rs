@@ -28,6 +28,7 @@ use super::{
 };
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
+    WindowFunction,
 };
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
@@ -729,6 +730,33 @@ impl ExprRewriter for LogicalAggBuilder {
                 .collect();
             FunctionCall::new_unchecked(func_type, inputs, ret).into()
         }
+    }
+
+    /// When there is an `WindowFunction` (outside of agg call), it must refers to a group column.
+    /// Or all `InputRef`s appears in it must refer to a group column.
+    fn rewrite_window_function(&mut self, window_func: WindowFunction) -> ExprImpl {
+        let WindowFunction {
+            args,
+            partition_by,
+            order_by,
+            ..
+        } = window_func;
+        let args = args
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        let partition_by = partition_by
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        let order_by = order_by.rewrite_expr(self);
+        WindowFunction {
+            args,
+            partition_by,
+            order_by,
+            ..window_func
+        }
+        .into()
     }
 
     /// When there is an `InputRef` (outside of agg call), it must refers to a group column.
