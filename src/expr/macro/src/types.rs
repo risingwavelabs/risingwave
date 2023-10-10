@@ -14,72 +14,58 @@
 
 //! This module provides utility functions for SQL data type conversion and manipulation.
 
-//  name        data type   variant     array type          owned type      ref type    primitive
+//  name        data type   array type          owned type      ref type            primitive
 const TYPE_MATRIX: &str = "
-    boolean     Boolean     Bool        BoolArray           bool            bool            _
-    int2        Int16       Int16       I16Array            i16             i16             y
-    int4        Int32       Int32       I32Array            i32             i32             y
-    int8        Int64       Int64       I64Array            i64             i64             y
-    int256      Int256      Int256      Int256Array         Int256          Int256Ref<'_>   _
-    float4      Float32     Float32     F32Array            F32             F32             y
-    float8      Float64     Float64     F64Array            F64             F64             y
-    decimal     Decimal     Decimal     DecimalArray        Decimal         Decimal         y
-    serial      Serial      Serial      SerialArray         Serial          Serial          y
-    date        Date        Date        DateArray           Date            Date            y
-    time        Time        Time        TimeArray           Time            Time            y
-    timestamp   Timestamp   Timestamp   TimestampArray      Timestamp       Timestamp       y
-    timestamptz Timestamptz Timestamptz TimestamptzArray    Timestamptz     Timestamptz     y
-    interval    Interval    Interval    IntervalArray       Interval        Interval        y
-    varchar     Varchar     Utf8        Utf8Array           Box<str>        &str            _
-    bytea       Bytea       Bytea       BytesArray          Box<[u8]>       &[u8]           _
-    jsonb       Jsonb       Jsonb       JsonbArray          JsonbVal        JsonbRef<'_>    _
-    list        List        List        ListArray           ListValue       ListRef<'_>     _
-    struct      Struct      Struct      StructArray         StructValue     StructRef<'_>   _
+    boolean     Boolean     BoolArray           bool            bool                _
+    int2        Int16       I16Array            i16             i16                 y
+    int4        Int32       I32Array            i32             i32                 y
+    int8        Int64       I64Array            i64             i64                 y
+    int256      Int256      Int256Array         Int256          Int256Ref<'_>       _
+    float4      Float32     F32Array            F32             F32                 y
+    float8      Float64     F64Array            F64             F64                 y
+    decimal     Decimal     DecimalArray        Decimal         Decimal             y
+    serial      Serial      SerialArray         Serial          Serial              y
+    date        Date        DateArray           Date            Date                y
+    time        Time        TimeArray           Time            Time                y
+    timestamp   Timestamp   TimestampArray      Timestamp       Timestamp           y
+    timestamptz Timestamptz TimestamptzArray    Timestamptz     Timestamptz         y
+    interval    Interval    IntervalArray       Interval        Interval            y
+    varchar     Varchar     Utf8Array           Box<str>        &str                _
+    bytea       Bytea       BytesArray          Box<[u8]>       &[u8]               _
+    jsonb       Jsonb       JsonbArray          JsonbVal        JsonbRef<'_>        _
+    anyarray    List        ListArray           ListValue       ListRef<'_>         _
+    struct      Struct      StructArray         StructValue     StructRef<'_>       _
+    any         ???         ArrayImpl           ScalarImpl      ScalarRefImpl<'_>   _
 ";
 
 /// Maps a data type to its corresponding data type name.
 pub fn data_type(ty: &str) -> &str {
-    // XXX:
-    // For functions that contain `any` type, or `...` variable arguments,
-    // there are special handlings in the frontend, and the signature won't be accessed.
-    // So we simply return a placeholder here.
-    if ty == "any" || ty == "..." {
-        return "Int32";
-    }
     lookup_matrix(ty, 1)
-}
-
-/// Maps a data type to its corresponding variant name.
-pub fn variant(ty: &str) -> &str {
-    lookup_matrix(ty, 2)
 }
 
 /// Maps a data type to its corresponding array type name.
 pub fn array_type(ty: &str) -> &str {
-    if ty == "any" {
-        return "ArrayImpl";
-    }
-    lookup_matrix(ty, 3)
+    lookup_matrix(ty, 2)
 }
 
 /// Maps a data type to its corresponding `Scalar` type name.
 pub fn owned_type(ty: &str) -> &str {
-    lookup_matrix(ty, 4)
+    lookup_matrix(ty, 3)
 }
 
 /// Maps a data type to its corresponding `ScalarRef` type name.
 pub fn ref_type(ty: &str) -> &str {
-    lookup_matrix(ty, 5)
+    lookup_matrix(ty, 4)
 }
 
 /// Checks if a data type is primitive.
 pub fn is_primitive(ty: &str) -> bool {
-    lookup_matrix(ty, 6) == "y"
+    lookup_matrix(ty, 5) == "y"
 }
 
 fn lookup_matrix(mut ty: &str, idx: usize) -> &str {
     if ty.ends_with("[]") {
-        ty = "list";
+        ty = "anyarray";
     } else if ty.starts_with("struct") {
         ty = "struct";
     } else if ty == "void" {
@@ -105,6 +91,7 @@ pub fn expand_type_wildcard(ty: &str) -> Vec<&str> {
             .trim()
             .lines()
             .map(|l| l.split_whitespace().next().unwrap())
+            .filter(|l| *l != "any")
             .collect(),
         "*int" => vec!["int2", "int4", "int8"],
         "*float" => vec!["float4", "float8"],
