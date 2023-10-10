@@ -19,14 +19,14 @@ use risingwave_common::catalog::ColumnCatalog;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
-    SinkError, SinkMetrics, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
+    SinkError, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
 };
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
 use risingwave_storage::dispatch_state_store;
 
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
-use crate::common::log_store_impl::kv_log_store::KvLogStoreFactory;
+use crate::common::log_store_impl::kv_log_store::{KvLogStoreFactory, KvLogStoreMetrics};
 use crate::executor::SinkExecutor;
 
 pub struct SinkExecutorBuilder;
@@ -107,20 +107,20 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         };
 
         let identity = format!("SinkExecutor {:X?}", params.executor_id);
+        let sink_id_str = format!("{}", sink_id.sink_id);
 
-        let sink_commit_duration_metrics = stream
-            .streaming_metrics
-            .sink_commit_duration
-            .with_label_values(&[identity.as_str(), connector]);
+        let sink_metrics = stream.streaming_metrics.new_sink_metrics(
+            identity.as_str(),
+            sink_id_str.as_str(),
+            connector,
+        );
 
-        let connector_sink_rows_received = stream
-            .streaming_metrics
-            .connector_sink_rows_received
-            .with_label_values(&[connector, &sink_param.sink_id.sink_id.to_string()]);
-
-        let sink_metrics = SinkMetrics {
-            sink_commit_duration_metrics,
-            connector_sink_rows_received,
+        let sink_write_param = SinkWriterParam {
+            connector_params: params.env.connector_params(),
+            executor_id: params.executor_id,
+            vnode_bitmap: params.vnode_bitmap.clone(),
+            meta_client: params.env.meta_client(),
+            sink_metrics,
         };
 
         match node.log_store_type() {
@@ -131,13 +131,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 Ok(Box::new(
                     SinkExecutor::new(
                         input_executor,
-                        SinkWriterParam {
-                            connector_params: params.env.connector_params(),
-                            executor_id: params.executor_id,
-                            vnode_bitmap: params.vnode_bitmap,
-                            meta_client: params.env.meta_client(),
-                            sink_metrics,
-                        },
+                        sink_write_param,
                         sink_param,
                         columns,
                         params.actor_context,
@@ -148,24 +142,25 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 ))
             }
             SinkLogStoreType::KvLogStore => {
+                let metrics = KvLogStoreMetrics::new(
+                    &params.executor_stats,
+                    &sink_write_param,
+                    &sink_param,
+                    connector,
+                );
                 dispatch_state_store!(params.env.state_store(), state_store, {
                     let factory = KvLogStoreFactory::new(
                         state_store,
                         node.table.as_ref().unwrap().clone(),
                         params.vnode_bitmap.clone().map(Arc::new),
-                        0,
+                        32,
+                        metrics,
                     );
 
                     Ok(Box::new(
                         SinkExecutor::new(
                             input_executor,
-                            SinkWriterParam {
-                                connector_params: params.env.connector_params(),
-                                executor_id: params.executor_id,
-                                vnode_bitmap: params.vnode_bitmap,
-                                meta_client: params.env.meta_client(),
-                                sink_metrics,
-                            },
+                            sink_write_param,
                             sink_param,
                             columns,
                             params.actor_context,
