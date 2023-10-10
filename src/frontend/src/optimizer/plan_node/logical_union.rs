@@ -180,9 +180,7 @@ impl ToStream for LogicalUnion {
                     .map(|x| col_index_mapping.map(x))
                     .collect_vec();
                 new_input
-                    .stream_key()
-                    .unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
-                    new_input.explain_to_string()))
+                    .expect_stream_key()
                     .iter()
                     .all(|x| original_schema_new_pos.contains(x))
             });
@@ -231,10 +229,7 @@ impl ToStream for LogicalUnion {
                 .iter()
                 .flat_map(|(new_input, _)| {
                     new_input
-                        .stream_key().unwrap_or_else(|| panic!(
-                            "should always have a stream key in the stream plan but not, sub plan: {}",
-                            new_input.explain_to_string()
-                        ))
+                        .expect_stream_key()
                         .iter()
                         .map(|x| new_input.schema().fields[*x].data_type())
                 })
@@ -245,17 +240,7 @@ impl ToStream for LogicalUnion {
                 .collect_vec();
             let input_pk_lens = rewrites
                 .iter()
-                .map(|(new_input, _)| {
-                    new_input
-                        .stream_key()
-                        .unwrap_or_else(|| {
-                            panic!(
-                    "should always have a stream key in the stream plan but not, sub plan: {}",
-                    new_input.explain_to_string()
-                )
-                        })
-                        .len()
-                })
+                .map(|(new_input, _)| new_input.expect_stream_key().len())
                 .collect_vec();
             let mut input_pk_offsets = vec![0];
             for (i, len) in input_pk_lens.into_iter().enumerate() {
@@ -279,17 +264,7 @@ impl ToStream for LogicalUnion {
                         .collect_vec();
                     // input1_pk + input2_pk + ...
                     let mut input_pks = input_pk_nulls.clone();
-                    for (j, pk_idx) in new_input
-                        .stream_key()
-                        .unwrap_or_else(|| {
-                            panic!(
-                        "should always have a stream key in the stream plan but not, sub plan: {}",
-                        new_input.explain_to_string()
-                    )
-                        })
-                        .iter()
-                        .enumerate()
-                    {
+                    for (j, pk_idx) in new_input.expect_stream_key().iter().enumerate() {
                         input_pks[input_pk_offsets[i] + j] = ExprImpl::InputRef(
                             InputRef::new(
                                 *pk_idx,

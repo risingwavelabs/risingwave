@@ -138,8 +138,7 @@ impl StreamSink {
                     }
                     _ => {
                         assert_matches!(user_distributed_by, RequiredDist::Any);
-                        RequiredDist::shard_by_key(input.schema().len(), input.stream_key().unwrap_or_else(|| panic!("should always have a stream key on the top of the stream plan but not, plan: {}",
-                            input.explain_to_string())))
+                        RequiredDist::shard_by_key(input.schema().len(), input.expect_stream_key()
                     }
                 }
             }

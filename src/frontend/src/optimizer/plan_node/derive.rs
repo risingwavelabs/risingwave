@@ -84,13 +84,7 @@ pub(crate) fn derive_pk(
 ) -> (Vec<ColumnOrder>, Vec<usize>) {
     // Note(congyi): avoid pk duplication
     let stream_key = input
-        .stream_key()
-        .unwrap_or_else(|| {
-            panic!(
-                "should always have a stream key on the top of the stream plan but not, plan: {}",
-                input.explain_to_string()
-            )
-        })
+        .expect_stream_key()
         .iter()
         .copied()
         .unique()

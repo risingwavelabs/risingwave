@@ -141,11 +141,7 @@ impl StreamMaterialize {
                 TableType::MaterializedView => {
                     assert_matches!(user_distributed_by, RequiredDist::Any);
                     // ensure the same pk will not shuffle to different node
-                    RequiredDist::shard_by_key(
-                        input.schema().len(),
-                        input.stream_key().unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
-                        input.explain_to_string())),
-                    )
+                    RequiredDist::shard_by_key(input.schema().len(), input.expect_stream_key())
                 }
                 TableType::Index => {
                     assert_matches!(

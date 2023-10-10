@@ -93,12 +93,7 @@ impl StreamNode for StreamGroupTopN {
             .infer_internal_table_catalog(
                 input.schema(),
                 input.ctx(),
-                input.stream_key().unwrap_or_else(|| {
-                    panic!(
-                        "should always have a stream key in the stream plan but not, sub plan: {}",
-                        input.explain_to_string()
-                    )
-                }),
+                input.expect_stream_key(),
                 self.vnode_col_idx,
             )
             .with_id(state.gen_table_id_wrapped());

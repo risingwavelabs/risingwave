@@ -218,6 +218,15 @@ impl RewriteExprsRecursive for PlanRef {
 }
 
 impl PlanRef {
+    pub fn expect_stream_key(&self) -> &[usize] {
+        self.stream_key().unwrap_or_else(|| {
+            panic!(
+                "a stream key is expected but not exist, plan: {}",
+                self.explain_to_string()
+            )
+        })
+    }
+
     fn prune_col_inner(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
             // Check the share cache first. If cache exists, it means this is the second round of

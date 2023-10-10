@@ -39,7 +39,6 @@ pub struct LogicalUpdate {
 
 impl From<generic::Update<PlanRef>> for LogicalUpdate {
     fn from(core: generic::Update<PlanRef>) -> Self {
-        let _ctx = core.input.ctx();
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }

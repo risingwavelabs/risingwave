@@ -334,13 +334,7 @@ impl ToStream for LogicalHopWindow {
         let i2o = self.core.i2o_col_mapping();
         output_indices.extend(
             input
-                .stream_key()
-                .unwrap_or_else(|| {
-                    panic!(
-                        "should always have a stream key in the stream plan but not, sub plan: {}",
-                        input.explain_to_string()
-                    )
-                })
+                .expect_stream_key()
                 .iter()
                 .cloned()
                 .filter(|i| i2o.try_map(*i).is_none()),
