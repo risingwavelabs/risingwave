@@ -323,18 +323,23 @@ impl DdlController {
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         // 1. Drop source in catalog.
-        let version = self
+        let (version, streaming_job_ids)  = self
             .catalog_manager
             .drop_relation(
                 RelationIdEnum::Source(source_id),
                 self.fragment_manager.clone(),
                 drop_mode,
             )
-            .await?
-            .0;
+            .await?;
+
         // 2. Unregister source connector worker.
         self.source_manager
             .unregister_sources(vec![source_id])
+            .await;
+
+        // 3. Drop streaming jobs if cascade
+        self.stream_manager
+            .drop_streaming_jobs(streaming_job_ids)
             .await;
 
         Ok(version)
