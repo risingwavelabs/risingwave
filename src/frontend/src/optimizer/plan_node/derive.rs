@@ -22,7 +22,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::PlanRef;
 use crate::optimizer::property::Order;
-use crate::Explain;
+
 
 pub(crate) fn derive_columns(
     input_schema: &Schema,

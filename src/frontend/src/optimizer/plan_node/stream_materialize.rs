@@ -32,7 +32,7 @@ use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::Explain;
+
 
 /// Materializes a stream.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

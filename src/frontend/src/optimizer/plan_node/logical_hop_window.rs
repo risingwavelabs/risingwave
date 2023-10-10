@@ -28,7 +28,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
-use crate::Explain;
+
 
 /// `LogicalHopWindow` implements Hop Table Function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

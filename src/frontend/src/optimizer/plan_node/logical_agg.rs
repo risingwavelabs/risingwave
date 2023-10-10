@@ -39,7 +39,7 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, GroupBy, IndexSet, Substitute,
 };
-use crate::Explain;
+
 
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.
 ///

@@ -30,7 +30,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition, Substitute};
-use crate::Explain;
+
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
 ///

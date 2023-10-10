@@ -41,7 +41,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
-use crate::Explain;
+
 
 /// `LogicalJoin` combines two relations according to some condition.
 ///

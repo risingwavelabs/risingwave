@@ -39,7 +39,7 @@ use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::{Explain, TableCatalog, WithOptions};
+use crate::{TableCatalog, WithOptions};
 
 const DOWNSTREAM_PK_KEY: &str = "primary_key";
 

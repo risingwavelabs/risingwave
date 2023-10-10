@@ -21,7 +21,7 @@ use super::utils::{plan_node_name, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Order;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::{Explain, PlanRef};
+use crate::{PlanRef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGroupTopN {

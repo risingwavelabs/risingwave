@@ -22,7 +22,7 @@ use super::generic::{GenericPlanNode, PlanWindowFunction};
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::{Explain, TableCatalog};
+use crate::{TableCatalog};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamOverWindow {

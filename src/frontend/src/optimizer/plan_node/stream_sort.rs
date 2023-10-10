@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::{Explain, TableCatalog};
+use crate::{TableCatalog};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamEowcSort {
