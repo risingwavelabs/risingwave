@@ -1472,9 +1472,9 @@ checksum = "374d28ec25809ee0e23827c2ab573d729e293f281dfe393500e7ad618baa61c6"
 
 [[package]]
 name = "byteorder"
-version = "1.4.3"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
+checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
@@ -2784,15 +2784,15 @@ dependencies = [
 
 [[package]]
 name = "etcd-client"
-version = "0.11.1"
-source = "git+https://github.com/risingwavelabs/etcd-client.git?rev=d55550a#d55550a182f2119e39e64858771468e1b26f6777"
+version = "0.12.1"
+source = "git+https://github.com/risingwavelabs/etcd-client.git?rev=4e84d40#4e84d40a84b35718d814cc2afccc9274c9d78e1e"
 dependencies = [
  "http",
- "prost 0.11.9",
+ "prost 0.12.1",
  "tokio",
  "tokio-stream",
- "tonic 0.9.2",
- "tonic-build 0.9.2",
+ "tonic 0.10.2",
+ "tonic-build",
  "tower",
  "tower-service",
 ]
@@ -3851,7 +3851,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.0.10"
-source = "git+https://github.com/icelake-io/icelake?rev=72a65aed6ed7b3d529b311031c2c8d99650990e2#72a65aed6ed7b3d529b311031c2c8d99650990e2"
+source = "git+https://github.com/icelake-io/icelake?rev=16dab0e36ab337e58ee8002d828def2d212fa116#16dab0e36ab337e58ee8002d828def2d212fa116"
 dependencies = [
  "anyhow",
  "apache-avro 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -4511,21 +4511,21 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.3.0+0.11.1"
+version = "0.4.0+0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c26d21c8d69c25db9d461ab7dfa4b09bd982687546c8ca2c43d743533a8f1c3f"
+checksum = "02b4b5de48bb7f3f7eae0bca62b3ed0b7d714b1b273d7347329b92c3a2eef113"
 dependencies = [
  "etcd-client",
  "futures-util",
  "http",
  "madsim",
  "serde",
- "serde_with 2.3.3",
+ "serde_with 3.3.0",
  "spin 0.9.8",
  "thiserror",
  "tokio",
- "toml 0.7.8",
- "tonic 0.9.2",
+ "toml 0.8.2",
+ "tonic 0.10.2",
  "tracing",
 ]
 
@@ -4602,7 +4602,7 @@ dependencies = [
  "prost-build 0.12.1",
  "quote",
  "syn 2.0.37",
- "tonic-build 0.10.2",
+ "tonic-build",
 ]
 
 [[package]]
@@ -5294,6 +5294,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "percent-encoding",
  "pin-project",
+ "prometheus",
  "quick-xml 0.29.0",
  "reqsign",
  "reqwest",
@@ -6161,7 +6162,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f4c021e1093a56626774e81216a4ce732a735e5bad4868a03f3ed65ca0c3919"
 dependencies = [
  "once_cell",
- "toml_edit",
+ "toml_edit 0.19.15",
 ]
 
 [[package]]
@@ -6309,7 +6310,7 @@ checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "log",
  "multimap 0.8.3",
  "once_cell",
@@ -6343,7 +6344,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.37",
@@ -7021,6 +7022,7 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "auto_enums",
+ "auto_impl",
  "bitflags 2.4.0",
  "byteorder",
  "bytes",
@@ -7089,6 +7091,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror",
+ "tikv-jemalloc-ctl",
  "tinyvec",
  "toml 0.7.8",
  "tower-layer",
@@ -7306,6 +7309,8 @@ dependencies = [
  "tokio-util",
  "tonic 0.9.2",
  "tracing",
+ "tracing-futures",
+ "tracing-test",
  "url",
  "urlencoding",
  "workspace-hack",
@@ -7674,7 +7679,6 @@ dependencies = [
  "thiserror",
  "tokio-retry",
  "tokio-stream",
- "tonic 0.9.2",
  "tower",
  "tower-http",
  "tracing",
@@ -8800,22 +8804,6 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "2.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07ff71d2c147a7b57362cead5e22f772cd52f6ab31cfcd9edcd7f6aeb2a0afbe"
-dependencies = [
- "base64 0.13.1",
- "chrono",
- "hex",
- "indexmap 1.9.3",
- "serde",
- "serde_json",
- "serde_with_macros 2.3.3",
- "time",
-]
-
-[[package]]
-name = "serde_with"
 version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ca3b16a3d82c4088f343b7480a93550b3eabe1a358569c2dfe38bbcead07237"
@@ -8841,18 +8829,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "serde_with_macros"
-version = "2.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "881b6f881b17d13214e5d494c939ebab463d01264ce1811e9d4ac3a882e7695f"
-dependencies = [
- "darling 0.20.3",
- "proc-macro2",
- "quote",
- "syn 2.0.37",
 ]
 
 [[package]]
@@ -9039,9 +9015,9 @@ checksum = "f27f6278552951f1f2b8cf9da965d10969b2efdea95a6ec47987ab46edfe263a"
 
 [[package]]
 name = "similar"
-version = "2.2.1"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "420acb44afdae038210c99e69aae24109f32f15500aa708e81d46c9f29d55fcf"
+checksum = "2aeaf503862c419d66959f5d7ca015337d864e9c49485d771b732e2a20453597"
 
 [[package]]
 name = "simple_asn1"
@@ -10010,7 +9986,19 @@ dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit",
+ "toml_edit 0.19.15",
+]
+
+[[package]]
+name = "toml"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "185d8ab0dfbb35cf1399a6344d8484209c088f75f8f68230da55d48d95d43e3d"
+dependencies = [
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_edit 0.20.2",
 ]
 
 [[package]]
@@ -10027,6 +10015,19 @@ name = "toml_edit"
 version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
+dependencies = [
+ "indexmap 2.0.0",
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "winnow",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.20.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "396e4d48bbb2b7554c944bde63101b5ae446cff6ec4a24227428f15eb72ef338"
 dependencies = [
  "indexmap 2.0.0",
  "serde",
@@ -10093,19 +10094,6 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
-]
-
-[[package]]
-name = "tonic-build"
-version = "0.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6fdaae4c2c638bb70fe42803a26fbd6fc6ac8c72f5c59f67ecc2a2dcabf4b07"
-dependencies = [
- "prettyplease 0.1.25",
- "proc-macro2",
- "prost-build 0.11.9",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -10938,6 +10926,7 @@ dependencies = [
  "hyper",
  "indexmap 1.9.3",
  "itertools 0.10.5",
+ "itertools 0.11.0",
  "jni",
  "lazy_static",
  "lexical-core",
@@ -11010,7 +10999,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml_datetime",
- "toml_edit",
+ "toml_edit 0.19.15",
  "tonic 0.9.2",
  "tower",
  "tracing",

@@ -22,7 +22,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use risingwave_batch::task::BatchManager;
-use risingwave_common::config::{HeapProfilingConfig, StorageConfig, StorageMemoryConfig};
+use risingwave_common::config::{StorageConfig, StorageMemoryConfig};
 use risingwave_common::util::pretty_bytes::convert;
 use risingwave_stream::task::LocalStreamManager;
 
@@ -67,16 +67,10 @@ pub trait MemoryControl: Send + Sync + std::fmt::Debug {
     ) -> MemoryControlStats;
 }
 
-pub fn build_memory_control_policy(
-    total_memory_bytes: usize,
-    heap_profiling_config: HeapProfilingConfig,
-) -> MemoryControlRef {
+pub fn build_memory_control_policy(total_memory_bytes: usize) -> MemoryControlRef {
     use self::policy::JemallocMemoryControl;
 
-    Box::new(JemallocMemoryControl::new(
-        total_memory_bytes,
-        heap_profiling_config,
-    ))
+    Box::new(JemallocMemoryControl::new(total_memory_bytes))
 }
 
 /// `DummyPolicy` is used for operarting systems other than Linux. It does nothing as memory control
