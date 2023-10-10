@@ -25,8 +25,8 @@ use risingwave_expr::expr::BoxedExpression;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{
-    ActorContextRef, Barrier, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
-    StreamExecutorError,
+    ActorContextRef, Barrier, BoxedMessageStream, Executor, Message, Mutation, PkIndices,
+    PkIndicesRef, StreamExecutorError,
 };
 use crate::task::CreateMviewProgress;
 
@@ -83,10 +83,23 @@ impl ValuesExecutor {
             .unwrap();
 
         let emit = barrier.is_newly_added(self.ctx.id);
+        let paused_on_startup = barrier.is_pause_on_startup();
 
         yield Message::Barrier(barrier);
+
         // If it's failover, do not evaluate rows (assume they have been yielded)
         if emit {
+            if paused_on_startup {
+                // Wait for the data stream to be resumed before yielding the chunks.
+                while let Some(barrier) = barrier_receiver.recv().await {
+                    let is_resume = barrier.is_resume();
+                    yield Message::Barrier(barrier);
+                    if is_resume {
+                        break;
+                    }
+                }
+            }
+
             let cardinality = schema.len();
             ensure!(cardinality > 0);
             while !rows.is_empty() {
