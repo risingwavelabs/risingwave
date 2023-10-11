@@ -81,6 +81,11 @@ enum CompressionCodec {
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RdKafkaPropertiesProducer {
+    /// Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
+    #[serde(rename = "properties.allow.auto.create.topics")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub allow_auto_create_topics: Option<bool>,
+
     /// Maximum number of messages allowed on the producer queue. This queue is shared by all
     /// topics and partitions. A value of 0 disables this limit.
     #[serde(rename = "properties.queue.buffering.max.messages")]
@@ -160,6 +165,9 @@ pub struct RdKafkaPropertiesProducer {
 
 impl RdKafkaPropertiesProducer {
     pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        if let Some(v) = self.allow_auto_create_topics {
+            c.set("allow.auto.create.topics", v.to_string());
+        }
         if let Some(v) = self.queue_buffering_max_messages {
             c.set("queue.buffering.max.messages", v.to_string());
         }
