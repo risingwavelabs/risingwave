@@ -184,6 +184,7 @@ where
         let keys = K::build(&self.group_by, chunk.data_chunk())?;
         let table_id_str = self.managed_state.state_table.table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
+        let fragment_id_str = self.ctx.fragment_id.to_string();
         for (r, group_cache_key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
             let Some((op, row_ref)) = r else {
                 continue;
@@ -196,7 +197,7 @@ where
             self.ctx
                 .streaming_metrics
                 .group_top_n_total_query_cache_count
-                .with_label_values(&[&table_id_str, &actor_id_str])
+                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                 .inc();
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
@@ -204,7 +205,7 @@ where
                 self.ctx
                     .streaming_metrics
                     .group_top_n_cache_miss_count
-                    .with_label_values(&[&table_id_str, &actor_id_str])
+                    .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                     .inc();
                 let mut topn_cache =
                     TopNCache::new(self.offset, self.limit, self.schema().data_types());
@@ -241,7 +242,7 @@ where
         self.ctx
             .streaming_metrics
             .group_top_n_cached_entry_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(self.caches.len() as i64);
         generate_output(res_rows, res_ops, self.schema())
     }

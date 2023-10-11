@@ -24,10 +24,10 @@ use risingwave_rt::{init_risingwave_logger, main_okk, LoggerSettings};
 macro_rules! main {
     ($component:ident) => {
         #[cfg(enable_task_local_alloc)]
-        risingwave_common::enable_task_local_jemalloc_on_unix!();
+        risingwave_common::enable_task_local_jemalloc!();
 
         #[cfg(not(enable_task_local_alloc))]
-        risingwave_common::enable_jemalloc_on_unix!();
+        risingwave_common::enable_jemalloc!();
 
         #[cfg_attr(coverage, no_coverage)]
         fn main() {
@@ -36,6 +36,8 @@ macro_rules! main {
         }
     };
 }
+
+risingwave_expr_impl::enable!();
 
 // Entry point functions.
 

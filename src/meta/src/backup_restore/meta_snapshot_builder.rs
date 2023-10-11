@@ -191,7 +191,6 @@ mod tests {
             let v_ = v.clone();
             async move { v_ }
         };
-        hummock_version.insert(&meta_store).await.unwrap();
         let err = builder
             .build(1, get_ckpt_builder(&hummock_version))
             .await

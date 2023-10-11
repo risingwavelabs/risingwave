@@ -562,8 +562,8 @@ where
         &self.value_indices
     }
 
-    pub fn is_dirty(&self) -> bool {
-        self.local_store.is_dirty()
+    fn is_dirty(&self) -> bool {
+        self.local_store.is_dirty() || self.state_clean_watermark.is_some()
     }
 
     pub fn vnode_bitmap(&self) -> &Bitmap {
@@ -913,9 +913,15 @@ where
             }
             true => {
                 self.watermark_buffer_strategy.tick();
-                self.seal_current_epoch(new_epoch.curr)
-                    .instrument(tracing::info_span!("state_table_commit"))
-                    .await?;
+                if !self.is_dirty() {
+                    // If the state table is not modified, go fast path.
+                    self.local_store.seal_current_epoch(new_epoch.curr);
+                    return Ok(());
+                } else {
+                    self.seal_current_epoch(new_epoch.curr)
+                        .instrument(tracing::info_span!("state_table_commit"))
+                        .await?;
+                }
 
                 // Refresh watermark cache if it is out of sync.
                 if USE_WATERMARK_CACHE && !self.watermark_cache.is_synced() {

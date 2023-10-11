@@ -83,10 +83,23 @@ impl ValuesExecutor {
             .unwrap();
 
         let emit = barrier.is_newly_added(self.ctx.id);
+        let paused_on_startup = barrier.is_pause_on_startup();
 
         yield Message::Barrier(barrier);
+
         // If it's failover, do not evaluate rows (assume they have been yielded)
         if emit {
+            if paused_on_startup {
+                // Wait for the data stream to be resumed before yielding the chunks.
+                while let Some(barrier) = barrier_receiver.recv().await {
+                    let is_resume = barrier.is_resume();
+                    yield Message::Barrier(barrier);
+                    if is_resume {
+                        break;
+                    }
+                }
+            }
+
             let cardinality = schema.len();
             ensure!(cardinality > 0);
             while !rows.is_empty() {
@@ -99,11 +112,7 @@ impl ValuesExecutor {
                 let mut array_builders = schema.create_array_builders(chunk_size);
                 for row in rows.by_ref().take(chunk_size) {
                     for (expr, builder) in row.into_iter().zip_eq_fast(&mut array_builders) {
-                        let out = expr
-                            .eval_infallible(&one_row_chunk, |err| {
-                                self.ctx.on_compute_error(err, self.identity.as_str())
-                            })
-                            .await;
+                        let out = expr.eval_infallible(&one_row_chunk).await;
                         builder.append_array(&out);
                     }
                 }
@@ -123,7 +132,7 @@ impl ValuesExecutor {
 
         while let Some(barrier) = barrier_receiver.recv().await {
             if emit {
-                progress.finish(barrier.epoch.curr);
+                progress.finish(barrier.epoch.curr, 0);
             }
             yield Message::Barrier(barrier);
         }

@@ -16,31 +16,37 @@
 
 package com.risingwave.java.binding;
 
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
 
-@Warmup(iterations = 10, time = 1, timeUnit = TimeUnit.MILLISECONDS)
-@Measurement(iterations = 20, time = 1, timeUnit = TimeUnit.MILLISECONDS)
+@Warmup(iterations = 2, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
+@Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
 @Fork(value = 1)
 @BenchmarkMode(org.openjdk.jmh.annotations.Mode.AverageTime)
-@OutputTimeUnit(TimeUnit.MICROSECONDS)
+@OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(org.openjdk.jmh.annotations.Scope.Benchmark)
 public class StreamchunkBenchmark {
     @Param({"100", "1000", "10000"})
-    static int loopTime;
+    int loopTime;
 
-    String str;
-    StreamChunkIterator iter;
+    Iterator<StreamChunkIterator> iterOfIter;
 
-    @Setup(Level.Invocation)
+    @Setup(Level.Iteration)
     public void setup() {
-        str = "i i I f F B i";
-        for (int i = 0; i < loopTime; i++) {
-            String b = i % 2 == 0 ? "f" : "t";
-            String n = i % 2 == 0 ? "." : "1";
-            str += String.format("\n + %d %d %d %d.0 %d.0 %s %s", i, i, i, i, i, b, n);
+        var iterList = new ArrayList<StreamChunkIterator>();
+        for (int iterI = 0; iterI < 10; iterI++) {
+            String str = "i i I f F B i";
+            for (int i = 0; i < loopTime; i++) {
+                String b = i % 2 == 0 ? "f" : "t";
+                String n = i % 2 == 0 ? "." : "1";
+                str += String.format("\n + %d %d %d %d.0 %d.0 %s %s", i, i, i, i, i, b, n);
+            }
+            var iter = new StreamChunkIterator(str);
+            iterList.add(iter);
         }
-        iter = new StreamChunkIterator(str);
+        iterOfIter = iterList.iterator();
     }
 
     public void getValue(StreamChunkRow row) {
@@ -55,15 +61,18 @@ public class StreamchunkBenchmark {
 
     @Benchmark
     public void streamchunkTest() {
+        if (!iterOfIter.hasNext()) {
+            throw new RuntimeException("too few prepared iter");
+        }
+        var iter = iterOfIter.next();
         int count = 0;
         while (true) {
-            try (StreamChunkRow row = iter.next()) {
-                if (row == null) {
-                    break;
-                }
-                count += 1;
-                getValue(row);
+            StreamChunkRow row = iter.next();
+            if (row == null) {
+                break;
             }
+            count += 1;
+            getValue(row);
         }
         if (count != loopTime) {
             throw new RuntimeException(

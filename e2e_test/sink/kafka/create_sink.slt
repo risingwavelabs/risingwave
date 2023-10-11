@@ -10,20 +10,11 @@ create table t_kafka (
     v_timestamp timestamp
 );
 
-statement error failed to fetch metadata from kafka
+statement error cannot connect to kafka broker
 create sink sink_non_exist_broker from t_kafka with (
     connector = 'kafka',
     properties.bootstrap.server = 'make no sense',
     topic = 'test-rw-sink-append-only',
-    force_append_only = 'true',
-    type = 'append-only',
-);
-
-statement error topic invalid_topic not found
-create sink sink_non_exist_topic from t_kafka with (
-    connector = 'kafka',
-    properties.bootstrap.server = '127.0.0.1:29092',
-    topic = 'invalid_topic',
     force_append_only = 'true',
     type = 'append-only',
 );
@@ -115,7 +106,7 @@ create sink si_kafka_debezium from t_kafka with (
     primary_key = 'id',
 );
 
-statement error primary key not defined for debezium kafka sink
+statement error primary key not defined
 create sink debezium_without_pk from t_kafka with (
     connector = 'kafka',
     properties.bootstrap.server = '127.0.0.1:29092',

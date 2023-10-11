@@ -332,12 +332,10 @@ impl MetaClient {
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
-        stream_job_execution_mode: StreamJobExecutionMode,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
-            stream_job_execution_mode: stream_job_execution_mode as i32,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -666,7 +664,7 @@ impl MetaClient {
                         extra_info.push(info);
                     }
                 }
-                tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
+                tracing::debug!(target: "events::meta::client_heartbeat", "heartbeat");
                 match tokio::time::timeout(
                     // TODO: decide better min_interval for timeout
                     min_interval * 3,
@@ -938,10 +936,10 @@ impl MetaClient {
         Ok(resp.job_id)
     }
 
-    pub async fn get_backup_job_status(&self, job_id: u64) -> Result<BackupJobStatus> {
+    pub async fn get_backup_job_status(&self, job_id: u64) -> Result<(BackupJobStatus, String)> {
         let req = GetBackupJobStatusRequest { job_id };
         let resp = self.inner.get_backup_job_status(req).await?;
-        Ok(resp.job_status())
+        Ok((resp.job_status(), resp.message))
     }
 
     pub async fn delete_meta_snapshot(&self, snapshot_ids: &[u64]) -> Result<()> {

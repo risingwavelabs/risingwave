@@ -422,13 +422,28 @@ pub struct StreamingConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub enum MetricLevel {
     #[default]
     Disabled = 0,
     Critical = 1,
     Info = 2,
     Debug = 3,
+}
+
+impl clap::ValueEnum for MetricLevel {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Disabled, Self::Critical, Self::Info, Self::Debug]
+    }
+
+    fn to_possible_value<'a>(&self) -> ::std::option::Option<clap::builder::PossibleValue> {
+        match self {
+            Self::Disabled => Some(clap::builder::PossibleValue::new("disabled").alias("0")),
+            Self::Critical => Some(clap::builder::PossibleValue::new("critical")),
+            Self::Info => Some(clap::builder::PossibleValue::new("info").alias("1")),
+            Self::Debug => Some(clap::builder::PossibleValue::new("debug")),
+        }
+    }
 }
 
 impl PartialEq<Self> for MetricLevel {
@@ -563,6 +578,8 @@ pub struct StorageConfig {
     pub compact_iter_recreate_timeout_ms: u64,
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
+    #[serde(default = "default::storage::enable_fast_compaction")]
+    pub enable_fast_compaction: bool,
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -656,6 +673,16 @@ impl AsyncStackTraceOption {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, ValueEnum)]
+pub enum CompactorMode {
+    #[default]
+    #[clap(alias = "dedicated")]
+    Dedicated,
+
+    #[clap(alias = "shared")]
+    Shared,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct HeapProfilingConfig {
     /// Enable to auto dump heap profile when memory usage is high
@@ -716,6 +743,10 @@ pub struct StreamingDeveloperConfig {
     /// the channel.
     #[serde(default = "default::developer::stream_dml_channel_initial_permits")]
     pub dml_channel_initial_permits: usize,
+
+    /// The max heap size of dirty groups of `HashAggExecutor`.
+    #[serde(default = "default::developer::stream_hash_agg_max_dirty_groups_heap_size")]
+    pub hash_agg_max_dirty_groups_heap_size: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1031,6 +1062,10 @@ pub mod default {
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
+
+        pub fn enable_fast_compaction() -> bool {
+            true
+        }
     }
 
     pub mod streaming {
@@ -1178,6 +1213,10 @@ pub mod default {
 
         pub fn stream_dml_channel_initial_permits() -> usize {
             32768
+        }
+
+        pub fn stream_hash_agg_max_dirty_groups_heap_size() -> usize {
+            64 << 20 // 64MB
         }
     }
 

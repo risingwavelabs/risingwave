@@ -38,7 +38,7 @@ more-asserts = "0.3"
 num-integer = "0.1"
 parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.11"
+prost = { workspace = true }
 rand = "0.8"
 risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
@@ -66,6 +66,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tokio-retry = "0.3"
+tonic = { workspace = true }
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 xorf = "0.8.1"

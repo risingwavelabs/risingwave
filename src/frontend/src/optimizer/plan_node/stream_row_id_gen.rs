@@ -40,7 +40,7 @@ impl StreamRowIdGen {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            input.logical_pk().to_vec(),
+            input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             distribution,
             input.append_only(),

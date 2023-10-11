@@ -40,7 +40,7 @@ impl StreamValues {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.logical_pk().to_vec(),
+            logical.stream_key().map(|v| v.to_vec()),
             logical.functional_dependency().clone(),
             Distribution::Single,
             true,

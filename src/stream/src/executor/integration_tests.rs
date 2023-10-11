@@ -20,7 +20,7 @@ use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 

@@ -79,6 +79,7 @@ stream_exchange_initial_permits = 2048
 stream_exchange_batched_permits = 256
 stream_exchange_concurrent_barriers = 1
 stream_dml_channel_initial_permits = 32768
+stream_hash_agg_max_dirty_groups_heap_size = 67108864
 
 [storage]
 share_buffers_sync_parallelism = 1
@@ -108,6 +109,8 @@ object_store_req_retry_max_attempts = 8
 compactor_max_sst_key_count = 2097152
 compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
+enable_fast_compaction = true
+
 
 [storage.data_file_cache]
 dir = ""

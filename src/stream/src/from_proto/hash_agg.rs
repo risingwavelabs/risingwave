@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
 use risingwave_pb::stream_plan::HashAggNode;
 
 use super::agg_common::{
@@ -114,6 +114,11 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 extra: HashAggExecutorExtraArgs {
                     group_key_indices,
                     chunk_size: params.env.config().developer.chunk_size,
+                    max_dirty_groups_heap_size: params
+                        .env
+                        .config()
+                        .developer
+                        .hash_agg_max_dirty_groups_heap_size,
                     emit_on_window_close: node.get_emit_on_window_close(),
                 },
             },

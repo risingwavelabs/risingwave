@@ -69,6 +69,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             .map(|_| BitmapBuilder::zeroed(column.len()))
             .collect_vec();
         let actor_id_str = ctx.id.to_string();
+        let fragment_id_str = ctx.fragment_id.to_string();
         let table_id_str = dedup_table.table_id().to_string();
         for (datum_idx, (op, datum)) in ops.iter().zip_eq_fast(column.iter()).enumerate() {
             // skip if this item is hidden to all agg calls (this is likely to happen)
@@ -85,7 +86,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             self.metrics_info
                 .metrics
                 .agg_distinct_total_cache_count
-                .with_label_values(&[&table_id_str, &actor_id_str])
+                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                 .inc();
             // TODO(yuhao): avoid this `contains`.
             // https://github.com/risingwavelabs/risingwave/issues/9233
@@ -95,7 +96,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
                 self.metrics_info
                     .metrics
                     .agg_distinct_cache_miss_count
-                    .with_label_values(&[&table_id_str, &actor_id_str])
+                    .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                     .inc();
                 // load from table into the cache
                 let counts = if let Some(counts_row) =
@@ -190,11 +191,12 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         // WARN: if you want to change to batching the write to table. please remember to change
         // `self.cache.evict()` too.
         let actor_id_str = ctx.id.to_string();
+        let fragment_id_str = ctx.fragment_id.to_string();
         let table_id_str = dedup_table.table_id().to_string();
         self.metrics_info
             .metrics
             .agg_distinct_cached_entry_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(self.cache.len() as i64);
         self.cache.evict();
     }

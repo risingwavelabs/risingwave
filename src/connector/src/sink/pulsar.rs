@@ -24,19 +24,16 @@ use pulsar::producer::{Message, SendFuture};
 use pulsar::{Producer, ProducerOptions, Pulsar, TokioExecutor};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_rpc_client::ConnectorClient;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
-use super::encoder::{JsonEncoder, TimestampHandlingMode};
-use super::formatter::{AppendOnlyFormatter, UpsertFormatter};
-use super::{
-    FormattedSink, Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam, SINK_TYPE_APPEND_ONLY,
-    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
-};
+use super::catalog::{SinkFormat, SinkFormatDesc};
+use super::{Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam};
 use crate::common::PulsarCommon;
-use crate::deserialize_duration_from_string;
+use crate::sink::formatter::SinkFormatterImpl;
+use crate::sink::writer::{FormattedSink, LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result};
+use crate::{deserialize_duration_from_string, dispatch_sink_formatter_impl};
 
 pub const PULSAR_SINK: &str = "pulsar";
 
@@ -116,8 +113,6 @@ pub struct PulsarConfig {
 
     #[serde(flatten)]
     pub producer_properties: PulsarPropertiesProducer,
-
-    pub r#type: String, // accept "append-only" or "upsert"
 }
 
 impl PulsarConfig {
@@ -125,14 +120,6 @@ impl PulsarConfig {
         let config = serde_json::from_value::<PulsarConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
-        if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
-            return Err(SinkError::Config(anyhow!(
-                "`{}` must be {}, or {}",
-                SINK_TYPE_OPTION,
-                SINK_TYPE_APPEND_ONLY,
-                SINK_TYPE_UPSERT
-            )));
-        }
         Ok(config)
     }
 }
@@ -142,41 +129,55 @@ pub struct PulsarSink {
     pub config: PulsarConfig,
     schema: Schema,
     downstream_pk: Vec<usize>,
-    is_append_only: bool,
+    format_desc: SinkFormatDesc,
+    db_name: String,
+    sink_from_name: String,
 }
 
-impl PulsarSink {
-    pub fn new(config: PulsarConfig, param: SinkParam) -> Self {
-        Self {
+impl TryFrom<SinkParam> for PulsarSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = PulsarConfig::from_hashmap(param.properties)?;
+        Ok(Self {
             config,
-            schema: param.schema(),
+            schema,
             downstream_pk: param.downstream_pk,
-            is_append_only: param.sink_type.is_append_only(),
-        }
+            format_desc: param
+                .format_desc
+                .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
+            db_name: param.db_name,
+            sink_from_name: param.sink_from_name,
+        })
     }
 }
 
-#[async_trait]
 impl Sink for PulsarSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = PulsarSinkWriter;
+    type LogSinker = LogSinkerOf<PulsarSinkWriter>;
 
-    async fn new_writer(&self, _writer_param: SinkWriterParam) -> Result<Self::Writer> {
-        PulsarSinkWriter::new(
+    const SINK_NAME: &'static str = PULSAR_SINK;
+
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        Ok(PulsarSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.downstream_pk.clone(),
-            self.is_append_only,
+            &self.format_desc,
+            self.db_name.clone(),
+            self.sink_from_name.clone(),
         )
-        .await
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
+    async fn validate(&self) -> Result<()> {
         // For upsert Pulsar sink, the primary key must be defined.
-        if !self.is_append_only && self.downstream_pk.is_empty() {
+        if self.format_desc.format != SinkFormat::AppendOnly && self.downstream_pk.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "primary key not defined for {} pulsar sink (please define in `primary_key` field)",
-                self.config.r#type
+                "primary key not defined for {:?} pulsar sink (please define in `primary_key` field)",
+                self.format_desc.format
             )));
         }
 
@@ -189,12 +190,14 @@ impl Sink for PulsarSink {
 }
 
 pub struct PulsarSinkWriter {
+    payload_writer: PulsarPayloadWriter,
+    formatter: SinkFormatterImpl,
+}
+
+struct PulsarPayloadWriter {
     pulsar: Pulsar<TokioExecutor>,
     producer: Producer<TokioExecutor>,
     config: PulsarConfig,
-    schema: Schema,
-    downstream_pk: Vec<usize>,
-    is_append_only: bool,
     send_future_buffer: VecDeque<SendFuture>,
 }
 
@@ -203,21 +206,27 @@ impl PulsarSinkWriter {
         config: PulsarConfig,
         schema: Schema,
         downstream_pk: Vec<usize>,
-        is_append_only: bool,
+        format_desc: &SinkFormatDesc,
+        db_name: String,
+        sink_from_name: String,
     ) -> Result<Self> {
+        let formatter =
+            SinkFormatterImpl::new(format_desc, schema, downstream_pk, db_name, sink_from_name)?;
         let pulsar = config.common.build_client().await?;
         let producer = build_pulsar_producer(&pulsar, &config).await?;
         Ok(Self {
-            pulsar,
-            producer,
-            config,
-            schema,
-            downstream_pk,
-            is_append_only,
-            send_future_buffer: VecDeque::new(),
+            formatter,
+            payload_writer: PulsarPayloadWriter {
+                pulsar,
+                producer,
+                config,
+                send_future_buffer: VecDeque::new(),
+            },
         })
     }
+}
 
+impl PulsarPayloadWriter {
     async fn send_message(&mut self, message: Message) -> Result<()> {
         let mut success_flag = false;
         let mut connection_err = None;
@@ -277,34 +286,6 @@ impl PulsarSinkWriter {
         Ok(())
     }
 
-    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        // TODO: Remove the clones here, only to satisfy borrow checker at present
-        let schema = self.schema.clone();
-        let downstream_pk = self.downstream_pk.clone();
-        let key_encoder =
-            JsonEncoder::new(&schema, Some(&downstream_pk), TimestampHandlingMode::Milli);
-        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
-
-        // Initialize the append_only_stream
-        let f = AppendOnlyFormatter::new(key_encoder, val_encoder);
-
-        self.write_chunk(chunk, f).await
-    }
-
-    async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
-        // TODO: Remove the clones here, only to satisfy borrow checker at present
-        let schema = self.schema.clone();
-        let downstream_pk = self.downstream_pk.clone();
-        let key_encoder =
-            JsonEncoder::new(&schema, Some(&downstream_pk), TimestampHandlingMode::Milli);
-        let val_encoder = JsonEncoder::new(&schema, None, TimestampHandlingMode::Milli);
-
-        // Initialize the upsert_stream
-        let f = UpsertFormatter::new(key_encoder, val_encoder);
-
-        self.write_chunk(chunk, f).await
-    }
-
     async fn commit_inner(&mut self) -> Result<()> {
         self.producer
             .send_batch()
@@ -321,7 +302,7 @@ impl PulsarSinkWriter {
     }
 }
 
-impl FormattedSink for PulsarSinkWriter {
+impl FormattedSink for PulsarPayloadWriter {
     type K = String;
     type V = Vec<u8>;
 
@@ -333,11 +314,9 @@ impl FormattedSink for PulsarSinkWriter {
 #[async_trait]
 impl SinkWriter for PulsarSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.is_append_only {
-            self.append_only(chunk).await
-        } else {
-            self.upsert(chunk).await
-        }
+        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+            self.payload_writer.write_chunk(chunk, formatter).await
+        })
     }
 
     async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
@@ -346,7 +325,7 @@ impl SinkWriter for PulsarSinkWriter {
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
         if is_checkpoint {
-            self.commit_inner().await?;
+            self.payload_writer.commit_inner().await?;
         }
 
         Ok(())

@@ -28,7 +28,7 @@ use super::*;
 /// `FilterExecutor` will insert, delete or update element into next executor according
 /// to the result of the expression.
 pub struct FilterExecutor {
-    ctx: ActorContextRef,
+    _ctx: ActorContextRef,
     info: ExecutorInfo,
     input: BoxedExecutor,
 
@@ -46,7 +46,7 @@ impl FilterExecutor {
     ) -> Self {
         let input_info = input.info();
         Self {
-            ctx,
+            _ctx: ctx,
             input,
             info: ExecutorInfo {
                 schema: input_info.schema,
@@ -170,12 +170,7 @@ impl FilterExecutor {
                 Message::Chunk(chunk) => {
                     let chunk = chunk.compact();
 
-                    let pred_output = self
-                        .expr
-                        .eval_infallible(chunk.data_chunk(), |err| {
-                            self.ctx.on_compute_error(err, &self.info.identity)
-                        })
-                        .await;
+                    let pred_output = self.expr.eval_infallible(chunk.data_chunk()).await;
 
                     match Self::filter(chunk, pred_output)? {
                         Some(new_chunk) => yield Message::Chunk(new_chunk),
