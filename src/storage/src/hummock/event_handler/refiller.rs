@@ -358,6 +358,14 @@ impl CacheRefillTask {
 
         let mut tasks = vec![];
 
+        // unit-level refill:
+        //
+        // Although file cache receivces item by block, a larger range of data is still recommended to reduce
+        // S3 iops and per request base latency waste.
+        //
+        // To decide which unit to refill, we calculate the ratio that the block of a unit will be received by
+        // file cache. If the ratio is higher than a threshold, we fetich and refill the whole unit by block.
+
         for block_index_start in (0..sst.block_count()).step_by(unit) {
             let block_index_end = std::cmp::min(block_index_start + unit, sst.block_count());
 
