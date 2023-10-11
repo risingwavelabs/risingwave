@@ -325,6 +325,7 @@ impl StreamTableScan {
                     .session_ctx()
                     .config()
                     .get_streaming_rate_limit(),
+                ..Default::default()
             })),
             stream_key,
             operator_id: self.base.id.0 as u64,
