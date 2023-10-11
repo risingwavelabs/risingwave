@@ -60,7 +60,7 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
         .run("create materialized view m1 as select * from t1;")
         .await?;
 
-    kill_and_wait_recover(&cluster).await;
+    kill_cn_and_wait_recover(&cluster).await;
 
     // Send some upstream updates.
     cluster
@@ -69,6 +69,8 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     cluster.run("flush;").await?;
 
     kill_cn_and_wait_recover(&cluster).await;
+
+    kill_and_wait_recover(&cluster).await;
 
     // Send some upstream updates.
     cluster
