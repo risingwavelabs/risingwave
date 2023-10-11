@@ -4544,7 +4544,8 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.3.0+0.34.0"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=3235309#32353095f8109c7dd70efbdd8d7e0010930fdcf4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00f9ab2d0545a55e4f209fc72c180a7e7b45a4e7baee7b4994c4628a877c5525"
 dependencies = [
  "async-channel",
  "async-trait",
