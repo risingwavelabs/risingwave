@@ -314,7 +314,7 @@ impl ClusterManager {
         worker_id: WorkerId,
         info: Vec<heartbeat_request::extra_info::Info>,
     ) -> MetaResult<()> {
-        tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
+        tracing::debug!(target: "events::meta::server_heartbeat", worker_id, "receive heartbeat");
         let mut core = self.core.write().await;
         for worker in core.workers.values_mut() {
             if worker.worker_id() == worker_id {
