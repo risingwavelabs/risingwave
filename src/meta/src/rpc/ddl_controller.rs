@@ -512,7 +512,16 @@ impl DdlController {
             .create_streaming_job(table_fragments, ctx)
             .await;
         if let Err(e) = result {
-            self.cancel_stream_job(&stream_job, internal_tables).await?;
+            match stream_job.create_type() {
+                // NOTE: This assumes that we will trigger recovery,
+                // and recover stream job progress.
+                CreateType::Background => {
+                    tracing::error!(stream_job_id = stream_job.id(), error = ?e, "finish stream job failed")
+                }
+                _ => {
+                    self.cancel_stream_job(&stream_job, internal_tables).await?;
+                }
+            }
             return Err(e);
         };
         self.finish_stream_job(stream_job, internal_tables).await
