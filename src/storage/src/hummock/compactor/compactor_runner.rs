@@ -702,9 +702,9 @@ where
         progress_key_num += 1;
 
         if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
-                task_progress.inc_progress_key(progress_key_num);
-                progress_key_num = 0;
-            }
+            task_progress.inc_progress_key(progress_key_num);
+            progress_key_num = 0;
+        }
 
         let mut iter_key = iter.key();
         compaction_statistics.iter_total_key_counts += 1;
@@ -750,6 +750,11 @@ where
                     .await?;
             }
             del_iter.next();
+            progress_key_num += 1;
+            if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+                task_progress.inc_progress_key(progress_key_num);
+                progress_key_num = 0;
+            }
         }
         let earliest_range_delete_which_can_see_iter_key = del_iter.earliest_delete_since(epoch);
 
@@ -844,6 +849,11 @@ where
                 break;
             }
             del_iter.update_range();
+            progress_key_num += 1;
+            if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+                task_progress.inc_progress_key(progress_key_num);
+                progress_key_num = 0;
+            }
             sst_builder
                 .add_monotonic_delete(MonotonicDeleteEvent {
                     event_key: del_iter.key().clone(),
