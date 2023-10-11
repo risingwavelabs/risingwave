@@ -248,6 +248,14 @@ impl<T: AsRef<[u8]>> KeyedRow<T> {
         }
     }
 
+    pub fn new_tombstone(table_key: TableKey<T>, row: OwnedRow) -> Self {
+        Self {
+            vnode_prefixed_key: table_key,
+            row,
+            is_tombstone: true,
+        }
+    }
+
     pub fn into_owned_row(self) -> OwnedRow {
         self.row
     }

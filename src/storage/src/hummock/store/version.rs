@@ -922,6 +922,7 @@ impl HummockVersionReader {
             min_epoch,
             Some(committed),
             delete_range_iter,
+            read_options.with_tombstone,
         );
         user_iter
             .rewind()

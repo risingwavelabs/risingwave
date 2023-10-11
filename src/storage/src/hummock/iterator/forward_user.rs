@@ -54,6 +54,9 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     stats: StoreLocalStatistic,
 
     delete_range_iter: ForwardMergeRangeIterator,
+
+    // Whether to expose tombstone user key
+    with_tombstone: bool,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
@@ -66,6 +69,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         min_epoch: u64,
         version: Option<PinnedVersion>,
         delete_range_iter: ForwardMergeRangeIterator,
+        with_tombstone: bool,
     ) -> Self {
         Self {
             iterator,
@@ -78,6 +82,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             stats: StoreLocalStatistic::default(),
             delete_range_iter,
             _version: version,
+            with_tombstone,
         }
     }
 
@@ -91,6 +96,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             0,
             None,
             ForwardMergeRangeIterator::new(read_epoch),
+            false,
         )
     }
 
@@ -130,6 +136,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                         self.delete_range_iter.next_until(full_key.user_key).await?;
                         if self.delete_range_iter.current_epoch() >= epoch {
                             self.stats.skip_delete_key_count += 1;
+                            if self.with_tombstone {
+                                self.last_val.clear();
+                                return Ok(());
+                            }
                         } else {
                             self.last_val = Bytes::copy_from_slice(val);
                             self.stats.processed_key_count += 1;
@@ -141,6 +151,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     // returned to user.
                     HummockValue::Delete => {
                         self.stats.skip_delete_key_count += 1;
+                        if self.with_tombstone {
+                            self.last_val.clear();
+                            return Ok(());
+                        }
                     }
                 }
             } else {
@@ -965,7 +979,7 @@ mod tests {
             cache.lookup(table_id, &table_id).unwrap(),
         ));
         let mut ui: UserIterator<_> =
-            UserIterator::new(mi, (Unbounded, Unbounded), 150, 0, None, del_iter);
+            UserIterator::new(mi, (Unbounded, Unbounded), 150, 0, None, del_iter, false);
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
@@ -996,7 +1010,7 @@ mod tests {
         ));
         let mi = UnorderedMergeIteratorInner::new(iters);
         let mut ui: UserIterator<_> =
-            UserIterator::new(mi, (Unbounded, Unbounded), 300, 0, None, del_iter);
+            UserIterator::new(mi, (Unbounded, Unbounded), 300, 0, None, del_iter, false);
         ui.rewind().await.unwrap();
         assert!(ui.is_valid());
         assert_eq!(ui.key().user_key, iterator_test_bytes_user_key_of(2));

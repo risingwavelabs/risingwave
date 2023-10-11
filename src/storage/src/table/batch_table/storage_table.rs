@@ -20,6 +20,7 @@ use std::sync::Arc;
 use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use foyer::common::code::Key;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -701,6 +702,9 @@ struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
 
     /// used for deserializing key part of output row from pk.
     output_row_in_key_indices: Vec<usize>,
+
+    /// whether the inner iter can give back tombstone key
+    with_tombstone: bool,
 }
 
 impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
@@ -736,6 +740,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
             key_output_indices,
             value_output_indices,
             output_row_in_key_indices,
+            with_tombstone: read_options.with_tombstone,
         };
         Ok(iter)
     }
@@ -766,32 +771,45 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
 
                             pk.project(&self.output_row_in_key_indices).into_owned_row()
                         }
-                        None => OwnedRow::empty(),
-                    };
-
-                    let mut result_row_vec = vec![];
-                    for idx in &self.output_indices {
-                        if self.value_output_indices.contains(idx) {
-                            let item_position_in_value_indices = &self
-                                .value_output_indices
-                                .iter()
-                                .position(|p| idx == p)
-                                .unwrap();
-                            result_row_vec.push(
-                                result_row_in_value
-                                    .index(*item_position_in_value_indices)
-                                    .clone(),
-                            );
-                        } else {
-                            let item_position_in_pk_indices =
-                                key_output_indices.iter().position(|p| idx == p).unwrap();
-                            result_row_vec
-                                .push(result_row_in_key.index(item_position_in_pk_indices).clone());
+                        None => {
+                            // pk_serializer must be provided if with_tombstone=true because
+                            // we need to deserialize the tombstone key without value
+                            assert!(!self.with_tombstone);
+                            OwnedRow::empty()
                         }
-                    }
-                    let row = OwnedRow::new(result_row_vec);
+                    };
+                    
+                    // HACK: use empty value to indicate tombstone key
+                    if self.with_tombstone && value.is_empty() {
+                        assert!(!result_row_in_key.is_empty());
 
-                    yield KeyedRow::new(table_key, row)
+                        yield KeyedRow::new_tombstone(table_key, result_row_in_key);
+                    } else {
+                        let mut result_row_vec = vec![];
+                        for idx in &self.output_indices {
+                            if self.value_output_indices.contains(idx) {
+                                let item_position_in_value_indices = &self
+                                    .value_output_indices
+                                    .iter()
+                                    .position(|p| idx == p)
+                                    .unwrap();
+                                result_row_vec.push(
+                                    result_row_in_value
+                                        .index(*item_position_in_value_indices)
+                                        .clone(),
+                                );
+                            } else {
+                                let item_position_in_pk_indices =
+                                    key_output_indices.iter().position(|p| idx == p).unwrap();
+                                result_row_vec.push(
+                                    result_row_in_key.index(item_position_in_pk_indices).clone(),
+                                );
+                            }
+                        }
+                        let row = OwnedRow::new(result_row_vec);
+
+                        yield KeyedRow::new(table_key, row)
+                    }
                 }
                 None => yield KeyedRow::new(table_key, result_row_in_value),
             }
