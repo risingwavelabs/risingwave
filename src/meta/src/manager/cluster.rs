@@ -728,11 +728,8 @@ mod tests {
     async fn test_cluster_manager() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
 
-        let cluster_manager = Arc::new(
-            ClusterManager::new(env.clone(), Duration::new(0, 0))
-                .await
-                .unwrap(),
-        );
+        let cluster_manager =
+            Arc::new(ClusterManager::new(env, Duration::new(0, 0)).await.unwrap());
 
         let mut worker_nodes = Vec::new();
         let worker_count = 5usize;
@@ -839,11 +836,8 @@ mod tests {
     async fn test_cluster_manager_schedulability() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
 
-        let cluster_manager = Arc::new(
-            ClusterManager::new(env.clone(), Duration::new(0, 0))
-                .await
-                .unwrap(),
-        );
+        let cluster_manager =
+            Arc::new(ClusterManager::new(env, Duration::new(0, 0)).await.unwrap());
         let worker_node = cluster_manager
             .add_worker_node(
                 WorkerType::ComputeNode,
