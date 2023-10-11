@@ -259,6 +259,7 @@ where
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
+                let mut snapshot_read_complete = false;
 
                 // We should not buffer rows from previous epoch, else we can have duplicates.
                 assert!(upstream_chunk_buffer.is_empty());
@@ -277,13 +278,12 @@ where
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
-                    let backfill_stream =
+                    let mut backfill_stream =
                         select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
                             stream::PollNext::Left
                         });
 
-                    #[for_await]
-                    for either in backfill_stream {
+                    while let Some(either) = backfill_stream.next().await {
                         match either {
                             // Upstream
                             Either::Left(msg) => {
@@ -397,6 +397,39 @@ where
                             }
                         }
                     }
+
+                    // Before processing barrier, we check current_pos. If it is None, we continue snapshot read.
+                    if current_pos.is_none() {
+                        let (_, snapshot) = backfill_stream.into_inner();
+                        #[for_await]
+                        for msg in snapshot {
+                            let Either::Right(msg) = msg else {
+                                bail!("BUG: snapshot_read contains upstream messages");
+                            };
+                            match msg? {
+                                None => {
+                                    // End of the snapshot read stream.
+                                    snapshot_read_complete = true;
+                                    break;
+                                }
+                                Some(chunk) => {
+                                    // Raise the current position.
+                                    // As snapshot read streams are ordered by pk, so we can
+                                    // just use the last row to update `current_pos`.
+                                    current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
+
+                                    let chunk_cardinality = chunk.cardinality() as u64;
+                                    cur_barrier_snapshot_processed_rows += chunk_cardinality;
+                                    total_snapshot_processed_rows += chunk_cardinality;
+                                    yield Message::Chunk(mapping_chunk(
+                                        chunk,
+                                        &self.output_indices,
+                                    ));
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
                 // When we break out of inner backfill_stream loop, it means we have a barrier.
                 // If there are no updates and there are no snapshots left,
@@ -485,6 +518,10 @@ where
                 );
 
                 yield Message::Barrier(barrier);
+
+                if snapshot_read_complete {
+                    break 'backfill_loop;
+                }
 
                 // We will switch snapshot at the start of the next iteration of the backfill loop.
             }
