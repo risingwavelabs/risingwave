@@ -180,7 +180,7 @@ pub(super) fn generate_captured_function(
             };
             let name = arg.pat.into_token_stream();
             scoped = quote_spanned! { context.span()=>
-                // TODO: Can we add an assertion here that `#context::Type`` is same as `#arg.ty`?
+                // TODO: Can we add an assertion here that `&<<#context::Type> as Deref>::Target` is same as `#arg.ty`?
                 #context::try_with(|#name| {
                     #scoped
                 }).flatten()
