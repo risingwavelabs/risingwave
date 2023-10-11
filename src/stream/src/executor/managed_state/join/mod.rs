@@ -15,7 +15,7 @@
 mod join_entry_state;
 
 use std::alloc::Global;
-use std::ops::{Deref, DerefMut};
+use std::ops::{Bound, Deref, DerefMut};
 use std::sync::Arc;
 
 use futures::future::try_join;
@@ -410,14 +410,18 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
-            let table_iter_fut = self
-                .state
-                .table
-                .iter_row_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter());
-            let degree_table_iter_fut = self
-                .degree_state
-                .table
-                .iter_row_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter());
+            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                &(Bound::Unbounded, Bound::Unbounded);
+            let table_iter_fut = self.state.table.iter_with_prefix(
+                &key,
+                sub_range,
+                PrefetchOptions::new_for_exhaust_iter(),
+            );
+            let degree_table_iter_fut = self.degree_state.table.iter_with_prefix(
+                &key,
+                sub_range,
+                PrefetchOptions::new_for_exhaust_iter(),
+            );
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
@@ -445,10 +449,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 );
             }
         } else {
+            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                &(Bound::Unbounded, Bound::Unbounded);
             let table_iter = self
                 .state
                 .table
-                .iter_row_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter())
+                .iter_with_prefix(&key, sub_range, PrefetchOptions::new_for_exhaust_iter())
                 .await?;
 
             #[for_await]
