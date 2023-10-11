@@ -23,7 +23,7 @@ fn array_access(list: ListRef<'_>, index: i32) -> Option<ScalarRefImpl<'_>> {
         return None;
     }
     // returns `NULL` if index is out of bounds
-    list.elem_at(index as usize - 1).flatten()
+    list.get(index as usize - 1).flatten()
 }
 
 #[cfg(test)]

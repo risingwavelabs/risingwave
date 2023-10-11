@@ -130,7 +130,7 @@ fn generate_subscripts_inner(array: ListRef<'_>, dim: i32) -> (i32, i32) {
         ..=0 => nothing,
         1 => (1, array.len() as i32 + 1),
         // Although RW's array can be zig-zag, we just look at the first element.
-        2.. => match array.elem_at(0) {
+        2.. => match array.get(0) {
             Some(Some(ScalarRefImpl::List(list))) => generate_subscripts_inner(list, dim - 1),
             _ => nothing,
         },
