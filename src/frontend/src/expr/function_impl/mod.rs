@@ -14,4 +14,4 @@
 
 mod cast_regclass;
 mod col_description;
-mod context;
+pub mod context;
