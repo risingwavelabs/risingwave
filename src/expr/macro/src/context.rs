@@ -14,9 +14,8 @@
 
 use itertools::Itertools;
 use proc_macro2::TokenStream;
-use quote::{quote, quote_spanned};
+use quote::{quote, quote_spanned, ToTokens};
 use syn::parse::{Parse, ParseStream};
-use syn::punctuated::Punctuated;
 use syn::{Error, FnArg, Ident, ItemFn, Result, Token, Type, Visibility};
 
 /// See [`super::define_context`].
@@ -147,7 +146,8 @@ pub(super) fn generate_captured_function(
     }
 
     let (captured_inputs, remained_inputs) = {
-        let inputs = inputs.iter().cloned().by_ref();
+        let mut inputs = inputs.iter().cloned();
+        let inputs = inputs.by_ref();
         let captured_inputs = inputs.take(captures.len()).collect_vec();
         let remained_inputs = inputs.collect_vec();
         (captured_inputs, remained_inputs)
@@ -162,13 +162,13 @@ pub(super) fn generate_captured_function(
         #[allow(clippy::disallowed_methods)]
         for (context, arg) in captures.into_iter().zip(captured_inputs.into_iter()) {
             let FnArg::Typed(arg) = arg else {
-                return syn::Error::new_spanned(
+                return Err(syn::Error::new_spanned(
                     arg,
                     "receiver is not allowed in captured function",
-                );
+                ));
             };
-            let name = format!("{pat}");
-            scoped = quote_spanned! { context=>
+            let name = arg.pat.into_token_stream();
+            scoped = quote_spanned! { context.span()=>
                 // TODO: Can we add an assertion here that `#context::Type`` is same as `#arg.ty`?
                 #context::try_with(|#name| {
                     #scoped
@@ -177,10 +177,15 @@ pub(super) fn generate_captured_function(
         }
         scoped
     };
-    *body = new_body;
+    let new_user_fn = quote! {
+        #user_fn.attrs
+        #user_fn.vis #user_fn.sig {
+            #new_body
+        }
+    };
 
     Ok(quote! {
         #orig_user_fn
-        #user_fn
+        #new_user_fn
     })
 }

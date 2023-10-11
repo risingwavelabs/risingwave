@@ -17,8 +17,8 @@
 
 use context::DefineContextAttr;
 use proc_macro::TokenStream;
-use proc_macro2::{Ident, TokenStream as TokenStream2};
-use syn::{Error, ItemFn, Result, Type, Visibility};
+use proc_macro2::TokenStream as TokenStream2;
+use syn::{Error, ItemFn, Result};
 
 use crate::context::{generate_captured_function, CaptureContextAttr};
 
