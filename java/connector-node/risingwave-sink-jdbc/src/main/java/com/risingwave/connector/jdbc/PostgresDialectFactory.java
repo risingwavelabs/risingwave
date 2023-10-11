@@ -14,12 +14,10 @@
 
 package com.risingwave.connector.jdbc;
 
-import java.util.Map;
-
 public class PostgresDialectFactory implements JdbcDialectFactory {
 
     @Override
-    public JdbcDialect create(Map<String, Integer> columnTypeMapping) {
-        return new PostgresDialect(columnTypeMapping);
+    public JdbcDialect create(int[] columnSqlTypes) {
+        return new PostgresDialect(columnSqlTypes);
     }
 }

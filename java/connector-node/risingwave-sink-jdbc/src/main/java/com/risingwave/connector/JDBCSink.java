@@ -33,9 +33,6 @@ public class JDBCSink extends SinkWriterBase {
     private final Connection conn;
     private final List<String> pkColumnNames;
 
-    // column name -> java.sql.Types
-    private final Map<String, Integer> columnTypeMapping;
-
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
     public static final String JDBC_DATA_TYPE_KEY = "DATA_TYPE";
 
@@ -57,11 +54,20 @@ public class JDBCSink extends SinkWriterBase {
             this.conn = DriverManager.getConnection(config.getJdbcUrl());
             this.pkColumnNames =
                     getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
-            this.columnTypeMapping =
+            // column name -> java.sql.Types
+            Map<String, Integer> columnTypeMapping =
                     getColumnTypeMapping(conn, config.getTableName(), config.getSchemaName());
 
+            // create an array that each slot corresponding to each column in TableSchema
+            var columnSqlTypes = new int[tableSchema.getNumColumns()];
+            for (int columnIdx = 0; columnIdx < tableSchema.getNumColumns(); columnIdx++) {
+                var columnName = tableSchema.getColumnNames()[columnIdx];
+                columnSqlTypes[columnIdx] = columnTypeMapping.get(columnName);
+            }
+            LOG.debug("columnSqlTypes: {}", Arrays.toString(columnSqlTypes));
+
             if (factory.isPresent()) {
-                this.jdbcDialect = factory.get().create(columnTypeMapping);
+                this.jdbcDialect = factory.get().create(columnSqlTypes);
             } else {
                 throw Status.INVALID_ARGUMENT
                         .withDescription("Unsupported jdbc url: " + jdbcUrl)
