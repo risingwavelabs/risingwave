@@ -26,7 +26,6 @@ extern crate self as risingwave_expr;
 pub mod aggregate;
 #[doc(hidden)]
 pub mod codegen;
-pub mod context;
 mod error;
 pub mod expr;
 pub mod scalar;
