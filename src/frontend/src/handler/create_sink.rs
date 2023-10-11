@@ -23,7 +23,8 @@ use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::{
-    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    CONNECTOR_TYPE_KEY, SINK_PRIMARY_KEY_OPTION, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
@@ -110,6 +111,22 @@ pub fn gen_sink_plan(
     let col_names = get_column_names(&bound, session, stmt.columns)?;
 
     let mut with_options = context.with_options().clone();
+
+    // "primary_key" is not allowed on sink types other than "upsert"
+    match (
+        with_options.get(SINK_PRIMARY_KEY_OPTION),
+        with_options.get(SINK_TYPE_OPTION),
+    ) {
+        (Some(_), Some(sink_type)) if sink_type == SINK_TYPE_UPSERT => (),
+        (None, _) => (),
+        _ => {
+            return Err(ErrorCode::BindError(format!(
+                "{SINK_PRIMARY_KEY_OPTION} can only be set when the type is {SINK_TYPE_UPSERT}"
+            ))
+            .into());
+        }
+    }
+
     let connection_id = {
         let conn_id =
             resolve_privatelink_in_with_option(&mut with_options, &sink_schema_name, session)?;
