@@ -48,7 +48,7 @@ impl StreamMaterialize {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            table.stream_key.clone(),
+            Some(table.stream_key.clone()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
