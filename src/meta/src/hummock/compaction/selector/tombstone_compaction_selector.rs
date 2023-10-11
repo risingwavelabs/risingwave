@@ -48,7 +48,7 @@ impl CompactionSelector for TombstoneCompactionSelector {
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
         let picker = TombstoneReclaimCompactionPicker::new(
             create_overlap_strategy(group.compaction_config.compaction_mode()),
-            group.compaction_config.max_compaction_bytes,
+            group.compaction_config.max_space_reclaim_bytes,
             group.compaction_config.tombstone_reclaim_ratio as u64,
             group.compaction_config.tombstone_reclaim_ratio as u64 / 2,
         );
