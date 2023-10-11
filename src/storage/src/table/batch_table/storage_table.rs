@@ -758,11 +758,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
             .verbose_instrument_await("storage_table_iter_next")
             .await?
         {
-            let full_row = self.row_deserializer.deserialize(&value)?;
-            let result_row_in_value = self
-                .mapping
-                .project(OwnedRow::new(full_row))
-                .into_owned_row();
             match &self.key_output_indices {
                 Some(key_output_indices) => {
                     let result_row_in_key = match self.pk_serializer.clone() {
@@ -785,6 +780,11 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
 
                         yield KeyedRow::new_tombstone(table_key, result_row_in_key);
                     } else {
+                        let full_row = self.row_deserializer.deserialize(&value)?;
+                        let result_row_in_value = self
+                            .mapping
+                            .project(OwnedRow::new(full_row))
+                            .into_owned_row();
                         let mut result_row_vec = vec![];
                         for idx in &self.output_indices {
                             if self.value_output_indices.contains(idx) {
