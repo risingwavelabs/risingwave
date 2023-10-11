@@ -5494,15 +5494,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ordered-float"
-version = "4.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "536900a8093134cf9ccf00a27deb3532421099e958d9dd431135d0c7543ca1e8"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
 name = "ordered-multimap"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10958,7 +10949,7 @@ dependencies = [
  "num-traits",
  "opentelemetry_api",
  "opentelemetry_sdk",
- "ordered-float 4.1.1",
+ "ordered-float 3.9.2",
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.8",
  "petgraph",
