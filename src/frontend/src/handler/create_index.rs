@@ -21,7 +21,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::catalog::{PbIndex, PbStreamJobStatus, PbTable};
+use risingwave_pb::catalog::{CreateType, PbIndex, PbStreamJobStatus, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast;
@@ -407,7 +407,7 @@ pub async fn handle_create_index(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    let (graph, index_table, index) = {
+    let (graph, mut index_table, index) = {
         {
             match session.check_relation_name_duplicated(index_name.clone()) {
                 Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name)))
@@ -456,6 +456,14 @@ pub async fn handle_create_index(
                 index.schema_id,
                 index.name.clone(),
             ));
+
+    let run_in_background = session.config().get_background_ddl();
+    let create_type = if run_in_background {
+        CreateType::Background
+    } else {
+        CreateType::Foreground
+    };
+    index_table.create_type = create_type.into();
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer

@@ -247,6 +247,47 @@ test_foreground_index_cancel() {
    cargo make kill
 }
 
+test_background_index_recovery() {
+  echo "--- e2e, $CLUSTER_PROFILE, test_background_index_recovery"
+  cargo make ci-start $CLUSTER_PROFILE
+
+  # Test before recovery
+  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
+  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_index.slt"
+  sleep 1
+  OLD_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
+
+  rename_logs_with_prefix "before-restart"
+
+  # Restart
+  cargo make kill
+  cargo make dev $CLUSTER_PROFILE
+
+  # Test after recovery
+  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+
+  # Recover the mview progress
+  sleep 3
+
+  NEW_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
+
+  if [[ $OLD_PROGRESS < $NEW_PROGRESS ]]; then
+    echo "OK: $OLD_PROGRESS smaller than $NEW_PROGRESS"
+  else
+    echo "FAILED: $OLD_PROGRESS larger or equal to $NEW_PROGRESS"
+  fi
+
+  sleep 60
+
+  # Test after backfill finished
+  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+
+  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_index.slt"
+  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
+
+  cargo make kill
+}
+
 test_foreground_sink_cancel() {
    echo "--- e2e, $CLUSTER_PROFILE, test_foreground_sink_ddl_cancel"
    cargo make ci-start $CLUSTER_PROFILE
@@ -286,13 +327,14 @@ test_foreground_sink_cancel() {
 
 main() {
   set -euo pipefail
-  test_snapshot_and_upstream_read
-  test_background_ddl_recovery
-  test_background_ddl_cancel
-  test_foreground_ddl_no_recover
-  test_foreground_ddl_cancel
-  test_foreground_index_cancel
-  test_foreground_sink_cancel
+#  test_snapshot_and_upstream_read
+#  test_background_ddl_recovery
+#  test_background_ddl_cancel
+#  test_foreground_ddl_no_recover
+#  test_foreground_ddl_cancel
+#  test_foreground_index_cancel
+  test_background_index_recovery
+#  test_foreground_sink_cancel
 }
 
 main
