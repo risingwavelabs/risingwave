@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+use std::ops::Bound::Unbounded;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Instant;
@@ -20,6 +22,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use futures::future::try_join_all;
 use futures::{pin_mut, Future, StreamExt};
+use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::store::PrefetchOptions;
 use size::Size;
@@ -102,8 +105,14 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
                         tb
                     };
                     loop {
+                        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                            &(Unbounded, Unbounded);
                         let stream = state_table
-                            .iter_row(PrefetchOptions::new_for_exhaust_iter())
+                            .iter_with_prefix(
+                                row::empty(),
+                                sub_range,
+                                PrefetchOptions::new_for_exhaust_iter(),
+                            )
                             .await?;
                         pin_mut!(stream);
                         iter_cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
