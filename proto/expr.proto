@@ -228,6 +228,7 @@ message ExprNode {
 
     // Adminitration functions
     COL_DESCRIPTION = 2100;
+    CAST_REGCLASS = 2101;
   }
   Type function_type = 1;
   data.DataType return_type = 3;

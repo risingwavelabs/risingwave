@@ -76,11 +76,11 @@ impl DefineContextField {
                     static LOCAL_KEY: #ty;
                 }
 
-                #vis fn try_with<F, R>(f: F) -> Result<R, risingwave_expr::ContextUnavailable>
+                #vis fn try_with<F, R>(f: F) -> Result<R, risingwave_expr::ExprError>
                 where
                     F: FnOnce(&#ty) -> R
                 {
-                    LOCAL_KEY.try_with(f).map_err(|_| risingwave_expr::ContextUnavailable::new(stringify!(#name)))
+                    LOCAL_KEY.try_with(f).map_err(|_| risingwave_expr::ContextUnavailable::new(stringify!(#name))).map_err(Into::into)
                 }
 
                 pub fn scope<F>(value: #ty, f: F) -> tokio::task::futures::TaskLocalFuture<#ty, F>
