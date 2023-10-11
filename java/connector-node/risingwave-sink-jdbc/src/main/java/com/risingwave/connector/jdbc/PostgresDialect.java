@@ -116,7 +116,7 @@ public class PostgresDialect implements JdbcDialect {
                     assert (column.getDataType().getFieldTypeCount() == 1);
                     var fieldType = column.getDataType().getFieldType(0);
                     stmt.setArray(
-                            columnIdx + 1,
+                            placeholderIdx++,
                             conn.createArrayOf(fieldType.getTypeName().name(), objArray));
                     break;
                 case VARCHAR:

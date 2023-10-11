@@ -64,7 +64,7 @@ public class JDBCSink extends SinkWriterBase {
                 var columnName = tableSchema.getColumnNames()[columnIdx];
                 columnSqlTypes[columnIdx] = columnTypeMapping.get(columnName);
             }
-            LOG.debug("columnSqlTypes: {}", Arrays.toString(columnSqlTypes));
+            LOG.info("columnSqlTypes: {}", Arrays.toString(columnSqlTypes));
 
             if (factory.isPresent()) {
                 this.jdbcDialect = factory.get().create(columnSqlTypes);
