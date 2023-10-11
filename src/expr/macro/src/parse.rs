@@ -75,6 +75,8 @@ impl Parse for FunctionAttr {
                 parsed.prebuild = Some(get_value()?);
             } else if meta.path().is_ident("type_infer") {
                 parsed.type_infer = Some(get_value()?);
+            } else if meta.path().is_ident("generic") {
+                parsed.generic = Some(get_value()?);
             } else if meta.path().is_ident("volatile") {
                 parsed.volatile = true;
             } else if meta.path().is_ident("deprecated") {
@@ -141,8 +143,13 @@ impl Parse for AggregateImpl {
                 _ => None,
             })
         };
+        let self_path = itemimpl.self_ty.to_token_stream().to_string();
+        let struct_name = match self_path.split_once('<') {
+            Some((path, _)) => path.trim().into(), // remove generic parameters
+            None => self_path,
+        };
         Ok(AggregateImpl {
-            struct_name: itemimpl.self_ty.to_token_stream().to_string(),
+            struct_name,
             accumulate: parse_function("accumulate").expect("expect accumulate function"),
             retract: parse_function("retract"),
             merge: parse_function("merge"),
@@ -156,6 +163,8 @@ impl Parse for AggregateImpl {
 
 impl Parse for AggregateFnOrImpl {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
+        // consume attributes
+        let _ = input.call(syn::Attribute::parse_outer)?;
         if input.peek(Token![impl]) {
             Ok(AggregateFnOrImpl::Impl(input.parse()?))
         } else {

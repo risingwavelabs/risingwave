@@ -495,6 +495,8 @@ struct FunctionAttr {
     prebuild: Option<String>,
     /// Type inference function.
     type_infer: Option<String>,
+    /// Generic type.
+    generic: Option<String>,
     /// Whether the function is volatile.
     volatile: bool,
     /// Whether the function is deprecated.

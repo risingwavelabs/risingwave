@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
 use std::ops::BitAnd;
 
 use risingwave_common::types::{ListRef, ListValue, ScalarImpl};
@@ -60,23 +61,27 @@ where
 ///
 /// ```slt
 /// statement ok
-/// create table t (a int2);
+/// create table t (a int2, b int4, c int8);
 ///
 /// statement ok
-/// create materialized view mv as select bit_and(a) from t;
+/// create materialized view mv as
+/// select bit_and(a), bit_and(b), bit_and(c) from t;
 ///
 /// query I
 /// select * from mv;
 /// ----
-/// NULL
+/// NULL NULL NULL
 ///
 /// statement ok
-/// insert into t values (3), (6), (null);
+/// insert into t values
+///    (6, 6, 6),
+///    (3, 3, 3),
+///    (null, null, null);
 ///
 /// query I
 /// select * from mv;
 /// ----
-/// 2
+/// 2 2 2
 ///
 /// statement ok
 /// delete from t where a = 3;
@@ -84,7 +89,7 @@ where
 /// query I
 /// select * from mv;
 /// ----
-/// 6
+/// 6 6 6
 ///
 /// statement ok
 /// drop materialized view mv;
@@ -93,19 +98,23 @@ where
 /// drop table t;
 /// ```
 #[derive(Debug, Default, Clone)]
-struct BitAndI16Updatable;
+struct BitAndUpdatable<T> {
+    _phantom: PhantomData<T>,
+}
 
-#[aggregate("bit_and(int2) -> int2", state = "int8[]")]
-impl BitAndI16Updatable {
+#[aggregate("bit_and(int2) -> int2", state = "int8[]", generic = "i16")]
+#[aggregate("bit_and(int4) -> int4", state = "int8[]", generic = "i32")]
+#[aggregate("bit_and(int8) -> int8", state = "int8[]", generic = "i64")]
+impl<T: Bits> BitAndUpdatable<T> {
     // state is the number of 0s for each bit.
 
     fn create_state(&self) -> ListValue {
-        ListValue::new(vec![Some(ScalarImpl::Int64(0)); 16])
+        ListValue::new(vec![Some(ScalarImpl::Int64(0)); T::BITS])
     }
 
-    fn accumulate(&self, mut state: ListValue, input: i16) -> ListValue {
-        for i in 0..16 {
-            if (input >> i) & 1 == 0 {
+    fn accumulate(&self, mut state: ListValue, input: T) -> ListValue {
+        for i in 0..T::BITS {
+            if !input.get_bit(i) {
                 let Some(ScalarImpl::Int64(count)) = &mut state[i] else {
                     panic!("invalid state");
                 };
@@ -115,9 +124,9 @@ impl BitAndI16Updatable {
         state
     }
 
-    fn retract(&self, mut state: ListValue, input: i16) -> ListValue {
-        for i in 0..16 {
-            if (input >> i) & 1 == 0 {
+    fn retract(&self, mut state: ListValue, input: T) -> ListValue {
+        for i in 0..T::BITS {
+            if !input.get_bit(i) {
                 let Some(ScalarImpl::Int64(count)) = &mut state[i] else {
                     panic!("invalid state");
                 };
@@ -127,184 +136,56 @@ impl BitAndI16Updatable {
         state
     }
 
-    fn finalize(&self, state: ListRef<'_>) -> i16 {
-        let mut result = 0;
-        for i in 0..16 {
+    fn finalize(&self, state: ListRef<'_>) -> T {
+        let mut result = T::default();
+        for i in 0..T::BITS {
             let count = state.get(i).unwrap().unwrap().into_int64();
             if count == 0 {
-                result |= 1 << i;
+                result.set_bit(i);
             }
         }
         result
     }
 }
 
-/// Computes the bitwise AND of all non-null input values.
-///
-/// # Example
-///
-/// ```slt
-/// statement ok
-/// create table t (a int4);
-///
-/// statement ok
-/// create materialized view mv as select bit_and(a) from t;
-///
-/// query I
-/// select * from mv;
-/// ----
-/// NULL
-///
-/// statement ok
-/// insert into t values (3), (6), (null);
-///
-/// query I
-/// select * from mv;
-/// ----
-/// 2
-///
-/// statement ok
-/// delete from t where a = 3;
-///
-/// query I
-/// select * from mv;
-/// ----
-/// 6
-///
-/// statement ok
-/// drop materialized view mv;
-///
-/// statement ok
-/// drop table t;
-/// ```
-#[derive(Debug, Default, Clone)]
-struct BitAndI32Updatable;
+pub trait Bits: Default {
+    const BITS: usize;
+    fn get_bit(&self, i: usize) -> bool;
+    fn set_bit(&mut self, i: usize);
+}
 
-#[aggregate("bit_and(int4) -> int4", state = "int8[]")]
-impl BitAndI32Updatable {
-    // state is the number of 0s for each bit.
+impl Bits for i16 {
+    const BITS: usize = 16;
 
-    fn create_state(&self) -> ListValue {
-        ListValue::new(vec![Some(ScalarImpl::Int64(0)); 32])
+    fn get_bit(&self, i: usize) -> bool {
+        (*self >> i) & 1 == 1
     }
 
-    fn accumulate(&self, mut state: ListValue, input: i32) -> ListValue {
-        for i in 0..32 {
-            if (input >> i) & 1 == 0 {
-                let Some(ScalarImpl::Int64(count)) = &mut state[i] else {
-                    panic!("invalid state");
-                };
-                *count += 1;
-            }
-        }
-        state
-    }
-
-    fn retract(&self, mut state: ListValue, input: i32) -> ListValue {
-        for i in 0..32 {
-            if (input >> i) & 1 == 0 {
-                let Some(ScalarImpl::Int64(count)) = &mut state[i] else {
-                    panic!("invalid state");
-                };
-                *count -= 1;
-            }
-        }
-        state
-    }
-
-    fn finalize(&self, state: ListRef<'_>) -> i32 {
-        let mut result = 0;
-        for i in 0..32 {
-            let count = state.get(i).unwrap().unwrap().into_int64();
-            if count == 0 {
-                result |= 1 << i;
-            }
-        }
-        result
+    fn set_bit(&mut self, i: usize) {
+        *self |= 1 << i;
     }
 }
 
-/// Computes the bitwise AND of all non-null input values.
-///
-/// # Example
-///
-/// ```slt
-/// statement ok
-/// create table t (a int8);
-///
-/// statement ok
-/// create materialized view mv as select bit_and(a) from t;
-///
-/// query I
-/// select * from mv;
-/// ----
-/// NULL
-///
-/// statement ok
-/// insert into t values (3), (6), (null);
-///
-/// query I
-/// select * from mv;
-/// ----
-/// 2
-///
-/// statement ok
-/// delete from t where a = 3;
-///
-/// query I
-/// select * from mv;
-/// ----
-/// 6
-///
-/// statement ok
-/// drop materialized view mv;
-///
-/// statement ok
-/// drop table t;
-/// ```
-#[derive(Debug, Default, Clone)]
-struct BitAndI64Updatable;
+impl Bits for i32 {
+    const BITS: usize = 32;
 
-#[aggregate("bit_and(int8) -> int8", state = "int8[]")]
-impl BitAndI64Updatable {
-    // state is the number of 0s for each bit.
-
-    fn create_state(&self) -> ListValue {
-        ListValue::new(vec![Some(ScalarImpl::Int64(0)); 64])
+    fn get_bit(&self, i: usize) -> bool {
+        (*self >> i) & 1 == 1
     }
 
-    fn accumulate(&self, mut state: ListValue, input: i64) -> ListValue {
-        for i in 0..64 {
-            if (input >> i) & 1 == 0 {
-                let Some(ScalarImpl::Int64(count)) = &mut state[i] else {
-                    panic!("invalid state");
-                };
-                *count += 1;
-            }
-        }
-        state
+    fn set_bit(&mut self, i: usize) {
+        *self |= 1 << i;
+    }
+}
+
+impl Bits for i64 {
+    const BITS: usize = 64;
+
+    fn get_bit(&self, i: usize) -> bool {
+        (*self >> i) & 1 == 1
     }
 
-    fn retract(&self, mut state: ListValue, input: i64) -> ListValue {
-        for i in 0..64 {
-            if (input >> i) & 1 == 0 {
-                let Some(ScalarImpl::Int64(count)) = &mut state[i] else {
-                    panic!("invalid state");
-                };
-                *count -= 1;
-            }
-        }
-        state
-    }
-
-    fn finalize(&self, state: ListRef<'_>) -> i64 {
-        let mut result = 0;
-        for i in 0..64 {
-            let count = state.get(i).unwrap().unwrap().into_int64();
-            if count == 0 {
-                result |= 1 << i;
-            }
-        }
-        result
+    fn set_bit(&mut self, i: usize) {
+        *self |= 1 << i;
     }
 }

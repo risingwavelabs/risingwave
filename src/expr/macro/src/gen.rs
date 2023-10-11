@@ -719,14 +719,22 @@ impl FunctionAttr {
             AggregateFnOrImpl::Fn(_) => quote! {},
             AggregateFnOrImpl::Impl(i) => {
                 let struct_name = format_ident!("{}", i.struct_name);
-                quote! { function: #struct_name, }
+                let generic = self.generic.as_ref().map(|g| {
+                    let g = format_ident!("{g}");
+                    quote! { <#g> }
+                });
+                quote! { function: #struct_name #generic, }
             }
         };
         let function_new = match user_fn {
             AggregateFnOrImpl::Fn(_) => quote! {},
             AggregateFnOrImpl::Impl(i) => {
                 let struct_name = format_ident!("{}", i.struct_name);
-                quote! { function: #struct_name::default(), }
+                let generic = self.generic.as_ref().map(|g| {
+                    let g = format_ident!("{g}");
+                    quote! { ::<#g> }
+                });
+                quote! { function: #struct_name #generic :: default(), }
             }
         };
 
