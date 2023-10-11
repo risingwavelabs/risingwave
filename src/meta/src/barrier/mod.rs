@@ -796,9 +796,9 @@ impl GlobalBarrierManager {
                         actor_ids_to_send,
                         actor_ids_to_collect,
                     };
-                    tracing::trace!(
+                    tracing::debug!(
                         target: "events::meta::barrier::inject_barrier",
-                        "inject barrier request: {:?}", request
+                        ?request, "inject barrier request"
                     );
 
                     // This RPC returns only if this worker node has injected this barrier.
@@ -838,9 +838,9 @@ impl GlobalBarrierManager {
                         prev_epoch,
                         tracing_context,
                     };
-                    tracing::trace!(
+                    tracing::debug!(
                         target: "events::meta::barrier::barrier_complete",
-                        "barrier complete request: {:?}", request
+                        ?request, "barrier complete"
                     );
 
                     // This RPC returns only if this worker node has collected this barrier.

@@ -17,7 +17,7 @@ use risingwave_common::types::ScalarRefImpl;
 use risingwave_expr::function;
 
 #[function(
-    "unnest(list) -> setof any",
+    "unnest(anyarray) -> setof any",
     type_infer = "|args| Ok(args[0].unnest_list().clone())"
 )]
 fn unnest(list: ListRef<'_>) -> impl Iterator<Item = Option<ScalarRefImpl<'_>>> {

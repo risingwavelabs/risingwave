@@ -40,7 +40,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
         // Union all its inputs pks + source_col if exists
         let mut pk_indices = vec![];
         for input in &self.inputs {
-            for pk in input.stream_key() {
+            for pk in input.stream_key()? {
                 if !pk_indices.contains(pk) {
                     pk_indices.push(*pk);
                 }
