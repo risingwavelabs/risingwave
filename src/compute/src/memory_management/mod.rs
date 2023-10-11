@@ -158,7 +158,7 @@ pub fn storage_memory_config(
         .unwrap_or(
             storage_config.data_file_cache.file_capacity_mb
                 * (storage_config.data_file_cache.flushers
-                    + storage_config.data_file_cache.flushers / 2),
+                    + 2 * (1 << storage_config.data_file_cache.allocation_bits)),
         );
     let meta_file_cache_buffer_pool_capacity_mb = storage_config
         .meta_file_cache
@@ -166,7 +166,7 @@ pub fn storage_memory_config(
         .unwrap_or(
             storage_config.meta_file_cache.file_capacity_mb
                 * (storage_config.meta_file_cache.flushers
-                    + storage_config.meta_file_cache.flushers / 2),
+                    + 2 * (1 << storage_config.meta_file_cache.allocation_bits)),
         );
     let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
