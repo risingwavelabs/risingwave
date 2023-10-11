@@ -157,14 +157,16 @@ pub fn storage_memory_config(
         .buffer_pool_size_mb
         .unwrap_or(
             storage_config.data_file_cache.file_capacity_mb
-                * storage_config.data_file_cache.flushers,
+                * (storage_config.data_file_cache.flushers
+                    + storage_config.data_file_cache.flushers / 2),
         );
     let meta_file_cache_buffer_pool_capacity_mb = storage_config
         .meta_file_cache
         .buffer_pool_size_mb
         .unwrap_or(
             storage_config.meta_file_cache.file_capacity_mb
-                * storage_config.meta_file_cache.flushers,
+                * (storage_config.meta_file_cache.flushers
+                    + storage_config.meta_file_cache.flushers / 2),
         );
     let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
@@ -229,8 +231,8 @@ mod tests {
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
         assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
-        assert_eq!(memory_config.data_file_cache_buffer_pool_capacity_mb, 256);
-        assert_eq!(memory_config.meta_file_cache_buffer_pool_capacity_mb, 256);
+        assert_eq!(memory_config.data_file_cache_buffer_pool_capacity_mb, 384);
+        assert_eq!(memory_config.meta_file_cache_buffer_pool_capacity_mb, 384);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
         storage_config.block_cache_capacity_mb = Some(512);
