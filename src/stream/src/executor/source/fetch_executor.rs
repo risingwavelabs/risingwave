@@ -91,7 +91,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
         }
     }
 
-    async fn try_replace_with_new_batch_reader<const BIASED: bool>(
+    async fn replace_with_new_batch_reader<const BIASED: bool>(
         splits_on_fetch: &mut usize,
         state_store_handler: &SourceStateTableHandler<S>,
         column_ids: Vec<ColumnId>,
@@ -99,11 +99,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
     ) -> StreamExecutorResult<()> {
-        if *splits_on_fetch > 0 {
-            return Ok(());
-        }
-
-        let mut batch = Vec::new();
+        let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
         'vnodes: for vnodes in state_store_handler.state_store.vnodes().iter_vnodes() {
             let table_iter = state_store_handler
                 .state_store
@@ -187,7 +183,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
         // Initialize state table.
         state_store_handler.init_epoch(barrier.epoch);
 
-        let mut splits_on_fetch = 0usize;
+        let mut splits_on_fetch: usize = 0;
         let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
             upstream,
             stream::pending().boxed(),
@@ -200,7 +196,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
         // If it is a recovery startup,
         // there can be file assignments in the state table.
         // Hence we try building a reader first.
-        Self::try_replace_with_new_batch_reader(
+        Self::replace_with_new_batch_reader(
             &mut splits_on_fetch,
             &state_store_handler,
             core.column_ids.clone(),
@@ -217,15 +213,6 @@ impl<S: StateStore> FsFetchExecutor<S> {
                 Err(e) => {
                     tracing::error!("Fetch Error: {:?}", e);
                     splits_on_fetch = 0;
-                    Self::try_replace_with_new_batch_reader(
-                        &mut splits_on_fetch,
-                        &state_store_handler,
-                        core.column_ids.clone(),
-                        self.build_source_ctx(&source_desc, core.source_id),
-                        &source_desc,
-                        &mut stream,
-                    )
-                    .await?;
                 }
                 Ok(msg) => {
                     match msg {
@@ -250,10 +237,26 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                         barrier.as_update_vnode_bitmap(self.actor_ctx.id)
                                     {
                                         // if _cache_may_stale, we must rebuild the stream to adjust vnode mappings
-                                        let (_prev_vnode_bitmap, _cache_may_stale) =
+                                        let (_prev_vnode_bitmap, cache_may_stale) =
                                             state_store_handler
                                                 .state_store
                                                 .update_vnode_bitmap(vnode_bitmap);
+
+                                            if cache_may_stale {
+                                                splits_on_fetch = 0;
+                                            }
+                                    }
+
+                                    if splits_on_fetch == 0 {
+                                        Self::replace_with_new_batch_reader(
+                                            &mut splits_on_fetch,
+                                            &state_store_handler,
+                                            core.column_ids.clone(),
+                                            self.build_source_ctx(&source_desc, core.source_id),
+                                            &source_desc,
+                                            &mut stream,
+                                        )
+                                        .await?;
                                     }
 
                                     // Propagate the barrier.
@@ -272,16 +275,6 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                         })
                                         .collect();
                                     state_store_handler.take_snapshot(file_assignment).await?;
-
-                                    Self::try_replace_with_new_batch_reader(
-                                        &mut splits_on_fetch,
-                                        &state_store_handler,
-                                        core.column_ids.clone(),
-                                        self.build_source_ctx(&source_desc, core.source_id),
-                                        &source_desc,
-                                        &mut stream,
-                                    )
-                                    .await?;
                                 }
                                 _ => unreachable!(),
                             }
@@ -314,16 +307,6 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                         .await?;
                                 }
                             }
-
-                            Self::try_replace_with_new_batch_reader(
-                                &mut splits_on_fetch,
-                                &state_store_handler,
-                                core.column_ids.clone(),
-                                self.build_source_ctx(&source_desc, core.source_id),
-                                &source_desc,
-                                &mut stream,
-                            )
-                            .await?;
 
                             yield Message::Chunk(chunk);
                         }
