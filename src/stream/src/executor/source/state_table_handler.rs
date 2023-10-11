@@ -176,7 +176,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
-    async fn delete(&mut self, key: SplitId) -> StreamExecutorResult<()> {
+    pub async fn delete(&mut self, key: SplitId) -> StreamExecutorResult<()> {
         if let Some(prev_row) = self.get(key).await? {
             self.state_store.delete(prev_row);
         }
