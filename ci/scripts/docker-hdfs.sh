@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Exits as soon as any line fails.
-set -eu pipefail
+set -euo pipefail
 
 ghcraddr="ghcr.io/risingwavelabs/risingwave"
 dockerhubaddr="risingwavelabs/risingwave"
