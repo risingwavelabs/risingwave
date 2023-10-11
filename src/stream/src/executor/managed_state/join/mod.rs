@@ -196,6 +196,16 @@ impl JoinHashMapMetrics {
 
     pub fn flush(&mut self) {
         self.metrics
+            .join_lookup_total_count
+            .with_label_values(&[
+                (self.side),
+                &self.join_table_id,
+                &self.degree_table_id,
+                &self.actor_id,
+                &self.fragment_id,
+            ])
+            .inc_by(self.total_lookup_count as u64);
+        self.metrics
             .join_lookup_miss_count
             .with_label_values(&[
                 (self.side),
@@ -205,16 +215,6 @@ impl JoinHashMapMetrics {
                 &self.fragment_id,
             ])
             .inc_by(self.lookup_miss_count as u64);
-        self.metrics
-            .join_total_lookup_count
-            .with_label_values(&[
-                (self.side),
-                &self.join_table_id,
-                &self.degree_table_id,
-                &self.actor_id,
-                &self.fragment_id,
-            ])
-            .inc_by(self.total_lookup_count as u64);
         self.metrics
             .join_insert_cache_miss_count
             .with_label_values(&[

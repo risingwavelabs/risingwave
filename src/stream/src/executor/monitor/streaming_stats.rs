@@ -76,7 +76,7 @@ pub struct StreamingMetrics {
 
     // Streaming Join
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
-    pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
+    pub join_lookup_total_count: GenericCounterVec<AtomicU64>,
     pub join_insert_cache_miss_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_match_duration_ns: GenericCounterVec<AtomicU64>,
@@ -389,7 +389,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let join_total_lookup_count = register_int_counter_vec_with_registry!(
+        let join_lookup_total_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_total_count",
             "Join executor lookup total operation",
             &[
@@ -946,7 +946,7 @@ impl StreamingMetrics {
             mview_input_row_count,
             exchange_frag_recv_size,
             join_lookup_miss_count,
-            join_total_lookup_count,
+            join_lookup_total_count,
             join_insert_cache_miss_count,
             join_actor_input_waiting_duration_ns,
             join_match_duration_ns,
