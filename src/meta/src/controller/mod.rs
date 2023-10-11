@@ -77,7 +77,6 @@ impl From<PbSchema> for schema::ActiveModel {
         Self {
             schema_id: ActiveValue::Set(schema.id as _),
             name: ActiveValue::Set(schema.name),
-            database_id: ActiveValue::Set(schema.database_id as _),
         }
     }
 }
@@ -87,7 +86,7 @@ impl From<ObjectModel<schema::Model>> for PbSchema {
         Self {
             id: value.0.schema_id as _,
             name: value.0.name,
-            database_id: value.0.database_id as _,
+            database_id: value.1.database_id.unwrap() as _,
             owner: value.1.owner_id as _,
         }
     }

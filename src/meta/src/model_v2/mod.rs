@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use sea_orm::FromJsonQueryResult;
 use serde::{Deserialize, Serialize};
 
@@ -47,3 +49,11 @@ pub struct DataType(pub risingwave_pb::data::DataType);
 
 #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Eq, Serialize, Deserialize, Default)]
 pub struct DataTypeArray(pub Vec<risingwave_pb::data::DataType>);
+
+#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize, Default)]
+pub struct FieldArray(pub Vec<risingwave_pb::plan_common::Field>);
+
+impl Eq for FieldArray {}
+
+#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Eq, Serialize, Deserialize, Default)]
+pub struct StringMap(pub HashMap<String, String>);

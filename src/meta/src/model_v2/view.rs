@@ -12,7 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::catalog::PbView;
 use sea_orm::entity::prelude::*;
+use sea_orm::ActiveValue;
+
+use crate::model_v2::{FieldArray, StringMap};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "view")]
@@ -20,23 +24,13 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub view_id: i32,
     pub name: String,
-    pub schema_id: i32,
-    pub database_id: i32,
-    pub properties: Option<Json>,
-    pub sql: Option<String>,
-    pub columns: Option<Json>,
+    pub properties: StringMap,
+    pub sql: String,
+    pub columns: FieldArray,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::database::Entity",
-        from = "Column::DatabaseId",
-        to = "super::database::Column::DatabaseId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Database,
     #[sea_orm(
         belongs_to = "super::object::Entity",
         from = "Column::ViewId",
@@ -45,20 +39,6 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Object,
-    #[sea_orm(
-        belongs_to = "super::schema::Entity",
-        from = "Column::SchemaId",
-        to = "super::schema::Column::SchemaId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Schema,
-}
-
-impl Related<super::database::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Database.def()
-    }
 }
 
 impl Related<super::object::Entity> for Entity {
@@ -67,10 +47,16 @@ impl Related<super::object::Entity> for Entity {
     }
 }
 
-impl Related<super::schema::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Schema.def()
+impl ActiveModelBehavior for ActiveModel {}
+
+impl From<PbView> for ActiveModel {
+    fn from(view: PbView) -> Self {
+        Self {
+            view_id: ActiveValue::Set(view.id as _),
+            name: ActiveValue::Set(view.name),
+            properties: ActiveValue::Set(StringMap(view.properties)),
+            sql: ActiveValue::Set(view.sql),
+            columns: ActiveValue::Set(FieldArray(view.columns)),
+        }
     }
 }
-
-impl ActiveModelBehavior for ActiveModel {}

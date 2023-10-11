@@ -22,8 +22,6 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub table_id: i32,
     pub name: String,
-    pub schema_id: i32,
-    pub database_id: i32,
     pub optional_associated_source_id: Option<i32>,
     pub table_type: Option<String>,
     pub columns: Option<Json>,
@@ -47,14 +45,6 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::database::Entity",
-        from = "Column::DatabaseId",
-        to = "super::database::Column::DatabaseId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Database,
     #[sea_orm(
         belongs_to = "super::fragment::Entity",
         from = "Column::DmlFragmentId",
@@ -80,14 +70,6 @@ pub enum Relation {
     )]
     Object,
     #[sea_orm(
-        belongs_to = "super::schema::Entity",
-        from = "Column::SchemaId",
-        to = "super::schema::Column::SchemaId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Schema,
-    #[sea_orm(
         belongs_to = "super::source::Entity",
         from = "Column::OptionalAssociatedSourceId",
         to = "super::source::Column::SourceId",
@@ -97,21 +79,9 @@ pub enum Relation {
     Source,
 }
 
-impl Related<super::database::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Database.def()
-    }
-}
-
 impl Related<super::object::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Object.def()
-    }
-}
-
-impl Related<super::schema::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Schema.def()
     }
 }
 

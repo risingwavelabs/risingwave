@@ -37,6 +37,22 @@ pub enum ObjectType {
     Connection,
 }
 
+impl ObjectType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ObjectType::Database => "database",
+            ObjectType::Schema => "schema",
+            ObjectType::Table => "table",
+            ObjectType::Source => "source",
+            ObjectType::Sink => "sink",
+            ObjectType::View => "view",
+            ObjectType::Index => "index",
+            ObjectType::Function => "function",
+            ObjectType::Connection => "connection",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "object")]
 pub struct Model {
@@ -44,6 +60,8 @@ pub struct Model {
     pub oid: i32,
     pub obj_type: ObjectType,
     pub owner_id: i32,
+    pub schema_id: Option<i32>,
+    pub database_id: Option<i32>,
     pub initialized_at: DateTime,
     pub created_at: DateTime,
 }
@@ -60,6 +78,22 @@ pub enum Relation {
     Function,
     #[sea_orm(has_many = "super::index::Entity")]
     Index,
+    #[sea_orm(
+        belongs_to = "Entity",
+        from = "Column::DatabaseId",
+        to = "Column::Oid",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    SelfRef2,
+    #[sea_orm(
+        belongs_to = "Entity",
+        from = "Column::SchemaId",
+        to = "Column::Oid",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    SelfRef1,
     #[sea_orm(has_many = "super::schema::Entity")]
     Schema,
     #[sea_orm(has_many = "super::sink::Entity")]
@@ -73,7 +107,7 @@ pub enum Relation {
         from = "Column::OwnerId",
         to = "super::user::Column::UserId",
         on_update = "NoAction",
-        on_delete = "NoAction"
+        on_delete = "Cascade"
     )]
     User,
     #[sea_orm(has_many = "super::user_privilege::Entity")]

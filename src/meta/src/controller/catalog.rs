@@ -16,25 +16,29 @@ use std::iter;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
-use risingwave_pb::catalog::{PbDatabase, PbFunction, PbSchema};
+use risingwave_pb::catalog::{PbDatabase, PbFunction, PbSchema, PbView};
+use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
-use sea_orm::sea_query::{Expr, Query, QueryStatementBuilder, UnionType};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    DatabaseTransaction, EntityTrait, ModelTrait, QueryFilter, Statement, TransactionTrait,
+    ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, DatabaseTransaction,
+    EntityTrait, QueryFilter, QuerySelect, TransactionTrait,
 };
 use tokio::sync::RwLock;
 
-use crate::controller::utils::construct_obj_dependency_query;
+use crate::controller::utils::{
+    check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
+    ensure_object_id, ensure_schema_empty, ensure_user_id, list_used_by,
+};
 use crate::controller::ObjectModel;
-use crate::manager::{DatabaseId, FunctionId, MetaSrvEnv, NotificationVersion, UserId};
+use crate::manager::{
+    DatabaseId, FunctionId, MetaSrvEnv, NotificationVersion, RelationIdEnum, SchemaId, UserId,
+};
 use crate::model_v2::object::ObjectType;
 use crate::model_v2::prelude::*;
-use crate::model_v2::{
-    connection, database, function, index, object, schema, sink, source, table, view,
-};
+use crate::model_v2::{database, function, object, object_dependency, schema, view};
+use crate::rpc::ddl_controller::DropMode;
 use crate::{MetaError, MetaResult};
 
 /// `CatalogController` is the controller for catalog related operations, including database, schema, table, view, etc.
@@ -78,6 +82,17 @@ impl CatalogController {
             .notify_frontend(operation, info)
             .await
     }
+
+    async fn notify_frontend_relation_info(
+        &self,
+        operation: NotificationOperation,
+        relation_info: PbRelationInfo,
+    ) -> NotificationVersion {
+        self.env
+            .notification_manager()
+            .notify_frontend_relation_info(operation, relation_info)
+            .await
+    }
 }
 
 impl CatalogController {
@@ -89,11 +104,15 @@ impl CatalogController {
         txn: &DatabaseTransaction,
         obj_type: ObjectType,
         owner_id: UserId,
+        database_id: Option<i32>,
+        schema_id: Option<i32>,
     ) -> MetaResult<object::Model> {
         let active_db = object::ActiveModel {
             oid: Default::default(),
             obj_type: ActiveValue::Set(obj_type),
             owner_id: ActiveValue::Set(owner_id as _),
+            schema_id: ActiveValue::Set(schema_id),
+            database_id: ActiveValue::Set(database_id),
             initialized_at: Default::default(),
             created_at: Default::default(),
         };
@@ -102,21 +121,23 @@ impl CatalogController {
 
     pub async fn create_database(&self, db: PbDatabase) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
         let owner_id = db.owner;
+        let txn = inner.db.begin().await?;
+        ensure_user_id(owner_id as _, &txn).await?;
 
-        let db_obj = Self::create_object(&txn, ObjectType::Database, owner_id).await?;
+        let db_obj = Self::create_object(&txn, ObjectType::Database, owner_id, None, None).await?;
         let mut db: database::ActiveModel = db.into();
         db.database_id = ActiveValue::Set(db_obj.oid);
         let db = db.insert(&txn).await?;
 
         let mut schemas = vec![];
         for schema_name in iter::once(DEFAULT_SCHEMA_NAME).chain(SYSTEM_SCHEMAS) {
-            let schema_obj = Self::create_object(&txn, ObjectType::Schema, owner_id).await?;
+            let schema_obj =
+                Self::create_object(&txn, ObjectType::Schema, owner_id, Some(db_obj.oid), None)
+                    .await?;
             let schema = schema::ActiveModel {
                 schema_id: ActiveValue::Set(schema_obj.oid),
                 name: ActiveValue::Set(schema_name.into()),
-                database_id: ActiveValue::Set(db.database_id),
             };
             let schema = schema.insert(&txn).await?;
             schemas.push(ObjectModel(schema, schema_obj).into());
@@ -138,133 +159,62 @@ impl CatalogController {
         Ok(version)
     }
 
-    /// List all objects that are using the given one. It runs a recursive CTE to find all the dependencies.
-    async fn list_used_by(&self, obj_id: i32) -> MetaResult<Vec<i32>> {
-        let inner = self.inner.read().await;
-
-        let query = construct_obj_dependency_query(obj_id, "used_by");
-        let (sql, values) = query.build_any(&*inner.db.get_database_backend().get_query_builder());
-        let res = inner
-            .db
-            .query_all(Statement::from_sql_and_values(
-                inner.db.get_database_backend(),
-                sql,
-                values,
-            ))
-            .await?;
-
-        let ids: Vec<i32> = res
-            .into_iter()
-            .map(|row| row.try_get("", "user_by").unwrap())
-            .collect_vec();
-        Ok(ids)
-    }
-
     pub async fn drop_database(
         &self,
         database_id: DatabaseId,
     ) -> MetaResult<(ReleaseContext, NotificationVersion)> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+        ensure_object_id(ObjectType::Database, database_id as _, &txn).await?;
 
-        let db = Database::find_by_id(database_id as i32)
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;
-        let db_obj = db.find_related(Object).one(&txn).await?;
-        let pb_db = ObjectModel(db.clone(), db_obj.unwrap()).into();
-
-        let tables = db.find_related(Table).all(&txn).await?;
-        let sinks = db.find_related(Sink).all(&txn).await?;
-        let indexes = db.find_related(Index).all(&txn).await?;
-        let streaming_jobs = tables
-            .into_iter()
-            .map(|t| t.table_id)
-            .chain(sinks.into_iter().map(|s| s.sink_id))
-            .chain(indexes.into_iter().map(|i| i.index_id))
-            .collect::<Vec<_>>();
-        let source_ids = db
-            .find_related(Source)
-            .all(&txn)
-            .await?
-            .into_iter()
-            .map(|s| s.source_id)
-            .collect_vec();
-        let connections = db
-            .find_related(Connection)
-            .all(&txn)
-            .await?
-            .into_iter()
-            .flat_map(|c| c.info)
-            .collect_vec();
-
-        let mut query_schema = Query::select()
-            .column(schema::Column::SchemaId)
-            .from(Schema)
-            .and_where(schema::Column::DatabaseId.eq(database_id as i32))
-            .to_owned();
-        let query_table = Query::select()
-            .column(table::Column::TableId)
-            .from(Table)
-            .and_where(table::Column::DatabaseId.eq(database_id as i32))
-            .to_owned();
-        let query_source = Query::select()
-            .column(source::Column::SourceId)
-            .from(Source)
-            .and_where(source::Column::DatabaseId.eq(database_id as i32))
-            .to_owned();
-        let query_sink = Query::select()
-            .column(sink::Column::SinkId)
-            .from(Sink)
-            .and_where(sink::Column::DatabaseId.eq(database_id as i32))
-            .to_owned();
-        let query_index = Query::select()
-            .column(index::Column::IndexId)
-            .from(Index)
-            .and_where(index::Column::DatabaseId.eq(database_id as i32))
-            .to_owned();
-        let query_view = Query::select()
-            .column(view::Column::ViewId)
-            .from(View)
-            .and_where(view::Column::DatabaseId.eq(database_id as i32))
-            .to_owned();
-        let query_function = Query::select()
-            .column(function::Column::FunctionId)
-            .from(Function)
-            .and_where(function::Column::DatabaseId.eq(database_id as i32))
-            .to_owned();
-        let query_connection = Query::select()
-            .column(connection::Column::ConnectionId)
-            .from(Connection)
-            .and_where(connection::Column::DatabaseId.eq(database_id as i32))
-            .to_owned();
-        let query_all = query_schema
-            .union(UnionType::All, query_table)
-            .union(UnionType::All, query_source)
-            .union(UnionType::All, query_sink)
-            .union(UnionType::All, query_index)
-            .union(UnionType::All, query_view)
-            .union(UnionType::All, query_function)
-            .union(UnionType::All, query_connection)
-            .union(
-                UnionType::All,
-                Query::select()
-                    .expr(Expr::value(database_id as i32))
-                    .to_owned(),
+        let streaming_jobs: Vec<i32> = Object::find()
+            .select_only()
+            .column(object::Column::Oid)
+            .filter(
+                object::Column::DatabaseId
+                    .eq(Some(database_id as i32))
+                    .and(object::Column::ObjType.is_in([ObjectType::Table, ObjectType::Sink])),
             )
-            .to_owned();
-        // drop related objects, the relations will be dropped cascade.
-        Object::delete_many()
-            .filter(object::Column::Oid.in_subquery(query_all))
-            .exec(&txn)
+            .into_tuple()
+            .all(&txn)
             .await?;
+
+        let source_ids: Vec<i32> = Object::find()
+            .select_only()
+            .column(object::Column::Oid)
+            .filter(
+                object::Column::DatabaseId
+                    .eq(Some(database_id as i32))
+                    .and(object::Column::ObjType.eq(ObjectType::Source)),
+            )
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let connections = Connection::find()
+            .inner_join(Object)
+            .filter(object::Column::DatabaseId.eq(Some(database_id as i32)))
+            .all(&txn)
+            .await?
+            .into_iter()
+            .flat_map(|conn| conn.info)
+            .collect_vec();
+
+        // The schema and objects in the database will be delete cascade.
+        let res = Object::delete_by_id(database_id as i32).exec(&txn).await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found("database", database_id));
+        }
 
         txn.commit().await?;
 
         let version = self
             .notify_frontend(
                 NotificationOperation::Delete,
-                NotificationInfo::Database(pb_db),
+                NotificationInfo::Database(PbDatabase {
+                    id: database_id,
+                    ..Default::default()
+                }),
             )
             .await;
         Ok((
@@ -279,11 +229,20 @@ impl CatalogController {
 
     pub async fn create_schema(&self, schema: PbSchema) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
         let owner_id = schema.owner;
+        let txn = inner.db.begin().await?;
+        ensure_user_id(owner_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Database, schema.database_id as _, &txn).await?;
+        check_schema_name_duplicate(&schema.name, schema.database_id as _, &txn).await?;
 
-        // todo: whether to check existence of database and user, or let the database do it?
-        let schema_obj = Self::create_object(&txn, ObjectType::Schema, owner_id).await?;
+        let schema_obj = Self::create_object(
+            &txn,
+            ObjectType::Schema,
+            owner_id,
+            Some(schema.database_id as _),
+            None,
+        )
+        .await?;
         let mut schema: schema::ActiveModel = schema.into();
         schema.schema_id = ActiveValue::Set(schema_obj.oid);
         let schema = schema.insert(&txn).await?;
@@ -298,15 +257,64 @@ impl CatalogController {
         Ok(version)
     }
 
+    pub async fn drop_schema(
+        &self,
+        schema_id: SchemaId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let schema_obj = Object::find_by_id(schema_id as i32).one(&inner.db).await?;
+        let Some(schema_obj) = schema_obj else {
+            return Err(MetaError::catalog_id_not_found("schema", schema_id));
+        };
+        if matches!(drop_mode, DropMode::Restrict) {
+            ensure_schema_empty(schema_id, &inner.db).await?;
+        }
+
+        let res = Object::delete(object::ActiveModel {
+            oid: ActiveValue::Set(schema_id as _),
+            ..Default::default()
+        })
+        .exec(&inner.db)
+        .await?;
+        if res.rows_affected == 0 {
+            return Err(MetaError::catalog_id_not_found("schema", schema_id));
+        }
+
+        // todo: update user privileges accordingly.
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Delete,
+                NotificationInfo::Schema(PbSchema {
+                    id: schema_id,
+                    database_id: schema_obj.database_id.unwrap() as _,
+                    ..Default::default()
+                }),
+            )
+            .await;
+        Ok(version)
+    }
+
     pub async fn create_function(
         &self,
         mut pb_function: PbFunction,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
         let owner_id = pb_function.owner;
+        let txn = inner.db.begin().await?;
+        ensure_user_id(owner_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_function.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_function.schema_id as _, &txn).await?;
+        check_function_signature_duplicate(&pb_function, &txn).await?;
 
-        let function_obj = Self::create_object(&txn, ObjectType::Function, owner_id).await?;
+        let function_obj = Self::create_object(
+            &txn,
+            ObjectType::Function,
+            owner_id,
+            Some(pb_function.database_id as _),
+            Some(pb_function.schema_id as _),
+        )
+        .await?;
         pb_function.id = function_obj.oid as _;
         let function: function::ActiveModel = pb_function.clone().into();
         function.insert(&txn).await?;
@@ -318,19 +326,22 @@ impl CatalogController {
                 NotificationInfo::Function(pb_function),
             )
             .await;
-
         Ok(version)
     }
 
     pub async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
-        // todo: wrap the error and return the list if used by others.
-        let res = Object::delete(object::ActiveModel {
-            oid: ActiveValue::Set(function_id as _),
-            ..Default::default()
-        })
-        .exec(&inner.db)
-        .await?;
+        let objects = list_used_by(function_id as _, &inner.db).await?;
+        if !objects.is_empty() {
+            return Err(MetaError::permission_denied(format!(
+                "function is used by {} other objects",
+                objects.len()
+            )));
+        }
+
+        let res = Object::delete_by_id(function_id as i32)
+            .exec(&inner.db)
+            .await?;
         if res.rows_affected == 0 {
             return Err(MetaError::catalog_id_not_found("function", function_id));
         }
@@ -346,9 +357,67 @@ impl CatalogController {
             .await;
         Ok(version)
     }
+
+    pub async fn create_view(&self, mut pb_view: PbView) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let owner_id = pb_view.owner;
+        let txn = inner.db.begin().await?;
+        ensure_user_id(owner_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_view.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_view.schema_id as _, &txn).await?;
+        check_relation_name_duplicate(
+            &pb_view.name,
+            pb_view.database_id as _,
+            pb_view.schema_id as _,
+            &txn,
+        )
+        .await?;
+
+        let view_obj = Self::create_object(
+            &txn,
+            ObjectType::View,
+            owner_id,
+            Some(pb_view.database_id as _),
+            Some(pb_view.schema_id as _),
+        )
+        .await?;
+        pb_view.id = view_obj.oid as _;
+        let view: view::ActiveModel = pb_view.clone().into();
+        view.insert(&txn).await?;
+
+        // todo: change `dependent_relations` to `dependent_objects`, which should includes connection and function as well.
+        for obj_id in &pb_view.dependent_relations {
+            object_dependency::ActiveModel {
+                oid: ActiveValue::Set(*obj_id as _),
+                used_by: ActiveValue::Set(view_obj.oid),
+                ..Default::default()
+            }
+            .insert(&txn)
+            .await?;
+        }
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend_relation_info(
+                NotificationOperation::Add,
+                PbRelationInfo::View(pb_view),
+            )
+            .await;
+        Ok(version)
+    }
+
+    pub async fn drop_relation(
+        &self,
+        _relation: RelationIdEnum,
+        _drop_mode: DropMode,
+    ) -> MetaResult<(ReleaseContext, NotificationVersion)> {
+        todo!("implement drop relation.")
+    }
 }
 
 #[cfg(test)]
+#[cfg(not(madsim))]
 mod tests {
     use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
 
@@ -360,7 +429,6 @@ mod tests {
     const TEST_OWNER_ID: UserId = 1;
 
     #[tokio::test]
-    #[cfg(not(madsim))]
     async fn test_create_database() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
         let db = PbDatabase {
@@ -380,7 +448,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(not(madsim))]
     async fn test_create_function() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
         let return_type = risingwave_pb::data::DataType {
@@ -403,10 +470,11 @@ mod tests {
         .await?;
 
         let function = Function::find()
+            .inner_join(Object)
             .filter(
-                function::Column::DatabaseId
+                object::Column::DatabaseId
                     .eq(TEST_DATABASE_ID)
-                    .and(function::Column::SchemaId.eq(TEST_SCHEMA_ID))
+                    .and(object::Column::SchemaId.eq(TEST_SCHEMA_ID))
                     .add(function::Column::Name.eq("test_function")),
             )
             .one(&mgr.inner.read().await.db)
@@ -416,6 +484,10 @@ mod tests {
         assert_eq!(function.language, "python");
 
         mgr.drop_function(function.function_id as _).await?;
+        assert!(Object::find_by_id(function.function_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .is_none());
 
         Ok(())
     }
