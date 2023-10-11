@@ -111,7 +111,6 @@ compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
 enable_fast_compaction = true
 
-
 [storage.data_file_cache]
 dir = ""
 capacity_mb = 1024
@@ -148,7 +147,7 @@ timeout_ms = 6000
 concurrency = 10
 
 [system]
-barrier_interval_ms = 100
+barrier_interval_ms = 1000
 checkpoint_frequency = 1
 sstable_size_mb = 256
 parallel_compact_size_mb = 512
