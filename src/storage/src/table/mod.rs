@@ -148,6 +148,33 @@ where
     Ok(chunk)
 }
 
+/// Collects data chunks from stream of rows.
+pub async fn collect_data_chunk_with_tombstone<E, S>(
+    stream: &mut S,
+    builder: &mut DataChunkBuilder,
+    tombstone_row: &mut Option<OwnedRow>,
+) -> Result<Option<DataChunk>, E>
+where
+    S: Stream<Item = Result<KeyedRow<Bytes>, E>> + Unpin,
+{
+    // TODO(kwannoel): If necessary, we can optimize it in the future.
+    // This can be done by moving the check if builder is full from `append_one_row` to here,
+    while let Some(row) = stream.next().await.transpose()? {
+        if row.is_tombstone {
+            *tombstone_row = Some(row.into_owned_row());
+            continue;
+        }
+        let row = row.into_owned_row();
+        let result = builder.append_one_row(row);
+        if let Some(chunk) = result {
+            return Ok(Some(chunk));
+        }
+    }
+
+    let chunk = builder.consume_all();
+    Ok(chunk)
+}
+
 pub fn get_second<T, U, E>(arg: Result<(T, U), E>) -> Result<U, E> {
     arg.map(|x| x.1)
 }

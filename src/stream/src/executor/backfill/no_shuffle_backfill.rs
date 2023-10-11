@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::pin::pin;
 use std::sync::Arc;
 
@@ -23,7 +24,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::Datum;
+use risingwave_common::types::{Datum, DefaultOrd};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
@@ -35,8 +36,8 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
-    compute_bounds, construct_initial_finished_state, get_new_pos, iter_chunks, mapping_chunk,
-    mapping_message, mark_chunk, owned_row_iter,
+    compute_bounds, construct_initial_finished_state, get_new_pos, iter_chunks_with_tombstone,
+    mapping_chunk, mapping_message, mark_chunk,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -257,6 +258,7 @@ where
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
             'backfill_loop: loop {
+                let mut latest_tombstone_pos = None;
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
 
@@ -271,7 +273,8 @@ where
                         snapshot_read_epoch,
                         current_pos.clone(),
                         true,
-                        &mut builder
+                        &mut builder,
+                        &mut latest_tombstone_pos,
                     )
                     .map(Either::Right),);
 
@@ -422,6 +425,16 @@ where
                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
                     total_snapshot_processed_rows += chunk_cardinality;
                     yield Message::Chunk(mapping_chunk(chunk, &self.output_indices));
+                }
+
+                match (&current_pos, &latest_tombstone_pos) {
+                    (Some(c), Some(t)) if c.default_cmp(t) == Ordering::Less => {
+                        current_pos = latest_tombstone_pos.take();
+                    }
+                    (None, Some(_t)) => {
+                        current_pos = latest_tombstone_pos.take();
+                    }
+                    _ => {}
                 }
 
                 // Consume upstream buffer chunk
@@ -638,6 +651,7 @@ where
         current_pos: Option<OwnedRow>,
         ordered: bool,
         builder: &'a mut DataChunkBuilder,
+        tombstone_latest_row: &'a mut Option<OwnedRow>,
     ) {
         tracing::trace!("new snapshot_read, epoch={}", epoch);
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
@@ -652,7 +666,7 @@ where
         // We use uncommitted read here, because we have already scheduled the `BackfillExecutor`
         // together with the upstream mv.
         let iter = upstream_table
-            .batch_iter_with_pk_bounds(
+            .batch_iter_with_tombstone(
                 HummockReadEpoch::NoWait(epoch),
                 row::empty(),
                 range_bounds,
@@ -661,11 +675,10 @@ where
             )
             .await?;
 
-        let row_iter = owned_row_iter(iter);
-        pin_mut!(row_iter);
+        pin_mut!(iter);
 
         #[for_await]
-        for chunk in iter_chunks(row_iter, builder) {
+        for chunk in iter_chunks_with_tombstone(iter, builder, tombstone_latest_row) {
             yield chunk?;
         }
     }

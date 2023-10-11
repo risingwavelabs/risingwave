@@ -37,7 +37,9 @@ use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::external::{
     CdcOffset, ExternalTableReader, ExternalTableReaderImpl,
 };
-use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
+use risingwave_storage::table::{
+    collect_data_chunk_with_builder, collect_data_chunk_with_tombstone, KeyedRow,
+};
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTableInner;
@@ -254,6 +256,7 @@ fn mark_cdc_chunk_inner(
 }
 
 /// Builds a new stream chunk with `output_indices`.
+/// We don't change the visibility bitmap, only change the columns.
 pub(crate) fn mapping_chunk(chunk: StreamChunk, output_indices: &[usize]) -> StreamChunk {
     let (ops, columns, visibility) = chunk.into_inner();
     let mapped_columns = output_indices.iter().map(|&i| columns[i].clone()).collect();
@@ -453,6 +456,28 @@ where
         let row = row?;
         yield row.into_owned_row()
     }
+}
+
+#[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
+pub(crate) async fn iter_chunks_with_tombstone<'a, S, E>(
+    mut iter: S,
+    builder: &'a mut DataChunkBuilder,
+    tombstone: &'a mut Option<OwnedRow>,
+) where
+    StreamExecutorError: From<E>,
+    S: Stream<Item = Result<KeyedRow<Bytes>, E>> + Unpin + 'a,
+{
+    while let Some(data_chunk) = collect_data_chunk_with_tombstone(&mut iter, builder, tombstone)
+        .instrument_await("backfill_snapshot_read")
+        .await?
+    {
+        debug_assert!(data_chunk.cardinality() > 0);
+        let ops = vec![Op::Insert; data_chunk.capacity()];
+        let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+        yield Some(stream_chunk);
+    }
+
+    yield None;
 }
 
 #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]

@@ -648,7 +648,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 
     /// Construct a [`StorageTableInnerIter`] for batch executors.
     /// Differs from the streaming one, this iterator will wait for the epoch before iteration
-    pub async fn iter_tombstone_with_pk_bounds(
+    pub async fn batch_iter_with_tombstone(
         &self,
         epoch: HummockReadEpoch,
         pk_prefix: impl Row,
