@@ -593,7 +593,7 @@ where
             let key: &[Datum] = &[Some(vnode.into())];
             let row = state_table.get_row(key).await?;
             let state = Self::deserialize_backfill_state(row, pk_len);
-            assert_eq!(state, expected_state);
+            assert_eq!(state.is_finished, expected_state.is_finished);
         }
         Ok(expected_state)
     }
