@@ -47,6 +47,7 @@ pub static GLOBAL_CACHE_REFILL_METRICS: LazyLock<CacheRefillMetrics> =
 pub struct CacheRefillMetrics {
     pub refill_duration: HistogramVec,
     pub refill_total: GenericCounterVec<AtomicU64>,
+    pub refill_bytes: GenericCounterVec<AtomicU64>,
 
     pub data_refill_success_duration: Histogram,
     pub meta_refill_success_duration: Histogram,
@@ -55,6 +56,9 @@ pub struct CacheRefillMetrics {
     pub data_refill_attempts_total: GenericCounter<AtomicU64>,
     pub data_refill_started_total: GenericCounter<AtomicU64>,
     pub meta_refill_attempts_total: GenericCounter<AtomicU64>,
+
+    pub data_refill_ideal_bytes: GenericCounter<AtomicU64>,
+    pub data_refill_success_bytes: GenericCounter<AtomicU64>,
 
     pub refill_queue_total: IntGauge,
 }
@@ -71,6 +75,13 @@ impl CacheRefillMetrics {
         let refill_total = register_int_counter_vec_with_registry!(
             "refill_total",
             "refill total",
+            &["type", "op"],
+            registry,
+        )
+        .unwrap();
+        let refill_bytes = register_int_counter_vec_with_registry!(
+            "refill_bytes",
+            "refill bytes",
             &["type", "op"],
             registry,
         )
@@ -96,6 +107,13 @@ impl CacheRefillMetrics {
             .get_metric_with_label_values(&["meta", "attempts"])
             .unwrap();
 
+        let data_refill_ideal_bytes = refill_bytes
+            .get_metric_with_label_values(&["data", "ideal"])
+            .unwrap();
+        let data_refill_success_bytes = refill_bytes
+            .get_metric_with_label_values(&["data", "success"])
+            .unwrap();
+
         let refill_queue_total = register_int_gauge_with_registry!(
             "refill_queue_total",
             "refill queue total",
@@ -106,6 +124,7 @@ impl CacheRefillMetrics {
         Self {
             refill_duration,
             refill_total,
+            refill_bytes,
 
             data_refill_success_duration,
             meta_refill_success_duration,
@@ -113,6 +132,10 @@ impl CacheRefillMetrics {
             data_refill_attempts_total,
             data_refill_started_total,
             meta_refill_attempts_total,
+
+            data_refill_ideal_bytes,
+            data_refill_success_bytes,
+
             refill_queue_total,
         }
     }
@@ -342,6 +365,10 @@ impl CacheRefillTask {
             let (range_last, _) = sst.calculate_block_info(block_index_end - 1);
             let range = range_first.start..range_last.end;
 
+            GLOBAL_CACHE_REFILL_METRICS
+                .data_refill_ideal_bytes
+                .inc_by((range.end - range.start) as u64);
+
             let mut writers = Vec::with_capacity(block_index_end - block_index_start);
             let mut ranges = Vec::with_capacity(block_index_end - block_index_start);
             let mut admits = 0;
@@ -392,7 +419,13 @@ impl CacheRefillTask {
                                 writer.weight() - writer.key().serialized_len(),
                             )?;
                             let block = Box::new(block);
-                            writer.finish(block).await.map_err(HummockError::file_cache)
+                            let res = writer.finish(block).await.map_err(HummockError::file_cache);
+                            if matches!(res, Ok(true)) {
+                                GLOBAL_CACHE_REFILL_METRICS
+                                    .data_refill_success_bytes
+                                    .inc_by(len as u64);
+                            }
+                            res
                         };
                         futures.push(future);
                     }
