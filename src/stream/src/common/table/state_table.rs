@@ -930,7 +930,7 @@ where
                     let mut streams = vec![];
                     for vnode in self.vnodes().iter_vnodes() {
                         let stream = self
-                            .vnode_iter_row(&range, vnode, PrefetchOptions::default())
+                            .iter_with_vnode(vnode, &range, PrefetchOptions::default())
                             .await?;
                         streams.push(Box::pin(stream));
                     }
@@ -1090,13 +1090,14 @@ where
 {
     /// This function scans rows from the relational table with specific `pk_range` under the same
     /// `vnode`.
-    pub async fn vnode_iter_row(
+    pub async fn iter_with_vnode(
         &self,
-        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
         Ok(deserialize_keyed_row_stream(
@@ -1129,7 +1130,7 @@ where
     /// This function scans rows from the relational table with specific `prefix` and `sub_range` under the same
     /// `vnode`. If `sub_range` is (Unbounded, Unbounded), it scans rows from the relational table with specific `pk_prefix`.
     /// `pk_prefix` is used to identify the exact vnode the scan should perform on.
-    pub async fn prefix_iter_row(
+    pub async fn iter_with_prefix(
         &self,
         pk_prefix: impl Row,
         sub_range: &(Bound<impl Row>, Bound<impl Row>),

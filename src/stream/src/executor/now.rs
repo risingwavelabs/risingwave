@@ -85,7 +85,7 @@ impl<S: StateStore> NowExecutor<S> {
                 let state_row = {
                     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
                     let data_iter = state_table
-                        .prefix_iter_row(row::empty(), sub_range, Default::default())
+                        .iter_with_prefix(row::empty(), sub_range, Default::default())
                         .await?;
                     pin_mut!(data_iter);
                     if let Some(keyed_row) = data_iter.next().await {

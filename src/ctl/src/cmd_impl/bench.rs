@@ -108,7 +108,7 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
                         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
                             &(Unbounded, Unbounded);
                         let stream = state_table
-                            .prefix_iter_row(
+                            .iter_with_prefix(
                                 row::empty(),
                                 sub_range,
                                 PrefetchOptions::new_for_exhaust_iter(),

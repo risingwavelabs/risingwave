@@ -284,7 +284,7 @@ async fn test_state_table_iter_with_prefix() {
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
     let iter = state_table
-        .prefix_iter_row(&pk_prefix, sub_range, Default::default())
+        .iter_with_prefix(&pk_prefix, sub_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -415,7 +415,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::Included(OwnedRow::new(vec![Some(4_i32.into())])),
     );
     let iter = state_table
-        .vnode_iter_row(&pk_range, DEFAULT_VNODE, Default::default())
+        .iter_with_vnode(DEFAULT_VNODE, &pk_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -440,7 +440,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::<row::Empty>::Unbounded,
     );
     let iter = state_table
-        .vnode_iter_row(&pk_range, DEFAULT_VNODE, Default::default())
+        .iter_with_vnode(DEFAULT_VNODE, &pk_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -580,7 +580,7 @@ async fn test_state_table_iter_with_value_indices() {
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     {
         let iter = state_table
-            .prefix_iter_row(row::empty(), sub_range, Default::default())
+            .iter_with_prefix(row::empty(), sub_range, Default::default())
             .await
             .unwrap();
         pin_mut!(iter);
@@ -638,7 +638,7 @@ async fn test_state_table_iter_with_value_indices() {
     ]));
 
     let iter = state_table
-        .prefix_iter_row(row::empty(), sub_range, Default::default())
+        .iter_with_prefix(row::empty(), sub_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -747,7 +747,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     {
         let iter = state_table
-            .prefix_iter_row(row::empty(), sub_range, Default::default())
+            .iter_with_prefix(row::empty(), sub_range, Default::default())
             .await
             .unwrap();
         pin_mut!(iter);
@@ -826,7 +826,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     ]));
 
     let iter = state_table
-        .prefix_iter_row(row::empty(), sub_range, Default::default())
+        .iter_with_prefix(row::empty(), sub_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -1015,7 +1015,7 @@ async fn test_state_table_write_chunk() {
     state_table.write_chunk(chunk);
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .prefix_iter_row(
+        .iter_with_prefix(
             row::empty(),
             sub_range,
             PrefetchOptions::new_for_exhaust_iter(),
@@ -1133,7 +1133,7 @@ async fn test_state_table_write_chunk_visibility() {
     state_table.write_chunk(chunk);
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .prefix_iter_row(
+        .iter_with_prefix(
             row::empty(),
             sub_range,
             PrefetchOptions::new_for_exhaust_iter(),
@@ -1249,7 +1249,7 @@ async fn test_state_table_write_chunk_value_indices() {
     state_table.write_chunk(chunk);
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .prefix_iter_row(
+        .iter_with_prefix(
             row::empty(),
             sub_range,
             PrefetchOptions::new_for_exhaust_iter(),
@@ -1535,7 +1535,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
     state_table.write_chunk(chunk);
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let inserted_rows: Vec<_> = state_table
-        .prefix_iter_row(
+        .iter_with_prefix(
             row::empty(),
             sub_range,
             PrefetchOptions::new_for_exhaust_iter(),
@@ -1826,7 +1826,7 @@ async fn test_state_table_watermark_cache_refill() {
     }
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let inserted_rows: Vec<_> = state_table
-        .prefix_iter_row(
+        .iter_with_prefix(
             row::empty(),
             sub_range,
             PrefetchOptions::new_for_exhaust_iter(),
@@ -1928,7 +1928,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
     );
 
     let iter = state_table
-        .prefix_iter_row(pk_prefix, &sub_range1, Default::default())
+        .iter_with_prefix(pk_prefix, &sub_range1, Default::default())
         .await
         .unwrap();
 
@@ -1966,7 +1966,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
     let iter = state_table
-        .prefix_iter_row(pk_prefix, &sub_range2, Default::default())
+        .iter_with_prefix(pk_prefix, &sub_range2, Default::default())
         .await
         .unwrap();
 
@@ -2004,7 +2004,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
     let iter = state_table
-        .prefix_iter_row(pk_prefix, &sub_range3, Default::default())
+        .iter_with_prefix(pk_prefix, &sub_range3, Default::default())
         .await
         .unwrap();
 

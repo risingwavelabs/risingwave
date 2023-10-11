@@ -86,7 +86,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
             .state_table
-            .prefix_iter_row(&group_key, sub_range, Default::default())
+            .iter_with_prefix(&group_key, sub_range, Default::default())
             .await?;
         pin_mut!(state_table_iter);
 
@@ -124,7 +124,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
             .state_table
-            .prefix_iter_row(
+            .iter_with_prefix(
                 &group_key,
                 sub_range,
                 PrefetchOptions {
@@ -173,7 +173,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
             .state_table
-            .prefix_iter_row(
+            .iter_with_prefix(
                 &group_key,
                 sub_range,
                 PrefetchOptions {

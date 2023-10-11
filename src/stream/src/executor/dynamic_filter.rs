@@ -235,7 +235,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
         let rhs_stream = self
             .right_table
-            .prefix_iter_row(row::empty(), sub_range, Default::default())
+            .iter_with_prefix(row::empty(), sub_range, Default::default())
             .await?;
         pin_mut!(rhs_stream);
 
@@ -386,9 +386,9 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         // TODO: prefetching for append-only case.
                         let streams = futures::future::try_join_all(
                             self.left_table.vnodes().iter_vnodes().map(|vnode| {
-                                self.left_table.vnode_iter_row(
-                                    &range,
+                                self.left_table.iter_with_vnode(
                                     vnode,
+                                    &range,
                                     PrefetchOptions::new_for_exhaust_iter(),
                                 )
                             }),
