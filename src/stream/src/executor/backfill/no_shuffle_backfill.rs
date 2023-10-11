@@ -260,6 +260,7 @@ where
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
                 let mut snapshot_read_complete = false;
+                let mut has_snapshot_read = false;
 
                 // We should not buffer rows from previous epoch, else we can have duplicates.
                 assert!(upstream_chunk_buffer.is_empty());
@@ -358,6 +359,7 @@ where
                             }
                             // Snapshot read
                             Either::Right(msg) => {
+                                has_snapshot_read = true;
                                 match msg? {
                                     None => {
                                         // End of the snapshot read stream.
@@ -398,9 +400,10 @@ where
                         }
                     }
 
-                    // Before processing barrier, we check current_pos. If it is None, we continue snapshot read.
+                    // Before processing barrier, if did not snapshot read,
+                    // do a snapshot read first.
                     // This is so we don't lose the tombstone iteration progress.
-                    if current_pos.is_none() {
+                    if !has_snapshot_read {
                         let (_, snapshot) = backfill_stream.into_inner();
                         #[for_await]
                         for msg in snapshot {
