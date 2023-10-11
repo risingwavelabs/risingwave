@@ -535,7 +535,7 @@ impl ToStream for LogicalSource {
             plan_prefix = Some(self.rewrite_new_s3_plan()?);
         }
         plan = if self.core.for_table {
-            dispatch_new_s3_plan(self.core.clone(), plan_prefix)
+            dispatch_new_s3_plan(self.rewrite_to_stream_batch_source(), plan_prefix)
         } else {
             // Create MV on source.
             self.wrap_with_optional_generated_columns_stream_proj(plan_prefix)?
