@@ -146,7 +146,7 @@ CREATE SINK s_pg_t2 FROM tt2 WITH (
 
 
 statement ok
-create table t1_uuid (v1 int primary key, v2 varchar);
+create table t1_uuid (v1 int primary key, v2 varchar, v3 varchar);
 
 statement ok
 CREATE SINK s1_uuid FROM t1_uuid WITH (
@@ -158,7 +158,7 @@ CREATE SINK s1_uuid FROM t1_uuid WITH (
 );
 
 statement ok
-INSERT INTO t1_uuid values (221, '74605c5a-a7bb-4b3b-8742-2a12e9709dea');
+INSERT INTO t1_uuid values (221, '74605c5a-a7bb-4b3b-8742-2a12e9709dea', 'hello world');
 
 statement ok
 INSERT INTO tt2 VALUES
