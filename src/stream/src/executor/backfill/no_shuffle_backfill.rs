@@ -284,7 +284,8 @@ where
                             stream::PollNext::Left
                         });
 
-                    while let Some(either) = backfill_stream.next().await {
+                    #[for_await]
+                    for either in &mut backfill_stream {
                         match either {
                             // Upstream
                             Either::Left(msg) => {
