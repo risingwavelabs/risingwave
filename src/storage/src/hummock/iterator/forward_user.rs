@@ -310,6 +310,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             min_epoch,
             None,
             ForwardMergeRangeIterator::new(read_epoch),
+            false,
         )
     }
 }

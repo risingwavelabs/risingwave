@@ -20,7 +20,6 @@ use std::sync::Arc;
 use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use foyer::common::code::Key;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -725,6 +724,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
     ) -> StorageResult<Self> {
         let raw_epoch = epoch.get_epoch();
         store.try_wait_epoch(epoch).await?;
+        let with_tombstone = read_options.with_tombstone;
         let iter = store.iter(table_key_range, raw_epoch, read_options).await?;
         // For `HummockStorage`, a cluster recovery will clear storage data and make subsequent
         // `HummockReadEpoch::Current` read incomplete.
@@ -740,7 +740,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
             key_output_indices,
             value_output_indices,
             output_row_in_key_indices,
-            with_tombstone: read_options.with_tombstone,
+            with_tombstone,
         };
         Ok(iter)
     }
@@ -778,7 +778,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                             OwnedRow::empty()
                         }
                     };
-                    
+
                     // HACK: use empty value to indicate tombstone key
                     if self.with_tombstone && value.is_empty() {
                         assert!(!result_row_in_key.is_empty());
