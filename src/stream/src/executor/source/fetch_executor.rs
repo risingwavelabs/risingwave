@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::ops::Bound;
 use std::sync::Arc;
@@ -93,14 +92,14 @@ impl<S: StateStore> FsFetchExecutor<S> {
     }
 
     async fn try_replace_with_new_batch_reader<const BIASED: bool>(
-        splits_on_fetch: &mut HashSet<String>,
+        splits_on_fetch: &mut usize,
         state_store_handler: &SourceStateTableHandler<S>,
         column_ids: Vec<ColumnId>,
         source_ctx: SourceContext,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
     ) -> StreamExecutorResult<()> {
-        if !splits_on_fetch.is_empty() {
+        if *splits_on_fetch > 0 {
             return Ok(());
         }
 
@@ -135,7 +134,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
         if batch.is_empty() {
             stream.replace_data_stream(stream::pending().boxed());
         } else {
-            splits_on_fetch.extend(batch.iter().map(|s| s.id().to_string()));
+            *splits_on_fetch += batch.len();
             let batch_reader =
                 Self::build_batched_stream_reader(column_ids, source_ctx, source_desc, Some(batch))
                     .await?;
@@ -188,7 +187,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
         // Initialize state table.
         state_store_handler.init_epoch(barrier.epoch);
 
-        let mut splits_on_fetch = HashSet::with_capacity(SPLIT_BATCH_SIZE);
+        let mut splits_on_fetch = 0usize;
         let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
             upstream,
             stream::pending().boxed(),
@@ -217,7 +216,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
             match msg {
                 Err(e) => {
                     tracing::error!("Fetch Error: {:?}", e);
-                    splits_on_fetch.clear();
+                    splits_on_fetch = 0;
                     Self::try_replace_with_new_batch_reader(
                         &mut splits_on_fetch,
                         &state_store_handler,
@@ -307,7 +306,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                 };
 
                                 if offset.parse::<usize>().unwrap() >= fs_split.size {
-                                    splits_on_fetch.remove(split_id.as_ref());
+                                    splits_on_fetch -= 1;
                                     state_store_handler.delete(split_id).await?;
                                 } else {
                                     state_store_handler
