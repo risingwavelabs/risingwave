@@ -94,5 +94,5 @@ ENV RW_DASHBOARD_UI_PATH /risingwave/ui
 # Set default connector libs path
 ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
 
-ENTRYPOINT [ "/risingwave/hdfs_env.sh" ]
+ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "playground" ]
