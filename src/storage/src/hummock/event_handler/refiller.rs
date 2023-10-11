@@ -416,7 +416,7 @@ impl CacheRefillTask {
                         .read(&sstable_store.get_sst_data_path(object_id), range.clone())
                         .await?;
                     let mut futures = vec![];
-                    for (writer, r) in writers.into_iter().zip_eq_fast(ranges) {
+                    for (mut writer, r) in writers.into_iter().zip_eq_fast(ranges) {
                         let offset = r.start - range.start;
                         let len = r.end - r.start;
                         let bytes = data.slice(offset..offset + len);
@@ -427,6 +427,7 @@ impl CacheRefillTask {
                                 writer.weight() - writer.key().serialized_len(),
                             )?;
                             let block = Box::new(block);
+                            writer.force();
                             let res = writer.finish(block).await.map_err(HummockError::file_cache);
                             if matches!(res, Ok(true)) {
                                 GLOBAL_CACHE_REFILL_METRICS

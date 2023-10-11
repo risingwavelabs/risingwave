@@ -169,6 +169,13 @@ where
         }
     }
 
+    fn force(&mut self) {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.force(),
+            FileCacheWriter::None { writer } => writer.force(),
+        }
+    }
+
     async fn finish(self, value: Self::Value) -> FileCacheResult<bool> {
         match self {
             FileCacheWriter::Foyer { writer } => writer.finish(value).await,
