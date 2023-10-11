@@ -35,6 +35,7 @@ use strum_macros::{Display, EnumString};
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
 use crate::common::KafkaCommon;
+use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::{
     DeliveryFutureManager, DeliveryFutureManagerAddFuture, LogReader, LogStoreReadItem,
@@ -293,6 +294,10 @@ impl Sink for KafkaSink {
     type LogSinker = KafkaLogSinker;
 
     const SINK_NAME: &'static str = KAFKA_SINK;
+
+    fn default_sink_decouple(desc: &SinkDesc) -> bool {
+        desc.sink_type.is_append_only()
+    }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let formatter = SinkFormatterImpl::new(

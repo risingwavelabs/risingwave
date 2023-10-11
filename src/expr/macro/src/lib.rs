@@ -154,7 +154,7 @@ mod utils;
 ///
 /// ```ignore
 /// #[function(
-///     "unnest(list) -> setof any",
+///     "unnest(anyarray) -> setof any",
 ///     type_infer = "|args| Ok(args[0].unnest_list())"
 /// )]
 /// ```
@@ -172,7 +172,7 @@ mod utils;
 /// For instance:
 ///
 /// ```ignore
-/// #[function("trim_array(list, int32) -> list")]
+/// #[function("trim_array(anyarray, int32) -> anyarray")]
 /// fn trim_array(array: ListRef<'_>, n: i32) -> ListValue {...}
 /// ```
 ///
@@ -182,7 +182,7 @@ mod utils;
 /// to be considered, the `Option` type can be used:
 ///
 /// ```ignore
-/// #[function("trim_array(list, int32) -> list")]
+/// #[function("trim_array(anyarray, int32) -> anyarray")]
 /// fn trim_array(array: Option<ListRef<'_>>, n: Option<i32>) -> ListValue {...}
 /// ```
 ///
@@ -390,7 +390,7 @@ mod utils;
 ///
 /// | name                   | SQL type             | owned type    | reference type     |
 /// | ---------------------- | -------------------- | ------------- | ------------------ |
-/// | list                   | `any[]`              | `ListValue`   | `ListRef<'_>`      |
+/// | anyarray               | `any[]`              | `ListValue`   | `ListRef<'_>`      |
 /// | struct                 | `record`             | `StructValue` | `StructRef<'_>`    |
 /// | T[^1][]                | `T[]`                | `ListValue`   | `ListRef<'_>`      |
 /// | struct<name T[^1], ..> | `struct<name T, ..>` | `(T, ..)`     | `(&T, ..)`         |
@@ -586,7 +586,7 @@ impl FunctionAttr {
     /// Return a unique name that can be used as an identifier.
     fn ident_name(&self) -> String {
         format!("{}_{}_{}", self.name, self.args.join("_"), self.ret)
-            .replace("[]", "list")
+            .replace("[]", "array")
             .replace("...", "variadic")
             .replace(['<', '>', ' ', ','], "_")
             .replace("__", "_")

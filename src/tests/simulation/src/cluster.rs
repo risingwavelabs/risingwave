@@ -655,6 +655,12 @@ impl Session {
         self.query_tx.send((sql.into(), tx)).await?;
         rx.await?
     }
+
+    /// Run `FLUSH` on the session.
+    pub async fn flush(&mut self) -> Result<()> {
+        self.run("FLUSH").await?;
+        Ok(())
+    }
 }
 
 /// Options for killing nodes.

@@ -47,6 +47,49 @@ impl FunctionAttr {
         attrs
     }
 
+    /// Generate the type infer function.
+    fn generate_type_infer_fn(&self) -> Result<TokenStream2> {
+        if let Some(func) = &self.type_infer {
+            if func == "panic" {
+                return Ok(quote! { |_| panic!("type inference function is not implemented") });
+            }
+            // use the user defined type inference function
+            return Ok(func.parse().unwrap());
+        } else if self.ret == "any" {
+            // TODO: if there are multiple "any", they should be the same type
+            if let Some(i) = self.args.iter().position(|t| t == "any") {
+                // infer as the type of "any" argument
+                return Ok(quote! { |args| Ok(args[#i].clone()) });
+            }
+            if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
+                // infer as the element type of "anyarray" argument
+                return Ok(quote! { |args| Ok(args[#i].as_list().clone()) });
+            }
+        } else if self.ret == "anyarray" {
+            if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
+                // infer as the type of "anyarray" argument
+                return Ok(quote! { |args| Ok(args[#i].clone()) });
+            }
+            if let Some(i) = self.args.iter().position(|t| t == "any") {
+                // infer as the array type of "any" argument
+                return Ok(quote! { |args| Ok(DataType::List(Box::new(args[#i].clone()))) });
+            }
+        } else if self.ret == "struct" {
+            if let Some(i) = self.args.iter().position(|t| t == "struct") {
+                // infer as the type of "struct" argument
+                return Ok(quote! { |args| Ok(args[#i].clone()) });
+            }
+        } else {
+            // the return type is fixed
+            let ty = data_type(&self.ret);
+            return Ok(quote! { |_| Ok(#ty) });
+        }
+        Err(Error::new(
+            Span::call_site(),
+            "type inference function is required",
+        ))
+    }
+
     /// Generate a descriptor of the scalar or table function.
     ///
     /// The types of arguments and return value should not contain wildcard.
@@ -65,31 +108,37 @@ impl FunctionAttr {
             false => &self.args[..],
         }
         .iter()
-        .map(|ty| data_type_name(ty))
+        .map(|ty| sig_data_type(ty))
         .collect_vec();
-        let ret = data_type_name(&self.ret);
+        let ret = sig_data_type(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
-        let descriptor_type = quote! { risingwave_expr::sig::func::FuncSign };
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
         } else {
             self.generate_build_scalar_function(user_fn, true)?
         };
+        let type_infer_fn = self.generate_type_infer_fn()?;
         let deprecated = self.deprecated;
+
         Ok(quote! {
             #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                unsafe { risingwave_expr::sig::func::_register(#descriptor_type {
-                    func: risingwave_pb::expr::expr_node::Type::#pb_type,
-                    inputs_type: &[#(#args),*],
+                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+
+                unsafe { _register(FuncSign {
+                    name: risingwave_pb::expr::expr_node::Type::#pb_type.into(),
+                    inputs_type: vec![#(#args),*],
                     variadic: #variadic,
                     ret_type: #ret,
-                    build: #build_fn,
+                    build: FuncBuilder::Scalar(#build_fn),
+                    type_infer: #type_infer_fn,
                     deprecated: #deprecated,
+                    state_type: None,
+                    append_only: false,
                 }) };
             }
         })
@@ -478,12 +527,15 @@ impl FunctionAttr {
 
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
-            args.push(data_type_name(ty));
+            args.push(sig_data_type(ty));
         }
-        let ret = data_type_name(&self.ret);
+        let ret = sig_data_type(&self.ret);
         let state_type = match &self.state {
-            Some(ty) if ty != "ref" => data_type_name(ty),
-            _ => data_type_name(&self.ret),
+            Some(ty) if ty != "ref" => {
+                let ty = data_type(ty);
+                quote! { Some(#ty) }
+            }
+            _ => quote! { None },
         };
         let append_only = match build_fn {
             false => !user_fn.has_retract(),
@@ -495,24 +547,31 @@ impl FunctionAttr {
             false => format_ident!("{}", self.ident_name()),
             true => format_ident!("{}_append_only", self.ident_name()),
         };
-        let descriptor_type = quote! { risingwave_expr::sig::agg::AggFuncSig };
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.as_fn().name);
             quote! { #name }
         } else {
             self.generate_agg_build_fn(user_fn)?
         };
+        let type_infer_fn = self.generate_type_infer_fn()?;
+        let deprecated = self.deprecated;
+
         Ok(quote! {
             #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                unsafe { risingwave_expr::sig::agg::_register(#descriptor_type {
-                    func: risingwave_expr::aggregate::AggKind::#pb_type,
-                    inputs_type: &[#(#args),*],
-                    state_type: #state_type,
+                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+
+                unsafe { _register(FuncSign {
+                    name: risingwave_expr::aggregate::AggKind::#pb_type.into(),
+                    inputs_type: vec![#(#args),*],
+                    variadic: false,
                     ret_type: #ret,
-                    build: #build_fn,
+                    build: FuncBuilder::Aggregate(#build_fn),
+                    type_infer: #type_infer_fn,
+                    state_type: #state_type,
                     append_only: #append_only,
+                    deprecated: #deprecated,
                 }) };
             }
         })
@@ -531,11 +590,9 @@ impl FunctionAttr {
             .enumerate()
             .map(|(i, arg)| {
                 let array = format_ident!("a{i}");
-                let variant: TokenStream2 = types::variant(arg).parse().unwrap();
+                let array_type: TokenStream2 = types::array_type(arg).parse().unwrap();
                 quote! {
-                    let ArrayImpl::#variant(#array) = &**input.column_at(#i) else {
-                        bail!("input type mismatch. expect: {}", stringify!(#variant));
-                    };
+                    let #array: &#array_type = input.column_at(#i).as_ref().into();
                 }
             })
             .collect_vec();
@@ -759,41 +816,37 @@ impl FunctionAttr {
         let name = self.name.clone();
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
-            args.push(data_type_name(ty));
+            args.push(sig_data_type(ty));
         }
-        let ret = data_type_name(&self.ret);
+        let ret = sig_data_type(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
-        let descriptor_type = quote! { risingwave_expr::sig::table_function::FuncSign };
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
         } else {
             self.generate_build_table_function(user_fn)?
         };
-        let type_infer_fn = if let Some(func) = &self.type_infer {
-            func.parse().unwrap()
-        } else {
-            if matches!(self.ret.as_str(), "any" | "list" | "struct") {
-                return Err(Error::new(
-                    Span::call_site(),
-                    format!("type inference function is required for {}", self.ret),
-                ));
-            }
-            let ty = data_type(&self.ret);
-            quote! { |_| Ok(#ty) }
-        };
+        let type_infer_fn = self.generate_type_infer_fn()?;
+        let deprecated = self.deprecated;
+
         Ok(quote! {
             #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                unsafe { risingwave_expr::sig::table_function::_register(#descriptor_type {
-                    func: risingwave_pb::expr::table_function::Type::#pb_type,
-                    inputs_type: &[#(#args),*],
+                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+
+                unsafe { _register(FuncSign {
+                    name: risingwave_pb::expr::table_function::Type::#pb_type.into(),
+                    inputs_type: vec![#(#args),*],
+                    variadic: false,
                     ret_type: #ret,
-                    build: #build_fn,
+                    build: FuncBuilder::Table(#build_fn),
                     type_infer: #type_infer_fn,
+                    deprecated: #deprecated,
+                    state_type: None,
+                    append_only: false,
                 }) };
             }
         })
@@ -989,9 +1042,17 @@ impl FunctionAttr {
     }
 }
 
-fn data_type_name(ty: &str) -> TokenStream2 {
-    let variant = format_ident!("{}", types::data_type(ty));
-    quote! { DataTypeName::#variant }
+fn sig_data_type(ty: &str) -> TokenStream2 {
+    match ty {
+        "any" => quote! { SigDataType::Any },
+        "anyarray" => quote! { SigDataType::AnyArray },
+        "struct" => quote! { SigDataType::AnyStruct },
+        _ if ty.starts_with("struct") && ty.contains("any") => quote! { SigDataType::AnyStruct },
+        _ => {
+            let datatype = data_type(ty);
+            quote! { SigDataType::Exact(#datatype) }
+        }
+    }
 }
 
 fn data_type(ty: &str) -> TokenStream2 {

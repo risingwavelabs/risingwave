@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use either::Either;
 use futures::stream::select_with_strategy;
-use futures::{pin_mut, stream, StreamExt, TryStreamExt};
+use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -207,38 +207,6 @@ where
         let mut builder =
             DataChunkBuilder::new(self.upstream_table.schema().data_types(), self.chunk_size);
 
-        // If the snapshot is empty, we don't need to backfill.
-        // We cannot complete progress now, as we want to persist
-        // finished state to state store first.
-        // As such we will wait for next barrier.
-        let is_snapshot_empty: bool = {
-            if is_finished {
-                // It is finished, so just assign a value to avoid accessing storage table again.
-                false
-            } else {
-                let snapshot_is_empty = {
-                    let snapshot = Self::snapshot_read(
-                        &self.upstream_table,
-                        init_epoch,
-                        None,
-                        false,
-                        &mut builder,
-                    );
-                    pin_mut!(snapshot);
-                    snapshot.try_next().await?.unwrap().is_none()
-                };
-                let snapshot_buffer_is_empty = builder.is_empty();
-                builder.clear();
-                snapshot_is_empty && snapshot_buffer_is_empty
-            }
-        };
-
-        // | backfill_is_finished | snapshot_empty | need_to_backfill |
-        // | t                    | t/f            | f                |
-        // | f                    | t              | f                |
-        // | f                    | f              | t                |
-        let to_backfill = !is_finished && !is_snapshot_empty;
-
         // Use this buffer to construct state,
         // which will then be persisted.
         let mut current_state: Vec<Datum> = vec![None; state_len];
@@ -285,7 +253,7 @@ where
         // finished.
         //
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
-        if to_backfill {
+        if !is_finished {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
             'backfill_loop: loop {
@@ -539,7 +507,7 @@ where
                         // This is because we can't update state table in first epoch,
                         // since it expects to have been initialized in previous epoch
                         // (there's no epoch before the first epoch).
-                        if is_snapshot_empty {
+                        if current_pos.is_none() {
                             current_pos =
                                 Some(construct_initial_finished_state(pk_in_output_indices.len()))
                         }
