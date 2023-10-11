@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::catalog::{Index, Sink, Source, Table};
+use risingwave_pb::catalog::{CreateType, Index, Sink, Source, Table};
 
 use crate::model::FragmentId;
 
@@ -195,6 +195,15 @@ impl StreamingJob {
             )
         } else {
             None
+        }
+    }
+
+    pub fn create_type(&self) -> CreateType {
+        match self {
+            Self::MaterializedView(table) => {
+                table.get_create_type().unwrap_or(CreateType::Foreground)
+            }
+            _ => CreateType::Foreground,
         }
     }
 }

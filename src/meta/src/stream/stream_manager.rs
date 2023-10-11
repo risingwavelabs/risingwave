@@ -18,7 +18,7 @@ use std::sync::Arc;
 use futures::future::{join_all, try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::catalog::Table;
+use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
@@ -67,6 +67,8 @@ pub struct CreateStreamingJobContext {
     pub definition: String,
 
     pub mv_table_id: Option<u32>,
+
+    pub create_type: CreateType,
 }
 
 impl CreateStreamingJobContext {
@@ -226,6 +228,7 @@ impl GlobalStreamManager {
         ctx: CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let table_id = table_fragments.table_id();
+        let create_type = ctx.create_type;
         let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
         let execution = StreamingJobExecution::new(table_id, sender.clone());
         self.creating_job_info.add_job(execution).await;
@@ -244,8 +247,10 @@ impl GlobalStreamManager {
                         .inspect_err(|_| tracing::warn!("failed to notify created: {table_id}"));
                 }
                 Err(err) => {
-                    for revert_func in revert_funcs.into_iter().rev() {
-                        revert_func.await;
+                    if create_type == CreateType::Foreground {
+                        for revert_func in revert_funcs.into_iter().rev() {
+                            revert_func.await;
+                        }
                     }
                     let _ = sender
                         .send(CreatingState::Failed {
@@ -417,7 +422,7 @@ impl GlobalStreamManager {
             definition,
             mv_table_id,
             internal_tables,
-            ..
+            create_type,
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
         // Register to compaction group beforehand.
@@ -462,9 +467,11 @@ impl GlobalStreamManager {
             })
             .await
         {
-            self.fragment_manager
-                .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(table_id)))
-                .await?;
+            if create_type == CreateType::Foreground {
+                self.fragment_manager
+                    .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(table_id)))
+                    .await?;
+            }
             return Err(err);
         }
 

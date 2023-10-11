@@ -974,9 +974,7 @@ impl GlobalBarrierManager {
         drop(tracker);
         for (table, internal_tables, finished) in receivers {
             let catalog_manager = self.catalog_manager.clone();
-            let fragment_manager = self.fragment_manager.clone();
             tokio::spawn(async move {
-                let internal_table_ids = internal_tables.iter().map(|t| t.id).collect_vec();
                 let res: MetaResult<()> = try {
                     finished
                         .await
@@ -990,25 +988,14 @@ impl GlobalBarrierManager {
                         .await?;
                 };
                 if let Err(e) = res.as_ref() {
-                    tracing::error!("Failed to finish stream job: {e:?}");
-                    let table_id = table.id;
-                    let clean_table_result = catalog_manager
-                        .cancel_create_table_procedure_with_internal_table_ids(
-                            table,
-                            internal_table_ids,
-                        )
-                        .await;
-                    let clean_fragment_result = fragment_manager
-                        .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
-                            table_id.into(),
-                        )))
-                        .await;
-                    if let Err(e) = clean_table_result.as_ref() {
-                        tracing::warn!("stream job {} table should be cleaned: {e:?}", table_id);
-                    }
-                    if let Err(e) = clean_fragment_result.as_ref() {
-                        tracing::warn!("stream job {} fragment should be cleaned: {e:?}", table_id);
-                    }
+                    tracing::error!(
+                        "stream job {} interrupted, will resume after recovery: {e:?}",
+                        table.id
+                    );
+                    // NOTE(kwannoel): We should never cleanup stream jobs,
+                    // we don't know if it's just due to CN killed,
+                    // or the job has actually failed.
+                    // Users have to manually cleanup the stream jobs.
                 }
             });
         }
