@@ -12,20 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::{function, ExprError};
+use risingwave_expr::{capture_context, function, ExprError};
 use risingwave_sqlparser::parser::{Parser, ParserError};
 use risingwave_sqlparser::tokenizer::{Token, Tokenizer, TokenizerError};
 use thiserror::Error;
 
-use super::context::CATALOG_READER;
+use super::context::{CATALOG_READER, DB_NAME};
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::CatalogReader;
 
-// #[derive(Error, Debug)]
-// enum ResolveRegclassError {
-//     #[error("parse object name failed: {0}")]
-//     Parser(#[from] ParserError),
-// }
+#[capture_context(CATALOG_READER, DB_NAME)]
+fn f1(catalog_reader: &CatalogReader, db_name: &str, s: i32) -> Result<i64, ExprError> {
+    Ok(3)
+}
+
+#[derive(Error, Debug)]
+enum ResolveRegclassError {
+    #[error("parse object name failed: {0}")]
+    Parser(#[from] ParserError),
+}
 
 // fn resolve_regclass(
 //     catalog: CatalogReadGuard,
@@ -45,25 +51,17 @@ use crate::catalog::root_catalog::SchemaPath;
 //     }
 // }
 
-// fn parse_object_name(name: &str) -> Result<risingwave_sqlparser::ast::ObjectName, ParserError> {
-//     // We use the full parser here because this function needs to accept every legal way
-//     // of identifying an object in PG SQL as a valid value for the varchar
-//     // literal.  For example: 'foo', 'public.foo', '"my table"', and
-//     // '"my schema".foo' must all work as values passed pg_table_size.
-//     let mut tokenizer = Tokenizer::new(name);
-//     let tokens = tokenizer
-//         .tokenize_with_location()
-//         .map_err(ParserError::from)?;
-//     let mut parser = Parser::new(tokens);
-//     let object = parser.parse_object_name()?;
-//     parser.expect_token(&Token::EOF)?;
-//     Ok(object)
-// }
-
-// // fn resolve_regclass(name: &str) ->
-
-// fn cast_regclass(_s: &str) -> Result<i32, ExprError> {
-//     CATALOG_READER.try_with(|catalog_reader| {})?;
-
-//     Ok(1)
-// }
+fn parse_object_name(name: &str) -> Result<risingwave_sqlparser::ast::ObjectName, ParserError> {
+    // We use the full parser here because this function needs to accept every legal way
+    // of identifying an object in PG SQL as a valid value for the varchar
+    // literal.  For example: 'foo', 'public.foo', '"my table"', and
+    // '"my schema".foo' must all work as values passed pg_table_size.
+    let mut tokenizer = Tokenizer::new(name);
+    let tokens = tokenizer
+        .tokenize_with_location()
+        .map_err(ParserError::from)?;
+    let mut parser = Parser::new(tokens);
+    let object = parser.parse_object_name()?;
+    parser.expect_token(&Token::EOF)?;
+    Ok(object)
+}

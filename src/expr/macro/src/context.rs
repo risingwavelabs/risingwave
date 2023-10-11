@@ -157,7 +157,9 @@ pub(super) fn generate_captured_function(
     // Modify the body
     let body = &mut user_fn.block;
     let new_body = {
-        let mut scoped = quote! { #body };
+        let mut scoped = quote! {
+            #body
+        };
 
         #[allow(clippy::disallowed_methods)]
         for (context, arg) in captures.into_iter().zip(captured_inputs.into_iter()) {
@@ -177,10 +179,13 @@ pub(super) fn generate_captured_function(
         }
         scoped
     };
-    let new_user_fn = quote! {
-        #user_fn.attrs
-        #user_fn.vis #user_fn.sig {
-            #new_body
+    let new_user_fn = {
+        let vis = user_fn.vis;
+        let sig = user_fn.sig;
+        quote! {
+            #vis #sig {
+                {#new_body}.map_err(Into::into)
+            }
         }
     };
 

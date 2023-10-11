@@ -15,5 +15,6 @@
 use risingwave_expr::define_context;
 
 define_context! {
-    CATALOG_READER: crate::catalog::CatalogReader,
+    pub(in crate::expr::function_impl) CATALOG_READER: crate::catalog::CatalogReader,
+    pub(in crate::expr::function_impl) DB_NAME: String,
 }
