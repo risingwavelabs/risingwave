@@ -533,11 +533,7 @@ impl Binder {
                     ))),
                     DataType::Int32 => Ok(input),
                     dt if dt.is_int() => Ok(input.cast_explicit(DataType::Int32)?),
-                    _ => {
-                        return Err(
-                            ErrorCode::BindError("Unsupported input type".to_string()).into()
-                        )
-                    }
+                    _ => Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
                 }
             }
             AstDataType::Regproc => {

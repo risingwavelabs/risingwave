@@ -69,7 +69,7 @@ fn resolve_regclass_inner(
         let schema_path = SchemaPath::Path(search_path, &auth_context.user_name);
         Ok(catalog
             .read_guard()
-            .get_id_by_class_name(&db_name, schema_path, &class_name)?)
+            .get_id_by_class_name(db_name, schema_path, &class_name)?)
     } else {
         let schema = obj.0[0].real_value();
         let class_name = obj.0[1].real_value();

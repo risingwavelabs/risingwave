@@ -461,6 +461,7 @@ async fn distribute_execute(
         .map_err(|err| err.into())
 }
 
+#[expect(clippy::unused_async)]
 async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQueryStream> {
     let front_env = session.env();
 
