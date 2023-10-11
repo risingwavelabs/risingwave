@@ -399,6 +399,7 @@ where
                     }
 
                     // Before processing barrier, we check current_pos. If it is None, we continue snapshot read.
+                    // This is so we don't lose the tombstone iteration progress.
                     if current_pos.is_none() {
                         let (_, snapshot) = backfill_stream.into_inner();
                         #[for_await]
@@ -409,6 +410,8 @@ where
                             match msg? {
                                 None => {
                                     // End of the snapshot read stream.
+                                    // We let the barrier handling logic take care of upstream updates.
+                                    // But we still want to exit backfill loop, so we mark snapshot read complete.
                                     snapshot_read_complete = true;
                                     break;
                                 }
