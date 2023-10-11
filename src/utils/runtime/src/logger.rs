@@ -28,35 +28,6 @@ use tracing_subscriber::{filter, EnvFilter};
 const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
 const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
 
-/// Default level for logging, depending on the deployment and `debug_assertions` flag.
-///
-/// Can be overridden by `RUST_LOG` env var and [`LoggerSettings`].
-fn default_level() -> Level {
-    match Deployment::current() {
-        Deployment::Ci => Level::INFO,
-        _ => {
-            if cfg!(debug_assertions) {
-                Level::DEBUG
-            } else {
-                Level::INFO
-            }
-        }
-    }
-}
-
-/// Configure log targets for some `RisingWave` crates.
-///
-/// Other RisingWave crates (like `stream` and `storage`) will follow the [`default_level`].
-fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets {
-    targets
-        // force a higher level for noisy logs
-        .with_target("risingwave_sqlparser", Level::INFO)
-        .with_target("pgwire", Level::INFO)
-        .with_target(PGWIRE_QUERY_LOG, Level::OFF)
-        // events are disabled unless `RUST_LOG` overrides
-        .with_target("events", Level::OFF)
-}
-
 pub struct LoggerSettings {
     /// The name of the service.
     name: String,
@@ -128,9 +99,12 @@ impl LoggerSettings {
 /// Overrides default level and tracing targets of the fmt layer (formatting and
 /// logging to `stdout` or `stderr`).
 ///
+/// Note that only verbosity levels below or equal to `DEBUG` are effective in
+/// release builds.
+///
 /// e.g.,
 /// ```bash
-/// RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info"
+/// RUST_LOG="info,risingwave_stream=debug,events=debug"
 /// ```
 ///
 /// ### `RW_QUERY_LOG_PATH`
@@ -165,7 +139,19 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
     // Default filter for logging to stdout and tracing.
     let default_filter = {
-        let mut filter = filter::Targets::new()
+        let mut filter = filter::Targets::new();
+
+        // Configure levels for some RisingWave crates.
+        // Other RisingWave crates like `stream` and `storage` will follow the default level.
+        filter = filter
+            .with_target("risingwave_sqlparser", Level::INFO)
+            .with_target("pgwire", Level::INFO)
+            .with_target(PGWIRE_QUERY_LOG, Level::OFF)
+            // debug-purposed events are disabled unless `RUST_LOG` overrides
+            .with_target("events", Level::OFF);
+
+        // Configure levels for external crates.
+        filter = filter
             .with_target("foyer", Level::WARN)
             .with_target("aws_sdk_ec2", Level::INFO)
             .with_target("aws_sdk_s3", Level::INFO)
@@ -182,25 +168,33 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("reqwest", Level::WARN)
             .with_target("sled", Level::INFO);
 
-        filter = configure_risingwave_targets_fmt(filter);
+        // For all other crates, apply default level depending on the deployment and `debug_assertions` flag.
+        let default_level = match deployment {
+            Deployment::Ci => Level::INFO,
+            _ => {
+                if cfg!(debug_assertions) {
+                    Level::DEBUG
+                } else {
+                    Level::INFO
+                }
+            }
+        };
+        filter = filter.with_default(default_level);
 
-        // For all other crates
-        filter = filter.with_default(default_level());
-
-        // Overrides from settings
+        // Overrides from settings.
         filter = filter.with_targets(settings.targets);
         if let Some(default_level) = settings.default_level {
             filter = filter.with_default(default_level);
         }
 
-        // Overrides from env var
+        // Overrides from env var.
         if let Ok(rust_log) = std::env::var(EnvFilter::DEFAULT_ENV) && !rust_log.is_empty() {
-          let rust_log_targets: Targets = rust_log.parse().expect("failed to parse `RUST_LOG`");
-          if let Some(default_level) = rust_log_targets.default_level() {
-              filter = filter.with_default(default_level);
-          }
-          filter = filter.with_targets(rust_log_targets)
-      };
+            let rust_log_targets: Targets = rust_log.parse().expect("failed to parse `RUST_LOG`");
+            if let Some(default_level) = rust_log_targets.default_level() {
+                filter = filter.with_default(default_level);
+            }
+            filter = filter.with_targets(rust_log_targets)
+        };
 
         filter
     };
