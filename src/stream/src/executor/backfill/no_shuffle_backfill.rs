@@ -176,6 +176,7 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
+        eprintln!("Starting backfill");
         // The primary key columns, in the output columns of the upstream_table scan.
         let mut snapshot_control = SnapshotControl::new(self.snapshot_read_interval);
 
@@ -572,6 +573,7 @@ where
         state_table: Option<&StateTable<S>>,
         pk_len: usize,
     ) -> StreamExecutorResult<BackfillState> {
+        eprintln!("Recovering backfill state!");
         let Some(state_table) = state_table else {
             // If no state table, but backfill is present, it must be from an old cluster.
             // In that case backfill must be finished, otherwise it won't have been persisted.
