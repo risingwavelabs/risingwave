@@ -29,15 +29,59 @@ flush() {
   run_sql "FLUSH;"
 }
 
-run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
+basic() {
+  echo "--- e2e, test_backfill_basic"
+  cargo make ci-start ci-backfill
+  run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
 
-# Provide snapshot
-run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql
-run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
-run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
+  # Provide snapshot
+  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
 
-wait
+  wait
 
-run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
+  run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
 
-echo "Backfill tests complete"
+  echo "--- Kill cluster"
+  cargo make kill
+}
+
+# Lots of upstream tombstone, backfill should still proceed.
+test_backfill_tombstone() {
+  echo "--- e2e, test_backfill_tombstone"
+  cargo make ci-start ci-backfill
+  ./risedev psql -c "
+  CREATE TABLE tomb (v1 int)
+  WITH (
+    connector = 'datagen',
+    fields.v1._.kind = 'sequence',
+    datagen.rows.per.second = '10000000'
+  )
+  FORMAT PLAIN
+  ENCODE JSON;
+  "
+
+  sleep 30
+
+  bash -c '
+    set -euo pipefail
+
+    for i in $(seq 1 1000)
+    do
+      ./risedev psql -c "DELETE FROM tomb; FLUSH;"
+      sleep 1
+    done
+  ' 1>deletes.log 2>&1 &
+
+  ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
+  echo "--- Kill cluster"
+  cargo make kill
+}
+
+main() {
+  basic
+  test_backfill_tombstone
+}
+
+main
