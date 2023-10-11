@@ -187,7 +187,7 @@
 
     Table 3 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished, lineitem_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [], read pk prefix len hint: 2 }
 
 - id: tpch_q2
   before:
@@ -589,7 +589,7 @@
 
     Table 50 { columns: [ vnode, ps_partkey, ps_suppkey, partsupp_backfill_finished, partsupp_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost) ], primary key: [ $0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [], read pk prefix len hint: 8 }
+    Table 4294967294 { columns: [ s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost) ], primary key: [ $0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [], read pk prefix len hint: 11 }
 
 - id: tpch_q3
   before:
@@ -769,7 +769,7 @@
 
     Table 13 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished, lineitem_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ l_orderkey, revenue, o_orderdate, o_shippriority ], primary key: [ $1 DESC, $2 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 3 }
+    Table 4294967294 { columns: [ l_orderkey, revenue, o_orderdate, o_shippriority ], primary key: [ $1 DESC, $2 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 4 }
 
 - id: tpch_q4
   before:
@@ -907,7 +907,7 @@
 
     Table 8 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished, lineitem_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ o_orderpriority, order_count ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ o_orderpriority, order_count ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
 - id: tpch_q5
   before:
@@ -1181,7 +1181,7 @@
 
     Table 28 { columns: [ vnode, s_suppkey, supplier_backfill_finished, supplier_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ n_name, revenue ], primary key: [ $1 DESC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ n_name, revenue ], primary key: [ $1 DESC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
 - id: tpch_q6
   before:
@@ -1521,7 +1521,7 @@
 
     Table 28 { columns: [ vnode, o_orderkey, orders_backfill_finished, orders_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ supp_nation, cust_nation, l_year, revenue ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ supp_nation, cust_nation, l_year, revenue ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 3 }
 
 - id: tpch_q8
   before:
@@ -1871,7 +1871,7 @@
 
     Table 38 { columns: [ vnode, o_orderkey, orders_backfill_finished, orders_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ o_year, mkt_share ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ o_year, mkt_share ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
 - id: tpch_q9
   before:
@@ -2135,7 +2135,7 @@
 
     Table 28 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished, lineitem_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ nation, o_year, sum_profit ], primary key: [ $0 ASC, $1 DESC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ nation, o_year, sum_profit ], primary key: [ $0 ASC, $1 DESC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 2 }
 
 - id: tpch_q10
   before:
@@ -2346,7 +2346,7 @@
 
     Table 18 { columns: [ vnode, o_orderkey, orders_backfill_finished, orders_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment ], primary key: [ $2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [], read pk prefix len hint: 7 }
+    Table 4294967294 { columns: [ c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment ], primary key: [ $2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [], read pk prefix len hint: 8 }
 
 - id: tpch_q11
   before:
@@ -2596,7 +2596,7 @@
 
     Table 16 { columns: [ sum(sum($expr2)), count ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 4294967294 { columns: [ ps_partkey, value ], primary key: [ $1 DESC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ ps_partkey, value ], primary key: [ $1 DESC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
 - id: tpch_q12
   before:
@@ -2731,7 +2731,7 @@
 
     Table 8 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished, lineitem_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ l_shipmode, high_line_count, low_line_count ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ l_shipmode, high_line_count, low_line_count ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
 - id: tpch_q13
   before:
@@ -2912,7 +2912,7 @@
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ c_count, custdist ], primary key: [ $1 DESC, $0 DESC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ c_count, custdist ], primary key: [ $1 DESC, $0 DESC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 2 }
 
 - id: tpch_q14
   before:
@@ -3220,7 +3220,7 @@
 
     Table 16 { columns: [ $expr2, max(sum($expr1)), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [], read pk prefix len hint: 1 }
 
 - id: tpch_q16
   before:
@@ -3436,7 +3436,7 @@
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ p_brand, p_type, p_size, supplier_cnt ], primary key: [ $3 DESC, $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ p_brand, p_type, p_size, supplier_cnt ], primary key: [ $3 DESC, $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 4 }
 
 - id: tpch_q17
   before:
@@ -4233,7 +4233,7 @@
 
     Table 23 { columns: [ vnode, p_partkey, part_backfill_finished, part_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ s_name, s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ s_name, s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [], read pk prefix len hint: 1 }
 
 - id: tpch_q21
   before:
@@ -4533,7 +4533,7 @@
 
     Table 28 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished, lineitem_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ s_name, numwait ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ s_name, numwait ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 2 }
 
 - id: tpch_q22
   before:
