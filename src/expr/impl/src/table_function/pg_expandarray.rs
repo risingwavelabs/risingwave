@@ -33,7 +33,7 @@ use risingwave_expr::{function, Result};
 /// three 3
 /// ```
 #[function(
-    "_pg_expandarray(list) -> setof struct<x any, n int4>",
+    "_pg_expandarray(anyarray) -> setof struct<x any, n int4>",
     type_infer = "infer_type"
 )]
 fn _pg_expandarray(array: ListRef<'_>) -> impl Iterator<Item = (Option<ScalarRefImpl<'_>>, i32)> {

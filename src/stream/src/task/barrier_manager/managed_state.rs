@@ -193,12 +193,10 @@ impl ManagedBarrierState {
 
     /// Collect a `barrier` from the actor with `actor_id`.
     pub(super) fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
-        tracing::trace!(
+        tracing::debug!(
             target: "events::stream::barrier::manager::collect",
-            "collect_barrier: epoch = {}, actor_id = {}, state = {:#?}",
-            barrier.epoch.curr,
-            actor_id,
-            self
+            epoch = barrier.epoch.curr, actor_id, state = ?self,
+            "collect_barrier",
         );
 
         match self.epoch_barrier_state_map.get_mut(&barrier.epoch.curr) {

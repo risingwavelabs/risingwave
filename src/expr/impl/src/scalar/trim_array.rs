@@ -70,7 +70,7 @@ use risingwave_expr::{function, ExprError, Result};
 /// statement error
 /// select trim_array(array[1,2,3,4,5,null], true);
 /// ```
-#[function("trim_array(list, int4) -> list")]
+#[function("trim_array(anyarray, int4) -> anyarray")]
 fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
     let values = array.iter();
     let len_to_trim: usize = n.try_into().map_err(|_| ExprError::InvalidParam {

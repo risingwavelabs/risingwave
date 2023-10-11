@@ -543,7 +543,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc_by(std::mem::take(&mut vars.stats.total_lookup_count));
         this.metrics
-            .agg_cached_keys
+            .agg_cached_entry_count
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(vars.agg_group_cache.len() as i64);
         this.metrics

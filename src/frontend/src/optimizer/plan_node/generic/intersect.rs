@@ -33,7 +33,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Intersect<PlanRef> {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        Some(self.inputs[0].stream_key().to_vec())
+        Some(self.inputs[0].stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {

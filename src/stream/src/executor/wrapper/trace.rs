@@ -59,7 +59,7 @@ pub async fn trace(
                             .with_label_values(&[&actor_id_str, &fragment_id_str, &info.identity])
                             .inc_by(chunk.cardinality() as u64);
                     }
-                    tracing::trace!(
+                    tracing::debug!(
                         target: "events::stream::message::chunk",
                         cardinality = chunk.cardinality(),
                         capacity = chunk.capacity(),
@@ -68,14 +68,14 @@ pub async fn trace(
                 }
             }
             Message::Watermark(watermark) => {
-                tracing::trace!(
+                tracing::debug!(
                     target: "events::stream::message::watermark",
                     value = ?watermark.val,
                     col_idx = watermark.col_idx,
                 );
             }
             Message::Barrier(barrier) => {
-                tracing::trace!(
+                tracing::debug!(
                     target: "events::stream::message::barrier",
                     prev_epoch = barrier.epoch.prev,
                     curr_epoch = barrier.epoch.curr,
