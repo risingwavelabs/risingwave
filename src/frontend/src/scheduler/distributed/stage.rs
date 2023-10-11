@@ -406,7 +406,7 @@ impl StageRunner {
             match status_res_inner {
                 Ok(status) => {
                     use risingwave_pb::task_service::task_info_response::TaskStatus as TaskStatusPb;
-                    match TaskStatusPb::from_i32(status.task_status).unwrap() {
+                    match TaskStatusPb::try_from(status.task_status).unwrap() {
                         TaskStatusPb::Running => {
                             running_task_cnt += 1;
                             // The task running count should always less or equal than the

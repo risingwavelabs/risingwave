@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ffi::CString;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -121,7 +122,6 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         request: Request<HeapProfilingRequest>,
     ) -> Result<Response<HeapProfilingResponse>, Status> {
-        use std::ffi::CStr;
         use std::fs::create_dir_all;
         use std::path::PathBuf;
 
@@ -139,9 +139,9 @@ impl MonitorService for MonitorServiceImpl {
             ));
         }
 
-        let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-        let file_name = format!("{}.{}\0", time_prefix, MANUALLY_DUMP_SUFFIX);
-        let arg_dir = request.into_inner().get_dir().clone();
+        let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
+        let file_name = format!("{}.{}", time_prefix, MANUALLY_DUMP_SUFFIX);
+        let arg_dir = request.into_inner().dir;
         let dir = PathBuf::from(if arg_dir.is_empty() {
             &self.server_config.heap_profiling.dir
         } else {
@@ -153,19 +153,19 @@ impl MonitorService for MonitorServiceImpl {
         let file_path = file_path_buf
             .to_str()
             .ok_or_else(|| Status::internal("The file dir is not a UTF-8 String"))?;
+        let file_path_c =
+            CString::new(file_path).map_err(|_| Status::internal("0 byte in file path"))?;
 
-        // `file_path_str` is leaked because `prof::dump::write` requires static lifetime
-        let file_path_str = Box::leak(file_path.to_string().into_boxed_str());
-        let file_path_bytes = file_path_str.as_bytes();
-        let response = if let Err(e) = tikv_jemalloc_ctl::prof::dump::write(
-            CStr::from_bytes_with_nul(file_path_bytes).unwrap(),
-        ) {
+        // FIXME(yuhao): `unsafe` here because `jemalloc_dump_mib.write` requires static lifetime
+        if let Err(e) =
+            tikv_jemalloc_ctl::prof::dump::write(unsafe { &*(file_path_c.as_c_str() as *const _) })
+        {
             tracing::warn!("Manually Jemalloc dump heap file failed! {:?}", e);
             Err(Status::internal(e.to_string()))
         } else {
+            tracing::info!("Manually Jemalloc dump heap file created: {}", file_path);
             Ok(Response::new(HeapProfilingResponse {}))
-        };
-        response
+        }
     }
 
     #[cfg_attr(coverage, no_coverage)]

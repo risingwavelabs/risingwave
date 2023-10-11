@@ -49,7 +49,12 @@ message GeneratedColumnDesc {
 }
 
 message DefaultColumnDesc {
+  // Expression of the `DEFAULT`. Used when inserting new records.
   expr.ExprNode expr = 1;
+  // Evaluated value of the expression at the time of the table creation or the
+  // column addition. Used when filling the default value for the records where
+  // the column is missing.
+  data.Datum snapshot_value = 2;
 }
 
 message StorageTableDesc {

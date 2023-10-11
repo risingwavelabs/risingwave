@@ -104,52 +104,6 @@ pub trait FormattedSink {
     }
 }
 
-pub struct SinkWriterV1Adapter<W: SinkWriterV1> {
-    is_empty: bool,
-    epoch: u64,
-    inner: W,
-}
-
-impl<W: SinkWriterV1> SinkWriterV1Adapter<W> {
-    pub(crate) fn new(inner: W) -> Self {
-        Self {
-            inner,
-            is_empty: true,
-            epoch: u64::MIN,
-        }
-    }
-}
-
-#[async_trait]
-impl<W: SinkWriterV1> SinkWriter for SinkWriterV1Adapter<W> {
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.epoch = epoch;
-        Ok(())
-    }
-
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.is_empty {
-            self.is_empty = false;
-            self.inner.begin_epoch(self.epoch).await?;
-        }
-        self.inner.write_batch(chunk).await
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        if is_checkpoint {
-            if !self.is_empty {
-                self.inner.commit().await?
-            }
-            self.is_empty = true;
-        }
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        self.inner.abort().await
-    }
-}
-
 pub struct LogSinkerOf<W: SinkWriter<CommitMetadata = ()>> {
     writer: W,
     sink_metrics: SinkMetrics,

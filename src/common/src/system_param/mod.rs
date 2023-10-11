@@ -51,8 +51,8 @@ macro_rules! for_all_params {
             { bloom_false_positive, f64, Some(0.001_f64), false },
             { state_store, String, None, false },
             { data_directory, String, None, false },
-            { backup_storage_url, String, Some("memory".to_string()), false },
-            { backup_storage_directory, String, Some("backup".to_string()), false },
+            { backup_storage_url, String, Some("memory".to_string()), true },
+            { backup_storage_directory, String, Some("backup".to_string()), true },
             { max_concurrent_creating_streaming_jobs, u32, Some(1_u32), true },
             { pause_on_next_bootstrap, bool, Some(false), true },
         }

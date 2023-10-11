@@ -127,30 +127,30 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             Some(funcs) => funcs,
         };
         let func = funcs.choose(&mut self.rng).unwrap();
-        let can_implicit_cast = INVARIANT_FUNC_SET.contains(&func.func);
+        let can_implicit_cast = INVARIANT_FUNC_SET.contains(&func.name.as_scalar());
         let exprs: Vec<Expr> = func
             .inputs_type
             .iter()
             .map(|t| {
-                if let Some(from_tys) = IMPLICIT_CAST_TABLE.get(t)
+                if let Some(from_tys) = IMPLICIT_CAST_TABLE.get(t.as_exact())
                     && can_implicit_cast
                     && self.flip_coin()
                 {
                     let from_ty = &from_tys.choose(&mut self.rng).unwrap().from_type;
                     self.gen_implicit_cast(from_ty, context)
                 } else {
-                    self.gen_expr(t, context)
+                    self.gen_expr(t.as_exact(), context)
                 }
             })
             .collect();
         let expr = if exprs.len() == 1 {
-            make_unary_op(func.func, &exprs[0])
+            make_unary_op(func.name.as_scalar(), &exprs[0])
         } else if exprs.len() == 2 {
-            make_bin_op(func.func, &exprs)
+            make_bin_op(func.name.as_scalar(), &exprs)
         } else {
             None
         };
-        expr.or_else(|| make_general_expr(func.func, exprs))
+        expr.or_else(|| make_general_expr(func.name.as_scalar(), exprs))
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 }

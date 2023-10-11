@@ -284,9 +284,42 @@ test_foreground_sink_cancel() {
    cargo make kill
 }
 
+# Lots of upstream tombstone, backfill should still proceed.
+test_backfill_tombstone() {
+  echo "--- e2e, test_backfill_tombstone"
+  cargo make ci-start ci-backfill
+  ./risedev psql -c "
+  CREATE TABLE tomb (v1 int)
+  WITH (
+    connector = 'datagen',
+    fields.v1._.kind = 'sequence',
+    datagen.rows.per.second = '10000000'
+  )
+  FORMAT PLAIN
+  ENCODE JSON;
+  "
+
+  sleep 30
+
+  bash -c '
+    set -euo pipefail
+
+    for i in $(seq 1 1000)
+    do
+      ./risedev psql -c "DELETE FROM tomb; FLUSH;"
+      sleep 1
+    done
+  ' 1>deletes.log 2>&1 &
+
+  ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
+  echo "--- Kill cluster"
+  cargo make kill
+}
+
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
+  test_backfill_tombstone
   test_background_ddl_recovery
   test_background_ddl_cancel
   test_foreground_ddl_no_recover

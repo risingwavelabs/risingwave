@@ -46,7 +46,7 @@ impl StreamNow {
         let base = PlanBase::new_stream(
             ctx,
             schema,
-            vec![],
+            Some(vec![]),
             FunctionalDependencySet::default(),
             Distribution::Single,
             false,

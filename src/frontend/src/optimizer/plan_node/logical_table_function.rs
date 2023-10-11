@@ -64,7 +64,7 @@ impl LogicalTableFunction {
                 .push(Field::with_name(DataType::Int64, "ordinality"));
         }
         let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
+        let base = PlanBase::new_logical(ctx, schema, None, functional_dependency);
         Self {
             base,
             table_function,

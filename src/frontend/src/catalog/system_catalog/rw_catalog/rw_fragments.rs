@@ -51,9 +51,9 @@ impl SysCatalogReaderImpl {
         for i in 0..32 {
             let bit = 1 << i;
             if mask & bit != 0 {
-                match FragmentTypeFlag::from_i32(bit as i32) {
-                    None => continue,
-                    Some(flag) => result.push(flag),
+                match FragmentTypeFlag::try_from(bit as i32) {
+                    Err(_) => continue,
+                    Ok(flag) => result.push(flag),
                 };
             }
         }

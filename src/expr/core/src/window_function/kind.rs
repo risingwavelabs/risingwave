@@ -42,18 +42,18 @@ impl WindowFuncKind {
         use risingwave_pb::expr::window_function::{PbGeneralType, PbType};
 
         let kind = match window_function_type {
-            PbType::General(typ) => match PbGeneralType::from_i32(*typ) {
-                Some(PbGeneralType::Unspecified) => bail!("Unspecified window function type"),
-                Some(PbGeneralType::RowNumber) => Self::RowNumber,
-                Some(PbGeneralType::Rank) => Self::Rank,
-                Some(PbGeneralType::DenseRank) => Self::DenseRank,
-                Some(PbGeneralType::Lag) => Self::Lag,
-                Some(PbGeneralType::Lead) => Self::Lead,
-                None => bail!("no such window function type"),
+            PbType::General(typ) => match PbGeneralType::try_from(*typ) {
+                Ok(PbGeneralType::Unspecified) => bail!("Unspecified window function type"),
+                Ok(PbGeneralType::RowNumber) => Self::RowNumber,
+                Ok(PbGeneralType::Rank) => Self::Rank,
+                Ok(PbGeneralType::DenseRank) => Self::DenseRank,
+                Ok(PbGeneralType::Lag) => Self::Lag,
+                Ok(PbGeneralType::Lead) => Self::Lead,
+                Err(_) => bail!("no such window function type"),
             },
-            PbType::Aggregate(agg_type) => match PbAggType::from_i32(*agg_type) {
-                Some(agg_type) => Self::Aggregate(AggKind::from_protobuf(agg_type)?),
-                None => bail!("no such aggregate function type"),
+            PbType::Aggregate(agg_type) => match PbAggType::try_from(*agg_type) {
+                Ok(agg_type) => Self::Aggregate(AggKind::from_protobuf(agg_type)?),
+                Err(_) => bail!("no such aggregate function type"),
             },
         };
         Ok(kind)

@@ -32,5 +32,4 @@ download_and_prepare_rw "$profile" common
 
 ################ TESTS
 
-echo "--- Run backfill tests"
 ./ci/scripts/run-backfill-tests.sh

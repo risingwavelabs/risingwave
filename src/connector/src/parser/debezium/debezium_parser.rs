@@ -111,7 +111,7 @@ impl DebeziumParser {
                 if let Ok(transaction_control) = row_op.transaction_control() {
                     Ok(ParseResult::TransactionControl(transaction_control))
                 } else {
-                    Err(err)
+                    Err(err)?
                 }
             }
         }

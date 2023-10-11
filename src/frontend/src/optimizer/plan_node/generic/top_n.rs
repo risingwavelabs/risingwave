@@ -42,7 +42,7 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
         &self,
         schema: &Schema,
         ctx: OptimizerContextRef,
-        stream_key: &[usize],
+        input_stream_key: &[usize],
         vnode_col_idx: Option<usize>,
     ) -> TableCatalog {
         let columns_fields = schema.fields().to_vec();
@@ -71,7 +71,7 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
             order_cols.insert(order.column_index);
         });
 
-        stream_key.iter().for_each(|idx| {
+        input_stream_key.iter().for_each(|idx| {
             if !order_cols.contains(idx) {
                 internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending());
                 order_cols.insert(*idx);
@@ -176,7 +176,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
         if self.limit_attr.max_one_row() {
             Some(self.group_key.clone())
         } else {
-            let mut pk = self.input.stream_key().to_vec();
+            let mut pk = self.input.stream_key()?.to_vec();
             for i in &self.group_key {
                 if !pk.contains(i) {
                     pk.push(*i);
