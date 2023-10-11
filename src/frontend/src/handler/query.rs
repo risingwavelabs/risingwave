@@ -461,13 +461,10 @@ async fn distribute_execute(
         .map_err(|err| err.into())
 }
 
-#[expect(clippy::unused_async)]
 async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQueryStream> {
     let front_env = session.env();
 
-    use crate::expr::function_impl::context::CATALOG_READER;
-
-    CATALOG_READER::scope(front_env.catalog_reader().clone(), async {
+    let mut exec = || {
         // TODO: if there's no table scan, we don't need to acquire snapshot.
         let snapshot = session.pinned_snapshot();
 
@@ -482,6 +479,12 @@ async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQ
         );
 
         Ok(execution.stream_rows())
-    })
-    .await
+    };
+
+    use crate::expr::function_impl::context::{CATALOG_READER, DB_NAME};
+
+    let exec = || CATALOG_READER::sync_scope(front_env.catalog_reader().clone(), exec);
+    let exec = || DB_NAME::sync_scope(session.database().to_string(), exec);
+
+    exec()
 }

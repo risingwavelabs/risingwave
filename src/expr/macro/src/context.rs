@@ -88,6 +88,13 @@ impl DefineContextField {
                 {
                     LOCAL_KEY.scope(value, f)
                 }
+
+                pub fn sync_scope<F, R>(value: #ty, f: F) -> R
+                where
+                    F: FnOnce() -> R
+                {
+                    LOCAL_KEY.sync_scope(value, f)
+                }
             }
         })
     }
