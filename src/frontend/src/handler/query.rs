@@ -32,7 +32,6 @@ use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundStatement};
 use crate::catalog::TableId;
-use crate::expr::function_impl::context::AUTH_CONTEXT;
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
@@ -465,29 +464,11 @@ async fn distribute_execute(
 async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQueryStream> {
     let front_env = session.env();
 
-    let exec = || {
-        // TODO: if there's no table scan, we don't need to acquire snapshot.
-        let snapshot = session.pinned_snapshot();
+    // TODO: if there's no table scan, we don't need to acquire snapshot.
+    let snapshot = session.pinned_snapshot();
 
-        // TODO: Passing sql here
-        let execution = LocalQueryExecution::new(
-            query,
-            front_env.clone(),
-            "",
-            snapshot,
-            session.auth_context(),
-            session.reset_cancel_query_flag(),
-        );
+    // TODO: Passing sql here
+    let execution = LocalQueryExecution::new(query, front_env.clone(), "", snapshot, session);
 
-        Ok(execution.stream_rows())
-    };
-
-    use crate::expr::function_impl::context::{CATALOG_READER, DB_NAME, SEARCH_PATH};
-
-    let exec = || CATALOG_READER::sync_scope(front_env.catalog_reader().clone(), exec);
-    let exec = || DB_NAME::sync_scope(session.database().to_string(), exec);
-    let exec = || SEARCH_PATH::sync_scope(session.config().get_search_path(), exec);
-    let exec = || AUTH_CONTEXT::sync_scope(session.auth_context(), exec);
-
-    exec()
+    Ok(execution.stream_rows())
 }

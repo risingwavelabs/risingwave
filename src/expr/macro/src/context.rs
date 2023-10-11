@@ -166,6 +166,7 @@ pub(super) fn generate_captured_function(
     let body = &mut user_fn.block;
     let new_body = {
         let mut scoped = quote! {
+            // TODO: We can call the old function directly here.
             #body
         };
 
@@ -198,6 +199,7 @@ pub(super) fn generate_captured_function(
     };
 
     Ok(quote! {
+        #[allow(dead_code)]
         #orig_user_fn
         #new_user_fn
     })
