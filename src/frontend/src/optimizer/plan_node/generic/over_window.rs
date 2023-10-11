@@ -219,7 +219,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for OverWindow<PlanRef> {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        let mut output_pk = self.input.stream_key().to_vec();
+        let mut output_pk = self.input.stream_key()?.to_vec();
         for part_key_idx in self
             .window_functions
             .iter()

@@ -93,7 +93,7 @@ impl StreamNode for StreamGroupTopN {
             .infer_internal_table_catalog(
                 input.schema(),
                 input.ctx(),
-                input.stream_key(),
+                input.expect_stream_key(),
                 self.vnode_col_idx,
             )
             .with_id(state.gen_table_id_wrapped());

@@ -56,7 +56,7 @@ use risingwave_expr::function;
 /// ----
 /// 1
 /// ```
-#[function("generate_subscripts(list, int4, boolean) -> setof int4")]
+#[function("generate_subscripts(anyarray, int4, boolean) -> setof int4")]
 fn generate_subscripts_reverse(
     array: ListRef<'_>,
     dim: i32,
@@ -104,7 +104,7 @@ fn generate_subscripts_reverse(
 /// ----
 /// 1
 /// ```
-#[function("generate_subscripts(list, int4) -> setof int4")]
+#[function("generate_subscripts(anyarray, int4) -> setof int4")]
 fn generate_subscripts(array: ListRef<'_>, dim: i32) -> impl Iterator<Item = i32> {
     generate_subscripts_iterator(array, dim, false)
 }
