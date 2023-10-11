@@ -12,9 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use risingwave_common::session_config::SearchPath;
 use risingwave_expr::define_context;
+
+use crate::session::AuthContext;
 
 define_context! {
     pub(in crate::expr::function_impl) CATALOG_READER: crate::catalog::CatalogReader,
+    pub(in crate::expr::function_impl) AUTH_CONTEXT: Arc<AuthContext>,
     pub(in crate::expr::function_impl) DB_NAME: String,
+    pub(in crate::expr::function_impl) SEARCH_PATH: SearchPath,
 }

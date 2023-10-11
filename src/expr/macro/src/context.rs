@@ -69,6 +69,7 @@ impl DefineContextField {
         Ok(quote! {
             #[allow(non_snake_case)]
             pub mod #name {
+                use super::*;
                 pub type Type = #ty;
 
                 tokio::task_local! {
