@@ -44,6 +44,11 @@ impl CompactionSelector for TombstoneCompactionSelector {
         _selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactionTask> {
+        if group.compaction_config.tombstone_reclaim_ratio == 0 {
+            // it might cause full-compaction when tombstone_reclaim_ratio == 0
+            return None;
+        }
+
         let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
         let picker = TombstoneReclaimCompactionPicker::new(
