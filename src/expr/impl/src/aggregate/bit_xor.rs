@@ -16,7 +16,7 @@ use std::ops::BitXor;
 
 use risingwave_expr::aggregate;
 
-/// Computes the bitwise OR of all non-null input values.
+/// Computes the bitwise XOR of all non-null input values.
 ///
 /// # Example
 ///

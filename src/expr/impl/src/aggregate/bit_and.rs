@@ -65,9 +65,9 @@ where
 ///
 /// statement ok
 /// create materialized view mv as
-/// select bit_and(a), bit_and(b), bit_and(c) from t;
+/// select bit_and(a) a, bit_and(b) b, bit_and(c) c from t;
 ///
-/// query I
+/// query III
 /// select * from mv;
 /// ----
 /// NULL NULL NULL
@@ -78,7 +78,7 @@ where
 ///    (3, 3, 3),
 ///    (null, null, null);
 ///
-/// query I
+/// query III
 /// select * from mv;
 /// ----
 /// 2 2 2
@@ -86,7 +86,7 @@ where
 /// statement ok
 /// delete from t where a = 3;
 ///
-/// query I
+/// query III
 /// select * from mv;
 /// ----
 /// 6 6 6
