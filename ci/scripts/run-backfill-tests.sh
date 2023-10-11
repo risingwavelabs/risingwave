@@ -72,8 +72,7 @@ test_backfill_tombstone() {
       ./risedev psql -c "DELETE FROM tomb; FLUSH;"
       sleep 1
     done
-  '
-  ./backfill-deletes.sh 1>.risingwave/log/backfill-deletes.log 2>&1 &
+  ' 1>deletes.log 2>&1 &
 
   ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
