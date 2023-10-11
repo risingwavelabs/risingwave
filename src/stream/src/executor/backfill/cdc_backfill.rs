@@ -227,6 +227,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         #[allow(unused_variables)]
         let mut total_snapshot_processed_rows: u64 = 0;
 
+        // Read the current binlog offset as a low watermark
         let mut last_binlog_offset: Option<CdcOffset> =
             upstream_table_reader.current_binlog_offset().await?;
 
@@ -441,20 +442,23 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     }
                 }
             }
-        } else {
-            if is_snapshot_empty {
-                Self::write_backfill_state(
-                    &mut self.source_state_handler,
-                    upstream_table_id,
-                    &split_id,
-                    &mut cdc_split,
-                    last_binlog_offset,
-                )
-                .await?;
-            }
+        } else if is_snapshot_empty {
+            tracing::info!(
+                upstream_table_id,
+                initial_binlog_offset = ?last_binlog_offset,
+                "upstream snapshot is empty, mark backfill is done and persist current binlog offset");
+
+            Self::write_backfill_state(
+                &mut self.source_state_handler,
+                upstream_table_id,
+                &split_id,
+                &mut cdc_split,
+                last_binlog_offset,
+            )
+            .await?;
         }
 
-        tracing::debug!(
+        tracing::info!(
             actor = self.actor_id,
             "CdcBackfill has already finished and forward messages directly to the downstream"
         );
