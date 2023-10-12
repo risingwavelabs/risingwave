@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
-use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
+use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType};
 use tokio::sync::oneshot::Receiver;
 
 use super::task_progress::TaskProgress;
@@ -47,8 +47,8 @@ use crate::hummock::iterator::{
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator,
-    CompressionAlgorithm, GetObjectId, HummockResult, MonotonicDeleteEvent, SstableBuilderOptions,
+    BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator, CompressionAlgorithm,
+    GetObjectId, HummockResult, MonotonicDeleteEvent, SstableBuilderOptions,
     SstableDeleteRangeIterator, SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
@@ -293,7 +293,7 @@ pub async fn compact(
         ])
         .start_timer();
 
-    let mut multi_filter = build_multi_compaction_filter(&compact_task);
+    let multi_filter = build_multi_compaction_filter(&compact_task);
 
     let mut compact_table_ids = compact_task
         .input_ssts
@@ -719,15 +719,16 @@ where
 
         let target_extended_user_key = PointRange::from_user_key(iter_key.user_key, false);
         while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
+            let event_key = del_iter.key().to_vec();
+            del_iter.next().await?;
             if !task_config.gc_delete_keys {
                 sst_builder
                     .add_monotonic_delete(MonotonicDeleteEvent {
-                        event_key: del_iter.key().to_vec(),
                         new_epoch: del_iter.earliest_epoch(),
+                        event_key,
                     })
                     .await?;
             }
-            del_iter.next().await?;
         }
         let earliest_range_delete_which_can_see_iter_key = del_iter.earliest_delete_since(epoch);
 
@@ -812,9 +813,7 @@ where
 
         let end_key_ref = extended_largest_user_key.as_ref();
         while del_iter.is_valid() {
-            if !end_key_ref.is_empty()
-                && del_iter.key().ge(&end_key_ref)
-            {
+            if !end_key_ref.is_empty() && del_iter.key().ge(&end_key_ref) {
                 sst_builder
                     .add_monotonic_delete(MonotonicDeleteEvent {
                         event_key: extended_largest_user_key,
@@ -823,13 +822,14 @@ where
                     .await?;
                 break;
             }
+            let event_key = del_iter.key().to_vec();
+            del_iter.next().await?;
             sst_builder
                 .add_monotonic_delete(MonotonicDeleteEvent {
-                    event_key: del_iter.key().to_vec(),
                     new_epoch: del_iter.earliest_epoch(),
+                    event_key,
                 })
                 .await?;
-            del_iter.next().await?;
         }
     }
 
@@ -860,9 +860,9 @@ mod tests {
     use crate::hummock::compactor::StateCleanUpCompactionFilter;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable_with_range_tombstone,
+        default_builder_opt_for_test, gen_test_sstable_impl, gen_test_sstable_with_range_tombstone,
     };
-    use crate::hummock::{create_monotonic_events, DeleteRangeTombstone};
+    use crate::hummock::{create_monotonic_events, DeleteRangeTombstone, Xor16FilterBuilder};
 
     #[tokio::test]
     async fn test_delete_range_aggregator_with_filter() {
@@ -893,15 +893,15 @@ mod tests {
         .get_sstable_info();
         sstable_info_1.table_ids = vec![1];
 
-        let mut sstable_info_2 = gen_test_sstable_with_range_tombstone(
+        let mut sstable_info_2 = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
             default_builder_opt_for_test(),
             2,
             kv_pairs.into_iter(),
             range_tombstones.clone(),
             sstable_store.clone(),
+            CachePolicy::NotFill,
         )
-        .await
-        .get_sstable_info();
+        .await;
         sstable_info_2.table_ids = vec![2];
 
         let compact_task = CompactTask {
@@ -930,12 +930,25 @@ mod tests {
             .cloned()
             .collect_vec();
 
-        // TODO: create delete range iterator
-        unimplemented!("add delete range iterator");
-        let ret = collector.get_tombstone_between(
-            UserKey::<Bytes>::default().as_ref(),
-            UserKey::<Bytes>::default().as_ref(),
-        );
+        let mut iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
+        iter.add_concat_iter(sstable_infos, sstable_store);
+
+        let ret = CompactionDeleteRangeIterator::new(iter)
+            .get_tombstone_between(
+                UserKey::<Bytes>::default().as_ref(),
+                UserKey::<Bytes>::default().as_ref(),
+            )
+            .await
+            .unwrap();
+        let ret = ret
+            .into_iter()
+            .filter(|event| {
+                !state_clean_up_filter.should_delete(FullKey::from_user_key(
+                    event.event_key.left_user_key.as_ref(),
+                    event.new_epoch,
+                ))
+            })
+            .collect_vec();
 
         assert_eq!(
             ret,

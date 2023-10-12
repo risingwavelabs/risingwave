@@ -27,14 +27,18 @@ use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
-    HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
-    DEFAULT_RESTART_INTERVAL,
+    HummockResult, InMemWriter, SstableMeta, SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
 };
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
+use crate::hummock::iterator::ForwardMergeRangeIterator;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BlockedXor16FilterBuilder, CachePolicy, create_monotonic_events, DeleteRangeTombstone, FilterBuilder, LruCache, Sstable, SstableBuilder, SstableBuilderOptions, SstableStoreRef, SstableWriter, Xor16FilterBuilder};
+use crate::hummock::{
+    create_monotonic_events, BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator,
+    DeleteRangeTombstone, FilterBuilder, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
+    SstableStoreRef, SstableWriter, Xor16FilterBuilder,
+};
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
 use crate::storage_value::StorageValue;
@@ -387,4 +391,34 @@ pub async fn count_stream<T>(s: impl Stream<Item = StorageResult<T>> + Send) -> 
 
 pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableObjectId, Box<Sstable>>> {
     Arc::new(LruCache::new(1, 4, 0))
+}
+
+#[derive(Default)]
+pub struct CompactionDeleteRangesBuilder {
+    iter: ForwardMergeRangeIterator,
+}
+
+impl CompactionDeleteRangesBuilder {
+    pub fn add_delete_events(
+        &mut self,
+        epoch: HummockEpoch,
+        table_id: TableId,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+    ) {
+        let size = SharedBufferBatch::measure_delete_range_size(&delete_ranges);
+        let batch = SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            vec![],
+            size,
+            delete_ranges,
+            table_id,
+            None,
+            None,
+        );
+        self.iter.add_batch_iter(batch.delete_range_iter());
+    }
+
+    pub fn build_for_compaction(self) -> CompactionDeleteRangeIterator {
+        CompactionDeleteRangeIterator::new(self.iter)
+    }
 }

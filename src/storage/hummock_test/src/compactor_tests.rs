@@ -62,10 +62,9 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::test_utils::gen_test_sstable_info;
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
-        CachePolicy, CompressionAlgorithm,
-        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
-        SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions, SstableIteratorReadOptions,
-        SstableObjectIdManager,
+        CachePolicy, CompressionAlgorithm, HummockStorage as GlobalHummockStorage, HummockStorage,
+        MemoryLimiter, SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions,
+        SstableIteratorReadOptions, SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
     use risingwave_storage::opts::StorageOpts;

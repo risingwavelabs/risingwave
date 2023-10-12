@@ -434,6 +434,7 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
 #[cfg(test)]
 mod tests {
     use std::ops::Bound;
+
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
@@ -442,12 +443,10 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
-    use crate::hummock::{
-        create_monotonic_events, DeleteRangeTombstone,
-        SstableBuilderOptions, DEFAULT_RESTART_INTERVAL,
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, test_key_of, test_user_key_of, CompactionDeleteRangesBuilder,
     };
-    use crate::hummock::sstable::delete_range_aggregator::CompactionDeleteRangesBuilder;
+    use crate::hummock::{SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
     #[tokio::test]
     async fn test_empty() {
@@ -561,23 +560,32 @@ mod tests {
         let opts = default_builder_opt_for_test();
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
-        builder.add_delete_events(100, table_id, vec![
-            (Bound::Included(Bytes::copy_from_slice(&[VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"]
-                .concat())),
-            Bound::Excluded(
-                Bytes::copy_from_slice(&[VirtualNode::ZERO.to_be_bytes().as_slice(), b"kkk"]
-                    .concat())
-            ))
-        ]);
-        builder.add_delete_events(200, table_id, vec![
-            (Bound::Included(Bytes::copy_from_slice(&[VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"]
-                .concat())),
-             Bound::Excluded(
-                 Bytes::copy_from_slice(&[VirtualNode::ZERO.to_be_bytes().as_slice(), b"dd"]
-                     .concat())
-             ))
-        ]);
-        let del_iter = builder.build_for_compaction();
+        builder.add_delete_events(
+            100,
+            table_id,
+            vec![(
+                Bound::Included(Bytes::copy_from_slice(
+                    &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"].concat(),
+                )),
+                Bound::Excluded(Bytes::copy_from_slice(
+                    &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"kkk"].concat(),
+                )),
+            )],
+        );
+        builder.add_delete_events(
+            200,
+            table_id,
+            vec![(
+                Bound::Included(Bytes::copy_from_slice(
+                    &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"aaa"].concat(),
+                )),
+                Bound::Excluded(Bytes::copy_from_slice(
+                    &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"ddd"].concat(),
+                )),
+            )],
+        );
+        let mut del_iter = builder.build_for_compaction();
+        del_iter.rewind().await.unwrap();
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
@@ -593,28 +601,30 @@ mod tests {
         );
         let target_extended_user_key = PointRange::from_user_key(full_key.user_key.as_ref(), false);
         while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
+            let event_key = del_iter.key().to_vec();
+            del_iter.next().await.unwrap();
             builder
                 .add_monotonic_delete(MonotonicDeleteEvent {
-                    event_key: del_iter.key().clone(),
                     new_epoch: del_iter.earliest_epoch(),
+                    event_key,
                 })
                 .await
                 .unwrap();
-            del_iter.next().await?;
         }
         builder
             .add_full_key(full_key.to_ref(), HummockValue::put(b"v"), false)
             .await
             .unwrap();
         while del_iter.is_valid() {
+            let event_key = del_iter.key().to_vec();
+            del_iter.next().await.unwrap();
             builder
                 .add_monotonic_delete(MonotonicDeleteEvent {
-                    event_key: del_iter.key().clone(),
+                    event_key,
                     new_epoch: del_iter.earliest_epoch(),
                 })
                 .await
                 .unwrap();
-            del_iter.next().await?;
         }
         let mut sst_infos = builder.finish().await.unwrap();
         let key_range = sst_infos
@@ -657,12 +667,23 @@ mod tests {
         };
         let table_id = TableId::new(1);
         let mut builder = CompactionDeleteRangesBuilder::default();
-        builder.add_delete_events(create_monotonic_events(vec![
-            DeleteRangeTombstone::new_for_test(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
-            DeleteRangeTombstone::new_for_test(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
-        ]));
-        let agg = builder.build_for_compaction();
-        let mut del_iter = agg.iter();
+        builder.add_delete_events(
+            100,
+            table_id,
+            vec![(
+                Bound::Included(Bytes::copy_from_slice(b"k")),
+                (Bound::Excluded(Bytes::copy_from_slice(b"kkk"))),
+            )],
+        );
+        builder.add_delete_events(
+            200,
+            table_id,
+            vec![(
+                Bound::Included(Bytes::copy_from_slice(b"aaa")),
+                (Bound::Excluded(Bytes::copy_from_slice(b"ddd"))),
+            )],
+        );
+        let mut del_iter = builder.build_for_compaction();
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
@@ -671,17 +692,18 @@ mod tests {
             false,
             0,
         );
+        del_iter.rewind().await.unwrap();
         assert_eq!(del_iter.earliest_epoch(), HummockEpoch::MAX);
         while del_iter.is_valid() {
-            del_iter.update_range();
+            let event_key = del_iter.key().to_vec();
+            del_iter.next().await.unwrap();
             builder
                 .add_monotonic_delete(MonotonicDeleteEvent {
-                    event_key: del_iter.key().clone(),
                     new_epoch: del_iter.earliest_epoch(),
+                    event_key,
                 })
                 .await
                 .unwrap();
-            del_iter.next();
         }
 
         let results = builder.finish().await.unwrap();

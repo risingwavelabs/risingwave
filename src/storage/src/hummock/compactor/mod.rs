@@ -69,8 +69,7 @@ pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, Tas
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockResult, SstableBuilderOptions,
-    SstableObjectIdManager, Xor16FilterBuilder,
+    GetObjectId, HummockResult, SstableBuilderOptions, SstableObjectIdManager, Xor16FilterBuilder,
 };
 use crate::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, StaticFilterKeyExtractorManager,

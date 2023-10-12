@@ -44,7 +44,11 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator, GetObjectId, HummockError, HummockResult, SstableBuilderOptions, SstableObjectIdManagerRef, MonotonicDeleteEvent};
+use crate::hummock::{
+    BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator, GetObjectId,
+    HummockError, HummockResult, MonotonicDeleteEvent, SstableBuilderOptions,
+    SstableObjectIdManagerRef,
+};
 use crate::mem_table::ImmutableMemtable;
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
@@ -376,12 +380,9 @@ pub async fn merge_imms_in_memory(
         .map(|((k, _), _)| k.clone())
         .unwrap_or_default();
     let mut monotonic_tombstone_events = vec![];
-    let target_extended_user_key = PointRange::from_user_key(UserKey::new(table_id, TableKey(pivot.as_ref())), false);
-    while del_iter.is_valid()
-        &&
-        del_iter.key()
-        .le(&target_extended_user_key)
-    {
+    let target_extended_user_key =
+        PointRange::from_user_key(UserKey::new(table_id, TableKey(pivot.as_ref())), false);
+    while del_iter.is_valid() && del_iter.key().le(&target_extended_user_key) {
         del_iter.next().await?;
         monotonic_tombstone_events.push(MonotonicDeleteEvent {
             event_key: del_iter.key().to_vec(),
@@ -400,11 +401,9 @@ pub async fn merge_imms_in_memory(
             pivot = key;
             pivot_last_delete_epoch = HummockEpoch::MAX;
             versions = vec![];
-            let target_extended_user_key = PointRange::from_user_key(UserKey::new(table_id, TableKey(pivot.as_ref())),false);
-            while del_iter.is_valid()
-                && del_iter.key()
-                    .le(&target_extended_user_key)
-            {
+            let target_extended_user_key =
+                PointRange::from_user_key(UserKey::new(table_id, TableKey(pivot.as_ref())), false);
+            while del_iter.is_valid() && del_iter.key().le(&target_extended_user_key) {
                 del_iter.next().await?;
                 monotonic_tombstone_events.push(MonotonicDeleteEvent {
                     event_key: del_iter.key().to_vec(),
@@ -412,9 +411,8 @@ pub async fn merge_imms_in_memory(
                 });
             }
         }
-        let earliest_range_delete_which_can_see_key =
-            del_iter.earliest_delete_since(epoch);
-            if value.is_delete() {
+        let earliest_range_delete_which_can_see_key = del_iter.earliest_delete_since(epoch);
+        if value.is_delete() {
             pivot_last_delete_epoch = epoch;
         } else if earliest_range_delete_which_can_see_key < pivot_last_delete_epoch {
             debug_assert!(

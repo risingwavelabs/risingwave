@@ -58,17 +58,17 @@ pub use delete_range_aggregator::{
     SstableDeleteRangeIterator,
 };
 pub use filter::FilterBuilder;
+use itertools::Itertools;
 pub use sstable_object_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};
 
-use itertools::Itertools;
 use self::delete_range_aggregator::{apply_event, CompactionDeleteRangeEvent};
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
-use crate::hummock::CachePolicy;
 use crate::hummock::sstable::delete_range_aggregator::TombstoneEnterExitEvent;
+use crate::hummock::CachePolicy;
 use crate::store::ReadOptions;
 
 const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
@@ -221,16 +221,13 @@ fn create_monotonic_events_from_compaction_delete_events(
     monotonic_tombstone_events
 }
 
-
 /// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges
 /// `{ [0, wmk1) in epoch1, [wmk1, wmk2) in epoch2, [wmk2, wmk3) in epoch3 }`
 /// can be transformed into events below:
 /// `{ <0, +epoch1> <wmk1, -epoch1> <wmk1, +epoch2> <wmk2, -epoch2> <wmk2, +epoch3> <wmk3,
 /// -epoch3> }`
 #[cfg(any(test, feature = "test"))]
-fn build_events(
-    delete_tombstones: &Vec<DeleteRangeTombstone>,
-) -> Vec<CompactionDeleteRangeEvent> {
+fn build_events(delete_tombstones: &Vec<DeleteRangeTombstone>) -> Vec<CompactionDeleteRangeEvent> {
     let tombstone_len = delete_tombstones.len();
     let mut events = Vec::with_capacity(tombstone_len * 2);
     for DeleteRangeTombstone {
