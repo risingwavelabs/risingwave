@@ -35,6 +35,10 @@ pub trait SinkFormatter {
     type K;
     type V;
 
+    /// * Key may be None so that messages are partitioned using round-robin.
+    /// For example append-only without `primary_key` (aka `downstream_pk`) set.
+    /// * Value may be None so that messages with same key are removed during log compaction.
+    /// For example debezium tombstone event.
     fn format_chunk(
         &self,
         chunk: &StreamChunk,
@@ -80,11 +84,13 @@ impl SinkFormatterImpl {
 
         match format_desc.format {
             SinkFormat::AppendOnly => {
-                let key_encoder = JsonEncoder::new(
-                    schema.clone(),
-                    Some(pk_indices),
-                    TimestampHandlingMode::Milli,
-                );
+                let key_encoder = (!pk_indices.is_empty()).then(|| {
+                    JsonEncoder::new(
+                        schema.clone(),
+                        Some(pk_indices),
+                        TimestampHandlingMode::Milli,
+                    )
+                });
                 let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
 
                 let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
