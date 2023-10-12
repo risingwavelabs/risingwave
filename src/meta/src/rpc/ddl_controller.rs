@@ -765,10 +765,6 @@ impl DdlController {
                         .cancel_create_table_procedure_with_source(source, table)
                         .await;
                 } else {
-                    // FIXME: Perhaps we still need to do some cleanup here???
-                    // Or we need to revert the cancel table, and only drop
-                    // the tables from meta store in barrier manager,
-                    // and do other cleanups here?
                     let result = self
                         .catalog_manager
                         .cancel_create_table_procedure_with_internal_table_ids(

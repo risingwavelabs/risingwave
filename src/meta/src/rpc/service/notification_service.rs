@@ -138,7 +138,6 @@ impl NotificationServiceImpl {
         }
     }
 
-    /// HERE
     async fn frontend_subscribe(&self) -> MetaSnapshot {
         let (
             (databases, schemas, tables, sources, sinks, indexes, views, functions, connections),
