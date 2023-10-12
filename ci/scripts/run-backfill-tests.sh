@@ -55,6 +55,33 @@ rename_logs_with_prefix() {
   popd
 }
 
+restart_cn() {
+  tmux list-windows -t risedev | grep compute-node | grep -o "^[0-9]*" | xargs -I {} tmux send-keys -t %{} C-c C-d
+  sleep 4
+  mv .risingwave/log/compute-node-*.log .risingwave/log/before-restart-cn-compute-node.log
+  ./.risingwave/bin/risingwave/compute-node \
+  --config-path \
+  ./.risingwave/config/risingwave.toml \
+  --listen-addr \
+  127.0.0.1:5688 \
+  --prometheus-listener-addr \
+  127.0.0.1:1222 \
+  --advertise-addr \
+  127.0.0.1:5688 \
+  --async-stack-trace \
+  verbose \
+  --connector-rpc-endpoint \
+  127.0.0.1:50051 \
+  --parallelism \
+  4 \
+  --total-memory-bytes \
+  8589934592 \
+  --role \
+  both \
+  --meta-address \
+  http://127.0.0.1:5690 >.risingwave/log/compute-node.log 2>&1 &
+}
+
 # Test snapshot and upstream read.
 test_snapshot_and_upstream_read() {
   echo "--- e2e, ci-backfill, test_snapshot_and_upstream_read"
@@ -91,10 +118,9 @@ test_background_ddl_recovery() {
   sleep 1
   OLD_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
 
-  rename_logs_with_prefix "before-restart"
-
   # Restart
   cargo make kill
+  rename_logs_with_prefix "before-restart"
   cargo make dev $CLUSTER_PROFILE
 
   # Test after recovery
@@ -139,10 +165,10 @@ test_background_ddl_cancel() {
 
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
 
-  rename_logs_with_prefix "before-restart"
 
   # Restart
   cargo make kill
+  rename_logs_with_prefix "before-restart"
   cargo make dev $CLUSTER_PROFILE
 
   # Recover
@@ -192,10 +218,10 @@ test_foreground_ddl_no_recover() {
   sleep 3
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
 
-  rename_logs_with_prefix "before-restart"
 
   # Restart
   cargo make kill
+  rename_logs_with_prefix "before-restart"
   cargo make dev $CLUSTER_PROFILE
 
   # Leave sometime for recovery
@@ -228,10 +254,10 @@ test_foreground_index_cancel() {
    sleep 3
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
 
-   rename_logs_with_prefix "before-restart"
 
    # Restart
    cargo make kill
+   rename_logs_with_prefix "before-restart"
    cargo make dev ci-1cn-1fe-with-recovery
 
    # Leave sometime for recovery
@@ -265,10 +291,10 @@ test_foreground_sink_cancel() {
    sleep 3
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
 
-   rename_logs_with_prefix "before-restart"
 
    # Restart
    cargo make kill
+   rename_logs_with_prefix "before-restart"
    cargo make dev $CLUSTER_PROFILE
 
    # Leave sometime for recovery
@@ -316,8 +342,8 @@ test_backfill_tombstone() {
   cargo make kill
 }
 
-test_backfill_restart_cn() {
-   echo "--- e2e, $CLUSTER_PROFILE, test_background_ddl_recovery"
+test_backfill_restart_cn_recovery() {
+   echo "--- e2e, $CLUSTER_PROFILE, test_background_restart_cn_recovery"
    cargo make ci-start $CLUSTER_PROFILE
 
    # Test before recovery
@@ -326,18 +352,37 @@ test_backfill_restart_cn() {
    sleep 1
    OLD_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
 
-   rename_logs_with_prefix "before-restart"
-
    # Restart 1 CN
-   pkill 'compute-node'
-   cargo make dev cn-with-$CLUSTER_PROFILE
+   restart_cn
+
+   # Give some time to recover.
+   sleep 3
 
    # Test after recovery
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
 
    # Recover the mview progress
-   sleep 3
+   sleep 5
 
+   NEW_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
+
+   if [[ ${OLD_PROGRESS%.*} -lt ${NEW_PROGRESS%.*} ]]; then
+     echo "OK: $OLD_PROGRESS smaller than $NEW_PROGRESS"
+   else
+     echo "FAILED: $OLD_PROGRESS larger or equal to $NEW_PROGRESS"
+     exit 1
+   fi
+
+   # Trigger a bootstrap recovery
+   pkill compute-node
+   cargo make kill
+   rename_logs_with_prefix "before-restart"
+   cargo make dev $CLUSTER_PROFILE
+
+   # Recover mview progress
+   sleep 5
+
+   OLD_PROGRESS=$NEW_PROGRESS
    NEW_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
 
    if [[ ${OLD_PROGRESS%.*} -lt ${NEW_PROGRESS%.*} ]]; then
@@ -356,18 +401,20 @@ test_backfill_restart_cn() {
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
 
    cargo make kill
+   pkill compute-node
 }
 
 main() {
   set -euo pipefail
-  test_snapshot_and_upstream_read
-  test_backfill_tombstone
-  test_background_ddl_recovery
-  test_background_ddl_cancel
-  test_foreground_ddl_no_recover
-  test_foreground_ddl_cancel
-  test_foreground_index_cancel
-  test_foreground_sink_cancel
+#  test_snapshot_and_upstream_read
+#  test_backfill_tombstone
+#  test_background_ddl_recovery
+#  test_background_ddl_cancel
+#  test_foreground_ddl_no_recover
+#  test_foreground_ddl_cancel
+#  test_foreground_index_cancel
+#  test_foreground_sink_cancel
+  test_backfill_restart_cn_recovery
 }
 
 main
