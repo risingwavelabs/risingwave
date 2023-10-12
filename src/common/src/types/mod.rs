@@ -352,6 +352,14 @@ impl DataType {
         DataTypeName::from(self).is_scalar()
     }
 
+    pub fn is_array(&self) -> bool {
+        matches!(self, DataType::List(_))
+    }
+
+    pub fn is_struct(&self) -> bool {
+        matches!(self, DataType::Struct(_))
+    }
+
     pub fn is_int(&self) -> bool {
         matches!(self, DataType::Int16 | DataType::Int32 | DataType::Int64)
     }
@@ -950,7 +958,21 @@ impl ScalarImpl {
         };
         Ok(res)
     }
+}
 
+impl From<ScalarRefImpl<'_>> for ScalarImpl {
+    fn from(scalar_ref: ScalarRefImpl<'_>) -> Self {
+        scalar_ref.into_scalar_impl()
+    }
+}
+
+impl<'a> From<&'a ScalarImpl> for ScalarRefImpl<'a> {
+    fn from(scalar: &'a ScalarImpl) -> Self {
+        scalar.as_scalar_ref_impl()
+    }
+}
+
+impl ScalarImpl {
     /// A lite version of casting from string to target type. Used by frontend to handle types that have
     /// to be created by casting.
     ///

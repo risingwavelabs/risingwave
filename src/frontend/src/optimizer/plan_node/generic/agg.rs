@@ -24,7 +24,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
-use risingwave_expr::sig::agg::AGG_FUNC_SIG_MAP;
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
@@ -488,15 +488,15 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .iter()
             .zip_eq_fast(&mut out_fields[self.group_key.len()..])
         {
-            let sig = AGG_FUNC_SIG_MAP
-                .get(
+            let sig = FUNCTION_REGISTRY
+                .get_aggregate(
                     agg_call.agg_kind,
                     &agg_call
                         .inputs
                         .iter()
-                        .map(|input| (&input.data_type).into())
+                        .map(|input| input.data_type.clone())
                         .collect_vec(),
-                    (&agg_call.return_type).into(),
+                    &agg_call.return_type,
                     in_append_only,
                 )
                 .expect("agg not found");
@@ -505,7 +505,10 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 // for backward compatibility, the state type is same as the return type.
                 // its values in the intermediate state table are always null.
             } else {
-                field.data_type = sig.state_type.into();
+                field.data_type = sig
+                    .state_type
+                    .clone()
+                    .unwrap_or(sig.ret_type.as_exact().clone());
             }
         }
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();

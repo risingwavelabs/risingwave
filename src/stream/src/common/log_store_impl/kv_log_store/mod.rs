@@ -174,7 +174,7 @@ pub struct KvLogStoreFactory<S: StateStore> {
 
     vnodes: Option<Arc<Bitmap>>,
 
-    max_stream_chunk_count: usize,
+    max_row_count: usize,
 
     metrics: KvLogStoreMetrics,
 }
@@ -184,14 +184,14 @@ impl<S: StateStore> KvLogStoreFactory<S> {
         state_store: S,
         table_catalog: Table,
         vnodes: Option<Arc<Bitmap>>,
-        max_stream_chunk_count: usize,
+        max_row_count: usize,
         metrics: KvLogStoreMetrics,
     ) -> Self {
         Self {
             state_store,
             table_catalog,
             vnodes,
-            max_stream_chunk_count,
+            max_row_count,
             metrics,
         }
     }
@@ -218,7 +218,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             })
             .await;
 
-        let (tx, rx) = new_log_store_buffer(self.max_stream_chunk_count);
+        let (tx, rx) = new_log_store_buffer(self.max_row_count);
 
         let reader = KvLogStoreReader::new(
             table_id,
@@ -236,7 +236,10 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::future::{poll_fn, Future};
+    use std::pin::pin;
     use std::sync::Arc;
+    use std::task::Poll;
 
     use risingwave_common::buffer::{Bitmap, BitmapBuilder};
     use risingwave_common::hash::VirtualNode;
@@ -251,18 +254,18 @@ mod tests {
 
     use crate::common::log_store_impl::kv_log_store::test_utils::{
         calculate_vnode_bitmap, check_rows_eq, check_stream_chunk_eq,
-        gen_multi_vnode_stream_chunks, gen_stream_chunk, gen_test_log_store_table,
+        gen_multi_vnode_stream_chunks, gen_stream_chunk, gen_test_log_store_table, TEST_DATA_SIZE,
     };
     use crate::common::log_store_impl::kv_log_store::{KvLogStoreFactory, KvLogStoreMetrics};
 
     #[tokio::test]
     async fn test_basic() {
         for count in 0..20 {
-            test_basic_inner(count).await
+            test_basic_inner(count * TEST_DATA_SIZE).await
         }
     }
 
-    async fn test_basic_inner(max_stream_chunk_count: usize) {
+    async fn test_basic_inner(max_row_count: usize) {
         let test_env = prepare_hummock_test_env().await;
 
         let table = gen_test_log_store_table();
@@ -277,7 +280,7 @@ mod tests {
             test_env.storage.clone(),
             table.clone(),
             Some(Arc::new(bitmap)),
-            max_stream_chunk_count,
+            max_row_count,
             KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -350,11 +353,11 @@ mod tests {
     #[tokio::test]
     async fn test_recovery() {
         for count in 0..20 {
-            test_recovery_inner(count).await
+            test_recovery_inner(count * TEST_DATA_SIZE).await
         }
     }
 
-    async fn test_recovery_inner(max_stream_chunk_count: usize) {
+    async fn test_recovery_inner(max_row_count: usize) {
         let test_env = prepare_hummock_test_env().await;
 
         let table = gen_test_log_store_table();
@@ -370,7 +373,7 @@ mod tests {
             test_env.storage.clone(),
             table.clone(),
             Some(bitmap.clone()),
-            max_stream_chunk_count,
+            max_row_count,
             KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -456,7 +459,7 @@ mod tests {
             test_env.storage.clone(),
             table.clone(),
             Some(bitmap),
-            max_stream_chunk_count,
+            max_row_count,
             KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -514,7 +517,7 @@ mod tests {
         }
     }
 
-    async fn test_truncate_inner(max_stream_chunk_count: usize) {
+    async fn test_truncate_inner(max_row_count: usize) {
         let test_env = prepare_hummock_test_env().await;
 
         let table = gen_test_log_store_table();
@@ -538,7 +541,7 @@ mod tests {
             test_env.storage.clone(),
             table.clone(),
             Some(bitmap.clone()),
-            max_stream_chunk_count,
+            max_row_count,
             KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -648,7 +651,7 @@ mod tests {
             test_env.storage.clone(),
             table.clone(),
             Some(bitmap),
-            max_stream_chunk_count,
+            max_row_count,
             KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -739,14 +742,14 @@ mod tests {
             test_env.storage.clone(),
             table.clone(),
             Some(vnodes1),
-            10,
+            10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
         );
         let factory2 = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
             Some(vnodes2),
-            10,
+            10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
         );
         let (mut reader1, mut writer1) = factory1.build().await;
@@ -865,7 +868,7 @@ mod tests {
             test_env.storage.clone(),
             table.clone(),
             Some(vnodes),
-            10,
+            10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -899,6 +902,72 @@ mod tests {
             (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
                 assert_eq!(epoch, epoch2);
                 assert!(is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cancellation_safe() {
+        let test_env = prepare_hummock_test_env().await;
+
+        let table = gen_test_log_store_table();
+
+        test_env.register_table(table.clone()).await;
+
+        let stream_chunk1 = gen_stream_chunk(0);
+        let stream_chunk2 = gen_stream_chunk(10);
+        let bitmap = calculate_vnode_bitmap(stream_chunk1.rows().chain(stream_chunk2.rows()));
+
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            table.clone(),
+            Some(Arc::new(bitmap)),
+            0,
+            KvLogStoreMetrics::for_test(),
+        );
+        let (mut reader, mut writer) = factory.build().await;
+
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .version()
+            .max_committed_epoch
+            + 1;
+        writer
+            .init(EpochPair::new_test_epoch(epoch1))
+            .await
+            .unwrap();
+        writer.write_chunk(stream_chunk1.clone()).await.unwrap();
+        let epoch2 = epoch1 + 1;
+        writer.flush_current_epoch(epoch2, true).await.unwrap();
+
+        reader.init().await.unwrap();
+
+        {
+            let mut future = pin!(reader.next_item());
+            assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+                .await
+                .is_pending());
+        }
+
+        match reader.next_item().await.unwrap() {
+            (
+                epoch,
+                LogStoreReadItem::StreamChunk {
+                    chunk: read_stream_chunk,
+                    ..
+                },
+            ) => {
+                assert_eq!(epoch, epoch1);
+                assert!(check_stream_chunk_eq(&stream_chunk1, &read_stream_chunk));
+            }
+            _ => unreachable!(),
+        }
+        match reader.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(is_checkpoint)
             }
             _ => unreachable!(),
         }
