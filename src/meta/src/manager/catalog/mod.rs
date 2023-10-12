@@ -762,11 +762,7 @@ impl CatalogManager {
     ///    1. `stream_job_status` = CREATING
     ///    2. Not belonging to a background stream job.
     ///    Clean up these hanging tables by the id.
-    pub async fn clean_dirty_tables(
-        &self,
-        fragment_manager: FragmentManagerRef,
-        for_bootstrap: bool,
-    ) -> MetaResult<()> {
+    pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
         let creating_tables: Vec<Table> = self.list_creating_tables().await;
         eprintln!(
             "creating_tables ids: {:#?}",
@@ -844,18 +840,16 @@ impl CatalogManager {
         // Cancel stream job should decrement it.
         // If rw restarted, and rebuilt the graph from persisted table fragments,
         // we will still need to clean it up though...
-        if for_bootstrap {
-            let user_core = &mut core.user;
-            // // FIXME: Do all tables need to decrease_ref_count?
-            // // Perhaps only those with a fragment?
-            for table in &tables_to_clean {
-                // Recovered when init database manager.
-                for relation_id in &table.dependent_relations {
-                    database_core.decrease_ref_count(*relation_id);
-                }
-                // Recovered when init user manager.
-                user_core.decrease_ref(table.owner);
+        let user_core = &mut core.user;
+        // // FIXME: Do all tables need to decrease_ref_count?
+        // // Perhaps only those with a fragment?
+        for table in &tables_to_clean {
+            // Recovered when init database manager.
+            for relation_id in &table.dependent_relations {
+                database_core.decrease_ref_count(*relation_id);
             }
+            // Recovered when init user manager.
+            user_core.decrease_ref(table.owner);
         }
 
         let tables = &mut database_core.tables;

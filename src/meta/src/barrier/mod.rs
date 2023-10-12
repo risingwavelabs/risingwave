@@ -597,7 +597,7 @@ impl GlobalBarrierManager {
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
             let paused_reason = paused.then_some(PausedReason::Manual);
 
-            self.recovery(prev_epoch, paused_reason, true, true)
+            self.recovery(prev_epoch, paused_reason, true)
                 .instrument(span)
                 .await
         };
@@ -1038,10 +1038,7 @@ impl GlobalBarrierManager {
 
             // No need to clean dirty tables for barrier recovery. It should clean it in the stream job.
             // (Cancel create table procedure)
-            *state = self
-                .recovery(prev_epoch, None, false, false)
-                .instrument(span)
-                .await;
+            *state = self.recovery(prev_epoch, None, true).instrument(span).await;
             self.set_status(BarrierManagerStatus::Running).await;
         } else {
             panic!("failed to execute barrier: {:?}", err);
