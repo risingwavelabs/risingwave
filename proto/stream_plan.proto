@@ -464,7 +464,7 @@ message ChainNode {
   optional uint32 rate_limit = 8;
 
   // Snapshot read every N barriers
-  uint32 snapshot_read_barrier_interval = 9;
+  uint32 snapshot_read_barrier_interval = 9 [deprecated = true];
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
