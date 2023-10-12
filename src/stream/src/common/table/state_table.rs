@@ -1146,15 +1146,20 @@ where
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
+        let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
+        let encoded_key_range = range_of_prefix(&encoded_prefix);
+
+        // We assume that all usages of iterating the state table only access a single vnode.
+        // If this assertion fails, then something must be wrong with the operator implementation or
+        // the distribution derivation from the optimizer.
+        let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
+        let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
+
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
         if self.prefix_hint_len != 0 {
             debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
         }
-
-        let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
-        let encoded_key_range = range_of_prefix(&encoded_prefix);
-
         let prefix_hint = {
             if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
                 None
@@ -1167,8 +1172,6 @@ where
             }
         };
 
-        let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
-        let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
         trace!(
             table_id = %self.table_id(),
             ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
