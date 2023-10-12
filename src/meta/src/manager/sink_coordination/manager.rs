@@ -588,6 +588,129 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_single_writer() {
+        let sink_id = SinkId::from(1);
+        let param = SinkParam {
+            sink_id,
+            properties: Default::default(),
+            columns: vec![],
+            downstream_pk: vec![],
+            sink_type: SinkType::AppendOnly,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let epoch1 = 233;
+        let epoch2 = 234;
+
+        let all_vnode = (0..VirtualNode::COUNT).collect_vec();
+        let build_bitmap = |indexes: &[usize]| {
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            for i in indexes {
+                builder.set(*i, true);
+            }
+            builder.finish()
+        };
+        let vnode = build_bitmap(&all_vnode);
+
+        let metadata = [vec![1u8, 2u8], vec![3u8, 4u8]];
+
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker(None, {
+                let param = param.clone();
+                let metadata = metadata.clone();
+                move |first_request: NewSinkWriterRequest, new_writer_rx, _| {
+                    let param = param.clone();
+                    let metadata = metadata.clone();
+                    tokio::spawn(async move {
+                        // validate the start request
+                        assert_eq!(first_request.param, param);
+                        CoordinatorWorker::execute_coordinator(
+                            first_request,
+                            new_writer_rx,
+                            MockCoordinator::new(0, |epoch, metadata_list, count: &mut usize| {
+                                *count += 1;
+                                let mut metadata_list = metadata_list
+                                    .into_iter()
+                                    .map(|metadata| match metadata {
+                                        SinkMetadata {
+                                            metadata:
+                                                Some(Metadata::Serialized(SerializedMetadata {
+                                                    metadata,
+                                                })),
+                                        } => metadata,
+                                        _ => unreachable!(),
+                                    })
+                                    .collect_vec();
+                                metadata_list.sort();
+                                match *count {
+                                    1 => {
+                                        assert_eq!(epoch, epoch1);
+                                        assert_eq!(1, metadata_list.len());
+                                        assert_eq!(metadata[0], metadata_list[0]);
+                                    }
+                                    2 => {
+                                        assert_eq!(epoch, epoch2);
+                                        assert_eq!(1, metadata_list.len());
+                                        assert_eq!(metadata[1], metadata_list[0]);
+                                    }
+                                    _ => unreachable!(),
+                                }
+                                Ok(())
+                            }),
+                        )
+                        .await;
+                    })
+                }
+            });
+
+        let build_client = |vnode| async {
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                |stream_req| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(stream_req.into_inner().map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
+            .await
+            .unwrap()
+        };
+
+        let mut client = build_client(vnode).await;
+
+        client
+            .commit(
+                epoch1,
+                SinkMetadata {
+                    metadata: Some(Metadata::Serialized(SerializedMetadata {
+                        metadata: metadata[0].clone(),
+                    })),
+                },
+            )
+            .await
+            .unwrap();
+
+        client
+            .commit(
+                epoch2,
+                SinkMetadata {
+                    metadata: Some(Metadata::Serialized(SerializedMetadata {
+                        metadata: metadata[1].clone(),
+                    })),
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn test_drop_sink_while_init() {
         let sink_id = SinkId::from(1);
         let param = SinkParam {
