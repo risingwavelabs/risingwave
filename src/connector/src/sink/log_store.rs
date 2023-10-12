@@ -204,11 +204,9 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
                 self.metrics.log_store_latest_read_epoch.set(*epoch as _);
             }
             if let LogStoreReadItem::StreamChunk { chunk, .. } = item {
-                let cardinality = chunk.cardinality();
-                self.metrics.log_store_read_rows.inc_by(cardinality as _);
                 self.metrics
-                    .connector_sink_rows_received
-                    .inc_by(cardinality as _);
+                    .log_store_read_rows
+                    .inc_by(chunk.cardinality() as _);
             }
         })
     }
