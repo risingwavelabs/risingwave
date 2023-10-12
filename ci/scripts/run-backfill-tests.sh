@@ -316,6 +316,48 @@ test_backfill_tombstone() {
   cargo make kill
 }
 
+test_backfill_restart_cn() {
+   echo "--- e2e, $CLUSTER_PROFILE, test_background_ddl_recovery"
+   cargo make ci-start $CLUSTER_PROFILE
+
+   # Test before recovery
+   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
+   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
+   sleep 1
+   OLD_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
+
+   rename_logs_with_prefix "before-restart"
+
+   # Restart 1 CN
+   pkill 'compute-node'
+   cargo make dev cn-with-$CLUSTER_PROFILE
+
+   # Test after recovery
+   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+
+   # Recover the mview progress
+   sleep 3
+
+   NEW_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
+
+   if [[ ${OLD_PROGRESS%.*} -lt ${NEW_PROGRESS%.*} ]]; then
+     echo "OK: $OLD_PROGRESS smaller than $NEW_PROGRESS"
+   else
+     echo "FAILED: $OLD_PROGRESS larger or equal to $NEW_PROGRESS"
+     exit 1
+   fi
+
+   sleep 60
+
+   # Test after backfill finished
+   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+
+   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_mv.slt"
+   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
+
+   cargo make kill
+}
+
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
