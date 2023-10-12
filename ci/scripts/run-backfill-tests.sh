@@ -318,13 +318,13 @@ test_backfill_tombstone() {
   WITH (
     connector = 'datagen',
     fields.v1._.kind = 'sequence',
-    datagen.rows.per.second = '10000000'
+    datagen.rows.per.second = '1000000'
   )
   FORMAT PLAIN
   ENCODE JSON;
   "
 
-  sleep 30
+  sleep 10
 
   bash -c '
     set -euo pipefail
@@ -339,6 +339,7 @@ test_backfill_tombstone() {
   ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
   kill_cluster
+  wait
 }
 
 test_backfill_restart_cn_recovery() {
