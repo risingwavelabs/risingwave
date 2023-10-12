@@ -574,7 +574,7 @@ impl NatsCommon {
     > {
         let context = self.build_context().await?;
         let stream = self.build_or_get_stream(context.clone()).await?;
-        let subject_name = self.subject.replace(",", "-");
+        let subject_name = self.subject.replace(',', "-");
         let name = format!("risingwave-consumer-{}-{}", subject_name, split_id);
         let mut config = jetstream::consumer::pull::Config {
             ack_policy: jetstream::consumer::AckPolicy::None,
@@ -611,8 +611,8 @@ impl NatsCommon {
         let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_string()).collect();
         let mut config = jetstream::stream::Config {
             name: self.stream.clone(),
-            subjects: subjects,
             max_bytes: 1000000,
+            subjects,
             ..Default::default()
         };
         if let Some(v) = self.max_bytes {
