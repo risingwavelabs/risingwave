@@ -55,6 +55,12 @@ rename_logs_with_prefix() {
   popd
 }
 
+restart_cluster() {
+   cargo make kill
+   rename_logs_with_prefix "before-restart"
+   cargo make dev $CLUSTER_PROFILE
+}
+
 restart_cn() {
   tmux list-windows -t risedev | grep compute-node | grep -o "^[0-9]*" | xargs -I {} tmux send-keys -t %{} C-c C-d
   sleep 4
@@ -119,9 +125,7 @@ test_background_ddl_recovery() {
   OLD_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
 
   # Restart
-  cargo make kill
-  rename_logs_with_prefix "before-restart"
-  cargo make dev $CLUSTER_PROFILE
+  restart_cluster
 
   # Test after recovery
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
@@ -220,9 +224,7 @@ test_foreground_ddl_no_recover() {
 
 
   # Restart
-  cargo make kill
-  rename_logs_with_prefix "before-restart"
-  cargo make dev $CLUSTER_PROFILE
+  restart_cluster
 
   # Leave sometime for recovery
   sleep 5
@@ -256,9 +258,7 @@ test_foreground_index_cancel() {
 
 
    # Restart
-   cargo make kill
-   rename_logs_with_prefix "before-restart"
-   cargo make dev ci-1cn-1fe-with-recovery
+   restart_cluster
 
    # Leave sometime for recovery
    sleep 5
@@ -293,9 +293,7 @@ test_foreground_sink_cancel() {
 
 
    # Restart
-   cargo make kill
-   rename_logs_with_prefix "before-restart"
-   cargo make dev $CLUSTER_PROFILE
+   restart_cluster
 
    # Leave sometime for recovery
    sleep 5
@@ -313,7 +311,7 @@ test_foreground_sink_cancel() {
 # Lots of upstream tombstone, backfill should still proceed.
 test_backfill_tombstone() {
   echo "--- e2e, test_backfill_tombstone"
-  cargo make ci-start ci-backfill
+  cargo make ci-start $CLUSTER_PROFILE
   ./risedev psql -c "
   CREATE TABLE tomb (v1 int)
   WITH (
