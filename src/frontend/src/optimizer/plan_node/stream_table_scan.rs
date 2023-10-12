@@ -325,12 +325,7 @@ impl StreamTableScan {
                     .session_ctx()
                     .config()
                     .get_streaming_rate_limit(),
-                snapshot_read_barrier_interval: self
-                    .ctx()
-                    .session_ctx()
-                    .config()
-                    .get_backfill_snapshot_barrier_interval()
-                    as u32,
+                ..Default::default()
             })),
             stream_key,
             operator_id: self.base.id.0 as u64,
