@@ -23,7 +23,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::AggKind;
 use risingwave_sqlparser::ast::{
     BinaryOperator, DataType as AstDataType, Distinct, Expr, Ident, Join, JoinConstraint,
-    JoinOperator, ObjectName, Select, SelectItem, TableFactor, TableWithJoins,
+    JoinOperator, ObjectName, Select, SelectItem, TableFactor, TableWithJoins, Value,
 };
 
 use super::bind_context::{Clause, ColumnBinding};
@@ -710,9 +710,7 @@ impl Binder {
                     .expect("ExprImpl value is a Literal but cannot get ref to data")
                     .as_utf8();
                 self.bind_cast(
-                    Expr::Value(risingwave_sqlparser::ast::Value::SingleQuotedString(
-                        table_name.to_string(),
-                    )),
+                    Expr::Value(Value::SingleQuotedString(table_name.to_string())),
                     AstDataType::Regclass,
                 )
             }
@@ -771,6 +769,14 @@ impl Binder {
     }
 
     /// Bind `DISTINCT` clause in a [`Select`].
+    /// Note that for `DISTINCT ON`, each expression is interpreted in the same way as `ORDER BY`
+    /// expression, which means it will be bound in the following order:
+    ///
+    /// * as an output-column name
+    /// * as an index (from 1) of an output column
+    /// * as an arbitrary expression
+    ///
+    /// See also the `bind_order_by_expr_in_query` method.
     ///
     /// # Arguments
     ///
@@ -788,23 +794,39 @@ impl Binder {
             Distinct::DistinctOn(exprs) => {
                 let mut bound_exprs = vec![];
                 for expr in exprs {
-                    let name = match &expr {
-                        Expr::Identifier(ident) => Some(ident.real_value()),
-                        _ => None,
-                    };
-                    let expr_impl = match (self.bind_expr(expr), name) {
-                        (Ok(expr_impl), _) => expr_impl,
-                        (Err(e), Some(name)) => match name_to_index.get(&name) {
-                            None => return Err(e),
-                            Some(&usize::MAX) => {
-                                return Err(ErrorCode::BindError(format!(
-                                    "DISTINCT ON \"{name}\" is ambiguous"
-                                ))
-                                .into())
+                    let expr_impl = match expr {
+                        Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => {
+                            match *index {
+                                usize::MAX => {
+                                    return Err(ErrorCode::BindError(format!(
+                                        "DISTINCT ON \"{}\" is ambiguous",
+                                        name.real_value()
+                                    ))
+                                    .into())
+                                }
+                                _ => {
+                                    InputRef::new(*index, select_items[*index].return_type()).into()
+                                }
                             }
-                            Some(out_idx) => select_items[*out_idx].clone(),
-                        },
-                        (Err(e), None) => return Err(e),
+                        }
+                        Expr::Value(Value::Number(number)) => {
+                            match number.parse::<usize>() {
+                                Ok(index) if 1 <= index && index <= select_items.len() => {
+                                    let idx_from_0 = index - 1;
+                                    InputRef::new(idx_from_0, select_items[idx_from_0].return_type()).into()
+                                }
+                                _ => {
+                                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                                        "Invalid ordinal number in DISTINCT ON: {}",
+                                        number
+                                    ))
+                                    .into())
+                                }
+                            }
+                        }
+                        expr => {
+                            self.bind_expr(expr)?
+                        }
                     };
                     bound_exprs.push(expr_impl);
                 }
@@ -852,9 +874,7 @@ fn derive_alias(expr: &Expr) -> Option<String> {
             derive_alias(&expr).or_else(|| data_type_to_alias(&data_type))
         }
         Expr::TypedString { data_type, .. } => data_type_to_alias(&data_type),
-        Expr::Value(risingwave_sqlparser::ast::Value::Interval { .. }) => {
-            Some("interval".to_string())
-        }
+        Expr::Value(Value::Interval { .. }) => Some("interval".to_string()),
         Expr::Row(_) => Some("row".to_string()),
         Expr::Array(_) => Some("array".to_string()),
         Expr::ArrayIndex { obj, index: _ } => derive_alias(&obj),
