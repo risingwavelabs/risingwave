@@ -46,3 +46,20 @@
     └─StreamGroupTopN { order: [], limit: 1, offset: 0, group_key: [t.a, t.b] }
       └─StreamExchange { dist: HashShard(t.a, t.b) }
         └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    create table t (a int, b int, c int);
+    select distinct on (2) a as foo, b from t;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [t.b] }
+      └─BatchExchange { order: [], dist: HashShard(t.b) }
+        └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [foo, b, t._row_id(hidden)], stream_key: [b], pk_columns: [b], pk_conflict: NoCheck }
+    └─StreamGroupTopN { order: [], limit: 1, offset: 0, group_key: [t.b] }
+      └─StreamExchange { dist: HashShard(t.b) }
+        └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    create table t (a int, b int, c int);
+    select distinct on (4) * from t;
+  binder_error: 'Invalid input syntax: Invalid ordinal number in DISTINCT ON: 4'

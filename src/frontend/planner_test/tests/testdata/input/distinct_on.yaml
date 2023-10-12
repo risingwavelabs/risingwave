@@ -16,3 +16,14 @@
   expected_outputs:
     - stream_plan
     - batch_plan
+- sql: |
+    create table t (a int, b int, c int);
+    select distinct on (2) a as foo, b from t;
+  expected_outputs:
+    - stream_plan
+    - batch_plan
+- sql: |
+    create table t (a int, b int, c int);
+    select distinct on (4) * from t;
+  expected_outputs:
+    - binder_error
