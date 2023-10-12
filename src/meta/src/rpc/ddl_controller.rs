@@ -413,10 +413,10 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         create_type: CreateType,
     ) -> MetaResult<NotificationVersion> {
-        tracing::trace!(
-            id = stream_job.id(),
+        tracing::debug!(
             definition = stream_job.definition(),
-            "creating stream job"
+            "starting stream job {}",
+            stream_job.id(),
         );
         let _permit = self
             .creating_streaming_job_permits
@@ -428,20 +428,20 @@ impl DdlController {
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
+        tracing::debug!("preparing stream job {}", stream_job.id());
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
-        tracing::trace!("prepared stream job {}", stream_job.id());
 
         // Update the corresponding 'initiated_at' field.
         stream_job.mark_initialized();
 
         let mut internal_tables = vec![];
         let result = try {
+            tracing::debug!("building stream job {}", stream_job.id());
             let (ctx, table_fragments) = self
                 .build_stream_job(env, &stream_job, fragment_graph)
                 .await?;
-            tracing::trace!("built stream job {}", stream_job.id());
 
             internal_tables = ctx.internal_tables();
 
@@ -499,6 +499,7 @@ impl DdlController {
         }
     }
 
+    // We persist table fragments at this step.
     async fn create_streaming_job_inner(
         &self,
         stream_job: StreamingJob,
@@ -506,7 +507,8 @@ impl DdlController {
         ctx: CreateStreamingJobContext,
         internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
-        // We persist table fragments at this step.
+        let job_id = stream_job.id();
+        tracing::debug!("creating stream job {}", job_id);
         let result = self
             .stream_manager
             .create_streaming_job(table_fragments, ctx)
@@ -524,7 +526,10 @@ impl DdlController {
             }
             return Err(e);
         };
-        self.finish_stream_job(stream_job, internal_tables).await
+        tracing::debug!("finishing stream job {}", job_id);
+        let version = self.finish_stream_job(stream_job, internal_tables).await?;
+        tracing::debug!("finished stream job {}", job_id);
+        Ok(version)
     }
 
     async fn drop_streaming_job(

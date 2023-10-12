@@ -9,7 +9,11 @@ echo "--- Download artifacts"
 download-and-decompress-artifact risingwave_simulation .
 chmod +x ./risingwave_simulation
 
-export RUST_LOG="info,risingwave_meta::barrier::recovery=debug,risingwave_simulation=debug"
+export RUST_LOG="info,\
+risingwave_meta::barrier::recovery=debug,\
+risingwave_meta::rpc::ddl_controller=debug,\
+risingwave_meta::barrier::mod=debug,\
+risingwave_simulation=debug"
 export LOGDIR=.risingwave/log
 
 mkdir -p $LOGDIR

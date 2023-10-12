@@ -976,20 +976,23 @@ impl GlobalBarrierManager {
             let catalog_manager = self.catalog_manager.clone();
             tokio::spawn(async move {
                 let res: MetaResult<()> = try {
+                    tracing::debug!("recovering stream job {}", table.id);
                     finished
                         .await
                         .map_err(|e| anyhow!("failed to finish command: {}", e))?;
 
+                    tracing::debug!("finished stream job {}", table.id);
                     // Once notified that job is finished we need to notify frontend.
                     // and mark catalog as created and commit to meta.
                     // both of these are done by catalog manager.
                     catalog_manager
                         .finish_create_table_procedure(internal_tables, table.clone())
                         .await?;
+                    tracing::debug!("notified frontend for stream job {}", table.id);
                 };
                 if let Err(e) = res.as_ref() {
                     tracing::error!(
-                        "stream job {} interrupted, will resume after recovery: {e:?}",
+                        "stream job {} interrupted, will retry after recovery: {e:?}",
                         table.id
                     );
                     // NOTE(kwannoel): We should never cleanup stream jobs,
