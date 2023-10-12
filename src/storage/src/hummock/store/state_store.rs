@@ -53,7 +53,8 @@ const MEM_TABLE_SPILL_THRESHOLD: usize = 64 * 1024 * 1024;
 pub struct LocalHummockStorage {
     mem_table: MemTable,
 
-    prev_epoch: Option<u64>,
+    write_epoch: Option<u64>,
+    spill_offset: u64,
     epoch: Option<u64>,
 
     table_id: TableId,
@@ -96,7 +97,7 @@ impl LocalHummockStorage {
     }
 
     fn prev_epoch(&self) -> u64 {
-        self.prev_epoch.expect("should have set the prev epoch")
+        self.write_epoch.expect("should have set the prev epoch")
     }
 
     pub async fn get_inner(
@@ -315,7 +316,7 @@ impl LocalStateStore for LocalHummockStorage {
             kv_pairs,
             delete_ranges,
             WriteOptions {
-                epoch: self.epoch(),
+                epoch: self.prev_epoch(),
                 table_id: self.table_id,
             },
         )
@@ -328,9 +329,11 @@ impl LocalStateStore for LocalHummockStorage {
                 "The size of mem table exceeds 64 Mb and spill occurs. table_id {}",
                 self.table_id.table_id()
             );
-            let gap_epoch = self.epoch() + 1;
-            if gap_epoch < self.prev_epoch() + AVALIABLE_EPOCH_GAP {
-                self.epoch
+
+            if self.spill_offset < AVALIABLE_EPOCH_GAP {
+                self.spill_offset += 1;
+                let gap_epoch = self.epoch() + self.spill_offset;
+                self.write_epoch
                     .replace(gap_epoch)
                     .expect("should have init epoch before seal the gap epoch");
                 self.flush(vec![]).await?;
@@ -358,7 +361,7 @@ impl LocalStateStore for LocalHummockStorage {
         );
 
         assert!(
-            self.prev_epoch.replace(epoch).is_none(),
+            self.write_epoch.replace(epoch).is_none(),
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
@@ -370,9 +373,10 @@ impl LocalStateStore for LocalHummockStorage {
             .epoch
             .replace(next_epoch)
             .expect("should have init epoch before seal the first epoch");
-        self.prev_epoch
+        self.write_epoch
             .replace(next_epoch)
             .expect("should have init epoch before seal the first epoch");
+        self.spill_offset = 0;
         assert!(
             next_epoch > prev_epoch,
             "new epoch {} should be greater than current epoch: {}",
@@ -480,7 +484,8 @@ impl LocalHummockStorage {
         let stats = hummock_version_reader.stats().clone();
         Self {
             mem_table: MemTable::new(option.is_consistent_op),
-            prev_epoch: None,
+            write_epoch: None,
+            spill_offset: 0,
             epoch: None,
             table_id: option.table_id,
             is_consistent_op: option.is_consistent_op,
