@@ -26,7 +26,7 @@ pub(super) struct DefineContextField {
     ty: Type,
 }
 
-/// See [`super::define_context`].
+/// See [`super::define_context!`].
 #[derive(Debug, Clone)]
 pub(super) struct DefineContextAttr {
     fields: Vec<DefineContextField>,

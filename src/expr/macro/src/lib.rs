@@ -623,7 +623,7 @@ pub fn define_context(def: TokenStream) -> TokenStream {
 }
 
 /// Capture the context from the local context to the function impl.
-/// TODO: The macro will be merged to [`#[function(.., capture_context(..))]`](function!) later.
+/// TODO: The macro will be merged to [`#[function(.., capture_context(..))]`](macro@function) later.
 ///
 /// Currently, we should use the macro separately with a simple wrapper.
 #[proc_macro_attribute]
