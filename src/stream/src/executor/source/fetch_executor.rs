@@ -100,12 +100,12 @@ impl<S: StateStore> FsFetchExecutor<S> {
         stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
     ) -> StreamExecutorResult<()> {
         let mut batch = Vec::with_capacity(SPLIT_BATCH_SIZE);
-        'vnodes: for vnodes in state_store_handler.state_store.vnodes().iter_vnodes() {
+        'vnodes: for vnode in state_store_handler.state_store.vnodes().iter_vnodes() {
             let table_iter = state_store_handler
                 .state_store
-                .iter_row_with_pk_range(
+                .iter_with_vnode(
+                    vnode,
                     &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
-                    vnodes,
                     PrefetchOptions::new_for_exhaust_iter(),
                 )
                 .await?;
