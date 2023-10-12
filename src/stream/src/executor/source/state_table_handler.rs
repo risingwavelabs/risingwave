@@ -101,9 +101,9 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         // all source executor has vnode id zero
         let iter = self
             .state_store
-            .iter_row_with_pk_range(
-                &(start, end),
+            .iter_with_vnode(
                 VirtualNode::ZERO,
+                &(start, end),
                 PrefetchOptions::new_for_exhaust_iter(),
             )
             .await?;

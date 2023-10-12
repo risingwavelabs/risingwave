@@ -446,8 +446,7 @@ fn expr_to_kafka_timestamp_range(
 
     match &expr {
         ExprImpl::FunctionCall(function_call) => {
-            if let Some((timestampz_literal, reverse)) = extract_timestampz_literal(&expr).unwrap()
-            {
+            if let Ok(Some((timestampz_literal, reverse))) = extract_timestampz_literal(&expr) {
                 match function_call.func_type() {
                     ExprType::GreaterThan => {
                         if reverse {

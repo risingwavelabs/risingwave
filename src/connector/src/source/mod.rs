@@ -34,6 +34,8 @@ mod common;
 pub mod external;
 mod manager;
 mod mock_external_table;
+pub mod test_source;
+
 pub use manager::{SourceColumnDesc, SourceColumnType};
 pub use mock_external_table::MockExternalTableReader;
 

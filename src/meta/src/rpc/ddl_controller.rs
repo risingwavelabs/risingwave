@@ -23,10 +23,10 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
 use risingwave_pb::catalog::{
-    connection, Connection, Database, Function, Schema, Source, Table, View,
+    connection, Connection, CreateType, Database, Function, Schema, Source, Table, View,
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
-use risingwave_pb::ddl_service::{DdlProgress, StreamJobExecutionMode};
+use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tokio::sync::Semaphore;
 use tracing::log::warn;
@@ -93,11 +93,7 @@ pub enum DdlCommand {
     DropFunction(FunctionId),
     CreateView(View),
     DropView(ViewId, DropMode),
-    CreateStreamingJob(
-        StreamingJob,
-        StreamFragmentGraphProto,
-        StreamJobExecutionMode,
-    ),
+    CreateStreamingJob(StreamingJob, StreamFragmentGraphProto, CreateType),
     DropStreamingJob(StreamingJobId, DropMode),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
@@ -240,12 +236,8 @@ impl DdlController {
                 DdlCommand::DropView(view_id, drop_mode) => {
                     ctrl.drop_view(view_id, drop_mode).await
                 }
-                DdlCommand::CreateStreamingJob(
-                    stream_job,
-                    fragment_graph,
-                    stream_job_execution_mode,
-                ) => {
-                    ctrl.create_streaming_job(stream_job, fragment_graph, stream_job_execution_mode)
+                DdlCommand::CreateStreamingJob(stream_job, fragment_graph, create_type) => {
+                    ctrl.create_streaming_job(stream_job, fragment_graph, create_type)
                         .await
                 }
                 DdlCommand::DropStreamingJob(job_id, drop_mode) => {
@@ -331,18 +323,23 @@ impl DdlController {
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         // 1. Drop source in catalog.
-        let version = self
+        let (version, streaming_job_ids) = self
             .catalog_manager
             .drop_relation(
                 RelationIdEnum::Source(source_id),
                 self.fragment_manager.clone(),
                 drop_mode,
             )
-            .await?
-            .0;
+            .await?;
+
         // 2. Unregister source connector worker.
         self.source_manager
             .unregister_sources(vec![source_id])
+            .await;
+
+        // 3. Drop streaming jobs if cascade
+        self.stream_manager
+            .drop_streaming_jobs(streaming_job_ids)
             .await;
 
         Ok(version)
@@ -414,7 +411,7 @@ impl DdlController {
         &self,
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        stream_job_execution_mode: StreamJobExecutionMode,
+        create_type: CreateType,
     ) -> MetaResult<NotificationVersion> {
         let _permit = self
             .creating_streaming_job_permits
@@ -462,12 +459,12 @@ impl DdlController {
             }
         };
 
-        match stream_job_execution_mode {
-            StreamJobExecutionMode::Foreground | StreamJobExecutionMode::Unspecified => {
+        match create_type {
+            CreateType::Foreground | CreateType::Unspecified => {
                 self.create_streaming_job_inner(stream_job, table_fragments, ctx, internal_tables)
                     .await
             }
-            StreamJobExecutionMode::Background => {
+            CreateType::Background => {
                 let ctrl = self.clone();
                 let definition = stream_job.definition();
                 let fut = async move {

@@ -21,6 +21,7 @@ use parking_lot::RwLock;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, AsyncStackTraceOption, MetricLevel, RwConfig,
 };
+use risingwave_common::heap_profiling::HeapProfiler;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -69,6 +70,7 @@ pub async fn prepare_start_parameters(
 ) -> (
     Arc<SstableStore>,
     Arc<MemoryLimiter>,
+    HeapProfiler,
     Option<Arc<RwLock<await_tree::Registry<String>>>>,
     Arc<StorageOpts>,
     Arc<CompactorMetrics>,
@@ -142,6 +144,11 @@ pub async fn prepare_start_parameters(
         storage_memory_config,
     ));
 
+    let heap_profiler = HeapProfiler::new(
+        total_memory_available_bytes,
+        config.server.heap_profiling.clone(),
+    );
+
     monitor_cache(memory_collector);
 
     let await_tree_config = match &config.streaming.async_stack_trace {
@@ -157,6 +164,7 @@ pub async fn prepare_start_parameters(
     (
         sstable_store,
         memory_limiter,
+        heap_profiler,
         await_tree_reg,
         storage_opts,
         compactor_metrics,
@@ -199,8 +207,14 @@ pub async fn compactor_serve(
         hummock_metrics.clone(),
     ));
 
-    let (sstable_store, memory_limiter, await_tree_reg, storage_opts, compactor_metrics) =
-        prepare_start_parameters(config.clone(), system_params_reader.clone()).await;
+    let (
+        sstable_store,
+        memory_limiter,
+        heap_profiler,
+        await_tree_reg,
+        storage_opts,
+        compactor_metrics,
+    ) = prepare_start_parameters(config.clone(), system_params_reader.clone()).await;
 
     let filter_key_extractor_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
         RemoteTableAccessor::new(meta_client.clone()),
@@ -212,6 +226,9 @@ pub async fn compactor_serve(
     );
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
+
+    // Run a background heap profiler
+    heap_profiler.start();
 
     // use half of limit because any memory which would hold in meta-cache will be allocate by
     // limited at first.
@@ -319,8 +336,9 @@ pub async fn shared_compactor_serve(
     );
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
-    let endpoint: &'static str = Box::leak(opts.proxy_rpc_endpoint.clone().into_boxed_str());
-    let endpoint = Endpoint::from_static(endpoint);
+    let endpoint_str = opts.proxy_rpc_endpoint.clone().to_string();
+    let endpoint =
+        Endpoint::from_shared(opts.proxy_rpc_endpoint).expect("Fail to construct tonic Endpoint");
     let channel = endpoint
         .http2_keep_alive_interval(Duration::from_secs(ENDPOINT_KEEP_ALIVE_INTERVAL_SEC))
         .keep_alive_timeout(Duration::from_secs(ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
@@ -328,19 +346,29 @@ pub async fn shared_compactor_serve(
         .connect()
         .await
         .expect("Failed to create channel via proxy rpc endpoint.");
-    let grpc_proxy_client = GrpcCompactorProxyClient::new(channel);
+    let grpc_proxy_client = GrpcCompactorProxyClient::new(channel, endpoint_str);
     let system_params_response = grpc_proxy_client
         .get_system_params()
         .await
         .expect("Fail to get system params, the compactor pod cannot be started.");
     let system_params = system_params_response.into_inner().params.unwrap();
 
-    let (sstable_store, memory_limiter, await_tree_reg, storage_opts, compactor_metrics) =
-        prepare_start_parameters(config.clone(), system_params.into()).await;
+    let (
+        sstable_store,
+        memory_limiter,
+        heap_profiler,
+        await_tree_reg,
+        storage_opts,
+        compactor_metrics,
+    ) = prepare_start_parameters(config.clone(), system_params.into()).await;
     let (sender, receiver) = mpsc::unbounded_channel();
     let compactor_srv: CompactorServiceImpl = CompactorServiceImpl::new(sender);
 
     let monitor_srv = MonitorServiceImpl::new(await_tree_reg.clone());
+
+    // Run a background heap profiler
+    heap_profiler.start();
+
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let compactor_context = CompactorContext {
         storage_opts,

@@ -193,12 +193,13 @@ message SinkDesc {
   repeated uint32 downstream_pk = 6;
   repeated uint32 distribution_key = 7;
   map<string, string> properties = 8;
-  catalog.SinkType sink_type = 9;
+  catalog.SinkType sink_type = 9; // to be deprecated
   repeated plan_common.ColumnCatalog column_catalogs = 10;
   string db_name = 11;
   // If the sink is from table or mv, this is name of the table/mv. Otherwise
   // it is the name of the sink itself.
   string sink_from_name = 12;
+  catalog.SinkFormatDesc format_desc = 13;
 }
 
 enum SinkLogStoreType {
@@ -480,6 +481,9 @@ message ChainNode {
 
   // The rate limit for the chain node.
   optional uint32 rate_limit = 8;
+
+  // Snapshot read every N barriers
+  uint32 snapshot_read_barrier_interval = 9;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.

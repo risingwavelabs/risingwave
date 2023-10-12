@@ -37,7 +37,7 @@ use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
-use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
+use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
@@ -91,7 +91,8 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
 }
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
     let config = load_config(&opts.config_path, NoOverride);
-    let compaction_config = CompactionConfigBuilder::new().build();
+    let compaction_config =
+        CompactionConfigBuilder::with_opt(&config.meta.compaction_config).build();
     compaction_test(
         compaction_config,
         config,
@@ -152,6 +153,7 @@ async fn compaction_test(
         created_at_epoch: None,
         cleaned_by_watermark: false,
         stream_job_status: PbStreamJobStatus::Created.into(),
+        create_type: PbCreateType::Foreground.into(),
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -595,6 +597,7 @@ fn run_compactor_thread(
         await_tree_reg: None,
         running_task_count: Arc::new(AtomicU32::new(0)),
     };
+
     start_compactor(
         compactor_context,
         meta_client,

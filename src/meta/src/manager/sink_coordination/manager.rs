@@ -25,7 +25,6 @@ use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::SinkParam;
 use risingwave_pb::connector_service::coordinate_request::Msg;
 use risingwave_pb::connector_service::{coordinate_request, CoordinateRequest, CoordinateResponse};
-use risingwave_rpc_client::ConnectorClient;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::{channel, Receiver, Sender};
@@ -70,28 +69,21 @@ pub struct SinkCoordinatorManager {
 }
 
 impl SinkCoordinatorManager {
-    pub(crate) fn start_worker(
-        connector_client: Option<ConnectorClient>,
-    ) -> (Self, (JoinHandle<()>, Sender<()>)) {
-        Self::start_worker_with_spawn_worker(
-            connector_client,
-            |writer_request, manager_request_stream, connector_client| {
-                tokio::spawn(CoordinatorWorker::run(
-                    writer_request,
-                    manager_request_stream,
-                    connector_client,
-                ))
-            },
-        )
+    pub(crate) fn start_worker() -> (Self, (JoinHandle<()>, Sender<()>)) {
+        Self::start_worker_with_spawn_worker(|writer_request, manager_request_stream| {
+            tokio::spawn(CoordinatorWorker::run(
+                writer_request,
+                manager_request_stream,
+            ))
+        })
     }
 
     fn start_worker_with_spawn_worker(
-        connector_client: Option<ConnectorClient>,
         spawn_coordinator_worker: impl SpawnCoordinatorFn,
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
         let (request_tx, request_rx) = mpsc::channel(BOUNDED_CHANNEL_SIZE);
         let (shutdown_tx, shutdown_rx) = channel();
-        let worker = ManagerWorker::new(request_rx, shutdown_rx, connector_client);
+        let worker = ManagerWorker::new(request_rx, shutdown_rx);
         let join_handle = tokio::spawn(worker.execute(spawn_coordinator_worker));
         (
             SinkCoordinatorManager { request_tx },
@@ -168,7 +160,6 @@ struct CoordinatorWorkerHandle {
 }
 
 struct ManagerWorker {
-    connector_client: Option<ConnectorClient>,
     request_rx: mpsc::Receiver<ManagerRequest>,
     // Make it option so that it can be polled with &mut SinkManagerWorker
     shutdown_rx: Option<Receiver<()>>,
@@ -186,26 +177,17 @@ enum ManagerEvent {
     },
 }
 
-trait SpawnCoordinatorFn = FnMut(
-        NewSinkWriterRequest,
-        UnboundedReceiver<NewSinkWriterRequest>,
-        Option<ConnectorClient>,
-    ) -> JoinHandle<()>
+trait SpawnCoordinatorFn = FnMut(NewSinkWriterRequest, UnboundedReceiver<NewSinkWriterRequest>) -> JoinHandle<()>
     + Send
     + 'static;
 
 impl ManagerWorker {
-    fn new(
-        request_rx: mpsc::Receiver<ManagerRequest>,
-        shutdown_rx: Receiver<()>,
-        connector_client: Option<ConnectorClient>,
-    ) -> Self {
+    fn new(request_rx: mpsc::Receiver<ManagerRequest>, shutdown_rx: Receiver<()>) -> Self {
         ManagerWorker {
             request_rx,
             shutdown_rx: Some(shutdown_rx),
             running_coordinator_worker_join_handles: Default::default(),
             running_coordinator_worker: Default::default(),
-            connector_client,
         }
     }
 
@@ -346,8 +328,7 @@ impl ManagerWorker {
             }
             Entry::Vacant(entry) => {
                 let (request_tx, request_rx) = unbounded_channel();
-                let connector_client = self.connector_client.clone();
-                let join_handle = spawn_coordinator_worker(request, request_rx, connector_client);
+                let join_handle = spawn_coordinator_worker(request, request_rx);
                 self.running_coordinator_worker_join_handles.push(
                     join_handle
                         .map(move |join_result| (sink_id, join_result))
@@ -422,6 +403,7 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -448,10 +430,10 @@ mod tests {
         ];
 
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker(None, {
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let param = param.clone();
                 let metadata = metadata.clone();
-                move |first_request: NewSinkWriterRequest, new_writer_rx, _| {
+                move |first_request: NewSinkWriterRequest, new_writer_rx| {
                     let param = param.clone();
                     let metadata = metadata.clone();
                     tokio::spawn(async move {
@@ -595,11 +577,12 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
 
-        let (manager, (_join_handle, _stop_tx)) = SinkCoordinatorManager::start_worker(None);
+        let (manager, (_join_handle, _stop_tx)) = SinkCoordinatorManager::start_worker();
 
         let mut build_client_future1 = pin!(CoordinatorStreamHandle::new_with_init_stream(
             param.to_proto(),
@@ -633,6 +616,7 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -653,9 +637,9 @@ mod tests {
         let vnode2 = build_bitmap(second);
 
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker(None, {
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let param = param.clone();
-                move |first_request: NewSinkWriterRequest, new_writer_rx, _| {
+                move |first_request: NewSinkWriterRequest, new_writer_rx| {
                     let param = param.clone();
                     tokio::spawn(async move {
                         // validate the start request
@@ -715,6 +699,7 @@ mod tests {
             columns: vec![],
             downstream_pk: vec![],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
         };
@@ -735,9 +720,9 @@ mod tests {
         let vnode2 = build_bitmap(second);
 
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker(None, {
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let param = param.clone();
-                move |first_request: NewSinkWriterRequest, new_writer_rx, _| {
+                move |first_request: NewSinkWriterRequest, new_writer_rx| {
                     let param = param.clone();
                     tokio::spawn(async move {
                         // validate the start request

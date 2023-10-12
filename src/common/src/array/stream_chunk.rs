@@ -58,13 +58,13 @@ impl Op {
     }
 
     pub fn from_protobuf(prost: &i32) -> ArrayResult<Op> {
-        let op = match PbOp::from_i32(*prost) {
-            Some(PbOp::Insert) => Op::Insert,
-            Some(PbOp::Delete) => Op::Delete,
-            Some(PbOp::UpdateInsert) => Op::UpdateInsert,
-            Some(PbOp::UpdateDelete) => Op::UpdateDelete,
-            Some(PbOp::Unspecified) => unreachable!(),
-            None => bail!("No such op type"),
+        let op = match PbOp::try_from(*prost) {
+            Ok(PbOp::Insert) => Op::Insert,
+            Ok(PbOp::Delete) => Op::Delete,
+            Ok(PbOp::UpdateInsert) => Op::UpdateInsert,
+            Ok(PbOp::UpdateDelete) => Op::UpdateDelete,
+            Ok(PbOp::Unspecified) => unreachable!(),
+            Err(_) => bail!("No such op type"),
         };
         Ok(op)
     }

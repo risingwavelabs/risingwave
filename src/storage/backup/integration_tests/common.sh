@@ -51,7 +51,7 @@ function drop_mvs() {
 
 function backup() {
   local job_id
-  job_id=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta backup-meta 2>&1 | grep "backup job succeeded" | awk '{print $(NF)}')
+  job_id=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta backup-meta 2>&1 | grep "backup job succeeded" | awk -F ',' '{print $(NF-1)}'| awk '{print $(NF)}')
   [ -n "${job_id}" ]
   echo "${job_id}"
 }

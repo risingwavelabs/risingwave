@@ -55,12 +55,12 @@ impl TombstoneReclaimCompactionPicker {
         state: &mut TombstoneReclaimPickerState,
     ) -> Option<CompactionInput> {
         assert!(!levels.levels.is_empty());
-        let mut select_input_ssts = vec![];
         if state.last_level == 0 {
             state.last_level = 1;
         }
 
         while state.last_level <= levels.levels.len() {
+            let mut select_input_ssts = vec![];
             let mut select_file_size = 0;
             for sst in &levels.levels[state.last_level - 1].table_infos {
                 let need_reclaim = (sst.range_tombstone_count * 100
@@ -108,6 +108,7 @@ impl TombstoneReclaimCompactionPicker {
                         }
                     }
                     if pending_compact {
+                        state.last_level += 1;
                         continue;
                     }
                     InputLevel {
@@ -151,7 +152,7 @@ pub mod tests {
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::create_overlap_strategy;
-    use crate::hummock::compaction::level_selector::tests::{generate_level, generate_table};
+    use crate::hummock::compaction::selector::tests::{generate_level, generate_table};
 
     #[test]
     fn test_basic() {

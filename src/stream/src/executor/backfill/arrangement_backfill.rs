@@ -473,7 +473,7 @@ where
                         &mut temporary_state,
                     ).await?;
 
-                    self.progress.finish(barrier.epoch.curr);
+                    self.progress.finish(barrier.epoch.curr, total_snapshot_processed_rows);
                     yield msg;
                     break;
                 }
@@ -548,7 +548,7 @@ where
             let range_bounds = range_bounds.unwrap();
 
             let vnode_row_iter = upstream_table
-                .iter_row_with_pk_range(&range_bounds, vnode, Default::default())
+                .iter_with_vnode(vnode, &range_bounds, Default::default())
                 .await?;
 
             // TODO: Is there some way to avoid double-pin here?

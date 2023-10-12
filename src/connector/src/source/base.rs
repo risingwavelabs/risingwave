@@ -355,6 +355,11 @@ impl ConnectorProperties {
         )
     }
 
+    pub fn enable_split_scale_in(&self) -> bool {
+        // enable split scale in just for Kinesis
+        matches!(self, ConnectorProperties::Kinesis(_))
+    }
+
     pub fn init_from_pb_source(&mut self, source: &PbSource) {
         dispatch_source_prop!(self, prop, prop.init_from_pb_source(source))
     }

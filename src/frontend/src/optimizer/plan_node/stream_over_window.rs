@@ -68,7 +68,7 @@ impl StreamOverWindow {
                 tbl_builder.add_order_column(o.column_index, o.order_type);
             }
         }
-        for &idx in self.logical.input.logical_pk() {
+        for &idx in self.logical.input.expect_stream_key() {
             if order_cols.insert(idx) {
                 tbl_builder.add_order_column(idx, OrderType::ascending());
             }

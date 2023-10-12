@@ -264,7 +264,7 @@ impl ToStream for LogicalProject {
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
-        let input_pk = input.logical_pk();
+        let input_pk = input.expect_stream_key();
         let i2o = proj.i2o_col_mapping();
         let col_need_to_add = input_pk
             .iter()
