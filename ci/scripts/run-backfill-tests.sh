@@ -55,11 +55,15 @@ rename_logs_with_prefix() {
   popd
 }
 
+kill_cluster() {
+  cargo make kill
+  sleep 10
+}
+
 restart_cluster() {
-   cargo make kill
-   rename_logs_with_prefix "before-restart"
-   sleep 10
-   cargo make dev $CLUSTER_PROFILE
+  kill_cluster
+  rename_logs_with_prefix "before-restart"
+  cargo make dev $CLUSTER_PROFILE
 }
 
 restart_cn() {
@@ -109,9 +113,7 @@ test_snapshot_and_upstream_read() {
 
   run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
 
-  cargo make kill
-
-  echo "Backfill tests complete"
+  kill_cluster
 }
 
 # Test background ddl recovery
@@ -151,8 +153,7 @@ test_background_ddl_recovery() {
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_mv.slt"
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
 
-  cargo make kill
-
+  kill_cluster
 }
 
 test_background_ddl_cancel() {
@@ -172,9 +173,7 @@ test_background_ddl_cancel() {
 
 
   # Restart
-  cargo make kill
-  rename_logs_with_prefix "before-restart"
-  cargo make dev $CLUSTER_PROFILE
+  restart_cluster
 
   # Recover
   sleep 3
@@ -188,7 +187,8 @@ test_background_ddl_cancel() {
   cancel_stream_jobs
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
-  cargo make kill
+
+  kill_cluster
 }
 
 # Test foreground ddl should not recover
@@ -209,7 +209,7 @@ test_foreground_ddl_cancel() {
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_mv.slt"
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
 
-  cargo make kill
+  kill_cluster
 }
 
 # Test foreground ddl should not recover
@@ -236,7 +236,7 @@ test_foreground_ddl_no_recover() {
 
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
 
-  cargo make kill
+  kill_cluster
 }
 
 test_foreground_index_cancel() {
@@ -271,7 +271,7 @@ test_foreground_index_cancel() {
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_index.slt"
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
 
-   cargo make kill
+   kill_cluster
 }
 
 test_foreground_sink_cancel() {
@@ -306,7 +306,7 @@ test_foreground_sink_cancel() {
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_sink.slt"
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
 
-   cargo make kill
+   kill_cluster
 }
 
 # Lots of upstream tombstone, backfill should still proceed.
@@ -338,7 +338,7 @@ test_backfill_tombstone() {
 
   ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
   echo "--- Kill cluster"
-  cargo make kill
+  kill_cluster
 }
 
 test_backfill_restart_cn_recovery() {
@@ -373,7 +373,7 @@ test_backfill_restart_cn_recovery() {
    fi
 
    # Trigger a bootstrap recovery
-   cargo make kill
+   kill_cluster
    pkill compute-node
    rename_logs_with_prefix "before-restart"
    sleep 10
@@ -400,7 +400,7 @@ test_backfill_restart_cn_recovery() {
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_mv.slt"
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
 
-   cargo make kill
+   kill_cluster
 }
 
 main() {
