@@ -610,7 +610,6 @@ impl NatsCommon {
     ) -> anyhow::Result<jetstream::stream::Stream> {
         let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_string()).collect();
         let mut config = jetstream::stream::Config {
-            // the subject default use name value
             name: self.stream.clone(),
             subjects: subjects,
             max_bytes: 1000000,
