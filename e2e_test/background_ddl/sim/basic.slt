@@ -8,7 +8,7 @@ CREATE TABLE t (v1 int);
 # This is expected to run under sim mode, which is fast,
 # so we need a higher number of rows.
 statement ok
-INSERT INTO t select * from generate_series(1, 2000000);
+INSERT INTO t select * from generate_series(1, 10000000);
 
 statement ok
 FLUSH;
