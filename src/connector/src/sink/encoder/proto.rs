@@ -26,19 +26,19 @@ use super::{FieldEncodeError, Result as SinkResult, RowEncoder, SerTo};
 
 type Result<T> = std::result::Result<T, FieldEncodeError>;
 
-pub struct ProtoEncoder<'a> {
-    schema: &'a Schema,
-    col_indices: Option<&'a [usize]>,
+pub struct ProtoEncoder {
+    schema: Schema,
+    col_indices: Option<Vec<usize>>,
     descriptor: MessageDescriptor,
 }
 
-impl<'a> ProtoEncoder<'a> {
+impl ProtoEncoder {
     pub fn new(
-        schema: &'a Schema,
-        col_indices: Option<&'a [usize]>,
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
         descriptor: MessageDescriptor,
     ) -> SinkResult<Self> {
-        match col_indices {
+        match &col_indices {
             Some(col_indices) => validate_fields(
                 col_indices.iter().map(|idx| {
                     let f = &schema[*idx];
@@ -63,15 +63,15 @@ impl<'a> ProtoEncoder<'a> {
     }
 }
 
-impl<'a> RowEncoder for ProtoEncoder<'a> {
+impl RowEncoder for ProtoEncoder {
     type Output = DynamicMessage;
 
     fn schema(&self) -> &Schema {
-        self.schema
+        &self.schema
     }
 
     fn col_indices(&self) -> Option<&[usize]> {
-        self.col_indices
+        self.col_indices.as_deref()
     }
 
     fn encode_cols(
@@ -371,7 +371,7 @@ mod tests {
             Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(3))),
         ]);
 
-        let encoder = ProtoEncoder::new(&schema, None, descriptor.clone()).unwrap();
+        let encoder = ProtoEncoder::new(schema, None, descriptor.clone()).unwrap();
         let m = encoder.encode(row).unwrap();
         let encoded: Vec<u8> = m.ser_to().unwrap();
         assert_eq!(
