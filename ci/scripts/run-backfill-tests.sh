@@ -402,19 +402,18 @@ test_backfill_restart_cn_recovery() {
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
 
    cargo make kill
-   pkill compute-node
 }
 
 main() {
   set -euo pipefail
-#  test_snapshot_and_upstream_read
-#  test_backfill_tombstone
-#  test_background_ddl_recovery
-#  test_background_ddl_cancel
-#  test_foreground_ddl_no_recover
-#  test_foreground_ddl_cancel
-#  test_foreground_index_cancel
-#  test_foreground_sink_cancel
+  test_snapshot_and_upstream_read
+  test_backfill_tombstone
+  test_background_ddl_recovery
+  test_background_ddl_cancel
+  test_foreground_ddl_no_recover
+  test_foreground_ddl_cancel
+  test_foreground_index_cancel
+  test_foreground_sink_cancel
   test_backfill_restart_cn_recovery
 }
 
