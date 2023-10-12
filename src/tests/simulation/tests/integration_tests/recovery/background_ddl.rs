@@ -34,6 +34,7 @@ async fn kill_cn_and_wait_recover(cluster: &Cluster) {
             .await;
         sleep(Duration::from_secs(2)).await;
     }
+    sleep(Duration::from_secs(10)).await;
 }
 
 async fn kill_and_wait_recover(cluster: &Cluster) {
