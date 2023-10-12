@@ -163,6 +163,9 @@ impl FragmentManager {
         map.values().cloned().collect()
     }
 
+    /// The `table_ids` here should correspond to stream jobs.
+    /// We get their corresponding table fragment, and from there,
+    /// we get the actors that are in the table fragment.
     pub async fn get_table_id_actor_mapping(
         &self,
         table_ids: &[TableId],
@@ -185,6 +188,13 @@ impl FragmentManager {
 
     /// Gets the counts for each upstream relation that each stream job
     /// indicated by `table_ids` depends on.
+    /// For example in the following query:
+    /// ```sql
+    /// CREATE MATERIALIZED VIEW m1 AS
+    ///   SELECT * FROM t1 JOIN t2 ON t1.a = t2.a JOIN t3 ON t2.b = t3.b
+    /// ```
+    ///
+    /// We have t1 occurring once, and t2 occurring once.
     pub async fn get_upstream_relation_counts(
         &self,
         table_ids: &[TableId],
@@ -542,7 +552,6 @@ impl FragmentManager {
     /// If table fragments already deleted, this should just be noop,
     /// the delete function (`table_fragments.remove`) will not return an error.
     pub async fn drop_table_fragments_vec(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
-        // println!("to_delete table ids: {:#?}", table_ids);
         let mut guard = self.core.write().await;
         let current_revision = guard.table_revision;
 
@@ -594,9 +603,6 @@ impl FragmentManager {
             commit_meta_with_trx!(self, trx, table_fragments)?;
             guard.table_revision = next_revision;
         }
-
-        // println!("to_delete_table_fragment_ids: {:#?}", to_delete_ids);
-        // println!("to_delete_table_fragments: {:#?}", to_delete_table_fragments);
 
         for table_fragments in to_delete_table_fragments {
             if table_fragments.state() != State::Initial {

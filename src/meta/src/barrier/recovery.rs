@@ -60,10 +60,8 @@ impl GlobalBarrierManager {
         .await
     }
 
-    /// Foreground stream jobs with "CREATING" status
-    /// should be cleaned
-    /// FIXME: If we call this function while cluster is online,
-    /// perhaps those in the progress tracker will be missed.
+    /// Please look at `CatalogManager::clean_dirty_tables` for more details.
+    /// This should only be called for bootstrap recovery.
     async fn clean_dirty_tables(&self) -> MetaResult<()> {
         let fragment_manager = self.fragment_manager.clone();
         self.catalog_manager
@@ -74,33 +72,17 @@ impl GlobalBarrierManager {
 
     /// Clean up all dirty streaming jobs.
     async fn clean_dirty_fragments(&self) -> MetaResult<()> {
-        // List stream jobs, includes both created / creating.
-        // Need to rewrite as well.
-        // List ALL stream jobs.
-        // The dirty tables should have been cleaned,
-        // so when we list the stream job ids here, they should be already purged.
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
-        eprintln!(
-            "clean_dirty_table_fragments_all_stream_ids {:#?}",
-            stream_job_ids
-        );
         let to_drop_table_fragments = self
             .fragment_manager
-            .list_dirty_table_fragments(|tf| {
-                // !stream_job_ids.contains(&tf.table_id().table_id) || !tf.is_created()
-                // FIXME: Is this correct?
-                !stream_job_ids.contains(&tf.table_id().table_id)
-            })
+            .list_dirty_table_fragments(|tf| !stream_job_ids.contains(&tf.table_id().table_id))
             .await;
         let to_drop_streaming_ids = to_drop_table_fragments
             .iter()
             .map(|t| t.table_id())
             .collect();
 
-        eprintln!(
-            "clean_dirty_table_fragments_by_table_id: {:?}",
-            to_drop_streaming_ids
-        );
+        debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
 
         self.fragment_manager
             .drop_table_fragments_vec(&to_drop_streaming_ids)
@@ -112,7 +94,7 @@ impl GlobalBarrierManager {
                 &to_drop_table_fragments
             )
             .await.inspect_err(|e|
-            tracing::warn!(
+            warn!(
             "Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}",
             to_drop_table_fragments,
             e)

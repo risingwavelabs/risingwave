@@ -963,15 +963,16 @@ impl GlobalBarrierManager {
             .collect();
         let version_stats = self.hummock_manager.get_version_stats().await;
         // If failed, enter recovery mode.
-        let mut tracker = self.tracker.lock().await;
-        *tracker = CreateMviewProgressTracker::recover(
-            table_map,
-            upstream_mv_counts,
-            definitions,
-            version_stats,
-            senders,
-        );
-        drop(tracker);
+        {
+            let mut tracker = self.tracker.lock().await;
+            *tracker = CreateMviewProgressTracker::recover(
+                table_map,
+                upstream_mv_counts,
+                definitions,
+                version_stats,
+                senders,
+            );
+        }
         for (table, internal_tables, finished) in receivers {
             let catalog_manager = self.catalog_manager.clone();
             tokio::spawn(async move {
@@ -995,10 +996,11 @@ impl GlobalBarrierManager {
                         "stream job {} interrupted, will retry after recovery: {e:?}",
                         table.id
                     );
-                    // NOTE(kwannoel): We should never cleanup stream jobs,
+                    // NOTE(kwannoel): We should not cleanup stream jobs,
                     // we don't know if it's just due to CN killed,
                     // or the job has actually failed.
-                    // Users have to manually cleanup the stream jobs.
+                    // Users have to manually cancel the stream jobs,
+                    // if they want to clean it.
                 }
             });
         }
@@ -1036,8 +1038,9 @@ impl GlobalBarrierManager {
                 prev_epoch = prev_epoch.value().0
             );
 
-            // No need to clean dirty tables for barrier recovery. It should clean it in the stream job.
-            // (Cancel create table procedure)
+            // No need to clean dirty tables for barrier recovery,
+            // because clean dirty tables also cleans up foreground table.
+            // We just need to cleanup dirty tables on bootstrap recovery.
             *state = self
                 .recovery(prev_epoch, None, false)
                 .instrument(span)

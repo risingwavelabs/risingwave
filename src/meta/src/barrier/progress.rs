@@ -188,13 +188,7 @@ impl CreateMviewProgressTracker {
             let mut states = HashMap::new();
             for actor in actors {
                 actor_map.insert(actor, creating_table_id);
-                states.insert(
-                    actor,
-                    ChainState::ConsumingUpstream(
-                        Epoch(0), // This should be updated?
-                        0,
-                    ),
-                );
+                states.insert(actor, ChainState::ConsumingUpstream(Epoch(0), 0));
             }
             let upstream_mv_count = upstream_mv_counts.remove(&creating_table_id).unwrap();
             let upstream_total_key_count = upstream_mv_count

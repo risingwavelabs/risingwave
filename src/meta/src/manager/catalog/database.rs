@@ -201,7 +201,6 @@ impl DatabaseManager {
                 && x.schema_id == relation_key.1
                 && x.name.eq(&relation_key.2)
         }) {
-            eprintln!("table duplicated: {:#?}", t.id);
             if t.stream_job_status == StreamJobStatus::Creating as i32 {
                 bail!("table is in creating procedure: {}", t.id);
             } else {
@@ -276,17 +275,12 @@ impl DatabaseManager {
             .collect_vec()
     }
 
-    pub fn list_creating_tables(&self) -> Vec<Table> {
+    pub fn list_persisted_creating_tables(&self) -> Vec<Table> {
         self.tables
             .values()
             .filter(|&t| t.stream_job_status == PbStreamJobStatus::Creating as i32)
             .cloned()
             .collect_vec()
-        // FIXME: Perhaps these are needed still?
-        // self.in_progress_creating_tables
-        //     .values()
-        //     .cloned()
-        //     .collect_vec()
     }
 
     pub fn list_tables(&self) -> Vec<Table> {
@@ -381,7 +375,6 @@ impl DatabaseManager {
     }
 
     pub fn increase_ref_count(&mut self, relation_id: RelationId) {
-        eprintln!("Increasing ref count for {}", relation_id);
         *self.relation_ref_count.entry(relation_id).or_insert(0) += 1;
     }
 
@@ -414,12 +407,12 @@ impl DatabaseManager {
             .contains(&relation.clone())
     }
 
-    /// This is for unrecoverable jobs, which will only be in-memory.
+    /// For all types of DDL
     pub fn mark_creating(&mut self, relation: &RelationKey) {
         self.in_progress_creation_tracker.insert(relation.clone());
     }
 
-    /// This is for recoverable jobs, which will be persisted at the very beginning.
+    /// Only for streaming DDL
     pub fn mark_creating_streaming_job(&mut self, table_id: TableId, key: RelationKey) {
         self.in_progress_creation_streaming_job
             .insert(table_id, key);

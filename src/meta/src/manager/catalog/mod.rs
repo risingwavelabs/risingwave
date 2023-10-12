@@ -700,8 +700,6 @@ impl CatalogManager {
     }
 
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
-    /// TODO(kwannoel): Should both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`
-    /// `commit_meta`? Or it doesn't matter?
     pub async fn start_create_table_procedure(
         &self,
         table: &Table,
@@ -720,10 +718,6 @@ impl CatalogManager {
         user_core.ensure_user_id(table.owner)?;
         let key = (table.database_id, table.schema_id, table.name.clone());
 
-        // NOTE: This MUST be after progress check.
-        // Because we persist tables, even for those in creating progress.
-        // And this will falsely indicate the table is duplicated.
-        // FIXME: Perhaps we should go further to only check against created tables here.
         database_core.check_relation_name_duplicated(&key)?;
 
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
@@ -763,7 +757,7 @@ impl CatalogManager {
     ///    2. Not belonging to a background stream job.
     ///    Clean up these hanging tables by the id.
     pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
-        let creating_tables: Vec<Table> = self.list_creating_tables().await;
+        let creating_tables: Vec<Table> = self.list_persisted_creating_tables().await;
         eprintln!(
             "creating_tables ids: {:#?}",
             creating_tables.iter().map(|t| t.id).collect_vec()
@@ -772,7 +766,7 @@ impl CatalogManager {
         let mut tables_to_clean = vec![];
         let mut internal_tables_to_clean = vec![];
         for table in creating_tables {
-            eprintln!(
+            tracing::trace!(
                 "checking table {} definition: {}, create_type: {:#?}, table_type: {:#?}",
                 table.id,
                 table.definition,
@@ -783,7 +777,7 @@ impl CatalogManager {
             if table.create_type == CreateType::Foreground as i32
             // || table.create_type == CreateType::Unspecified as i32
             {
-                eprintln!("cleaning table_id for foreground: {:#?}", table.id);
+                tracing::debug!("cleaning table_id for foreground: {:#?}", table.id);
                 tables_to_clean.push(table);
                 continue;
             }
@@ -798,7 +792,7 @@ impl CatalogManager {
                     .await
                 {
                     Err(_) => {
-                        eprintln!("cleaning table_id for no fragments: {:#?}", table.id);
+                        tracing::debug!("cleaning table_id for no fragments: {:#?}", table.id);
                         tables_to_clean.push(table);
                         continue;
                     }
@@ -807,7 +801,7 @@ impl CatalogManager {
                         // 3. For those in initial state (i.e. not running / created),
                         // we should purge them.
                         if fragment.state() == State::Initial {
-                            eprintln!("cleaning table_id no initial state: {:#?}", table.id);
+                            tracing::debug!("cleaning table_id no initial state: {:#?}", table.id);
                             tables_to_clean.push(table);
                             continue;
                         } else {
@@ -824,7 +818,7 @@ impl CatalogManager {
         }
         for t in internal_tables_to_clean {
             if !reserved_internal_tables.contains(&t.id) {
-                eprintln!(
+                tracing::debug!(
                     "cleaning table_id for internal tables not reserved: {:#?}",
                     t.id
                 );
@@ -836,13 +830,7 @@ impl CatalogManager {
         let database_core = &mut core.database;
         database_core.clear_creating_stream_jobs();
 
-        // No need to decrease ref count I think?
-        // Cancel stream job should decrement it.
-        // If rw restarted, and rebuilt the graph from persisted table fragments,
-        // we will still need to clean it up though...
         let user_core = &mut core.user;
-        // // FIXME: Do all tables need to decrease_ref_count?
-        // // Perhaps only those with a fragment?
         for table in &tables_to_clean {
             // Recovered when init database manager.
             for relation_id in &table.dependent_relations {
@@ -855,7 +843,7 @@ impl CatalogManager {
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
         for table in tables_to_clean {
-            eprintln!("clean_dirty_table_id: {}", table.id);
+            tracing::debug!("cleaning table_id: {}", table.id);
             let table = tables.remove(table.id);
             assert!(table.is_some())
         }
@@ -885,8 +873,6 @@ impl CatalogManager {
         }
         commit_meta!(self, tables)?;
 
-        // in frontend, there is some function which gets all created catalog,
-        // we only include the catalog with status::created in the snapshot.
         let version = self
             .notify_frontend(
                 Operation::Add,
@@ -906,19 +892,17 @@ impl CatalogManager {
         Ok(version)
     }
 
-    /// Used to cleanup states in stream mgr.
+    /// Used to cleanup states in stream manager.
     /// It is required because failure may not necessarily happen in barrier,
     /// e.g. when cordon nodes.
-    /// we need some way to cleanup the state.
-    /// FIXME: We should NOT invoke this if barrier manager has already cleaned up.
-    /// In other cases, barrier man
+    /// and we still need some way to cleanup the state.
     pub async fn cancel_create_table_procedure_with_internal_table_ids(
         &self,
         table: Table,
         internal_table_ids: Vec<TableId>,
     ) -> MetaResult<()> {
         let table_id = table.id;
-        tracing::trace!("cancel_create_table_procedure for {}", table_id);
+        tracing::trace!("cleanup tables for {}", table_id);
         let core = &mut self.core.lock().await;
         // Must get the latest from the database. Otherwise dependent relations may not be correct?
         // FIXME: This might not be needed..
@@ -949,8 +933,6 @@ impl CatalogManager {
         let mut tables = BTreeMapTransaction::new(tables);
         for table_id in table_ids {
             tables.remove(table_id);
-            // Table might not be committed.
-            // assert!(table.is_some())
         }
         commit_meta!(self, tables)?;
 
@@ -960,10 +942,6 @@ impl CatalogManager {
     }
 
     /// Used by CANCEL JOBS
-    /// We only need to call this for tables which are persisted, i.e. background ddl.
-    /// 1. Background ddl in creating process before recovery (managed by stream mgr).
-    /// 2. Background ddl in creating process after recovery (managed by barrier mgr).
-    /// This is because it HAS to happen before fragment clean-up.
     pub async fn cancel_create_table_procedure_with_table_fragments(
         &self,
         table_id: TableId,
@@ -1220,8 +1198,6 @@ impl CatalogManager {
                         database_core.relation_ref_count.get(&table_id).cloned()
                     {
                         if ref_count > index_ids.len() {
-                            eprintln!("ref count {:#?}", ref_count);
-                            eprintln!("index_ids {:#?}", index_ids);
                             // Other relations depend on it.
                             match drop_mode {
                                 DropMode::Restrict => {
@@ -2086,9 +2062,8 @@ impl CatalogManager {
         let user_core = &mut core.user;
         let key = (index.database_id, index.schema_id, index.name.clone());
         assert!(
-            !database_core.indexes.contains_key(&index.id),
-            // clean dirty tables should have cleaned this up.
-            // && database_core.has_in_progress_creation(&key),
+            !database_core.indexes.contains_key(&index.id)
+                && database_core.has_in_progress_creation(&key),
             "index must be in creating procedure"
         );
 
@@ -2440,8 +2415,12 @@ impl CatalogManager {
     }
 
     /// Lists table catalogs for all tables with `stream_job_status=CREATING`.
-    pub async fn list_creating_tables(&self) -> Vec<Table> {
-        self.core.lock().await.database.list_creating_tables()
+    pub async fn list_persisted_creating_tables(&self) -> Vec<Table> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_persisted_creating_tables()
     }
 
     pub async fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {

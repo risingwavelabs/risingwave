@@ -666,8 +666,6 @@ impl CommandContext {
             Command::CancelStreamingJob(table_fragments) => {
                 let node_actors = table_fragments.worker_actor_ids();
                 self.clean_up(node_actors).await?;
-                // FIXME(kwannoel): stream_manager and barrier_manager will call these two methods too.
-                // can they just be removed?
                 self.catalog_manager
                     .cancel_create_table_procedure_with_table_fragments(
                         table_fragments.table_id().table_id,
