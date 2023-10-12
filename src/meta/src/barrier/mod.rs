@@ -1038,7 +1038,10 @@ impl GlobalBarrierManager {
 
             // No need to clean dirty tables for barrier recovery. It should clean it in the stream job.
             // (Cancel create table procedure)
-            *state = self.recovery(prev_epoch, None, true).instrument(span).await;
+            *state = self
+                .recovery(prev_epoch, None, false)
+                .instrument(span)
+                .await;
             self.set_status(BarrierManagerStatus::Running).await;
         } else {
             panic!("failed to execute barrier: {:?}", err);
