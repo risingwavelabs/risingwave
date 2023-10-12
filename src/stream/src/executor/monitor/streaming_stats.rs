@@ -76,20 +76,18 @@ pub struct StreamingMetrics {
 
     // Streaming Join
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
-    pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
+    pub join_lookup_total_count: GenericCounterVec<AtomicU64>,
     pub join_insert_cache_miss_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_match_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: RelabeledHistogramVec,
-    pub join_cached_entries: GenericGaugeVec<AtomicI64>,
-    pub join_cached_rows: GenericGaugeVec<AtomicI64>,
-    pub join_cached_estimated_size: GenericGaugeVec<AtomicI64>,
+    pub join_cached_entry_count: GenericGaugeVec<AtomicI64>,
     pub join_matched_join_keys: RelabeledHistogramVec,
 
     // Streaming Aggregation
     pub agg_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub agg_total_lookup_count: GenericCounterVec<AtomicU64>,
-    pub agg_cached_keys: GenericGaugeVec<AtomicI64>,
+    pub agg_cached_entry_count: GenericGaugeVec<AtomicI64>,
     pub agg_chunk_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub agg_chunk_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub agg_distinct_cache_miss_count: GenericCounterVec<AtomicU64>,
@@ -391,7 +389,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let join_total_lookup_count = register_int_counter_vec_with_registry!(
+        let join_lookup_total_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_total_count",
             "Join executor lookup total operation",
             &[
@@ -454,25 +452,9 @@ impl StreamingMetrics {
             1,
         );
 
-        let join_cached_entries = register_int_gauge_vec_with_registry!(
-            "stream_join_cached_entries",
+        let join_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_join_cached_entry_count",
             "Number of cached entries in streaming join operators",
-            &["actor_id", "fragment_id", "side"],
-            registry
-        )
-        .unwrap();
-
-        let join_cached_rows = register_int_gauge_vec_with_registry!(
-            "stream_join_cached_rows",
-            "Number of cached rows in streaming join operators",
-            &["actor_id", "fragment_id", "side"],
-            registry
-        )
-        .unwrap();
-
-        let join_cached_estimated_size = register_int_gauge_vec_with_registry!(
-            "stream_join_cached_estimated_size",
-            "Estimated size of all cached entries in streaming join operators",
             &["actor_id", "fragment_id", "side"],
             registry
         )
@@ -651,8 +633,8 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let agg_cached_keys = register_int_gauge_vec_with_registry!(
-            "stream_agg_cached_keys",
+        let agg_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_agg_cached_entry_count",
             "Number of cached keys in streaming aggregation operators",
             &["table_id", "actor_id", "fragment_id"],
             registry
@@ -964,18 +946,16 @@ impl StreamingMetrics {
             mview_input_row_count,
             exchange_frag_recv_size,
             join_lookup_miss_count,
-            join_total_lookup_count,
+            join_lookup_total_count,
             join_insert_cache_miss_count,
             join_actor_input_waiting_duration_ns,
             join_match_duration_ns,
             join_barrier_align_duration,
-            join_cached_entries,
-            join_cached_rows,
-            join_cached_estimated_size,
+            join_cached_entry_count,
             join_matched_join_keys,
             agg_lookup_miss_count,
             agg_total_lookup_count,
-            agg_cached_keys,
+            agg_cached_entry_count,
             agg_chunk_lookup_miss_count,
             agg_chunk_total_lookup_count,
             agg_distinct_cache_miss_count,

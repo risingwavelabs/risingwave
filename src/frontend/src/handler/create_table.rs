@@ -25,6 +25,7 @@ use risingwave_common::catalog::{
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source::external::ExternalTableType;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
@@ -40,7 +41,7 @@ use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_source_watermark, check_source_schema, try_bind_columns_from_source,
     validate_compatibility, UPSTREAM_SOURCE_KEY,
@@ -231,27 +232,8 @@ fn check_generated_column_constraints(
     Ok(())
 }
 
-fn check_default_column_constraints(
-    expr: &ExprImpl,
-    column_catalogs: &[ColumnCatalog],
-) -> Result<()> {
-    let input_refs = expr.collect_input_refs(column_catalogs.len());
-    if input_refs.count_ones(..) > 0 {
-        return Err(ErrorCode::BindError(
-            "Default can not reference another column, and you should try generated column instead."
-                .to_string(),
-        )
-        .into());
-    }
-    if expr.is_impure() {
-        return Err(
-            ErrorCode::BindError("impure default expr is not supported.".to_string()).into(),
-        );
-    }
-    Ok(())
-}
-
-/// Binds constraints that can be only specified in column definitions.
+/// Binds constraints that can be only specified in column definitions,
+/// currently generated columns and default columns.
 pub fn bind_sql_column_constraints(
     session: &SessionImpl,
     table_name: String,
@@ -307,12 +289,34 @@ pub fn bind_sql_column_constraints(
                         .bind_expr(expr)?
                         .cast_assign(column_catalogs[idx].data_type().clone())?;
 
-                    check_default_column_constraints(&expr_impl, column_catalogs)?;
+                    // Rewrite expressions to evaluate a snapshot value, used for missing values in the case of
+                    // schema change.
+                    //
+                    // TODO: Currently we don't support impure expressions other than `now()` (like `random()`),
+                    // so the rewritten expression should almost always be pure and we directly call `fold_const`
+                    // here. Actually we do not require purity of the expression here since we're only to get a
+                    // snapshot value.
+                    let rewritten_expr_impl =
+                        InlineNowProcTime::new(session.pinned_snapshot().epoch())
+                            .rewrite_expr(expr_impl.clone());
 
-                    column_catalogs[idx].column_desc.generated_or_default_column =
-                        Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
-                            expr: Some(expr_impl.to_expr_proto()),
-                        }));
+                    if let Some(snapshot_value) = rewritten_expr_impl.try_fold_const() {
+                        let snapshot_value = snapshot_value?;
+
+                        column_catalogs[idx].column_desc.generated_or_default_column = Some(
+                            GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
+                                snapshot_value: Some(snapshot_value.to_protobuf()),
+                                expr: Some(expr_impl.to_expr_proto()), /* persist the original expression */
+                            }),
+                        );
+                    } else {
+                        return Err(ErrorCode::BindError(format!(
+                            "Default expression used in column `{}` cannot be evaluated. \
+                            Use generated columns instead if you mean to reference other columns.",
+                            column.name
+                        ))
+                        .into());
+                    }
                 }
                 _ => {}
             }

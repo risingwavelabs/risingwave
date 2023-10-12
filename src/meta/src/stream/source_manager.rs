@@ -194,6 +194,7 @@ struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
+    enable_scale_in: bool,
 }
 
 impl ConnectorSourceWorkerHandle {
@@ -285,7 +286,9 @@ impl SourceManagerCore {
                         *fragment_id,
                         prev_actor_splits,
                         &discovered_splits,
-                        SplitDiffOptions::default(),
+                        SplitDiffOptions {
+                            enable_scale_in: handle.enable_scale_in,
+                        },
                     ) {
                         split_assignment.insert(*fragment_id, change);
                     }
@@ -615,6 +618,7 @@ impl SourceManager {
             fragment_id,
             empty_actor_splits,
             &prev_splits,
+            // pre-allocate splits is the first time getting splits and it does not have scale in scene
             SplitDiffOptions::default(),
         )
         .unwrap_or_default();
@@ -715,6 +719,7 @@ impl SourceManager {
         let source_id = source.id;
 
         let connector_properties = extract_prop_from_source(&source)?;
+        let enable_scale_in = connector_properties.enable_split_scale_in();
         let handle = runtime.spawn(async move {
             let mut ticker = time::interval(Self::DEFAULT_SOURCE_TICK_INTERVAL);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -752,6 +757,7 @@ impl SourceManager {
                 handle,
                 sync_call_tx,
                 splits: current_splits_ref,
+                enable_scale_in,
             },
         );
         Ok(())
@@ -767,6 +773,7 @@ impl SourceManager {
     ) -> MetaResult<()> {
         let current_splits_ref = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         let connector_properties = extract_prop_from_source(source)?;
+        let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = dispatch_source_prop!(connector_properties, prop, {
             let mut worker = ConnectorSourceWorker::create(
@@ -808,6 +815,7 @@ impl SourceManager {
                 handle,
                 sync_call_tx,
                 splits: current_splits_ref,
+                enable_scale_in,
             },
         );
 

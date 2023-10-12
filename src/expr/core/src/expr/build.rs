@@ -29,8 +29,7 @@ use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
 use super::wrapper::{Checked, EvalErrorReport, NonStrict};
 use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
-use crate::sig::func::FUNC_SIG_MAP;
-use crate::sig::FuncSigDebug;
+use crate::sig::FUNCTION_REGISTRY;
 use crate::{bail, ExprError, Result};
 
 /// Build an expression from protobuf.
@@ -195,27 +194,18 @@ pub fn build_func(
         return Ok(ArrayTransformExpression { array, lambda }.boxed());
     }
 
-    let args = children
-        .iter()
-        .map(|c| c.return_type().into())
-        .collect_vec();
-    let desc = FUNC_SIG_MAP
-        .get(func, &args, (&ret_type).into())
+    let args = children.iter().map(|c| c.return_type()).collect_vec();
+    let desc = FUNCTION_REGISTRY
+        .get(func, &args, &ret_type)
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(
-                "{:?}",
-                FuncSigDebug {
-                    func: func.as_str_name(),
-                    inputs_type: &args,
-                    ret_type: (&ret_type).into(),
-                    set_returning: false,
-                    deprecated: false,
-                    append_only: false,
-                }
+                "{}({}) -> {}",
+                func.as_str_name().to_ascii_lowercase(),
+                args.iter().format(", "),
+                ret_type,
             ))
         })?;
-
-    (desc.build)(ret_type, children)
+    desc.build_scalar(ret_type, children)
 }
 
 /// Build an expression in `FuncCall` variant in non-strict mode.

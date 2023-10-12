@@ -66,8 +66,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY))
             })?;
 
-            use risingwave_connector::sink::Sink;
-
             match_sink_name_str!(
                 sink_type.to_lowercase().as_str(),
                 SinkType,
@@ -148,12 +146,13 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     &sink_param,
                     connector,
                 );
+                // TODO: support setting max row count in config
                 dispatch_state_store!(params.env.state_store(), state_store, {
                     let factory = KvLogStoreFactory::new(
                         state_store,
                         node.table.as_ref().unwrap().clone(),
                         params.vnode_bitmap.clone().map(Arc::new),
-                        32,
+                        65536,
                         metrics,
                     );
 

@@ -498,8 +498,7 @@ pub async fn start_service_as_election_leader(
         .unwrap(),
     );
 
-    let (sink_manager, shutdown_handle) =
-        SinkCoordinatorManager::start_worker(env.connector_client());
+    let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker();
     let mut sub_tasks = vec![shutdown_handle];
 
     let barrier_manager = Arc::new(GlobalBarrierManager::new(

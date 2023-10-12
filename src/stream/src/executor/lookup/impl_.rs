@@ -322,7 +322,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             .lookup_one_row(&row, self.last_barrier.as_ref().unwrap().epoch)
                             .await?
                         {
-                            tracing::trace!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
+                            tracing::debug!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
                             if let Some(chunk) = builder.append_row(*op, row, &matched_row) {
                                 yield Message::Chunk(chunk);
@@ -388,7 +388,7 @@ impl<S: StateStore> LookupExecutor<S> {
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .inc();
 
-        tracing::trace!(target: "events::stream::lookup::lookup_row", "{:?}", lookup_row);
+        tracing::debug!(target: "events::stream::lookup::lookup_row", "{:?}", lookup_row);
 
         let mut all_rows = VecWithKvSize::new();
         // Drop the stream.
@@ -427,7 +427,7 @@ impl<S: StateStore> LookupExecutor<S> {
             }
         }
 
-        tracing::trace!(target: "events::stream::lookup::result", "{:?} => {:?}", lookup_row, all_rows.inner());
+        tracing::debug!(target: "events::stream::lookup::result", "{:?} => {:?}", lookup_row, all_rows.inner());
 
         self.lookup_cache.batch_update(lookup_row, all_rows.clone());
 

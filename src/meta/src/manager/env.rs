@@ -237,6 +237,8 @@ impl MetaSrvEnv {
             )
             .await?,
         );
+        // TODO: remove `cluster_first_launch` and check equality of cluster id stored in hummock to
+        // make sure the data dir of hummock is not used by another cluster.
         let system_params_controller = match &meta_store_sql {
             Some(store) => {
                 cluster_id = Cluster::find()
