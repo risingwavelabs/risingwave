@@ -374,9 +374,10 @@ test_backfill_restart_cn_recovery() {
    fi
 
    # Trigger a bootstrap recovery
-   pkill compute-node
    cargo make kill
+   pkill compute-node
    rename_logs_with_prefix "before-restart"
+   sleep 10
    cargo make dev $CLUSTER_PROFILE
 
    # Recover mview progress
