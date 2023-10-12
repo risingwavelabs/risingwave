@@ -37,7 +37,6 @@ pub struct ComputeNodeConfig {
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_tempo: Option<Vec<TempoConfig>>,
     pub user_managed: bool,
-    pub connector_rpc_endpoint: String,
 
     pub total_memory_bytes: usize,
     pub parallelism: usize,
@@ -61,7 +60,6 @@ pub struct MetaNodeConfig {
 
     pub user_managed: bool,
 
-    pub connector_rpc_endpoint: String,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 

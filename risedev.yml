@@ -914,9 +914,6 @@ template:
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
 
-    # RPC endpoint for connector node
-    connector-rpc-endpoint: "127.0.0.1:50051"
-
     # Minio instances used by this compute node
     provide-minio: "minio*"
 
@@ -961,9 +958,6 @@ template:
 
     # Id of this instance
     id: meta-node-${port}
-
-    # RPC endpoint for connector node colocated with Meta
-    connector-rpc-endpoint: "127.0.0.1:50051"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
