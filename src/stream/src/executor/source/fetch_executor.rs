@@ -242,9 +242,9 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                                 .state_store
                                                 .update_vnode_bitmap(vnode_bitmap);
 
-                                            if cache_may_stale {
-                                                splits_on_fetch = 0;
-                                            }
+                                        if cache_may_stale {
+                                            splits_on_fetch = 0;
+                                        }
                                     }
 
                                     if splits_on_fetch == 0 {
