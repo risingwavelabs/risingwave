@@ -18,7 +18,7 @@ use quote::{quote, quote_spanned, ToTokens};
 use syn::parse::{Parse, ParseStream};
 use syn::{Error, FnArg, Ident, ItemFn, Result, Token, Type, Visibility};
 
-/// See [`super::define_context`].
+/// See [`super::define_context!`].
 #[derive(Debug, Clone)]
 pub(super) struct DefineContextField {
     vis: Visibility,
