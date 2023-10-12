@@ -53,17 +53,17 @@ sleep 30s
 query I
 select count(*) from m1;
 ----
-2000000
+10000000
 
 query I
 select count(*) from m2;
 ----
-2000000
+10000000
 
 query I
 select count(*) from m3;
 ----
-2000000
+10000000
 
 statement ok
 DROP MATERIALIZED VIEW m1;
