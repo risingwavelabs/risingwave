@@ -1,5 +1,3 @@
-statement ok
-SET BACKGROUND_DDL=true;
 
 statement ok
 ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 4;
@@ -15,11 +13,23 @@ INSERT INTO t select * from generate_series(1, 2000000);
 statement ok
 FLUSH;
 
+# FIXME: Ideally this can succeed at the same time as the subsequent statement.
+statement ok
+SET BACKGROUND_DDL=true;
+
 statement ok
 CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
 
+# FIXME: Ideally this can succeed at the same time as the subsequent statement.
+statement ok
+SET BACKGROUND_DDL=true;
+
 statement ok
 CREATE MATERIALIZED VIEW m2 as SELECT * FROM t;
+
+# FIXME: Ideally this can succeed at the same time as the subsequent statement.
+statement ok
+SET BACKGROUND_DDL=true;
 
 statement ok
 CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
@@ -43,17 +53,17 @@ sleep 30s
 query I
 select count(*) from m1;
 ----
-300000
+2000000
 
 query I
 select count(*) from m2;
 ----
-300000
+2000000
 
 query I
 select count(*) from m3;
 ----
-300000
+2000000
 
 statement ok
 DROP MATERIALIZED VIEW m1;
