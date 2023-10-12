@@ -856,7 +856,7 @@ mod tests {
                 .await?,
             );
 
-            let (sink_manager, _) = SinkCoordinatorManager::start_worker(None);
+            let (sink_manager, _) = SinkCoordinatorManager::start_worker();
 
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 scheduled_barriers,

@@ -25,6 +25,9 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
 use risingwave_jni_core::jvm_runtime::JVM;
+use risingwave_pb::connector_service::sink_coordinator_stream_request::{
+    CommitMetadata, StartCoordinator,
+};
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::{
     JsonPayload, Payload, StreamChunkPayload,
@@ -34,10 +37,10 @@ use risingwave_pb::connector_service::sink_writer_stream_request::{
 };
 use risingwave_pb::connector_service::sink_writer_stream_response::CommitResponse;
 use risingwave_pb::connector_service::{
-    sink_writer_stream_response, SinkMetadata, SinkPayloadFormat, SinkWriterStreamRequest,
-    SinkWriterStreamResponse, ValidateSinkRequest, ValidateSinkResponse,
+    sink_coordinator_stream_request, sink_coordinator_stream_response, sink_writer_stream_response,
+    SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse, SinkMetadata, SinkPayloadFormat,
+    SinkWriterStreamRequest, SinkWriterStreamResponse, ValidateSinkRequest, ValidateSinkResponse,
 };
-use risingwave_rpc_client::{ConnectorClient, SinkCoordinatorStreamHandle};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::warn;
@@ -46,7 +49,6 @@ use super::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::encoder::TimestampHandlingMode;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
-use crate::sink::SinkError::Remote;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkCommitCoordinator, SinkError, SinkParam,
     SinkWriterParam,
@@ -229,16 +231,52 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
         .into_log_sinker(writer_param.sink_metrics))
     }
 
-    async fn new_coordinator(
-        &self,
-        connector_client: Option<ConnectorClient>,
-    ) -> Result<Self::Coordinator> {
-        RemoteCoordinator::new(
-            connector_client
-                .ok_or_else(|| Remote(anyhow_error!("no connector client specified")))?,
-            self.0.param.clone(),
-        )
-        .await
+    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+        RemoteCoordinator::new(self.0.param.clone()).await
+    }
+}
+
+#[derive(Debug)]
+pub struct SinkCoordinatorStreamJniHandle {
+    request_tx: Sender<SinkCoordinatorStreamRequest>,
+    response_rx: Receiver<SinkCoordinatorStreamResponse>,
+}
+
+impl SinkCoordinatorStreamJniHandle {
+    pub async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+        self.request_tx
+            .send(SinkCoordinatorStreamRequest {
+                request: Some(sink_coordinator_stream_request::Request::Commit(
+                    CommitMetadata { epoch, metadata },
+                )),
+            })
+            .await
+            .map_err(|err| SinkError::Internal(err.into()))?;
+
+        match self.response_rx.recv().await {
+            Some(SinkCoordinatorStreamResponse {
+                response:
+                    Some(sink_coordinator_stream_response::Response::Commit(
+                        sink_coordinator_stream_response::CommitResponse {
+                            epoch: response_epoch,
+                        },
+                    )),
+            }) => {
+                if epoch == response_epoch {
+                    Ok(())
+                } else {
+                    Err(SinkError::Internal(anyhow!(
+                        "get different response epoch to commit epoch: {} {}",
+                        epoch,
+                        response_epoch
+                    )))
+                }
+            }
+            msg => Err(SinkError::Internal(anyhow!(
+                "should get Commit response but get {:?}",
+                msg
+            ))),
+        }
     }
 }
 
@@ -555,15 +593,88 @@ where
 }
 
 pub struct RemoteCoordinator<R: RemoteSinkTrait> {
-    stream_handle: SinkCoordinatorStreamHandle,
+    stream_handle: SinkCoordinatorStreamJniHandle,
     _phantom: PhantomData<R>,
 }
 
 impl<R: RemoteSinkTrait> RemoteCoordinator<R> {
-    pub async fn new(client: ConnectorClient, param: SinkParam) -> Result<Self> {
-        let stream_handle = client
-            .start_sink_coordinator_stream(param.to_proto())
-            .await?;
+    pub async fn new(param: SinkParam) -> Result<Self> {
+        let (request_tx, request_rx) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
+        let (response_tx, response_rx) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
+
+        let mut stream_handle = SinkCoordinatorStreamJniHandle {
+            request_tx,
+            response_rx,
+        };
+
+        std::thread::spawn(move || {
+            let mut env = JVM.as_ref().unwrap().attach_current_thread().unwrap();
+
+            let result = env.call_static_method(
+                "com/risingwave/connector/JniSinkCoordinatorHandler",
+                "runJniSinkCoordinatorThread",
+                "(JJ)V",
+                &[
+                    JValue::from(
+                        &request_rx as *const Receiver<SinkCoordinatorStreamRequest> as i64,
+                    ),
+                    JValue::from(
+                        &response_tx as *const Sender<SinkCoordinatorStreamResponse> as i64,
+                    ),
+                ],
+            );
+
+            match result {
+                Ok(_) => {
+                    tracing::info!("end of jni call runJniSinkCoordinatorThread");
+                }
+                Err(e) => {
+                    tracing::error!("jni call error: {:?}", e);
+                }
+            };
+        });
+
+        let sink_coordinator_stream_request = SinkCoordinatorStreamRequest {
+            request: Some(sink_coordinator_stream_request::Request::Start(
+                StartCoordinator {
+                    param: Some(param.to_proto()),
+                },
+            )),
+        };
+
+        // First request
+        stream_handle
+            .request_tx
+            .send(sink_coordinator_stream_request)
+            .await
+            .map_err(|err| {
+                SinkError::Internal(anyhow!(
+                    "fail to send start request for connector `{}`: {:?}",
+                    R::SINK_NAME,
+                    err
+                ))
+            })?;
+
+        // First response
+        match stream_handle.response_rx.recv().await {
+            Some(SinkCoordinatorStreamResponse {
+                response: Some(sink_coordinator_stream_response::Response::Start(_)),
+            }) => {}
+            msg => {
+                return Err(SinkError::Internal(anyhow!(
+                    "should get start response for connector `{}` but get {:?}",
+                    R::SINK_NAME,
+                    msg
+                )));
+            }
+        };
+
+        tracing::trace!(
+            "{:?} RemoteCoordinator started with properties: {:?}",
+            R::SINK_NAME,
+            &param.properties
+        );
+
         Ok(RemoteCoordinator {
             stream_handle,
             _phantom: PhantomData,

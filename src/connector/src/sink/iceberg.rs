@@ -34,7 +34,6 @@ use risingwave_common::error::anyhow_error;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_rpc_client::ConnectorClient;
 use serde::de;
 use serde_derive::Deserialize;
 use url::Url;
@@ -363,10 +362,7 @@ impl Sink for IcebergSink {
         .into_log_sinker(writer_param.sink_metrics))
     }
 
-    async fn new_coordinator(
-        &self,
-        _connector_client: Option<ConnectorClient>,
-    ) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         let table = self.create_table().await?;
         let partition_type = table.current_partition_type()?;
 
