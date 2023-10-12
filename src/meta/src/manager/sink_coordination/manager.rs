@@ -598,10 +598,10 @@ mod tests {
         let metadata = [vec![1u8, 2u8], vec![3u8, 4u8]];
 
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker(None, {
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let param = param.clone();
                 let metadata = metadata.clone();
-                move |first_request: NewSinkWriterRequest, new_writer_rx, _| {
+                move |first_request: NewSinkWriterRequest, new_writer_rx| {
                     let param = param.clone();
                     let metadata = metadata.clone();
                     tokio::spawn(async move {
