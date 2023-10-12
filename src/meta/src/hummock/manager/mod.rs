@@ -353,7 +353,11 @@ impl HummockManager {
             if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
                 && !env.opts.do_not_config_object_storage_lifecycle
             {
-                s3.inner().configure_bucket_lifecycle().await;
+                let is_bucket_retention_configured = s3.inner().configure_bucket_lifecycle().await;
+                if is_bucket_retention_configured{
+                    return Err(ObjectError::internal("Bucket retention is already configured, the cluster is at risk of losing data")
+                    .into());
+                }
             }
         }
         let checkpoint_path = version_checkpoint_path(state_store_dir);

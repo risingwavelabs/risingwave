@@ -671,7 +671,6 @@ impl S3ObjectStore {
         range: impl ObjectRangeBounds,
     ) -> GetObjectFluentBuilder {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
-
         if range.is_full() {
             return req;
         }
@@ -697,7 +696,7 @@ impl S3ObjectStore {
     ///   - <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html>
     /// - MinIO
     ///   - <https://github.com/minio/minio/issues/15681#issuecomment-1245126561>
-    pub async fn configure_bucket_lifecycle(&self) {
+    pub async fn configure_bucket_lifecycle(&self) -> bool {
         // Check if lifecycle is already configured to avoid overriding existing configuration.
         let bucket = self.bucket.as_str();
         let mut configured_rules = vec![];
@@ -723,6 +722,7 @@ impl S3ObjectStore {
                 bucket,
                 configured_rules,
             );
+            true
         } else {
             let bucket_lifecycle_rule = LifecycleRule::builder()
                 .id("abort-incomplete-multipart-upload")
@@ -754,6 +754,7 @@ impl S3ObjectStore {
             } else {
                 tracing::warn!("Failed to configure life cycle rule for S3 bucket: {:?}. It is recommended to configure it manually to avoid unnecessary storage cost.", bucket);
             }
+            false
         }
     }
 
