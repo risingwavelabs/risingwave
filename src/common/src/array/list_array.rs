@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::fmt;
 use std::cmp::Ordering;
+use std::fmt;
 use std::fmt::Debug;
 use std::future::Future;
 use std::hash::Hash;
 use std::mem::size_of;
+use std::ops::{Index, IndexMut};
 
 use bytes::{Buf, BufMut};
 use either::Either;
@@ -359,6 +360,20 @@ impl Ord for ListValue {
     }
 }
 
+impl Index<usize> for ListValue {
+    type Output = Datum;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.values[index]
+    }
+}
+
+impl IndexMut<usize> for ListValue {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.values[index]
+    }
+}
+
 // Used to display ListValue in explain for better readibilty.
 pub fn display_for_explain(list: &ListValue) -> String {
     // Example of ListValue display: ARRAY[1, 2, null]
@@ -485,7 +500,7 @@ impl<'a> ListRef<'a> {
     }
 
     /// Get the element at the given index. Returns `None` if the index is out of bounds.
-    pub fn elem_at(self, index: usize) -> Option<DatumRef<'a>> {
+    pub fn get(self, index: usize) -> Option<DatumRef<'a>> {
         iter_elems_ref!(self, it, {
             let mut it = it;
             it.nth(index)
@@ -551,12 +566,9 @@ impl Ord for ListRef<'_> {
 
 impl Debug for ListRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        iter_elems_ref!(*self, it, {
-            for v in it {
-                Debug::fmt(&v, f)?;
-            }
-            Ok(())
-        })
+        let mut f = f.debug_list();
+        iter_elems_ref!(*self, it, { f.entries(it) });
+        f.finish()
     }
 }
 
@@ -1020,7 +1032,7 @@ mod tests {
         );
 
         // Get 2nd value from ListRef
-        let scalar = list_ref.elem_at(1).unwrap();
+        let scalar = list_ref.get(1).unwrap();
         assert_eq!(scalar, Some(types::ScalarRefImpl::Int32(5)));
     }
 }

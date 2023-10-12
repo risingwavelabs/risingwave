@@ -936,7 +936,7 @@ where
                     let mut streams = vec![];
                     for vnode in self.vnodes().iter_vnodes() {
                         let stream = self
-                            .iter_row_with_pk_range(&range, vnode, PrefetchOptions::default())
+                            .iter_with_vnode(vnode, &range, PrefetchOptions::default())
                             .await?;
                         streams.push(Box::pin(stream));
                     }
@@ -1094,38 +1094,16 @@ where
     S: StateStore,
     SD: ValueRowSerde,
 {
-    /// This function scans rows from the relational table.
-    pub async fn iter_row(
-        &self,
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
-        self.iter_row_with_pk_prefix(row::empty(), prefetch_options)
-            .await
-    }
-
-    /// This function scans rows from the relational table with specific `pk_prefix`.
-    /// `pk_prefix` is used to identify the exact vnode the scan should perform on.
-    pub async fn iter_row_with_pk_prefix(
-        &self,
-        pk_prefix: impl Row,
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
-        Ok(deserialize_keyed_row_stream(
-            self.iter_kv_with_pk_prefix(pk_prefix, prefetch_options)
-                .await?,
-            &self.row_serde,
-        ))
-    }
-
     /// This function scans rows from the relational table with specific `pk_range` under the same
     /// `vnode`.
-    pub async fn iter_row_with_pk_range(
+    pub async fn iter_with_vnode(
         &self,
-        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
         Ok(deserialize_keyed_row_stream(
@@ -1155,49 +1133,26 @@ where
         Ok(self.local_store.iter(table_key_range, read_options).await?)
     }
 
-    /// This function scans raw key-values from the relational table with specific `pk_prefix`.
+    /// This function scans rows from the relational table with specific `prefix` and `sub_range` under the same
+    /// `vnode`. If `sub_range` is (Unbounded, Unbounded), it scans rows from the relational table with specific `pk_prefix`.
     /// `pk_prefix` is used to identify the exact vnode the scan should perform on.
-    async fn iter_kv_with_pk_prefix(
+    pub async fn iter_with_prefix(
         &self,
         pk_prefix: impl Row,
+        sub_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
-        let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
-        let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
-        let encoded_key_range = range_of_prefix(&encoded_prefix);
-
-        // We assume that all usages of iterating the state table only access a single vnode.
-        // If this assertion fails, then something must be wrong with the operator implementation or
-        // the distribution derivation from the optimizer.
+    ) -> StreamExecutorResult<KeyedRowStream<'_, S, SD>> {
         let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
-        let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
 
-        // Construct prefix hint for prefix bloom filter.
-        let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
-        if self.prefix_hint_len != 0 {
-            debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
-        }
-        let prefix_hint = {
-            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
-                None
-            } else {
-                let encoded_prefix_len = self
-                    .pk_serde
-                    .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
+        let memcomparable_range =
+            prefix_and_sub_range_to_memcomparable(&self.pk_serde, sub_range, pk_prefix);
 
-                Some(Bytes::from(encoded_prefix[..encoded_prefix_len].to_vec()))
-            }
-        };
-
-        trace!(
-            table_id = %self.table_id(),
-            ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
-             ?pk_prefix_indices,
-            "storage_iter_with_prefix"
-        );
-
-        self.iter_kv(encoded_key_range_with_vnode, prefix_hint, prefetch_options)
-            .await
+        let memcomparable_range_with_vnode = prefixed_range(memcomparable_range, &vnode);
+        Ok(deserialize_keyed_row_stream(
+            self.iter_kv(memcomparable_range_with_vnode, None, prefetch_options)
+                .await?,
+            &self.row_serde,
+        ))
     }
 
     /// This function scans rows from the relational table with specific `prefix` and `pk_sub_range` under the same
