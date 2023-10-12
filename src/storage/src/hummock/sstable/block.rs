@@ -563,8 +563,8 @@ impl BlockBuilder {
     /// # Format
     ///
     /// ```plain
-    /// compressed: | entries | restart point 0 (4B) | ... | restart point N-1 (4B) | N (4B) | restart point index 0 (5B)| ... | restart point index N-1 (5B) | N (4B)
-    /// uncompressed: | compression method (1B) | crc32sum (4B) |
+    /// compressed: | entries | restart point 0 (4B) | ... | restart point N-1 (4B) | N (4B) | restart point index 0 (5B)| ... | restart point index N-1 (5B) | N (4B) | table id (4B)
+    /// uncompressed: | compression method (1B) | xxhash64 checksum (8B) |
     /// ```
     ///
     /// # Panics

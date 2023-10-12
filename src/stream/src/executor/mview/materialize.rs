@@ -52,15 +52,14 @@ use crate::task::AtomicU64Ref;
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     input: BoxedExecutor,
+    info: ExecutorInfo,
 
     state_table: StateTableInner<S, SD>,
 
     /// Columns of arrange keys (including pk, group keys, join keys, etc.)
-    arrange_columns: Vec<usize>,
+    arrange_key_indices: Vec<usize>,
 
     actor_context: ActorContextRef,
-
-    info: ExecutorInfo,
 
     materialize_cache: MaterializeCache<SD>,
 
@@ -74,9 +73,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         input: BoxedExecutor,
+        info: ExecutorInfo,
         store: S,
-        key: Vec<ColumnOrder>,
-        executor_id: u64,
+        arrange_key: Vec<ColumnOrder>,
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
@@ -84,9 +83,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         conflict_behavior: ConflictBehavior,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_index).collect();
-
-        let schema = input.schema().clone();
+        let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
 
         let state_table = if table_catalog.version.is_some() {
             // TODO: If we do some `Delete` after schema change, we cannot ensure the encoded value
@@ -104,14 +101,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
         Self {
             input,
+            info,
             state_table,
-            arrange_columns: arrange_columns.clone(),
+            arrange_key_indices,
             actor_context,
-            info: ExecutorInfo {
-                schema,
-                pk_indices: arrange_columns,
-                identity: format!("MaterializeExecutor {:X}", executor_id),
-            },
             materialize_cache: MaterializeCache::new(watermark_epoch, metrics_info),
             conflict_behavior,
         }
@@ -242,7 +235,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         Self {
             input,
             state_table,
-            arrange_columns: arrange_columns.clone(),
+            arrange_key_indices: arrange_columns.clone(),
             actor_context: ActorContext::create(0),
             info: ExecutorInfo {
                 schema,
@@ -423,8 +416,8 @@ impl<S: StateStore, SD: ValueRowSerde> Executor for MaterializeExecutor<S, SD> {
 impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S, SD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MaterializeExecutor")
-            .field("input info", &self.info())
-            .field("arrange_columns", &self.arrange_columns)
+            .field("info", &self.info())
+            .field("arrange_key_indices", &self.arrange_key_indices)
             .finish()
     }
 }

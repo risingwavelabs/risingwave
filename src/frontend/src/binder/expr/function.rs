@@ -1162,6 +1162,12 @@ impl Binder {
                 ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
                 // TODO: implement pg_sleep_until
                 // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
+
+                // cast functions
+                // only functions required by the existing PostgreSQL tool are implemented
+                ("date", guard_by_len(1, raw(|_binder, inputs| {
+                    inputs[0].clone().cast_explicit(DataType::Date).map_err(Into::into)
+                }))),
             ]
             .into_iter()
             .collect()

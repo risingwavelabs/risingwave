@@ -117,6 +117,7 @@ impl UpsertParser {
         }
 
         apply_row_operation_on_stream_chunk_writer_with_op(row_op, &mut writer, change_event_op)
+            .map_err(Into::into)
     }
 }
 
