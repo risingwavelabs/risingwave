@@ -479,6 +479,8 @@ pub struct UpsertMessage<'a> {
 pub struct NatsCommon {
     #[serde(rename = "server_url")]
     pub server_url: String,
+    #[serde(rename = "stream")]
+    pub stream: String,
     #[serde(rename = "subject")]
     pub subject: String,
     #[serde(rename = "connect_mode")]
@@ -572,7 +574,8 @@ impl NatsCommon {
     > {
         let context = self.build_context().await?;
         let stream = self.build_or_get_stream(context.clone()).await?;
-        let name = format!("risingwave-consumer-{}-{}", self.subject, split_id);
+        let subject_name = self.subject.replace(",", "-");
+        let name = format!("risingwave-consumer-{}-{}", subject_name, split_id);
         let mut config = jetstream::consumer::pull::Config {
             ack_policy: jetstream::consumer::AckPolicy::None,
             ..Default::default()
@@ -605,9 +608,11 @@ impl NatsCommon {
         &self,
         jetstream: jetstream::Context,
     ) -> anyhow::Result<jetstream::stream::Stream> {
+        let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_string()).collect();
         let mut config = jetstream::stream::Config {
             // the subject default use name value
-            name: self.subject.clone(),
+            name: self.stream.clone(),
+            subjects: subjects,
             max_bytes: 1000000,
             ..Default::default()
         };
