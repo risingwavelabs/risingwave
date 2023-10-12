@@ -2513,7 +2513,7 @@
     ├── primary key: [ $2 DESC, $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    └── read pk prefix len hint: 2
 
 - id: nexmark_q106
   before:
