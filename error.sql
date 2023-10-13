@@ -35,7 +35,7 @@ CREATE MATERIALIZED VIEW m1 AS WITH with_0 AS (WITH with_1 AS (WITH with_2 AS (S
 -- CREATE MATERIALIZED VIEW m6 AS WITH with_0 AS (SELECT t_2.col_0 AS col_0, t_1.p_comment AS col_1, t_3.c2 AS col_2, (t_1.p_partkey >> (SMALLINT '527')) AS col_3 FROM (part AS t_1 LEFT JOIN m2 AS t_2 ON t_1.p_comment = t_2.col_0) JOIN alltypes1 AS t_3 ON t_2.col_0 = t_3.c9 AND true GROUP BY t_1.p_brand, t_1.p_size, t_3.c4, t_3.c13, t_2.col_0, t_3.c2, t_3.c5, t_1.p_partkey, t_1.p_comment HAVING (max(DISTINCT (REAL '729')) = t_3.c5)) SELECT (SMALLINT '32767') AS col_0 FROM with_0 WHERE false;
 CREATE MATERIALIZED VIEW m7 AS SELECT ARRAY['aH6XriL6ih', 'YFKDIoQnks', '8DQoIcfWS8'] AS col_0, hop_1.extra AS col_1, min(DISTINCT (REAL '619')) FILTER(WHERE true) AS col_2, hop_1.extra AS col_3 FROM supplier AS t_0 LEFT JOIN hop(auction, auction.date_time, INTERVAL '11', INTERVAL '33') AS hop_1 ON t_0.s_comment = hop_1.item_name WHERE true GROUP BY hop_1.extra, t_0.s_acctbal, hop_1.date_time, t_0.s_address, hop_1.item_name, hop_1.id, t_0.s_suppkey, hop_1.initial_bid;
 -- Failing query
-EXPLAIN (verbose) CREATE MATERIALIZED VIEW m8 AS
+CREATE MATERIALIZED VIEW m8 AS
 SELECT
     first_value(DISTINCT t_0.c9 ORDER BY t_0.c9 ASC NULLS LAST)
 FROM
