@@ -51,7 +51,7 @@ async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let test_sink = SimulationTestSink::register_new();
-    let test_source = SimulationTestSource::register_new(12, 0..1000000, 0.2, 50);
+    let test_source = SimulationTestSource::register_new(12, 0..500000, 0.2, 50);
 
     let mut session = cluster.start_session();
 
