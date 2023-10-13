@@ -40,6 +40,8 @@ bash ./start_spark_connect_server.sh
 "$HOME"/.local/bin/poetry update --quiet
 "$HOME"/.local/bin/poetry run python main.py -t ./test_case/no_partition_append_only.toml
 "$HOME"/.local/bin/poetry run python main.py -t ./test_case/no_partition_upsert.toml
+"$HOME"/.local/bin/poetry run python main.py -t ./test_case/partition_append_only.toml
+"$HOME"/.local/bin/poetry run python main.py -t ./test_case/partition_upsert.toml
 
 
 echo "--- Kill cluster"

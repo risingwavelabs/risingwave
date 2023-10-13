@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use either::Either;
 use futures::stream::select_with_strategy;
-use futures::{pin_mut, stream, StreamExt, TryStreamExt};
+use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -207,38 +207,6 @@ where
         let mut builder =
             DataChunkBuilder::new(self.upstream_table.schema().data_types(), self.chunk_size);
 
-        // If the snapshot is empty, we don't need to backfill.
-        // We cannot complete progress now, as we want to persist
-        // finished state to state store first.
-        // As such we will wait for next barrier.
-        let is_snapshot_empty: bool = {
-            if is_finished {
-                // It is finished, so just assign a value to avoid accessing storage table again.
-                false
-            } else {
-                let snapshot_is_empty = {
-                    let snapshot = Self::snapshot_read(
-                        &self.upstream_table,
-                        init_epoch,
-                        None,
-                        false,
-                        &mut builder,
-                    );
-                    pin_mut!(snapshot);
-                    snapshot.try_next().await?.unwrap().is_none()
-                };
-                let snapshot_buffer_is_empty = builder.is_empty();
-                builder.clear();
-                snapshot_is_empty && snapshot_buffer_is_empty
-            }
-        };
-
-        // | backfill_is_finished | snapshot_empty | need_to_backfill |
-        // | t                    | t/f            | f                |
-        // | f                    | t              | f                |
-        // | f                    | f              | t                |
-        let to_backfill = !is_finished && !is_snapshot_empty;
-
         // Use this buffer to construct state,
         // which will then be persisted.
         let mut current_state: Vec<Datum> = vec![None; state_len];
@@ -285,12 +253,14 @@ where
         // finished.
         //
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
-        if to_backfill {
+        if !is_finished {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
+                let mut snapshot_read_complete = false;
+                let mut has_snapshot_read = false;
 
                 // We should not buffer rows from previous epoch, else we can have duplicates.
                 assert!(upstream_chunk_buffer.is_empty());
@@ -309,13 +279,13 @@ where
 
                     // Prefer to select upstream, so we can stop snapshot stream as soon as the
                     // barrier comes.
-                    let backfill_stream =
+                    let mut backfill_stream =
                         select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
                             stream::PollNext::Left
                         });
 
                     #[for_await]
-                    for either in backfill_stream {
+                    for either in &mut backfill_stream {
                         match either {
                             // Upstream
                             Either::Left(msg) => {
@@ -333,30 +303,12 @@ where
                                             break;
                                         } else {
                                             // Process barrier:
-                                            // - consume upstream buffer chunk
                                             // - switch snapshot
-
-                                            // Consume upstream buffer chunk
-                                            // If no current_pos, means we did not process any snapshot
-                                            // yet. In that case
-                                            // we can just ignore the upstream buffer chunk, but still need to clean it.
-                                            if let Some(current_pos) = &current_pos {
-                                                for chunk in upstream_chunk_buffer.drain(..) {
-                                                    cur_barrier_upstream_processed_rows +=
-                                                        chunk.cardinality() as u64;
-                                                    yield Message::Chunk(mapping_chunk(
-                                                        mark_chunk(
-                                                            chunk,
-                                                            current_pos,
-                                                            &pk_in_output_indices,
-                                                            pk_order,
-                                                        ),
-                                                        &self.output_indices,
-                                                    ));
-                                                }
-                                            } else {
-                                                upstream_chunk_buffer.clear()
-                                            }
+                                            // Upstream updates should only be read after the
+                                            // Nth barrier.
+                                            // Otherwise they would get filtered out,
+                                            // if they are larger than current pos,
+                                            // and we  will lose them.
 
                                             self.metrics
                                                 .backfill_snapshot_read_row_count
@@ -365,14 +317,6 @@ where
                                                     self.actor_id.to_string().as_str(),
                                                 ])
                                                 .inc_by(cur_barrier_snapshot_processed_rows);
-
-                                            self.metrics
-                                                .backfill_upstream_output_row_count
-                                                .with_label_values(&[
-                                                    upstream_table_id.to_string().as_str(),
-                                                    self.actor_id.to_string().as_str(),
-                                                ])
-                                                .inc_by(cur_barrier_upstream_processed_rows);
 
                                             // Update snapshot read epoch.
                                             snapshot_read_epoch = barrier.epoch.prev;
@@ -416,6 +360,7 @@ where
                             }
                             // Snapshot read
                             Either::Right(msg) => {
+                                has_snapshot_read = true;
                                 match msg? {
                                     None => {
                                         // End of the snapshot read stream.
@@ -451,6 +396,43 @@ where
                                             &self.output_indices,
                                         ));
                                     }
+                                }
+                            }
+                        }
+                    }
+
+                    // Before processing barrier, if did not snapshot read,
+                    // do a snapshot read first.
+                    // This is so we don't lose the tombstone iteration progress.
+                    if !has_snapshot_read {
+                        let (_, snapshot) = backfill_stream.into_inner();
+                        #[for_await]
+                        for msg in snapshot {
+                            let Either::Right(msg) = msg else {
+                                bail!("BUG: snapshot_read contains upstream messages");
+                            };
+                            match msg? {
+                                None => {
+                                    // End of the snapshot read stream.
+                                    // We let the barrier handling logic take care of upstream updates.
+                                    // But we still want to exit backfill loop, so we mark snapshot read complete.
+                                    snapshot_read_complete = true;
+                                    break;
+                                }
+                                Some(chunk) => {
+                                    // Raise the current position.
+                                    // As snapshot read streams are ordered by pk, so we can
+                                    // just use the last row to update `current_pos`.
+                                    current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
+
+                                    let chunk_cardinality = chunk.cardinality() as u64;
+                                    cur_barrier_snapshot_processed_rows += chunk_cardinality;
+                                    total_snapshot_processed_rows += chunk_cardinality;
+                                    yield Message::Chunk(mapping_chunk(
+                                        chunk,
+                                        &self.output_indices,
+                                    ));
+                                    break;
                                 }
                             }
                         }
@@ -544,6 +526,10 @@ where
 
                 yield Message::Barrier(barrier);
 
+                if snapshot_read_complete {
+                    break 'backfill_loop;
+                }
+
                 // We will switch snapshot at the start of the next iteration of the backfill loop.
             }
         }
@@ -565,7 +551,7 @@ where
                         // This is because we can't update state table in first epoch,
                         // since it expects to have been initialized in previous epoch
                         // (there's no epoch before the first epoch).
-                        if is_snapshot_empty {
+                        if current_pos.is_none() {
                             current_pos =
                                 Some(construct_initial_finished_state(pk_in_output_indices.len()))
                         }
@@ -651,7 +637,7 @@ where
             let key: &[Datum] = &[Some(vnode.into())];
             let row = state_table.get_row(key).await?;
             let state = Self::deserialize_backfill_state(row, pk_len);
-            assert_eq!(state, expected_state);
+            assert_eq!(state.is_finished, expected_state.is_finished);
         }
         Ok(expected_state)
     }

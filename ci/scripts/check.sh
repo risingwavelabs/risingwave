@@ -42,7 +42,7 @@ sccache --show-stats
 sccache --zero-stats
 
 echo "--- Run doctest"
-cargo test --doc
+RUSTDOCFLAGS="-Clink-arg=-fuse-ld=lld" cargo test --doc
 
 echo "--- Show sccache stats"
 sccache --show-stats

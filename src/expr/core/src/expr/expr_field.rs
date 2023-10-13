@@ -16,7 +16,7 @@ use anyhow::anyhow;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::value_encoding::deserialize_datum;
+use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -89,7 +89,7 @@ impl Build for FieldExpression {
         let RexNode::Constant(value) = second.get_rex_node().unwrap() else {
             bail!("Expected Constant as 1st argument");
         };
-        let index = deserialize_datum(value.body.as_slice(), &DataType::Int32)
+        let index = Datum::from_protobuf(value, &DataType::Int32)
             .map_err(|e| anyhow!("Failed to deserialize i32, reason: {:?}", e))?
             .unwrap()
             .as_int32()

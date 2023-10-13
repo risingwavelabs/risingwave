@@ -77,7 +77,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
         } else {
             let mut pk = self
                 .input
-                .stream_key()
+                .stream_key()?
                 .iter()
                 .filter_map(|&pk_idx| self.output_indices.iter().position(|&idx| idx == pk_idx))
                 .collect_vec();

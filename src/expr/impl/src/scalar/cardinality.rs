@@ -57,8 +57,8 @@ use risingwave_expr::{function, ExprError, Result};
 /// query error Cannot implicitly cast
 /// select cardinality(null);
 /// ```
-#[function("cardinality(list) -> int4")]
-#[function("cardinality(list) -> int8", deprecated)]
+#[function("cardinality(anyarray) -> int4")]
+#[function("cardinality(anyarray) -> int8", deprecated)]
 fn cardinality<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T> {
     array
         .flatten()

@@ -111,13 +111,19 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
         buf
     }
 
+    /// Hash the datums of this row into the given hasher.
+    ///
+    /// Implementors should delegate [`std::hash::Hash::hash`] to this method.
+    fn hash_datums_into<H: Hasher>(&self, state: &mut H) {
+        for datum in self.iter() {
+            hash_datum(datum, state);
+        }
+    }
+
     /// Returns the hash code of the row.
-    #[inline]
     fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode<H> {
         let mut hasher = hash_builder.build_hasher();
-        for datum in self.iter() {
-            hash_datum(datum, &mut hasher);
-        }
+        self.hash_datums_into(&mut hasher);
         hasher.finish().into()
     }
 
@@ -248,6 +254,10 @@ macro_rules! deref_forward_row {
 
         fn hash<H: std::hash::BuildHasher>(&self, hash_builder: H) -> $crate::hash::HashCode<H> {
             (**self).hash(hash_builder)
+        }
+
+        fn hash_datums_into<H: std::hash::Hasher>(&self, state: &mut H) {
+            (**self).hash_datums_into(state)
         }
 
         fn eq(this: &Self, other: impl Row) -> bool {
@@ -417,6 +427,10 @@ impl<R1: Row, R2: Row> Row for either::Either<R1, R2> {
 
     fn memcmp_serialize(&self, serde: &OrderedRowSerde) -> Vec<u8> {
         either::for_both!(self, row => row.memcmp_serialize(serde))
+    }
+
+    fn hash_datums_into<H: Hasher>(&self, state: &mut H) {
+        either::for_both!(self, row => row.hash_datums_into(state))
     }
 
     fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode<H> {

@@ -93,8 +93,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
     fn stream_key(&self) -> Option<Vec<usize>> {
         let _left_len = self.left.schema().len();
         let _right_len = self.right.schema().len();
-        let left_pk = self.left.stream_key();
-        let right_pk = self.right.stream_key();
+        let left_pk = self.left.stream_key()?;
+        let right_pk = self.right.stream_key()?;
         let l2i = self.l2i_col_mapping();
         let r2i = self.r2i_col_mapping();
         let full_out_col_num = self.internal_column_num();
@@ -110,7 +110,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
-        pk_indices.and_then(|mut pk_indices| {
+        pk_indices.and_then(|mut pk_indices: Vec<usize>| {
             let left_len = self.left.schema().len();
             let right_len = self.right.schema().len();
             let eq_predicate = EqJoinPredicate::create(left_len, right_len, self.on.clone());

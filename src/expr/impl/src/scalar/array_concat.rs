@@ -87,7 +87,7 @@ use risingwave_expr::function;
 /// ----
 /// NULL
 /// ```
-#[function("array_cat(list, list) -> list")]
+#[function("array_cat(anyarray, anyarray) -> anyarray")]
 fn array_cat(
     left: Option<ListRef<'_>>,
     right: Option<ListRef<'_>>,
@@ -153,15 +153,12 @@ fn array_cat(
 /// ----
 /// {NULL}
 /// ```
-#[function("array_append(list, *) -> list")]
-fn array_append<'a>(
-    left: Option<ListRef<'_>>,
-    right: Option<impl Into<ScalarRefImpl<'a>>>,
-) -> ListValue {
+#[function("array_append(anyarray, any) -> anyarray")]
+fn array_append(left: Option<ListRef<'_>>, right: Option<ScalarRefImpl<'_>>) -> ListValue {
     ListValue::new(
         left.iter()
             .flat_map(|list| list.iter())
-            .chain(std::iter::once(right.map(Into::into)))
+            .chain(std::iter::once(right))
             .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
             .collect(),
     )
@@ -193,13 +190,10 @@ fn array_append<'a>(
 /// ----
 /// {NULL}
 /// ```
-#[function("array_prepend(*, list) -> list")]
-fn array_prepend<'a>(
-    left: Option<impl Into<ScalarRefImpl<'a>>>,
-    right: Option<ListRef<'_>>,
-) -> ListValue {
+#[function("array_prepend(any, anyarray) -> anyarray")]
+fn array_prepend(left: Option<ScalarRefImpl<'_>>, right: Option<ListRef<'_>>) -> ListValue {
     ListValue::new(
-        std::iter::once(left.map(Into::into))
+        std::iter::once(left)
             .chain(right.iter().flat_map(|list| list.iter()))
             .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
             .collect(),

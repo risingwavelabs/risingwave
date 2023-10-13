@@ -131,10 +131,10 @@ mod tests {
     use risingwave_common::array::DataChunk;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::value_encoding::serialize_datum;
+    use risingwave_common::types::{DataType, Datum, ScalarImpl};
+    use risingwave_common::util::value_encoding::DatumToProtoExt;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::{PbDataType, PbDatum};
+    use risingwave_pb::data::PbDataType;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::{ExprNode, FunctionCall};
 
@@ -158,9 +158,7 @@ mod tests {
                     type_name: TypeName::Varchar as i32,
                     ..Default::default()
                 }),
-                rex_node: Some(RexNode::Constant(PbDatum {
-                    body: serialize_datum(Some("ABC".into()).as_ref()),
-                })),
+                rex_node: Some(RexNode::Constant(Datum::Some("ABC".into()).to_protobuf())),
             },
             ExprNode {
                 function_type: Type::Unspecified as i32,
@@ -168,9 +166,7 @@ mod tests {
                     type_name: TypeName::Varchar as i32,
                     ..Default::default()
                 }),
-                rex_node: Some(RexNode::Constant(PbDatum {
-                    body: serialize_datum(Some("def".into()).as_ref()),
-                })),
+                rex_node: Some(RexNode::Constant(Datum::Some("def".into()).to_protobuf())),
             },
         ];
         let mut in_children = vec![input_ref_expr_node];
