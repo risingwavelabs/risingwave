@@ -21,7 +21,7 @@ use std::sync::LazyLock;
 use jni::strings::JNIString;
 use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
 use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 
 pub static JVM: LazyLock<Result<JavaVM, RwError>> = LazyLock::new(|| {
     let libs_path = if let Ok(libs_path) = std::env::var("CONNECTOR_LIBS_PATH") {
@@ -65,7 +65,8 @@ pub static JVM: LazyLock<Result<JavaVM, RwError>> = LazyLock::new(|| {
         heap_size
     } else {
         // Use 10% of total memory by default
-        format!("{}", total_memory_available_bytes() / 10)
+        // TODO: should use compute-node's total_memory_bytes
+        format!("{}", system_memory_available_bytes() / 10)
     };
 
     // Build the VM properties
