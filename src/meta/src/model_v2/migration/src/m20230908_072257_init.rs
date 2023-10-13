@@ -72,6 +72,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Worker::Host).string().not_null())
                     .col(ColumnDef::new(Worker::Port).integer().not_null())
                     .col(ColumnDef::new(Worker::Status).string().not_null())
+                    .col(ColumnDef::new(Worker::TransactionId).integer())
                     .to_owned(),
             )
             .await?;
@@ -811,6 +812,7 @@ enum Worker {
     WorkerType,
     Host,
     Port,
+    TransactionId,
     Status,
 }
 

@@ -18,14 +18,13 @@ use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk};
-use risingwave_common::types::{DataType, DataTypeName, DatumRef};
+use risingwave_common::types::{DataType, DatumRef};
 use risingwave_pb::expr::project_set_select_item::SelectItem;
 use risingwave_pb::expr::table_function::PbType;
 use risingwave_pb::expr::{PbProjectSetSelectItem, PbTableFunction};
 
 use super::{ExprError, Result};
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
-use crate::sig::FuncSigDebug;
 
 mod empty;
 mod repeat;
@@ -130,26 +129,18 @@ pub fn build(
     chunk_size: usize,
     children: Vec<BoxedExpression>,
 ) -> Result<BoxedTableFunction> {
-    let args = children
-        .iter()
-        .map(|t| t.return_type().into())
-        .collect::<Vec<DataTypeName>>();
-    let desc = crate::sig::table_function::FUNC_SIG_MAP
-        .get(func, &args)
+    let args = children.iter().map(|t| t.return_type()).collect_vec();
+    let desc = crate::sig::FUNCTION_REGISTRY
+        .get(func, &args, &return_type)
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(
-                "{:?}",
-                FuncSigDebug {
-                    func: func.as_str_name(),
-                    inputs_type: &args,
-                    ret_type: (&return_type).into(),
-                    set_returning: true,
-                    deprecated: false,
-                    append_only: false,
-                }
+                "{}({}) -> setof {}",
+                func.as_str_name().to_ascii_lowercase(),
+                args.iter().format(", "),
+                return_type,
             ))
         })?;
-    (desc.build)(return_type, chunk_size, children)
+    desc.build_table(return_type, chunk_size, children)
 }
 
 /// See also [`PbProjectSetSelectItem`]

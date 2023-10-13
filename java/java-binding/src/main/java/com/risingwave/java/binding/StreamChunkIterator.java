@@ -19,7 +19,7 @@ public class StreamChunkIterator implements AutoCloseable {
     private boolean isClosed;
 
     public StreamChunkIterator(byte[] streamChunkPayload) {
-        this.pointer = Binding.streamChunkIteratorNew(streamChunkPayload);
+        this.pointer = Binding.iteratorNewFromStreamChunkPayload(streamChunkPayload);
         this.isClosed = false;
     }
 
@@ -30,13 +30,13 @@ public class StreamChunkIterator implements AutoCloseable {
      *     40"
      */
     public StreamChunkIterator(String str) {
-        this.pointer = Binding.streamChunkIteratorFromPretty(str);
+        this.pointer = Binding.iteratorNewFromStreamChunkPretty(str);
         this.isClosed = false;
     }
 
     public StreamChunkRow next() {
-        long pointer = Binding.streamChunkIteratorNext(this.pointer);
-        if (pointer == 0) {
+        boolean hasNext = Binding.iteratorNext(this.pointer);
+        if (!hasNext) {
             return null;
         }
         return new StreamChunkRow(pointer);
@@ -46,7 +46,7 @@ public class StreamChunkIterator implements AutoCloseable {
     public void close() {
         if (!isClosed) {
             isClosed = true;
-            Binding.streamChunkIteratorClose(pointer);
+            Binding.iteratorClose(pointer);
         }
     }
 }

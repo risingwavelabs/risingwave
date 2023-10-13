@@ -433,17 +433,17 @@ pub async fn compact(
     ) * compact_task.splits.len() as u64;
 
     tracing::info!(
-            "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}",
-                compact_task.compaction_group_id,
-                compact_task.task_id,
-                compact_task_statistics,
-                compact_task.target_level,
-                compact_task.compression_algorithm,
-                compact_task.existing_table_ids,
-                parallelism,
-                task_memory_capacity_with_parallelism,
-                optimize_by_copy_block
-            );
+        "Ready to handle compaction group {} task: {} compact_task_statistics {:?} target_level {} compression_algorithm {:?} table_ids {:?} parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}",
+            compact_task.compaction_group_id,
+            compact_task.task_id,
+            compact_task_statistics,
+            compact_task.target_level,
+            compact_task.compression_algorithm,
+            compact_task.existing_table_ids,
+            parallelism,
+            task_memory_capacity_with_parallelism,
+            optimize_by_copy_block
+    );
 
     // If the task does not have enough memory, it should cancel the task and let the meta
     // reschedule it, so that it does not occupy the compactor's resources.
@@ -702,9 +702,9 @@ where
         progress_key_num += 1;
 
         if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
-                task_progress.inc_progress_key(progress_key_num);
-                progress_key_num = 0;
-            }
+            task_progress.inc_progress_key(progress_key_num);
+            progress_key_num = 0;
+        }
 
         let mut iter_key = iter.key();
         compaction_statistics.iter_total_key_counts += 1;
@@ -750,7 +750,13 @@ where
                     .await?;
             }
             del_iter.next();
+            progress_key_num += 1;
+            if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+                task_progress.inc_progress_key(progress_key_num);
+                progress_key_num = 0;
+            }
         }
+
         let earliest_range_delete_which_can_see_iter_key = del_iter.earliest_delete_since(epoch);
 
         // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
@@ -851,13 +857,18 @@ where
                 })
                 .await?;
             del_iter.next();
+            progress_key_num += 1;
+            if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+                task_progress.inc_progress_key(progress_key_num);
+                progress_key_num = 0;
+            }
         }
     }
 
     if let Some(task_progress) = task_progress.as_ref() && progress_key_num > 0 {
-            // Avoid losing the progress_key_num in the last Interval
-            task_progress.inc_progress_key(progress_key_num);
-        }
+        // Avoid losing the progress_key_num in the last Interval
+        task_progress.inc_progress_key(progress_key_num);
+    }
 
     if let Some(last_table_id) = last_table_id.take() {
         table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));

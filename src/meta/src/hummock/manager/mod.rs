@@ -28,6 +28,7 @@ use futures::stream::{BoxStream, FuturesUnordered};
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
+use risingwave_common::config::default::compaction_config;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_common::util::{pending_on_none, select_all};
@@ -44,6 +45,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 use risingwave_pb::hummock::group_delta::DeltaType;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config;
 use risingwave_pb::hummock::subscribe_compaction_event_request::{
     Event as RequestEvent, HeartBeat, PullTask, ReportTask,
 };
@@ -435,29 +437,16 @@ impl HummockManager {
                 .collect();
 
         let mut redo_state = if self.need_init().await? {
-            // For backward compatibility, try to read checkpoint from meta store.
-            let versions = HummockVersion::list(self.env.meta_store()).await?;
-            let checkpoint_version = if !versions.is_empty() {
-                let checkpoint = versions.into_iter().next().unwrap();
-                tracing::warn!(
-                    "read hummock version checkpoint from meta store: {:#?}",
-                    checkpoint
-                );
-                checkpoint
-            } else {
-                // As no record found in stores, create a initial version.
-                let default_compaction_config = self
-                    .compaction_group_manager
-                    .read()
-                    .await
-                    .default_compaction_config();
-                let checkpoint = create_init_version(default_compaction_config);
-                tracing::info!("init hummock version checkpoint");
-                HummockVersionStats::default()
-                    .insert(self.env.meta_store())
-                    .await?;
-                checkpoint
-            };
+            let default_compaction_config = self
+                .compaction_group_manager
+                .read()
+                .await
+                .default_compaction_config();
+            let checkpoint_version = create_init_version(default_compaction_config);
+            tracing::info!("init hummock version checkpoint");
+            HummockVersionStats::default()
+                .insert(self.env.meta_store())
+                .await?;
             versioning_guard.checkpoint = HummockVersionCheckpoint {
                 version: Some(checkpoint_version.clone()),
                 stale_objects: Default::default(),
@@ -511,7 +500,7 @@ impl HummockManager {
         versioning_guard.mark_objects_for_deletion();
 
         let all_group_ids = get_compaction_group_ids(&versioning_guard.current_version);
-        let configs = self
+        let mut configs = self
             .compaction_group_manager
             .write()
             .await
@@ -520,6 +509,46 @@ impl HummockManager {
                 self.env.meta_store(),
             )
             .await?;
+
+        // We've already lowered the default limit for write limit in PR-12183, and to prevent older clusters from continuing to use the outdated configuration, we've introduced a new logic to rewrite it in a uniform way.
+        let mut rewrite_cg_ids = vec![];
+        for (cg_id, compaction_group_config) in &mut configs {
+            // update write limit
+            let relaxed_default_write_stop_level_count = 1000;
+            if compaction_group_config
+                .compaction_config
+                .level0_sub_level_compact_level_count
+                == relaxed_default_write_stop_level_count
+            {
+                rewrite_cg_ids.push(*cg_id);
+            }
+        }
+
+        if !rewrite_cg_ids.is_empty() {
+            tracing::info!("Compaction group {:?} configs rewrite ", rewrite_cg_ids);
+
+            // update meta store
+            let result = self
+                .compaction_group_manager
+                .write()
+                .await
+                .update_compaction_config(
+                    &rewrite_cg_ids,
+                    &[
+                        mutable_config::MutableConfig::Level0StopWriteThresholdSubLevelNumber(
+                            compaction_config::level0_stop_write_threshold_sub_level_number(),
+                        ),
+                    ],
+                    self.env.meta_store(),
+                )
+                .await?;
+
+            // update memory
+            for new_config in result {
+                configs.insert(new_config.group_id(), new_config);
+            }
+        }
+
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
         trigger_write_stop_stats(&self.metrics, &versioning_guard.write_limit);
@@ -3021,8 +3050,6 @@ impl CompactionState {
         } else if guard.contains(&(group, compact_task::TaskType::Dynamic)) {
             Some(compact_task::TaskType::Dynamic)
         } else {
-            // Other types are not triggered by `try_sched_compaction`, so no need to be handled.
-            // TODO: Consider using match state to avoid missing newly added types
             None
         }
     }

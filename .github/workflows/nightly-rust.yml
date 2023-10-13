@@ -19,6 +19,7 @@ jobs:
            remove-haskell: 'true'
            remove-codeql: 'true'
            remove-docker-images: 'true'
+           root-reserve-mb: 2048
       - uses: actions/checkout@v3
       - name: Setup Rust toolchain
         run: |

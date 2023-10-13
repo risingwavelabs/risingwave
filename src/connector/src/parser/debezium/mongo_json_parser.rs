@@ -99,7 +99,7 @@ impl DebeziumMongoJsonParser {
 
         let row_op = DebeziumChangeEvent::with_value(MongoProjection::new(accessor));
 
-        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
+        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer).map_err(Into::into)
     }
 }
 
