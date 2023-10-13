@@ -456,9 +456,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         tracing::trace!(partition=?self.this_partition_key, "loading the whole partition into cache");
 
         let mut new_cache = PartitionCache::new(); // shouldn't use `new_empty_partition_cache` here because we don't want sentinels
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let table_iter = table
-            .iter_row_with_pk_prefix(
+            .iter_with_prefix(
                 self.this_partition_key,
+                sub_range,
                 PrefetchOptions::new_for_exhaust_iter(),
             )
             .await?;
@@ -571,9 +573,9 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     ) -> StreamExecutorResult<()> {
         let streams = stream::iter(table.vnode_bitmap().iter_vnodes())
             .map(|vnode| {
-                table.iter_row_with_pk_range(
-                    &table_pk_range,
+                table.iter_with_vnode(
                     vnode,
+                    &table_pk_range,
                     PrefetchOptions::new_for_exhaust_iter(),
                 )
             })
@@ -651,11 +653,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             );
             let streams: Vec<_> =
                 futures::future::try_join_all(table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                    table.iter_row_with_pk_range(
-                        &pk_range,
-                        vnode,
-                        PrefetchOptions::new_for_exhaust_iter(),
-                    )
+                    table.iter_with_vnode(vnode, &pk_range, PrefetchOptions::new_for_exhaust_iter())
                 }))
                 .await?
                 .into_iter()
@@ -749,7 +747,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             );
             let streams: Vec<_> =
                 futures::future::try_join_all(table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                    table.iter_row_with_pk_range(&pk_range, vnode, PrefetchOptions::default())
+                    table.iter_with_vnode(vnode, &pk_range, PrefetchOptions::default())
                 }))
                 .await?
                 .into_iter()

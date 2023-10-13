@@ -28,9 +28,10 @@ use risingwave_pb::catalog::PbTable;
 use crate::common::table::test_utils::gen_prost_table_with_dist_key;
 
 pub(crate) const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+pub(crate) const TEST_DATA_SIZE: usize = 10;
 
 pub(crate) fn gen_test_data(base: i64) -> (Vec<Op>, Vec<OwnedRow>) {
-    gen_sized_test_data(base, 10)
+    gen_sized_test_data(base, TEST_DATA_SIZE)
 }
 
 pub(crate) fn gen_sized_test_data(base: i64, max_count: usize) -> (Vec<Op>, Vec<OwnedRow>) {
