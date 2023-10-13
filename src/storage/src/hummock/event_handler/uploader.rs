@@ -1091,6 +1091,7 @@ mod tests {
         };
         SharedBufferBatch::build_shared_buffer_batch(
             epoch,
+            epoch,
             sorted_items,
             size,
             vec![],
