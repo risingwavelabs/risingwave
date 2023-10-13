@@ -43,7 +43,7 @@ use serde::{Deserialize, Serialize};
 
 /// If `total_memory_bytes` is not specified, the default memory limit will be set to
 /// the system memory limit multiplied by this proportion
-const DEFAULT_MEMORY_PROPORTION: f64 = 0.6;
+const DEFAULT_MEMORY_PROPORTION: f64 = 0.7;
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
