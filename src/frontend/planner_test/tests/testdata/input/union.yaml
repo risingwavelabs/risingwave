@@ -53,3 +53,15 @@
   expected_outputs:
   - batch_plan
   - optimized_logical_plan_for_batch
+- name: test merged union stream key
+  sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, c bigint);
+    create table t3 (a int, b numeric, c bigint);
+    create table t4 (a int, b numeric, c bigint);
+    create table t5 (a int, b numeric, c bigint);
+    select * from t1 union all select * from t2 union all select * from t3 union all select * from t4 union all select * from t5;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+    - stream_dist_plan

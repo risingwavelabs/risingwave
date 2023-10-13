@@ -140,13 +140,13 @@
     create table t2 (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
     select * from t1 Union all select * from t2;
   stream_plan: |-
-    StreamMaterialize { columns: [ts, v1, v2, t1._row_id(hidden), null:Serial(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, null:Serial, 0:Int32], pk_columns: [t1._row_id, null:Serial, 0:Int32], pk_conflict: NoCheck, watermark_columns: [ts] }
+    StreamMaterialize { columns: [ts, v1, v2, t1._row_id(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, 0:Int32], pk_columns: [t1._row_id, 0:Int32], pk_conflict: NoCheck, watermark_columns: [ts] }
     └─StreamUnion { all: true, output_watermarks: [t1.ts] }
-      ├─StreamExchange { dist: HashShard(t1._row_id, null:Serial, 0:Int32) }
-      │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, null:Serial, 0:Int32], output_watermarks: [t1.ts] }
+      ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+      │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, 0:Int32], output_watermarks: [t1.ts] }
       │   └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard(null:Serial, t2._row_id, 1:Int32) }
-        └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, null:Serial, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
+      └─StreamExchange { dist: HashShard(t2._row_id, 1:Int32) }
+        └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
           └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: union
   sql: |
@@ -159,11 +159,11 @@
       └─StreamExchange { dist: HashShard(t1.ts, t1.v1, t1.v2) }
         └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2], output_watermarks: [t1.ts] }
           └─StreamUnion { all: true, output_watermarks: [t1.ts] }
-            ├─StreamExchange { dist: HashShard(t1._row_id, null:Serial, 0:Int32) }
-            │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, null:Serial, 0:Int32], output_watermarks: [t1.ts] }
+            ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+            │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, 0:Int32], output_watermarks: [t1.ts] }
             │   └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-            └─StreamExchange { dist: HashShard(null:Serial, t2._row_id, 1:Int32) }
-              └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, null:Serial, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
+            └─StreamExchange { dist: HashShard(t2._row_id, 1:Int32) }
+              └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
                 └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: tumble
   sql: |

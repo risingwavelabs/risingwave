@@ -10,39 +10,56 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), null:Serial(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, null:Serial, 0:Int32], pk_columns: [t1._row_id, null:Serial, 0:Int32], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, 0:Int32], pk_columns: [t1._row_id, 0:Int32], pk_conflict: NoCheck }
     └─StreamUnion { all: true }
-      ├─StreamExchange { dist: HashShard(t1._row_id, null:Serial, 0:Int32) }
-      │ └─StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Serial, 0:Int32] }
+      ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+      │ └─StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, 0:Int32] }
       │   └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard(null:Serial, t2._row_id, 1:Int32) }
-        └─StreamProject { exprs: [t2.a, t2.b, t2.c, null:Serial, t2._row_id, 1:Int32] }
+      └─StreamExchange { dist: HashShard(t2._row_id, 1:Int32) }
+        └─StreamProject { exprs: [t2.a, t2.b, t2.c, t2._row_id, 1:Int32] }
           └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), null:Serial(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, null:Serial, 0:Int32], pk_columns: [t1._row_id, null:Serial, 0:Int32], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, 0:Int32], pk_columns: [t1._row_id, 0:Int32], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamUnion { all: true }
-        ├── StreamExchange Hash([3, 4, 5]) from 1
-        └── StreamExchange Hash([3, 4, 5]) from 2
+        ├── StreamExchange Hash([3, 4]) from 1
+        └── StreamExchange Hash([3, 4]) from 2
 
     Fragment 1
-    StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Serial, 0:Int32] }
+    StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, 0:Int32] }
     └── Chain { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { state table: 0 }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 2
-    StreamProject { exprs: [t2.a, t2.b, t2.c, null:Serial, t2._row_id, 1:Int32] }
+    StreamProject { exprs: [t2.a, t2.b, t2.c, t2._row_id, 1:Int32] }
     └── Chain { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) } { state table: 1 }
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ vnode, _row_id, t1_backfill_finished, t1_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0
+    ├── columns: [ vnode, _row_id, t1_backfill_finished, t1_row_count ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
-    Table 1 { columns: [ vnode, _row_id, t2_backfill_finished, t2_row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1
+    ├── columns: [ vnode, _row_id, t2_backfill_finished, t2_row_count ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a, b, c, t1._row_id, null:Serial, 0:Int32 ], primary key: [ $3 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 3, 4, 5 ], read pk prefix len hint: 3 }
+    Table 4294967294
+    ├── columns: [ a, b, c, t1._row_id, 0:Int32 ]
+    ├── primary key: [ $3 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
+    ├── distribution key: [ 3, 4 ]
+    └── read pk prefix len hint: 2
 
 - sql: |
     create table t1 (a int, b numeric, c bigint);
@@ -68,11 +85,11 @@
       └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
         └─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
           └─StreamUnion { all: true }
-            ├─StreamExchange { dist: HashShard(t1._row_id, null:Serial, 0:Int32) }
-            │ └─StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Serial, 0:Int32] }
+            ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+            │ └─StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, 0:Int32] }
             │   └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-            └─StreamExchange { dist: HashShard(null:Serial, t2._row_id, 1:Int32) }
-              └─StreamProject { exprs: [t2.a, t2.b, t2.c, null:Serial, t2._row_id, 1:Int32] }
+            └─StreamExchange { dist: HashShard(t2._row_id, 1:Int32) }
+              └─StreamProject { exprs: [t2.a, t2.b, t2.c, t2._row_id, 1:Int32] }
                 └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |+
     Fragment 0
@@ -87,18 +104,18 @@
 
     Fragment 1
     StreamUnion { all: true }
-    ├── StreamExchange Hash([3, 4, 5]) from 2
-    └── StreamExchange Hash([3, 4, 5]) from 3
+    ├── StreamExchange Hash([3, 4]) from 2
+    └── StreamExchange Hash([3, 4]) from 3
 
     Fragment 2
-    StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Serial, 0:Int32] }
+    StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, 0:Int32] }
     └── Chain { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         ├── state table: 1
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 3
-    StreamProject { exprs: [t2.a, t2.b, t2.c, null:Serial, t2._row_id, 1:Int32] }
+    StreamProject { exprs: [t2.a, t2.b, t2.c, t2._row_id, 1:Int32] }
     └── Chain { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
         ├── state table: 2
         ├── Upstream
@@ -292,3 +309,129 @@
     └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
       └─BatchExchange { order: [], dist: HashShard(1:Int32) }
         └─BatchValues { rows: [[1:Int32], [2:Int32], [3:Int32], [4:Int32], [5:Int32], [5:Int32]] }
+- name: test merged union stream key
+  sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, c bigint);
+    create table t3 (a int, b numeric, c bigint);
+    create table t4 (a int, b numeric, c bigint);
+    create table t5 (a int, b numeric, c bigint);
+    select * from t1 union all select * from t2 union all select * from t3 union all select * from t4 union all select * from t5;
+  batch_plan: |-
+    BatchUnion { all: true }
+    ├─BatchExchange { order: [], dist: Single }
+    │ └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
+    ├─BatchExchange { order: [], dist: Single }
+    │ └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
+    ├─BatchExchange { order: [], dist: Single }
+    │ └─BatchScan { table: t3, columns: [t3.a, t3.b, t3.c], distribution: SomeShard }
+    ├─BatchExchange { order: [], dist: Single }
+    │ └─BatchScan { table: t4, columns: [t4.a, t4.b, t4.c], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t5, columns: [t5.a, t5.b, t5.c], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, 0:Int32], pk_columns: [t1._row_id, 0:Int32], pk_conflict: NoCheck }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+      │ └─StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, 0:Int32] }
+      │   └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      ├─StreamExchange { dist: HashShard(t2._row_id, 1:Int32) }
+      │ └─StreamProject { exprs: [t2.a, t2.b, t2.c, t2._row_id, 1:Int32] }
+      │   └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+      ├─StreamExchange { dist: HashShard(t3._row_id, 2:Int32) }
+      │ └─StreamProject { exprs: [t3.a, t3.b, t3.c, t3._row_id, 2:Int32] }
+      │   └─StreamTableScan { table: t3, columns: [t3.a, t3.b, t3.c, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) }
+      ├─StreamExchange { dist: HashShard(t4._row_id, 3:Int32) }
+      │ └─StreamProject { exprs: [t4.a, t4.b, t4.c, t4._row_id, 3:Int32] }
+      │   └─StreamTableScan { table: t4, columns: [t4.a, t4.b, t4.c, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) }
+      └─StreamExchange { dist: HashShard(t5._row_id, 4:Int32) }
+        └─StreamProject { exprs: [t5.a, t5.b, t5.c, t5._row_id, 4:Int32] }
+          └─StreamTableScan { table: t5, columns: [t5.a, t5.b, t5.c, t5._row_id], pk: [t5._row_id], dist: UpstreamHashShard(t5._row_id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, 0:Int32], pk_columns: [t1._row_id, 0:Int32], pk_conflict: NoCheck }
+    ├── materialized table: 4294967294
+    └── StreamUnion { all: true }
+        ├── StreamExchange Hash([3, 4]) from 1
+        ├── StreamExchange Hash([3, 4]) from 2
+        ├── StreamExchange Hash([3, 4]) from 3
+        ├── StreamExchange Hash([3, 4]) from 4
+        └── StreamExchange Hash([3, 4]) from 5
+
+    Fragment 1
+    StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, 0:Int32] }
+    └── Chain { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { state table: 0 }
+        ├── Upstream
+        └── BatchPlanNode
+
+    Fragment 2
+    StreamProject { exprs: [t2.a, t2.b, t2.c, t2._row_id, 1:Int32] }
+    └── Chain { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) } { state table: 1 }
+        ├── Upstream
+        └── BatchPlanNode
+
+    Fragment 3
+    StreamProject { exprs: [t3.a, t3.b, t3.c, t3._row_id, 2:Int32] }
+    └── Chain { table: t3, columns: [t3.a, t3.b, t3.c, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) } { state table: 2 }
+        ├── Upstream
+        └── BatchPlanNode
+
+    Fragment 4
+    StreamProject { exprs: [t4.a, t4.b, t4.c, t4._row_id, 3:Int32] }
+    └── Chain { table: t4, columns: [t4.a, t4.b, t4.c, t4._row_id], pk: [t4._row_id], dist: UpstreamHashShard(t4._row_id) } { state table: 3 }
+        ├── Upstream
+        └── BatchPlanNode
+
+    Fragment 5
+    StreamProject { exprs: [t5.a, t5.b, t5.c, t5._row_id, 4:Int32] }
+    └── Chain { table: t5, columns: [t5.a, t5.b, t5.c, t5._row_id], pk: [t5._row_id], dist: UpstreamHashShard(t5._row_id) } { state table: 4 }
+        ├── Upstream
+        └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ vnode, _row_id, t1_backfill_finished, t1_row_count ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 1
+    ├── columns: [ vnode, _row_id, t2_backfill_finished, t2_row_count ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 2
+    ├── columns: [ vnode, _row_id, t3_backfill_finished, t3_row_count ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 3
+    ├── columns: [ vnode, _row_id, t4_backfill_finished, t4_row_count ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4
+    ├── columns: [ vnode, _row_id, t5_backfill_finished, t5_row_count ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ a, b, c, t1._row_id, 0:Int32 ]
+    ├── primary key: [ $3 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
+    ├── distribution key: [ 3, 4 ]
+    └── read pk prefix len hint: 2
+
