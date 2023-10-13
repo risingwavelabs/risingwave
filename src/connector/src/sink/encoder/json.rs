@@ -138,6 +138,7 @@ fn datum_to_json_object(
             json!(v)
         }
         (DataType::Float32, ScalarRefImpl::Float32(v)) => {
+            println!("float32: {:?}",json!(f32::from(v)));
             json!(f32::from(v))
         }
         (DataType::Float64, ScalarRefImpl::Float64(v)) => {
@@ -178,7 +179,10 @@ fn datum_to_json_object(
             json!(v.0.num_seconds_from_midnight() as i64 * 1000)
         }
         (DataType::Date, ScalarRefImpl::Date(v)) => match custom_json_type {
-            CustomJsonType::None => json!(v.0.num_days_from_ce()),
+            CustomJsonType::None => {
+                let a = v.0.format("%Y-%m-%d").to_string();
+                json!(a)
+            },
             CustomJsonType::Doris(_) => {
                 let a = v.0.format("%Y-%m-%d").to_string();
                 json!(a)

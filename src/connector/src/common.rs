@@ -466,6 +466,18 @@ impl DorisCommon {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct BigQueryCommon {
+    #[serde(rename = "bigquery.path")]
+    pub file_path: String,
+    #[serde(rename = "bigquery.project")]
+    pub project: String,
+    #[serde(rename = "bigquery.dataset")]
+    pub dataset: String,
+    #[serde(rename = "bigquery.table")]
+    pub table: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpsertMessage<'a> {
     #[serde(borrow)]

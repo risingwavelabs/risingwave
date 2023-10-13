@@ -18,6 +18,7 @@ pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
 pub mod doris;
+pub mod big_query;
 pub mod doris_connector;
 pub mod encoder;
 pub mod formatter;
@@ -78,6 +79,7 @@ macro_rules! for_all_sinks {
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { Doris, $crate::sink::doris::DorisSink },
+                { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink }
             }
             $(,$arg)*
@@ -393,6 +395,8 @@ pub enum SinkError {
     Pulsar(anyhow::Error),
     #[error("Internal error: {0}")]
     Internal(anyhow::Error),
+    #[error("BigQuery error: {0}")]
+    BigQuery(String),
 }
 
 impl From<icelake::Error> for SinkError {

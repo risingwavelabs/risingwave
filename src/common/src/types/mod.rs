@@ -55,7 +55,7 @@ mod native_type;
 mod num256;
 mod ops;
 mod ordered;
-mod ordered_float;
+pub mod ordered_float;
 mod postgres_type;
 mod scalar_impl;
 mod serial;
