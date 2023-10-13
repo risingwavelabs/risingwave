@@ -1051,7 +1051,7 @@
           FROM bid)
     WHERE rank_number <= 1;
   stream_plan: |-
-    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [_row_id, bidder, auction], pk_columns: [_row_id, bidder, auction], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction, _row_id], pk_columns: [bidder, auction, _row_id], pk_conflict: NoCheck }
     └─StreamGroupTopN { order: [$expr8 DESC], limit: 1, offset: 0, with_ties: true, group_key: [$expr4, $expr3] }
       └─StreamExchange { dist: HashShard($expr4, $expr3) }
         └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr3, Field(bid, 1:Int32) as $expr4, Field(bid, 2:Int32) as $expr5, Field(bid, 3:Int32) as $expr6, Field(bid, 4:Int32) as $expr7, Field(bid, 5:Int32) as $expr8, Field(bid, 6:Int32) as $expr9, _row_id] }
@@ -1065,7 +1065,7 @@
                 └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [_row_id, bidder, auction], pk_columns: [_row_id, bidder, auction], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction, _row_id], pk_columns: [bidder, auction, _row_id], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamGroupTopN { order: [$expr8 DESC], limit: 1, offset: 0, with_ties: true, group_key: [$expr4, $expr3] } { state table: 0 }
         └── StreamExchange Hash([1, 0]) from 1
@@ -1093,7 +1093,7 @@
 
     Table 4 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 4294967294 { columns: [ auction, bidder, price, channel, url, date_time, extra, _row_id ], primary key: [ $7 ASC, $1 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 1, 0 ], read pk prefix len hint: 3 }
+    Table 4294967294 { columns: [ auction, bidder, price, channel, url, date_time, extra, _row_id ], primary key: [ $1 ASC, $0 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 1, 0 ], read pk prefix len hint: 3 }
 
 - id: nexmark_q19
   before:
@@ -1103,7 +1103,7 @@
     (SELECT *, ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number FROM bid)
     WHERE rank_number <= 10;
   stream_plan: |-
-    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, p_time, _row_id(hidden), rank_number], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, p_time, _row_id(hidden), rank_number], stream_key: [auction, _row_id], pk_columns: [auction, _row_id], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr3 ORDER BY $expr5 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─StreamGroupTopN { order: [$expr5 DESC], limit: 10, offset: 0, group_key: [$expr3] }
         └─StreamExchange { dist: HashShard($expr3) }
@@ -1118,7 +1118,7 @@
                   └─StreamNow { output: [now] }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, p_time, _row_id(hidden), rank_number], stream_key: [_row_id, auction], pk_columns: [_row_id, auction], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, p_time, _row_id(hidden), rank_number], stream_key: [auction, _row_id], pk_columns: [auction, _row_id], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr3 ORDER BY $expr5 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] } { state table: 0 }
         └── StreamGroupTopN { order: [$expr5 DESC], limit: 10, offset: 0, group_key: [$expr3] } { state table: 1 }
@@ -1149,7 +1149,7 @@
 
     Table 5 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 4294967294 { columns: [ auction, bidder, price, channel, url, date_time, extra, p_time, _row_id, rank_number ], primary key: [ $8 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+    Table 4294967294 { columns: [ auction, bidder, price, channel, url, date_time, extra, p_time, _row_id, rank_number ], primary key: [ $0 ASC, $8 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
 - id: nexmark_q20
   before:
@@ -1919,7 +1919,7 @@
     StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr4], output_watermarks: [$expr4] }
     └── StreamNow { output: [now] } { state table: 10 }
 
-    Table 0 { columns: [ $expr2, $expr3, count($expr5), $expr6 ], primary key: [ $2 DESC, $0 ASC, $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ $expr2, $expr3, count($expr5), $expr6 ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
     ├── columns: [ $expr2, $expr3, count($expr5), $expr6 ]
