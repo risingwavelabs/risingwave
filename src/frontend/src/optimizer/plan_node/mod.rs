@@ -221,7 +221,7 @@ impl PlanRef {
     pub fn expect_stream_key(&self) -> &[usize] {
         self.stream_key().unwrap_or_else(|| {
             panic!(
-                "a stream key is expected but not exist, plan: {}",
+                "a stream key is expected but not exist, plan:\n{}",
                 self.explain_to_string()
             )
         })
