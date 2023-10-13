@@ -387,7 +387,7 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Connection::Name).string().not_null())
-                    .col(ColumnDef::new(Connection::Info).json())
+                    .col(ColumnDef::new(Connection::Info).json().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_connection_object_id")

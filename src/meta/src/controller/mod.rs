@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use risingwave_pb::catalog::{PbDatabase, PbSchema};
+use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
+use risingwave_pb::catalog::{PbConnection, PbDatabase, PbSchema};
 use sea_orm::{ActiveValue, DatabaseConnection, ModelTrait};
 
-use crate::model_v2::{database, object, schema};
+use crate::model_v2::{connection, database, object, schema};
 use crate::MetaError;
 
 #[allow(dead_code)]
@@ -100,6 +101,19 @@ impl From<ObjectModel<schema::Model>> for PbSchema {
             name: value.0.name,
             database_id: value.1.database_id.unwrap() as _,
             owner: value.1.owner_id as _,
+        }
+    }
+}
+
+impl From<ObjectModel<connection::Model>> for PbConnection {
+    fn from(value: ObjectModel<connection::Model>) -> Self {
+        Self {
+            id: value.1.oid as _,
+            schema_id: value.1.schema_id.unwrap() as _,
+            database_id: value.1.database_id.unwrap() as _,
+            name: value.0.name,
+            owner: value.1.owner_id as _,
+            info: Some(PbConnectionInfo::PrivateLinkService(value.0.info.0)),
         }
     }
 }

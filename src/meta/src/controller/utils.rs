@@ -14,7 +14,7 @@
 
 use anyhow::anyhow;
 use model_migration::WithQuery;
-use risingwave_pb::catalog::PbFunction;
+use risingwave_pb::catalog::{PbConnection, PbFunction};
 use sea_orm::sea_query::{
     Alias, CommonTableExpression, Expr, Query, QueryStatementBuilder, SelectStatement, UnionType,
     WithClause,
@@ -28,7 +28,8 @@ use crate::controller::{DatabaseId, ObjectId, SchemaId, UserId};
 use crate::model_v2::object::ObjectType;
 use crate::model_v2::prelude::*;
 use crate::model_v2::{
-    function, index, object, object_dependency, schema, sink, source, table, view, DataTypeArray,
+    connection, function, index, object, object_dependency, schema, sink, source, table, view,
+    DataTypeArray,
 };
 use crate::{MetaError, MetaResult};
 
@@ -189,6 +190,34 @@ where
     Ok(())
 }
 
+/// `check_connection_name_duplicate` checks whether the connection name is already used in the target namespace.
+pub async fn check_connection_name_duplicate<C>(
+    pb_connection: &PbConnection,
+    db: &C,
+) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = Connection::find()
+        .inner_join(Object)
+        .filter(
+            object::Column::DatabaseId
+                .eq(pb_connection.database_id as DatabaseId)
+                .and(object::Column::SchemaId.eq(pb_connection.schema_id as SchemaId))
+                .and(connection::Column::Name.eq(&pb_connection.name)),
+        )
+        .count(db)
+        .await?;
+    if count > 0 {
+        assert_eq!(count, 1);
+        return Err(MetaError::catalog_duplicated(
+            "connection",
+            &pb_connection.name,
+        ));
+    }
+    Ok(())
+}
+
 /// `check_relation_name_duplicate` checks whether the relation name is already used in the target namespace.
 pub async fn check_relation_name_duplicate<C>(
     name: &str,
@@ -261,18 +290,22 @@ where
     C: ConnectionTrait,
 {
     // Ignore indexes.
-    let count = ObjectDependency::find()
-        .join(
-            JoinType::InnerJoin,
-            object_dependency::Relation::Object1.def(),
-        )
-        .filter(
-            object_dependency::Column::Oid
-                .eq(object_id)
-                .and(object::Column::ObjType.ne(ObjectType::Index)),
-        )
-        .count(db)
-        .await?;
+    let count = if object_type == ObjectType::Table {
+        ObjectDependency::find()
+            .join(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object1.def(),
+            )
+            .filter(
+                object_dependency::Column::Oid
+                    .eq(object_id)
+                    .and(object::Column::ObjType.ne(ObjectType::Index)),
+            )
+            .count(db)
+            .await?
+    } else {
+        ObjectDependency::find_by_id(object_id).count(db).await?
+    };
     if count != 0 {
         return Err(MetaError::permission_denied(format!(
             "{} used by {} other objects.",
