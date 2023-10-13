@@ -40,9 +40,9 @@ v1 integer false
 v2 integer false
 v3 integer false
 _row_id serial true
-primary key _row_id
-distribution key _row_id
-idx1 index(v1 ASC, v2 ASC) include(v3) distributed by(v1)
+primary key _row_id NULL
+distribution key _row_id NULL
+idx1 index(v1 ASC, v2 ASC) include(v3) distributed by(v1) NULL
 
 query TT
 show create index idx1;
