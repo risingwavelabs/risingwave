@@ -239,7 +239,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         validate_config(&config);
 
-        let total_memory_bytes = resource_util::memory::total_memory_available_bytes();
+        let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
         let heap_profiler =
             HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
         // Run a background heap profiler
