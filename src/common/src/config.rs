@@ -586,14 +586,35 @@ pub struct StorageConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct CacheRefillConfig {
+    /// SSTable levels to refill.
     #[serde(default = "default::cache_refill::data_refill_levels")]
     pub data_refill_levels: Vec<u32>,
 
+    /// Cache refill maximum timeout to apply version delta.
     #[serde(default = "default::cache_refill::timeout_ms")]
     pub timeout_ms: u64,
 
+    /// Inflight data cache refill tasks.
     #[serde(default = "default::cache_refill::concurrency")]
     pub concurrency: usize,
+
+    /// Block count that a data cache refill request fetches.
+    #[serde(default = "default::cache_refill::unit")]
+    pub unit: usize,
+
+    /// Data cache refill unit admission ratio.
+    ///
+    /// Only unit whose blocks are admitted above the ratio will be refilled.
+    #[serde(default = "default::cache_refill::threshold")]
+    pub threshold: f64,
+
+    /// Recent filter layer count.
+    #[serde(default = "default::cache_refill::recent_filter_layers")]
+    pub recent_filter_layers: usize,
+
+    /// Recent filter layer rotate interval.
+    #[serde(default = "default::cache_refill::recent_filter_rotate_interval_ms")]
+    pub recent_filter_rotate_interval_ms: usize,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -637,14 +658,20 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::lfu_tiny_lru_capacity_ratio")]
     pub lfu_tiny_lru_capacity_ratio: f64,
 
-    #[serde(default = "default::file_cache::rated_random_rate_mb")]
-    pub rated_random_rate_mb: usize,
+    #[serde(default = "default::file_cache::insert_rate_limit_mb")]
+    pub insert_rate_limit_mb: usize,
 
     #[serde(default = "default::file_cache::flush_rate_limit_mb")]
     pub flush_rate_limit_mb: usize,
 
     #[serde(default = "default::file_cache::reclaim_rate_limit_mb")]
     pub reclaim_rate_limit_mb: usize,
+
+    #[serde(default = "default::file_cache::allocation_bits")]
+    pub allocation_bits: usize,
+
+    #[serde(default = "default::file_cache::allocation_timeout_ms")]
+    pub allocation_timeout_ms: usize,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -1132,7 +1159,7 @@ pub mod default {
             0.01
         }
 
-        pub fn rated_random_rate_mb() -> usize {
+        pub fn insert_rate_limit_mb() -> usize {
             0
         }
 
@@ -1142,6 +1169,14 @@ pub mod default {
 
         pub fn reclaim_rate_limit_mb() -> usize {
             0
+        }
+
+        pub fn allocation_bits() -> usize {
+            0
+        }
+
+        pub fn allocation_timeout_ms() -> usize {
+            10
         }
     }
 
@@ -1156,6 +1191,22 @@ pub mod default {
 
         pub fn concurrency() -> usize {
             10
+        }
+
+        pub fn unit() -> usize {
+            64
+        }
+
+        pub fn threshold() -> f64 {
+            0.5
+        }
+
+        pub fn recent_filter_layers() -> usize {
+            6
+        }
+
+        pub fn recent_filter_rotate_interval_ms() -> usize {
+            10000
         }
     }
 
