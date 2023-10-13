@@ -195,9 +195,12 @@ impl FormattedSink for KinesisSinkPayloadWriter {
     type V = Vec<u8>;
 
     async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
-        self.put_record(&k.unwrap_or_default(), v.unwrap_or_default())
-            .await
-            .map(|_| ())
+        self.put_record(
+            &k.ok_or_else(|| SinkError::Kinesis(anyhow!("no key provided")))?,
+            v.unwrap_or_default(),
+        )
+        .await
+        .map(|_| ())
     }
 }
 
