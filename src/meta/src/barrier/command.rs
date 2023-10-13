@@ -36,6 +36,7 @@ use uuid::Uuid;
 use super::info::BarrierActorInfo;
 use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
+use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
@@ -218,6 +219,7 @@ impl Command {
 pub struct CommandContext {
     fragment_manager: FragmentManagerRef,
     catalog_manager: CatalogManagerRef,
+    hummock_manager: HummockManagerRef,
 
     client_pool: StreamClientPoolRef,
 
@@ -249,6 +251,7 @@ impl CommandContext {
     pub(super) fn new(
         fragment_manager: FragmentManagerRef,
         catalog_manager: CatalogManagerRef,
+        hummock_manager: HummockManagerRef,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
         prev_epoch: TracedEpoch,
@@ -262,6 +265,7 @@ impl CommandContext {
         Self {
             fragment_manager,
             catalog_manager,
+            hummock_manager,
             client_pool,
             info: Arc::new(info),
             prev_epoch,
@@ -666,6 +670,13 @@ impl CommandContext {
             Command::CancelStreamingJob(table_fragments) => {
                 let node_actors = table_fragments.worker_actor_ids();
                 self.clean_up(node_actors).await?;
+
+                let table_id = table_fragments.table_id().table_id;
+                let mut table_ids = table_fragments.internal_table_ids();
+                table_ids.push(table_id);
+                if let Err(e) = self.hummock_manager.unregister_table_ids(&table_ids).await {
+                    tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", &table_ids, e);
+                }
                 self.catalog_manager
                     .cancel_create_table_procedure_with_table_fragments(
                         table_fragments.table_id().table_id,

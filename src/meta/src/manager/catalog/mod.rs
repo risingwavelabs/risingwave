@@ -892,29 +892,13 @@ impl CatalogManager {
         Ok(version)
     }
 
-    /// Used to cleanup states in stream manager.
-    /// It is required because failure may not necessarily happen in barrier,
-    /// e.g. when cordon nodes.
-    /// and we still need some way to cleanup the state.
-    pub async fn cancel_create_table_procedure_with_internal_table_ids(
+    async fn cancel_create_table_procedure_inner(
         &self,
         table: Table,
         internal_table_ids: Vec<TableId>,
     ) -> MetaResult<()> {
-        let table_id = table.id;
-        tracing::trace!("cleanup tables for {}", table_id);
+        tracing::trace!("cleanup tables for {}", table.id);
         let core = &mut self.core.lock().await;
-        // Must get the latest from the database. Otherwise dependent relations may not be correct?
-        // FIXME: This might not be needed..
-        let table = {
-            let database_core = &mut core.database;
-            let tables = &mut database_core.tables;
-            let Some(table) = tables.get(&table_id).cloned() else {
-                bail!("Table ID: {table_id} missing when attempting to cancel job")
-            };
-            table
-        };
-
         {
             let user_core = &mut core.user;
             user_core.decrease_ref(table.owner);
@@ -941,55 +925,49 @@ impl CatalogManager {
         Ok(())
     }
 
+    /// Used to cleanup states in stream manager.
+    /// It is required because failure may not necessarily happen in barrier,
+    /// e.g. when cordon nodes.
+    /// and we still need some way to cleanup the state.
+    pub async fn cancel_create_table_procedure_with_internal_table_ids(
+        &self,
+        table: Table,
+        internal_table_ids: Vec<TableId>,
+    ) -> MetaResult<()> {
+        let table = {
+            let core = &mut self.core.lock().await;
+            let database_core = &mut core.database;
+            let tables = &mut database_core.tables;
+            let Some(table) = tables.get(&table.id).cloned() else {
+                bail!(
+                    "table_id {} missing when attempting to cancel job",
+                    table.id
+                )
+            };
+            table
+        };
+        self.cancel_create_table_procedure_inner(table, internal_table_ids)
+            .await
+    }
+
     /// Used by CANCEL JOBS
     pub async fn cancel_create_table_procedure_with_table_fragments(
         &self,
         table_id: TableId,
         fragment: &TableFragments,
     ) -> MetaResult<()> {
-        eprintln!("remove create table with fragment: {table_id}");
-        let core = &mut self.core.lock().await;
         let table = {
+            let core = &mut self.core.lock().await;
             let database_core = &mut core.database;
-            // FIXME: Does not exist for sink and index yet.
-            // should we persist them?
-            // Figure out what was done in `main`.
             let tables = &mut database_core.tables;
             let Some(table) = tables.get(&table_id).cloned() else {
-                eprintln!("Table ID: {table_id} missing when attempting to cancel job");
+                tracing::warn!("Table ID: {table_id} missing when attempting to cancel job");
                 return Ok(());
-                // bail!("Table ID: {table_id} missing when attempting to cancel job")
             };
             table
         };
-
-        {
-            let user_core = &mut core.user;
-            user_core.decrease_ref(table.owner);
-        }
-
-        let database_core = &mut core.database;
-
-        for &dependent_relation_id in &table.dependent_relations {
-            database_core.decrease_ref_count(dependent_relation_id);
-        }
-
-        let mut table_ids = vec![table.id];
-
-        let internal_table_ids = fragment.internal_table_ids();
-        table_ids.extend(internal_table_ids);
-
-        let tables = &mut database_core.tables;
-        let mut tables = BTreeMapTransaction::new(tables);
-        for table_id in table_ids {
-            let table = tables.remove(table_id);
-            assert!(table.is_some())
-        }
-        commit_meta!(self, tables)?;
-
-        let tables = &mut database_core.tables;
-        assert!(tables.get(&table.id).is_none());
-        Ok(())
+        self.cancel_create_table_procedure_inner(table, fragment.internal_table_ids())
+            .await
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.

@@ -695,6 +695,7 @@ impl GlobalBarrierManager {
         let command_ctx = Arc::new(CommandContext::new(
             self.fragment_manager.clone(),
             self.catalog_manager.clone(),
+            self.hummock_manager.clone(),
             self.env.stream_client_pool_ref(),
             info,
             prev_epoch.clone(),
