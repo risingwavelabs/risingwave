@@ -586,24 +586,33 @@ pub struct StorageConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct CacheRefillConfig {
+    /// SSTable levels to refill.
     #[serde(default = "default::cache_refill::data_refill_levels")]
     pub data_refill_levels: Vec<u32>,
 
+    /// Cache refill maximum timeout to apply version delta.
     #[serde(default = "default::cache_refill::timeout_ms")]
     pub timeout_ms: u64,
 
+    /// Inflight data cache refill tasks.
     #[serde(default = "default::cache_refill::concurrency")]
     pub concurrency: usize,
 
+    /// Block count that a data cache refill request fetches.
     #[serde(default = "default::cache_refill::unit")]
     pub unit: usize,
 
+    /// Data cache refill unit admission ratio.
+    ///
+    /// Only unit whose blocks are admitted above the ratio will be refilled.
     #[serde(default = "default::cache_refill::threshold")]
     pub threshold: f64,
 
+    /// Recent filter layer count.
     #[serde(default = "default::cache_refill::recent_filter_layers")]
     pub recent_filter_layers: usize,
 
+    /// Recent filter layer rotate interval.
     #[serde(default = "default::cache_refill::recent_filter_rotate_interval_ms")]
     pub recent_filter_rotate_interval_ms: usize,
 
