@@ -126,6 +126,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
             for (lk, rk) in eq_predicate.eq_indexes() {
                 match either_or_both {
                     EitherOrBoth::Left(_) => {
+                        if let Some(rk) = r2i.try_map(rk) {
+                            if let Some(out_k) = i2o.try_map(rk) {
+                                pk_indices.retain(|&x| x != out_k);
+                            }
+                        }
                         if let Some(lk) = l2i.try_map(lk) {
                             let out_k = i2o.try_map(lk)?;
                             if !pk_indices.contains(&out_k) {
@@ -134,6 +139,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
                         }
                     }
                     EitherOrBoth::Right(_) => {
+                        if let Some(lk) = l2i.try_map(lk) {
+                            if let Some(out_k) = i2o.try_map(lk) {
+                                pk_indices.retain(|&x| x != out_k);
+                            }
+                        }
                         if let Some(rk) = r2i.try_map(rk) {
                             let out_k = i2o.try_map(rk)?;
                             if !pk_indices.contains(&out_k) {
