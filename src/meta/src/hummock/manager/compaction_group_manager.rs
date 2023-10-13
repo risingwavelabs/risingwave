@@ -924,6 +924,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::EnableEmergencyPicker(c) => {
                 target.enable_emergency_picker = *c;
             }
+            MutableConfig::TombstoneReclaimRatio(c) => {
+                target.tombstone_reclaim_ratio = *c;
+            }
         }
     }
 }
