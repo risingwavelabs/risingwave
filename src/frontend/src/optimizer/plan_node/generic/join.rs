@@ -122,11 +122,17 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
         for (lk, rk) in eq_predicate.eq_indexes() {
             match either_or_both {
                 EitherOrBoth::Left(_) => {
+                    // Remove right-side join-key column it from pk_indices.
+                    // This may happen when right-side join-key is included in right-side PK.
+                    // e.g. select a, b where a.bid = b.id
+                    // Here the pk_indices should be [a.id, a.bid] instead of [a.id, b.id, a.bid],
+                    // because b.id = a.bid, so either of them would be enough.
                     if let Some(rk) = r2i.try_map(rk) {
                         if let Some(out_k) = i2o.try_map(rk) {
                             pk_indices.retain(|&x| x != out_k);
                         }
                     }
+                    // Add left-side join-key column in pk_indices
                     if let Some(lk) = l2i.try_map(lk) {
                         let out_k = i2o.try_map(lk)?;
                         if !pk_indices.contains(&out_k) {
@@ -135,11 +141,14 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
                     }
                 }
                 EitherOrBoth::Right(_) => {
+                    // Remove left-side join-key column it from pk_indices
+                    // See the example above
                     if let Some(lk) = l2i.try_map(lk) {
                         if let Some(out_k) = i2o.try_map(lk) {
                             pk_indices.retain(|&x| x != out_k);
                         }
                     }
+                    // Add right-side join-key column in pk_indices
                     if let Some(rk) = r2i.try_map(rk) {
                         let out_k = i2o.try_map(rk)?;
                         if !pk_indices.contains(&out_k) {
