@@ -417,24 +417,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             _ => CachePolicy::Fill(CachePriority::High),
         };
 
-        // let raw_key_ranges = if !ordered
-        //     && matches!(encoded_key_range.start_bound(), Unbounded)
-        //     && matches!(encoded_key_range.end_bound(), Unbounded)
-        // {
-        //     // If the range is unbounded and order is not required, we can create a single iterator
-        //     // for each continuous vnode range.
-
-        //     // In this case, the `vnode_hint` must be default for singletons and `None` for
-        //     // distributed tables.
-        //     assert_eq!(vnode_hint.unwrap_or(DEFAULT_VNODE), DEFAULT_VNODE);
-
-        //     Either::Left(self.vnodes.vnode_ranges().map(|r| {
-        //         let start = Included(Bytes::copy_from_slice(&r.start().to_be_bytes()[..]));
-        //         let end = end_bound_of_prefix(&r.end().to_be_bytes());
-        //         assert_matches!(end, Excluded(_) | Unbounded);
-        //         (start, end)
-        //     }))
-        // } else {
         let raw_key_ranges = {
             // Vnodes that are set and should be accessed.
             let vnodes = match vnode_hint {
@@ -443,9 +425,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                 // Otherwise, we need to access all vnodes of this table.
                 None => Either::Right(self.vnodes.iter_vnodes()),
             };
-            // Either::Right(
             vnodes.map(|vnode| prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes()))
-            // )
         };
 
         // For each key range, construct an iterator.
