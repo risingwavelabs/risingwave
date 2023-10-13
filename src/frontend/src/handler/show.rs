@@ -584,6 +584,8 @@ mod tests {
             "country.city.zipcode".into() => "character varying".into(),
             "rate".into() => "real".into(),
             "country".into() => "test.Country".into(),
+            "_rw_kafka_timestamp".into() => "timestamp with time zone".into(),
+            "_row_id".into() => "serial".into(),
         };
 
         assert_eq!(columns, expected_columns);
