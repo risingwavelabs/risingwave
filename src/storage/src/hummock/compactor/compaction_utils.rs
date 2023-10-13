@@ -195,7 +195,6 @@ fn generate_splits_fast(
             .encode(),
         );
     }
-    // sort by key, as for every data block has the same size;
     indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.as_ref(), b.as_ref()));
     indexes.dedup();
     if indexes.len() <= parallelism {
