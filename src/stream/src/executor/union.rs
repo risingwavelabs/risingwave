@@ -113,6 +113,8 @@ async fn merge(inputs: Vec<BoxedMessageStream>) {
                     Message::Chunk(chunk) => {
                         // Continue polling this upstream by pushing it back to `active`.
                         active.push(remaining.into_future());
+
+                        println!("chunk {}", chunk.to_pretty());
                         yield Message::Chunk(chunk);
                     }
                     Message::Watermark(watermark) => {

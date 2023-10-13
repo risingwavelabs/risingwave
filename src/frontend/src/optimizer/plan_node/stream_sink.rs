@@ -127,6 +127,7 @@ impl StreamSink {
         Ok(Self::new(input, sink))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn derive_sink_desc(
         input: PlanRef,
         user_distributed_by: RequiredDist,

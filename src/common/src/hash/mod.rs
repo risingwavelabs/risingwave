@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod consistent_hash; // TODO: move this to a separate module
+pub mod consistent_hash; // TODO: move this to a separate module
 mod dispatcher;
 mod key;
 mod key_v2;

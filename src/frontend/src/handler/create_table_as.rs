@@ -106,6 +106,7 @@ pub async fn handle_create_as(
             vec![],        // No watermark should be defined in for `CREATE TABLE AS`
             append_only,
             Some(col_id_gen.into_version()),
+            0,
         )?;
         let mut graph = build_graph(plan);
         graph.parallelism =

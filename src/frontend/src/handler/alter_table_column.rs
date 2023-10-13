@@ -20,10 +20,6 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::Table;
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
 };
@@ -35,8 +31,8 @@ use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::handler::create_table::gen_create_table_plan_with_source;
-use crate::{build_graph, Binder, OptimizerContext, TableCatalog, WithOptions};
+use crate::handler::create_sink::regenerate_table;
+use crate::{Binder, WithOptions};
 
 /// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or
 /// `DropColumn`.
@@ -183,61 +179,20 @@ pub async fn handle_alter_table_column(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source) = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let (plan, source, table) = match source_schema {
-            Some(source_schema) => {
-                gen_create_table_plan_with_source(
-                    context,
-                    table_name,
-                    columns,
-                    constraints,
-                    source_schema,
-                    source_watermarks,
-                    col_id_gen,
-                    append_only,
-                )
-                .await?
-            }
-            None => gen_create_table_plan(
-                context,
-                table_name,
-                columns,
-                constraints,
-                col_id_gen,
-                source_watermarks,
-                append_only,
-            )?,
-        };
-
-        // TODO: avoid this backward conversion.
-        if TableCatalog::from(&table).pk_column_ids() != original_catalog.pk_column_ids() {
-            Err(ErrorCode::InvalidInputSyntax(
-                "alter primary key of table is not supported".to_owned(),
-            ))?
-        }
-
-        let graph = StreamFragmentGraph {
-            parallelism: session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                }),
-            ..build_graph(plan)
-        };
-
-        // Fill the original table ID.
-        let table = Table {
-            id: original_catalog.id().table_id(),
-            optional_associated_source_id: original_catalog
-                .associated_source_id()
-                .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
-            ..table
-        };
-
-        (graph, table, source)
-    };
+    let (graph, table, source, _) = regenerate_table(
+        &session,
+        table_name,
+        &original_catalog,
+        source_schema,
+        handler_args,
+        col_id_gen,
+        columns,
+        constraints,
+        source_watermarks,
+        append_only,
+        0,
+    )
+    .await?;
 
     // Calculate the mapping from the original columns to the new columns.
     let col_index_mapping = ColIndexMapping::new(

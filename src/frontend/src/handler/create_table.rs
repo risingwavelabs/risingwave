@@ -449,6 +449,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
     append_only: bool,
+    with_external_sinks: i32,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     if append_only
         && source_schema.format != Format::Plain
@@ -535,6 +536,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         watermark_descs,
         append_only,
         Some(col_id_gen.into_version()),
+        with_external_sinks,
     )
 }
 
@@ -548,6 +550,7 @@ pub(crate) fn gen_create_table_plan(
     mut col_id_gen: ColumnIdGenerator,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
+    with_external_sinks: i32,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let definition = context.normalized_sql().to_owned();
     let mut columns = bind_sql_columns(&column_defs)?;
@@ -566,6 +569,7 @@ pub(crate) fn gen_create_table_plan(
         source_watermarks,
         append_only,
         Some(col_id_gen.into_version()),
+        with_external_sinks,
     )
 }
 
@@ -581,6 +585,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     version: Option<TableVersion>,
+    with_external_sinks: i32,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     ensure_table_constraints_supported(&constraints)?;
     let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
@@ -613,6 +618,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         watermark_descs,
         append_only,
         version,
+        with_external_sinks,
     )
 }
 
@@ -630,6 +636,7 @@ fn gen_table_plan_inner(
     append_only: bool,
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
+    with_external_sinks: i32,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let session = context.session_ctx().clone();
     let db_name = session.database();
@@ -670,8 +677,6 @@ fn gen_table_plan_inner(
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
-
-    println!("source catalog {:?}", source_catalog);
     let source_node: PlanRef = LogicalSource::new(
         source_catalog.clone(),
         columns.clone(),
@@ -717,6 +722,7 @@ fn gen_table_plan_inner(
         watermark_descs,
         version,
         is_external_source,
+        with_external_sinks,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -828,6 +834,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
         vec![],
         Some(col_id_gen.into_version()),
         true,
+        0,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -903,6 +910,7 @@ pub(super) async fn handle_create_table_plan(
                     source_watermarks,
                     col_id_gen,
                     append_only,
+                    0,
                 )
                 .await?,
                 TableJobType::General,
@@ -916,6 +924,7 @@ pub(super) async fn handle_create_table_plan(
                     col_id_gen,
                     source_watermarks,
                     append_only,
+                    0,
                 )?,
                 TableJobType::General,
             ),

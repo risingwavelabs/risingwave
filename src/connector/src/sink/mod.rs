@@ -31,6 +31,7 @@ pub mod pulsar;
 pub mod redis;
 pub mod remote;
 pub mod starrocks;
+pub mod table;
 pub mod test_sink;
 pub mod utils;
 pub mod writer;
@@ -83,7 +84,8 @@ macro_rules! for_all_sinks {
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
-                { Test, $crate::sink::test_sink::TestSink }
+                { Test, $crate::sink::test_sink::TestSink },
+                { Table, $crate::sink::table::TableSink }
             }
             $(,$arg)*
         }
@@ -329,10 +331,14 @@ impl SinkImpl {
         param.properties.remove(PRIVATE_LINK_TARGET_KEY);
         param.properties.remove(CONNECTION_NAME_KEY);
 
-        let sink_type = param
-            .properties
-            .get(CONNECTOR_TYPE_KEY)
-            .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;
+        let sink_type = if param.sink_into_name.is_some() {
+            "table"
+        } else {
+            param.properties.get(CONNECTOR_TYPE_KEY).ok_or_else(|| {
+                SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY))
+            })?
+        };
+
         match_sink_name_str!(
             sink_type.to_lowercase().as_str(),
             SinkType,

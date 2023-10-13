@@ -53,7 +53,6 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
 use risingwave_pb::catalog::WatermarkDesc;
-use risingwave_sqlparser::ast::ObjectName;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::generic::{self, PhysicalPlanRef};
@@ -70,7 +69,6 @@ use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::expr::TimestamptzExprFinder;
 use crate::optimizer::plan_node::generic::Union;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
     ToStream, VisitExprsRecursive,
@@ -459,6 +457,7 @@ impl PlanRoot {
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
         with_external_source: bool,
+        with_external_sinks: i32,
     ) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_optimized_stream_plan(false)?;
 
@@ -476,7 +475,10 @@ impl PlanRoot {
                 .collect_vec()
         };
 
-        fn inject_project_if_needed(columns: &[ColumnCatalog], node: PlanRef) -> Result<PlanRef> {
+        fn inject_project_for_generated_column_if_needed(
+            columns: &[ColumnCatalog],
+            node: PlanRef,
+        ) -> Result<PlanRef> {
             let exprs = LogicalSource::derive_output_exprs_from_generated_columns(columns)?;
             if let Some(exprs) = exprs {
                 let logical_project = generic::Project::new(exprs, node);
@@ -496,7 +498,7 @@ impl PlanRoot {
             let mut dml_node = StreamDml::new(stream_plan, append_only, column_descs).into();
 
             // Add generated columns.
-            dml_node = inject_project_if_needed(columns, dml_node)?;
+            dml_node = inject_project_for_generated_column_if_needed(columns, dml_node)?;
 
             dml_node = match kind {
                 PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::RowIdAsPrimaryKey => {
@@ -531,12 +533,14 @@ impl PlanRoot {
 
         let column_descs = columns
             .iter()
-            .filter_map(|c| (!c.is_generated()).then(|| c.column_desc.clone()))
+            .filter(|&c| (!c.is_generated()))
+            .map(|c| c.column_desc.clone())
             .collect();
 
-        let union_inputs = if with_external_source {
+        let mut union_inputs = if with_external_source {
             let mut external_source_node = stream_plan;
-            external_source_node = inject_project_if_needed(&columns, external_source_node)?;
+            external_source_node =
+                inject_project_for_generated_column_if_needed(&columns, external_source_node)?;
             external_source_node = match kind {
                 PrimaryKeyKind::UserDefinedPrimaryKey => {
                     RequiredDist::hash_shard(&pk_column_indices)
@@ -719,8 +723,6 @@ impl PlanRoot {
         sink_into_table_name: Option<String>,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
-
-        // println!("plan {:#?}", stream_plan);
 
         StreamSink::create(
             stream_plan,

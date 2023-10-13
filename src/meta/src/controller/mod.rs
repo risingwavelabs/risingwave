@@ -198,6 +198,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             sink_from_name: value.0.sink_from_name,
             stream_job_status: PbStreamJobStatus::from(value.0.job_status) as _,
             format_desc: value.0.sink_format_desc.map(|desc| desc.0),
+            sink_into_name: None,
         }
     }
 }
