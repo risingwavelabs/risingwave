@@ -10,17 +10,20 @@ create view v3 as select sum(v2) as sum_v2 from t3;
 query TT
 describe t3;
 ----
-v1 integer
-v2 integer
-v3 integer
-primary key _row_id
+v1 integer false
+v2 integer false
+v3 integer false
+_row_id serial true
+primary key _row_id NULL
+distribution key _row_id NULL
 
 query TT
 show columns from t3;
 ----
-v1 integer
-v2 integer
-v3 integer
+v1 integer false
+v2 integer false
+v3 integer false
+_row_id serial true
 
 statement ok
 create index idx1 on t3 (v1,v2);
@@ -33,10 +36,12 @@ idx1 t3 v1 ASC, v2 ASC v3 v1
 query TT
 describe t3;
 ----
-v1 integer
-v2 integer
-v3 integer
+v1 integer false
+v2 integer false
+v3 integer false
+_row_id serial true
 primary key _row_id
+distribution key _row_id
 idx1 index(v1 ASC, v2 ASC) include(v3) distributed by(v1)
 
 query TT
