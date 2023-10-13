@@ -391,20 +391,25 @@ mod tests {
             &pk_indices(),
         )
         .await;
-        let a = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
-            source as Box<dyn Executor>,
-            ActorContext::create(0),
-            storage_key(),
-            (0, 2),
-            order_by_1(),
-            1,
-            vec![1],
-            state_table,
-            Arc::new(AtomicU64::new(0)),
-            pk_indices(),
-        )
-        .unwrap();
-        let top_n_executor = Box::new(a);
+        let info = ExecutorInfo {
+            schema: source.schema().clone(),
+            pk_indices: source.pk_indices().to_vec(), // this includes group key as prefix
+            identity: "GroupTopNExecutor 1".to_string(),
+        };
+        let top_n_executor = Box::new(
+            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+                source as Box<dyn Executor>,
+                ActorContext::create(0),
+                info,
+                storage_key(),
+                (0, 2),
+                order_by_1(),
+                vec![1],
+                state_table,
+                Arc::new(AtomicU64::new(0)),
+            )
+            .unwrap(),
+        );
         let mut top_n_executor = top_n_executor.execute();
 
         // consume the init barrier
@@ -488,18 +493,22 @@ mod tests {
             &pk_indices(),
         )
         .await;
+        let info = ExecutorInfo {
+            schema: source.schema().clone(),
+            pk_indices: source.pk_indices().to_vec(), // this includes group key as prefix
+            identity: "GroupTopNExecutor 1".to_string(),
+        };
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
+                info,
                 storage_key(),
                 (1, 2),
                 order_by_1(),
-                1,
                 vec![1],
                 state_table,
                 Arc::new(AtomicU64::new(0)),
-                pk_indices(),
             )
             .unwrap(),
         );
@@ -579,18 +588,22 @@ mod tests {
             &pk_indices(),
         )
         .await;
+        let info = ExecutorInfo {
+            schema: source.schema().clone(),
+            pk_indices: source.pk_indices().to_vec(), // this includes group key as prefix
+            identity: "GroupTopNExecutor 1".to_string(),
+        };
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
+                info,
                 storage_key(),
                 (0, 2),
                 order_by_2(),
-                1,
                 vec![1, 2],
                 state_table,
                 Arc::new(AtomicU64::new(0)),
-                pk_indices(),
             )
             .unwrap(),
         );

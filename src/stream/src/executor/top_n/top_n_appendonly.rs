@@ -168,7 +168,7 @@ mod tests {
     use super::AppendOnlyTopNExecutor;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Barrier, Executor, Message, PkIndices};
+    use crate::executor::{ActorContext, Barrier, Executor, ExecutorInfo, Message, PkIndices};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::from_pretty(
@@ -249,14 +249,19 @@ mod tests {
         )
         .await;
 
+        let info = ExecutorInfo {
+            schema: source.schema().clone(),
+            pk_indices: source.pk_indices().to_vec(),
+            identity: "AppendOnlyTopNExecutor 1".to_string(),
+        };
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::<_, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
+                info,
                 storage_key,
                 (0, 5),
                 order_by(),
-                1,
                 state_table,
             )
             .unwrap(),
@@ -331,14 +336,19 @@ mod tests {
         )
         .await;
 
+        let info = ExecutorInfo {
+            schema: source.schema().clone(),
+            pk_indices: source.pk_indices().to_vec(),
+            identity: "AppendOnlyTopNExecutor 1".to_string(),
+        };
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::<_, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
+                info,
                 storage_key(),
                 (3, 4),
                 order_by(),
-                1,
                 state_table,
             )
             .unwrap(),
