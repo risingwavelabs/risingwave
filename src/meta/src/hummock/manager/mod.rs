@@ -353,8 +353,8 @@ impl HummockManager {
             if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
                 && !env.opts.do_not_config_object_storage_lifecycle
             {
-                let is_bucket_retention_configured = s3.inner().configure_bucket_lifecycle().await;
-                if is_bucket_retention_configured{
+                let is_bucket_expiration_configured = s3.inner().configure_bucket_lifecycle().await;
+                if is_bucket_expiration_configured{
                     return Err(ObjectError::internal("Bucket retention is already configured, the cluster is at risk of losing data")
                     .into());
                 }

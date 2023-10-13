@@ -706,8 +706,12 @@ impl S3ObjectStore {
             .bucket(bucket)
             .send()
             .await;
+        let mut is_expiration_configured = false;
         if let Ok(config) = &get_config_result {
             for rule in config.rules().unwrap_or_default() {
+                if rule.expiration().is_some() {
+                    is_expiration_configured = true;
+                }
                 if matches!(rule.status().unwrap(), ExpirationStatus::Enabled)
                     && rule.abort_incomplete_multipart_upload().is_some()
                 {
@@ -722,7 +726,6 @@ impl S3ObjectStore {
                 bucket,
                 configured_rules,
             );
-            true
         } else {
             let bucket_lifecycle_rule = LifecycleRule::builder()
                 .id("abort-incomplete-multipart-upload")
@@ -754,8 +757,8 @@ impl S3ObjectStore {
             } else {
                 tracing::warn!("Failed to configure life cycle rule for S3 bucket: {:?}. It is recommended to configure it manually to avoid unnecessary storage cost.", bucket);
             }
-            false
         }
+        is_expiration_configured
     }
 
     #[inline(always)]
