@@ -24,25 +24,25 @@ skipif in-memory
 sleep 10s
 
 skipif in-memory
-query TI rowsort
-select * from mv1;
+query TI
+select * from mv1 order by 2;
 ----
 2023-05-06 16:51:00 1
 2023-05-06 16:51:00 2
 2023-05-06 16:51:00 3
 
 skipif in-memory
-query TI rowsort
-select * from mv2;
+query TI
+select * from mv2 order by 2;
 ----
 2023-05-06 16:51:00 1
-2023-05-06 16:51:00 2
-2023-05-06 16:51:00 3
+2023-05-06 16:51:00 1
 2023-05-06 16:51:00 1
 2023-05-06 16:51:00 2
-2023-05-06 16:51:00 3
-2023-05-06 16:51:00 1
 2023-05-06 16:51:00 2
+2023-05-06 16:51:00 2
+2023-05-06 16:51:00 3
+2023-05-06 16:51:00 3
 2023-05-06 16:51:00 3
 
 statement ok
