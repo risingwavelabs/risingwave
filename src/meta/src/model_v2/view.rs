@@ -16,7 +16,7 @@ use risingwave_pb::catalog::PbView;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue;
 
-use crate::model_v2::{FieldArray, StringMap};
+use crate::model_v2::{FieldArray, Property};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "view")]
@@ -24,7 +24,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub view_id: i32,
     pub name: String,
-    pub properties: StringMap,
+    pub properties: Property,
     pub sql: String,
     pub columns: FieldArray,
 }
@@ -54,7 +54,7 @@ impl From<PbView> for ActiveModel {
         Self {
             view_id: ActiveValue::Set(view.id as _),
             name: ActiveValue::Set(view.name),
-            properties: ActiveValue::Set(StringMap(view.properties)),
+            properties: ActiveValue::Set(Property(view.properties)),
             sql: ActiveValue::Set(view.sql),
             columns: ActiveValue::Set(FieldArray(view.columns)),
         }

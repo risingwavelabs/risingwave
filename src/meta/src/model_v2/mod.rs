@@ -56,4 +56,4 @@ pub struct FieldArray(pub Vec<risingwave_pb::plan_common::Field>);
 impl Eq for FieldArray {}
 
 #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Eq, Serialize, Deserialize, Default)]
-pub struct StringMap(pub HashMap<String, String>);
+pub struct Property(pub HashMap<String, String>);

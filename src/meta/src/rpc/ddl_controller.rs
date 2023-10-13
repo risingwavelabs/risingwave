@@ -48,6 +48,7 @@ use crate::stream::{
 };
 use crate::{MetaError, MetaResult};
 
+#[derive(PartialEq)]
 pub enum DropMode {
     Restrict,
     Cascade,

@@ -14,7 +14,20 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::I32Array;
+use crate::model_v2::{I32Array, Property};
+
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(None)")]
+pub enum TableType {
+    #[sea_orm(string_value = "TABLE")]
+    Table,
+    #[sea_orm(string_value = "MATERIALIZED_VIEW")]
+    MaterializedView,
+    #[sea_orm(string_value = "INDEX")]
+    Index,
+    #[sea_orm(string_value = "INTERNAL")]
+    Internal,
+}
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "table")]
@@ -23,24 +36,24 @@ pub struct Model {
     pub table_id: i32,
     pub name: String,
     pub optional_associated_source_id: Option<i32>,
-    pub table_type: Option<String>,
-    pub columns: Option<Json>,
-    pub pk: Option<Json>,
-    pub distribution_key: Option<I32Array>,
-    pub append_only: Option<bool>,
-    pub properties: Option<Json>,
-    pub fragment_id: Option<i32>,
-    pub vnode_col_index: Option<i32>,
-    pub value_indices: Option<I32Array>,
-    pub definition: Option<String>,
-    pub handle_pk_conflict_behavior: Option<i32>,
-    pub read_prefix_len_hint: Option<i32>,
-    pub watermark_indices: Option<I32Array>,
-    pub dist_key_in_pk: Option<I32Array>,
+    pub table_type: TableType,
+    pub columns: Json,
+    pub pk: Json,
+    pub distribution_key: I32Array,
+    pub append_only: bool,
+    pub properties: Property,
+    pub fragment_id: i32,
+    pub vnode_col_index: I32Array,
+    pub value_indices: I32Array,
+    pub definition: String,
+    pub handle_pk_conflict_behavior: i32,
+    pub read_prefix_len_hint: i32,
+    pub watermark_indices: I32Array,
+    pub dist_key_in_pk: I32Array,
     pub dml_fragment_id: Option<i32>,
     pub cardinality: Option<I32Array>,
-    pub cleaned_by_watermark: Option<bool>,
-    pub version: Option<Json>,
+    pub cleaned_by_watermark: bool,
+    pub version: Json,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
