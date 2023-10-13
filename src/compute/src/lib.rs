@@ -41,6 +41,10 @@ use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use serde::{Deserialize, Serialize};
 
+/// If `total_memory_bytes` is not specified, the default memory limit will be set to
+/// the system memory limit multiplied by this proportion
+const DEFAULT_MEMORY_PROPORTION: f64 = 0.6;
+
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
 #[command(
@@ -224,7 +228,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
 }
 
 fn default_total_memory_bytes() -> usize {
-    system_memory_available_bytes()
+    (system_memory_available_bytes() as f64 * DEFAULT_MEMORY_PROPORTION) as usize
 }
 
 fn default_parallelism() -> usize {
