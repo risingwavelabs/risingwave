@@ -68,9 +68,9 @@ mod runtime {
     }
 
     /// Given a certain controller, checks if it is enabled.
-    /// For cgroup_v1, existence of directory with controller name is checked in cgroup default root
+    /// For cgroup v1, existence of directory with controller name is checked in cgroup default root
     /// hierarchy. e.g if directory "/sys/fs/cgroup"/cpu" exists then CPU controller is enabled.
-    /// For cgroup_v2, check the controller list path for the controller name.
+    /// For cgroup v2, check the controller list path for the controller name.
     pub fn is_controller_activated(
         controller_type: super::Controller,
         cgroup_version: CgroupVersion,
@@ -134,7 +134,7 @@ pub mod memory {
 
     use super::runtime::get_resource;
 
-    /// Default paths for memory limtiations and usage for cgroup_v1 and cgroup_v2.
+    /// Default paths for memory limtiations and usage for cgroup v1 and cgroup v2.
     const V1_MEMORY_LIMIT_PATH: &str = "/sys/fs/cgroup/memory/memory.limit_in_bytes";
     const V1_MEMORY_CURRENT_PATH: &str = "/sys/fs/cgroup/memory/memory.usage_in_bytes";
     const V2_MEMORY_LIMIT_PATH: &str = "/sys/fs/cgroup/memory.max";
@@ -200,7 +200,7 @@ pub mod memory {
 
     /// Returns the memory limit of a container if running in a container else returns the system
     /// memory available.
-    /// When the limit is set to max, system_memory_available_bytes() will return default system
+    /// When the limit is set to max, [`system_memory_available_bytes()`] will return default system
     /// memory.
     fn get_container_memory_limit(
         cgroup_version: super::CgroupVersion,
@@ -285,7 +285,7 @@ pub mod cpu {
         }
     }
 
-    /// Returns the CPU limit when cgroup_V1 is utilised.
+    /// Returns the CPU limit when cgroup v1 is utilised.
     pub fn get_cpu_limit_v1(
         quota_path: &str,
         period_path: &str,
@@ -304,7 +304,7 @@ pub mod cpu {
         Ok((cpu_quota as f32) / (cpu_period as f32))
     }
 
-    /// Returns the CPU limit when cgroup_V2 is utilised.
+    /// Returns the CPU limit when cgroup v2 is utilised.
     pub fn get_cpu_limit_v2(limit_path: &str, max_value: f32) -> Result<f32, std::io::Error> {
         let cpu_limit_string = fs_err::read_to_string(limit_path)?;
 
@@ -333,7 +333,7 @@ pub mod cpu {
 }
 
 mod util {
-    /// Parses the filepath and checks for the existence of controller_name in the file.
+    /// Parses the filepath and checks for the existence of `controller_name` in the file.
     pub fn parse_controller_enable_file_for_cgroup_v2(
         file_path: &str,
         controller_name: &str,
@@ -372,7 +372,7 @@ mod util {
         Ok(limit_val)
     }
 
-    /// Helper function that helps to retrieve value in file, if value is "max", max_value will be
+    /// Helper function that helps to retrieve value in file, if value is "max", `max_value` will be
     /// returned instead.
     pub fn read_usize_or_max(file_path: &str, max_value: usize) -> Result<usize, std::io::Error> {
         let content = fs_err::read_to_string(file_path)?;
