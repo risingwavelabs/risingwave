@@ -18,3 +18,5 @@ mod basic;
 mod recovery;
 #[cfg(madsim)]
 mod utils;
+#[cfg(madsim)]
+mod scale;
