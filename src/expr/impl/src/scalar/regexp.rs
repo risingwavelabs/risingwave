@@ -18,6 +18,7 @@ use std::str::FromStr;
 
 use fancy_regex::{Regex, RegexBuilder};
 use risingwave_common::array::ListValue;
+use risingwave_common::types::ScalarImpl;
 use risingwave_expr::{bail, function, ExprError, Result};
 
 #[derive(Debug)]
@@ -437,4 +438,74 @@ fn regexp_replace(
 
         Ok(ret.into())
     }
+}
+
+#[function(
+    // regexp_split_to_array(source, pattern)
+    "regexp_split_to_array(varchar, varchar) -> varchar[]",
+    prebuild = "RegexpContext::from_pattern($1)?"
+)]
+#[function(
+    // regexp_split_to_array(source, pattern, flags)
+    "regexp_split_to_array(varchar, varchar, varchar) -> varchar[]",
+    prebuild = "RegexpContext::from_pattern_flags($1, $2)?"
+)]
+fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue> {
+    let n = text.len();
+    let mut start = 0;
+    let mut list: Vec<Option<ScalarImpl>> = Vec::new();
+
+    loop {
+        if start >= n {
+            // Prevent overflow
+            break;
+        }
+
+        let capture = regex.regex.captures(&text[start..]).unwrap();
+
+        if capture.is_none() {
+            break;
+        }
+
+        let whole_match = capture.unwrap().get(0);
+        debug_assert!(whole_match.is_some(), "Expected `whole_match` to be valid");
+
+        let begin = whole_match.unwrap().start() + start;
+        let end = whole_match.unwrap().end() + start;
+
+        if begin == end {
+            // Empty match (i.e., `\s*`)
+            if begin == text.len() {
+                // We do not need to push extra stuff to the result list
+                start = begin;
+                break;
+            }
+            list.push(Some(text[start..begin + 1].into()));
+            start = end + 1;
+            continue;
+        }
+
+        if begin != 0 {
+            // Normal case
+            if start == begin {
+                // The before match is possibly empty
+                // We don't push nothing, just move `start` forward
+                start = end;
+                continue;
+            }
+            list.push(Some(text[start..begin].into()));
+        }
+
+        // We should update the `start` no matter `begin` is zero or not
+        start = end;
+    }
+
+    if start < n {
+        // Push the extra text to the list
+        // Note that this will implicitly push the entire text to the list
+        // If there is no match, which is the expected behavior
+        list.push(Some(text[start..].into()));
+    }
+
+    Some(ListValue::new(list))
 }
