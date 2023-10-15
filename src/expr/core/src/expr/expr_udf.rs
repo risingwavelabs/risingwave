@@ -84,9 +84,9 @@ impl UdfExpression {
             .columns()
             .iter()
             .map(|c| {
-                c.as_ref().try_into().expect(
-                    "failed covert risingwave::common::array::ArrayRef to arrow_array::ArrayRef",
-                )
+                c.as_ref()
+                    .try_into()
+                    .expect("failed covert ArrayRef to arrow_array::ArrayRef")
             })
             .collect();
         let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(vis.len()));
