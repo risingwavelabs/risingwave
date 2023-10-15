@@ -57,11 +57,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
         Schema::new(fields)
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         let input_schema_len = self.input.schema().len();
         let mut pk_indices = self
             .input
-            .logical_pk()
+            .stream_key()?
             .iter()
             .map(|&pk| pk + input_schema_len)
             .collect_vec();

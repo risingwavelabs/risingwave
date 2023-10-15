@@ -184,7 +184,7 @@
         └─BatchExchange { order: [], dist: HashShard(t.y) }
           └─BatchScan { table: t, columns: [t.x, t.y, t.w], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, sum, max, min, t._row_id(hidden), t.y(hidden)], stream_key: [t._row_id, t.y, y], pk_columns: [t._row_id, t.y, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, sum, max, min, t._row_id(hidden), t.y(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
     └─StreamHashJoin { type: Inner, predicate: t.y = t.y, output: [t.x, t.y, sum(t.x), max(t.x), min(t.w), t._row_id, t.y] }
       ├─StreamExchange { dist: HashShard(t.y) }
       │ └─StreamShare { id: 1 }
@@ -717,9 +717,9 @@
     └── read pk prefix len hint: 2
 
     Table 1
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0

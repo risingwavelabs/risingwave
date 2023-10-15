@@ -58,8 +58,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for DynamicFilter<PlanRef> {
         self.left.schema().clone()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.left.logical_pk().to_vec())
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        Some(self.left.stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -151,7 +151,7 @@ pub fn infer_left_internal_table_catalog(
     let mut pk_indices = vec![left_key_index];
     let read_prefix_len_hint = pk_indices.len();
 
-    for i in me.logical_pk() {
+    for i in me.stream_key().unwrap() {
         if *i != left_key_index {
             pk_indices.push(*i);
         }

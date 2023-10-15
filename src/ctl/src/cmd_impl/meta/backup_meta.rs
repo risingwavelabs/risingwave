@@ -22,21 +22,33 @@ pub async fn backup_meta(context: &CtlContext) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let job_id = meta_client.backup_meta().await?;
     loop {
-        let job_status = meta_client.get_backup_job_status(job_id).await?;
+        let (job_status, message) = meta_client.get_backup_job_status(job_id).await?;
         match job_status {
             BackupJobStatus::Running => {
-                tracing::info!("backup job is still running: job {}", job_id);
+                tracing::info!("backup job is still running: job {}, {}", job_id, message);
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
             BackupJobStatus::Succeeded => {
+                tracing::info!("backup job succeeded: job {}, {}", job_id, message);
                 break;
             }
-            _ => {
-                return Err(anyhow::anyhow!("backup job failed: job {}", job_id));
+            BackupJobStatus::NotFound => {
+                return Err(anyhow::anyhow!(
+                    "backup job status not found: job {}, {}",
+                    job_id,
+                    message
+                ));
             }
+            BackupJobStatus::Failed => {
+                return Err(anyhow::anyhow!(
+                    "backup job failed: job {}, {}",
+                    job_id,
+                    message
+                ));
+            }
+            _ => unreachable!("unknown backup job status"),
         }
     }
-    tracing::info!("backup job succeeded: job {}", job_id);
     Ok(())
 }
 

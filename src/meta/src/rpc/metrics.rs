@@ -536,7 +536,7 @@ impl MetaMetrics {
         let sink_info = register_int_gauge_vec_with_registry!(
             "sink_info",
             "Mapping from actor id to (actor id, sink name)",
-            &["actor_id", "sink_name",],
+            &["actor_id", "sink_id", "sink_name",],
             registry
         )
         .unwrap();
@@ -810,13 +810,14 @@ pub async fn start_fragment_info_monitor(
 
                         if let Some(stream_node) = &actor.nodes {
                             if let Some(Sink(sink_node)) = &stream_node.node_body {
-                                let sink_name = match &sink_node.sink_desc {
-                                    Some(sink_desc) => &sink_desc.name,
-                                    _ => "unknown",
+                                let (sink_id, sink_name) = match &sink_node.sink_desc {
+                                    Some(sink_desc) => (sink_desc.id, sink_desc.name.as_str()),
+                                    _ => (0, "unknown"), // unreachable
                                 };
+                                let sink_id_str = sink_id.to_string();
                                 meta_metrics
                                     .sink_info
-                                    .with_label_values(&[&actor_id_str, sink_name])
+                                    .with_label_values(&[&actor_id_str, &sink_id_str, sink_name])
                                     .set(1);
                             }
                         }

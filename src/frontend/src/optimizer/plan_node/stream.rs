@@ -76,7 +76,7 @@ pub trait StreamPlanNode: GenericPlanNode {
             id: ctx.next_plan_node_id(),
             ctx,
             schema: self.schema(),
-            logical_pk: self.logical_pk().unwrap_or_default(),
+            stream_key: self.stream_key(),
             dist: self.distribution(),
             append_only: self.append_only(),
             emit_on_window_close: self.emit_on_window_close(),
@@ -95,8 +95,8 @@ impl generic::GenericPlanRef for PlanRef {
         &self.0.schema
     }
 
-    fn logical_pk(&self) -> &[usize] {
-        &self.0.logical_pk
+    fn stream_key(&self) -> Option<&[usize]> {
+        self.0.stream_key.as_deref()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -113,8 +113,8 @@ impl generic::GenericPlanRef for PlanBase {
         &self.schema
     }
 
-    fn logical_pk(&self) -> &[usize] {
-        &self.logical_pk
+    fn stream_key(&self) -> Option<&[usize]> {
+        self.stream_key.as_deref()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -266,7 +266,7 @@ impl HashJoin {
 
         // dedup the pk in dist key..
         let mut deduped_input_pk_indices = vec![];
-        for input_pk_idx in input.logical_pk() {
+        for input_pk_idx in input.stream_key().unwrap() {
             if !pk_indices.contains(input_pk_idx)
                 && !deduped_input_pk_indices.contains(input_pk_idx)
             {
@@ -410,7 +410,7 @@ pub struct PlanBase {
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
-    pub logical_pk: Vec<usize>,
+    pub stream_key: Option<Vec<usize>>,
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
     pub dist: Distribution,
@@ -608,7 +608,7 @@ pub fn to_stream_prost_body(
                 .infer_internal_table_catalog(
                     input.schema(),
                     input.ctx(),
-                    input.logical_pk(),
+                    input.stream_key().unwrap(),
                     me.vnode_col_idx,
                 )
                 .with_id(state.gen_table_id_wrapped());
@@ -765,7 +765,9 @@ pub fn to_stream_prost_body(
                     me.infer_internal_table_catalog(
                         input.schema(),
                         input.ctx(),
-                        input.logical_pk(),
+                        input
+                            .stream_key()
+                            .expect("should always have a stream key in the stream plan but not"),
                         None,
                     )
                     .with_id(state.gen_table_id_wrapped())

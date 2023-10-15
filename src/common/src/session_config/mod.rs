@@ -15,6 +15,7 @@
 mod over_window;
 mod query_mode;
 mod search_path;
+pub mod sink_decouple;
 mod transaction_isolation_level;
 mod visibility_mode;
 
@@ -30,6 +31,7 @@ pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use tracing::info;
 
 use crate::error::{ErrorCode, RwError};
+use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
 use crate::util::epoch::Epoch;
@@ -333,7 +335,6 @@ type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 90_500>;
 type ForceSplitDistinctAgg = ConfigBool<FORCE_SPLIT_DISTINCT_AGG, false>;
 type ClientMinMessages = ConfigString<CLIENT_MIN_MESSAGES>;
 type ClientEncoding = ConfigString<CLIENT_ENCODING>;
-type SinkDecouple = ConfigBool<SINK_DECOUPLE, false>;
 type SynchronizeSeqscans = ConfigBool<SYNCHRONIZE_SEQSCANS, false>;
 type StatementTimeout = ConfigI32<STATEMENT_TIMEOUT, 0>;
 type LockTimeout = ConfigI32<LOCK_TIMEOUT, 0>;
@@ -1012,8 +1013,8 @@ impl ConfigMap {
         &self.client_encoding
     }
 
-    pub fn get_sink_decouple(&self) -> bool {
-        self.sink_decouple.0
+    pub fn get_sink_decouple(&self) -> SinkDecouple {
+        self.sink_decouple
     }
 
     pub fn get_standard_conforming_strings(&self) -> &str {

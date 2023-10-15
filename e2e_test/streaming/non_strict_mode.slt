@@ -1,5 +1,8 @@
 # Test compute errors are replaced with NULLs.
 # See also <https://github.com/risingwavelabs/risingwave/issues/4625>
+#
+# UPDATE: after <https://github.com/risingwavelabs/risingwave/pull/12461>, the non-strict
+#         NULL padding is applied for each expression node instead of the root node only.
 
 statement ok
 create table t(x int);
@@ -8,45 +11,36 @@ statement ok
 insert into t values (0),(1),(2),(NULL);
 
 statement ok
-create materialized view mv_proj as select 10/x as v from t;
+create materialized view mv_proj as select x, 10/x as v from t;
 
 statement ok
-create materialized view mv_proj_is_null as select 10/x is null as v from t;
+create materialized view mv_proj_is_null as select x, 10/x is null as v from t;
 
-query I rowsort
-select * from mv_proj;
+query I
+select * from mv_proj order by x;
 ----
-10
-5
-NULL
-NULL
+0 NULL
+1 10
+2 5
+NULL NULL
 
-# result for 0 is NULL, instead of true
-query B rowsort
-select * from mv_proj_is_null;
+# 10/0 fails, which is replaced with NULL, then NULL `is null`
+query T
+select * from mv_proj_is_null order by x;
 ----
-NULL
-f
-f
-t
+0 t
+1 f
+2 f
+NULL t
 
 statement ok
 create materialized view mv_filter as select * from t where 10/x > 0;
-
-statement ok
-create materialized view mv_filter_is_null as select * from t where 10/x > 0 is null;
 
 query I rowsort
 select * from mv_filter;
 ----
 1
 2
-
-# result for 0 is not included
-query I rowsort
-select * from mv_filter_is_null;
-----
-NULL
 
 statement ok
 drop materialized view mv_proj;
@@ -58,7 +52,27 @@ statement ok
 drop materialized view mv_filter;
 
 statement ok
-drop materialized view mv_filter_is_null;
+drop table t;
+
+statement ok
+create table t(x varchar);
+
+statement ok
+insert into t values ('two'), ('4');
+
+statement ok
+create materialized view mv_coalesce as select coalesce(x::int, 0) as v from t;
+
+# convert 'two' to int fails, which is replaced with NULL, then coalesced to 0
+# https://github.com/risingwavelabs/risingwave/issues/11586
+query I rowsort
+select * from mv_coalesce;
+----
+0
+4
+
+statement ok
+drop materialized view mv_coalesce;
 
 statement ok
 drop table t;

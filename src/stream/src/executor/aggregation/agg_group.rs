@@ -24,7 +24,7 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{AggCall, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction};
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};

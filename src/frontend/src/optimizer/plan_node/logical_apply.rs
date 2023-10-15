@@ -86,16 +86,13 @@ impl LogicalApply {
         let ctx = left.ctx();
         let join_core = generic::Join::with_full_output(left, right, join_type, on);
         let schema = join_core.schema();
-        let pk_indices = join_core.logical_pk();
-        let (functional_dependency, pk_indices) = match pk_indices {
-            Some(pk_indices) => (
-                FunctionalDependencySet::with_key(schema.len(), &pk_indices),
-                pk_indices,
-            ),
-            None => (FunctionalDependencySet::new(schema.len()), vec![]),
+        let stream_key = join_core.stream_key();
+        let functional_dependency = match &stream_key {
+            Some(stream_key) => FunctionalDependencySet::with_key(schema.len(), stream_key),
+            None => FunctionalDependencySet::new(schema.len()),
         };
         let (left, right, on, join_type, _output_indices) = join_core.decompose();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
+        let base = PlanBase::new_logical(ctx, schema, stream_key, functional_dependency);
         LogicalApply {
             base,
             left,

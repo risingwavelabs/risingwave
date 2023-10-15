@@ -15,7 +15,7 @@ script = '''
 #!/usr/bin/env bash
 set -ex
 cd java
-mvn install --no-transfer-progress --pl java-binding-integration-test --am -DskipTests=true
+mvn install --no-transfer-progress --pl java-binding-integration-test --am -DskipTests=true -Dmaven.javadoc.skip
 mvn dependency:copy-dependencies --no-transfer-progress --pl java-binding-integration-test
 '''
 
@@ -98,9 +98,6 @@ cd ${RISINGWAVE_ROOT}/java
 [tasks.run-java-binding-stream-chunk-benchmark]
 category = "RiseDev - Java Binding"
 description = "Run the java binding stream chunk benchmark"
-dependencies = [
-    "build-java-binding",
-]
 script = '''
 #!/usr/bin/env bash
 set -ex
@@ -109,10 +106,10 @@ RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
 
 cd ${RISINGWAVE_ROOT}/java
 
-mvn install --pl java-binding-benchmark --am -DskipTests=true
+mvn install --pl java-binding-benchmark --am -DskipTests=true -Dmaven.javadoc.skip
 
 mvn dependency:copy-dependencies --pl java-binding-benchmark
 
-java -cp "java-binding-benchmark/target/dependency/*:java-binding-benchmark/target/java-binding-benchmark-1.0-SNAPSHOT.jar" \
+java -cp "java-binding-benchmark/target/dependency/*:java-binding-benchmark/target/java-binding-benchmark-0.1.0-SNAPSHOT.jar" \
              com.risingwave.java.binding.BenchmarkRunner
 '''

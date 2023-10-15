@@ -48,7 +48,7 @@ impl StreamEowcSort {
         assert!(input.watermark_columns().contains(sort_column_index));
 
         let schema = input.schema().clone();
-        let logical_pk = input.logical_pk().to_vec();
+        let stream_key = input.stream_key().map(|v| v.to_vec());
         let fd_set = input.functional_dependency().clone();
         let dist = input.distribution().clone();
         let mut watermark_columns = FixedBitSet::with_capacity(input.schema().len());
@@ -56,7 +56,7 @@ impl StreamEowcSort {
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
-            logical_pk,
+            stream_key,
             fd_set,
             dist,
             true,
@@ -92,7 +92,7 @@ impl StreamEowcSort {
             }
         }
 
-        for idx in self.input.logical_pk() {
+        for idx in self.input.expect_stream_key() {
             if !order_cols.contains(idx) {
                 tbl_builder.add_order_column(*idx, OrderType::ascending());
                 order_cols.insert(*idx);
