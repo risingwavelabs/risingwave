@@ -199,16 +199,17 @@ message Function {
   string language = 7;
   string link = 8;
   string identifier = 10;
-  optional string description = 11;
 
   oneof kind {
-    ScalarFunction scalar = 12;
-    TableFunction table = 13;
-    AggregateFunction aggregate = 14;
+    ScalarFunction scalar = 11;
+    TableFunction table = 12;
+    AggregateFunction aggregate = 13;
   }
   message ScalarFunction {}
   message TableFunction {}
   message AggregateFunction {}
+
+  optional string description = 14;
 }
 
 // See `TableCatalog` struct in frontend crate for more information.
