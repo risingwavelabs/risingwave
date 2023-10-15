@@ -63,6 +63,7 @@ impl From<ObjectModel<database::Model>> for PbDatabase {
             id: value.0.database_id as _,
             name: value.0.name,
             owner: value.1.owner_id as _,
+            description: None,
         }
     }
 }
@@ -93,6 +94,7 @@ impl From<ObjectModel<schema::Model>> for PbSchema {
             name: value.0.name,
             database_id: value.0.database_id as _,
             owner: value.1.owner_id as _,
+            description: None,
         }
     }
 }

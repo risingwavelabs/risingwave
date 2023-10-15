@@ -25,7 +25,7 @@ use risingwave_pb::catalog::connection::private_link_service::{
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Connection, CreateType, PbSource, PbTable};
+use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, PbSource, PbTable};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
@@ -674,6 +674,7 @@ impl DdlService for DdlServiceImpl {
                     name: req.name,
                     owner: req.owner_id,
                     info: Some(connection::Info::PrivateLinkService(private_link_svc)),
+                    description: None,
                 };
 
                 // save private link info to catalog
@@ -712,6 +713,27 @@ impl DdlService for DdlServiceImpl {
             .await?;
 
         Ok(Response::new(DropConnectionResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn create_comment(
+        &self,
+        request: Request<CreateCommentRequest>,
+    ) -> Result<Response<CreateCommentResponse>, Status> {
+        let req = request.into_inner();
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::CreateComment(Comment {
+                table_id: req.table_id,
+                column_index: req.column_index,
+                description: req.comment,
+            }))
+            .await?;
+
+        Ok(Response::new(CreateCommentResponse {
             status: None,
             version,
         }))

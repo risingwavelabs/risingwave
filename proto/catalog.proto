@@ -94,6 +94,7 @@ message Source {
 
   optional uint64 initialized_at_epoch = 15;
   optional uint64 created_at_epoch = 16;
+  optional string description = 17;
 
   // Per-source catalog version, used by schema change.
   uint64 version = 100;
@@ -140,6 +141,7 @@ message Sink {
   string sink_from_name = 18;
   StreamJobStatus stream_job_status = 19;
   SinkFormatDesc format_desc = 20;
+  optional string description = 21;
 }
 
 message Connection {
@@ -164,6 +166,7 @@ message Connection {
     PrivateLinkService private_link_service = 5;
   }
   uint32 owner = 6;
+  optional string description = 7;
 }
 
 message Index {
@@ -182,6 +185,7 @@ message Index {
   optional uint64 initialized_at_epoch = 10;
   optional uint64 created_at_epoch = 11;
   StreamJobStatus stream_job_status = 12;
+  optional string description = 13;
 }
 
 message Function {
@@ -195,11 +199,12 @@ message Function {
   string language = 7;
   string link = 8;
   string identifier = 10;
+  optional string description = 11;
 
   oneof kind {
-    ScalarFunction scalar = 11;
-    TableFunction table = 12;
-    AggregateFunction aggregate = 13;
+    ScalarFunction scalar = 12;
+    TableFunction table = 13;
+    AggregateFunction aggregate = 14;
   }
   message ScalarFunction {}
   message TableFunction {}
@@ -280,6 +285,8 @@ message Table {
 
   CreateType create_type = 32;
 
+  optional string description = 33;
+
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.
   TableVersion version = 100;
@@ -303,6 +310,7 @@ message View {
   repeated uint32 dependent_relations = 8;
   // User-specified column names.
   repeated plan_common.Field columns = 9;
+  optional string description = 10;
 }
 
 message Schema {
@@ -310,10 +318,18 @@ message Schema {
   uint32 database_id = 2;
   string name = 3;
   uint32 owner = 4;
+  optional string description = 5;
 }
 
 message Database {
   uint32 id = 1;
   string name = 2;
   uint32 owner = 3;
+  optional string description = 4;
+}
+
+message Comment {
+  uint32 table_id = 1;
+  uint32 column_index = 2;
+  optional string description = 3;
 }

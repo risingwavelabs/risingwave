@@ -111,6 +111,13 @@ pub trait CatalogWriter: Send + Sync {
         connection: create_connection_request::Payload,
     ) -> Result<()>;
 
+    async fn create_comment(
+        &self,
+        table_id: TableId,
+        column_index: u32,
+        comment: Option<String>,
+    ) -> Result<()>;
+
     async fn drop_table(
         &self,
         source_id: Option<u32>,
@@ -162,6 +169,7 @@ impl CatalogWriter for CatalogWriterImpl {
                 name: db_name.to_string(),
                 id: 0,
                 owner,
+                description: None,
             })
             .await?;
         self.wait_version(version).await
@@ -180,6 +188,7 @@ impl CatalogWriter for CatalogWriterImpl {
                 name: schema_name.to_string(),
                 database_id: db_id,
                 owner,
+                description: None,
             })
             .await?;
         self.wait_version(version).await
@@ -278,6 +287,19 @@ impl CatalogWriter for CatalogWriterImpl {
                 owner_id,
                 connection,
             )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn create_comment(
+        &self,
+        TableId { table_id }: TableId,
+        column_index: u32,
+        comment: Option<String>,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .create_comment(table_id, column_index, comment)
             .await?;
         self.wait_version(version).await
     }

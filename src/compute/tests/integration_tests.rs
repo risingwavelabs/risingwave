@@ -158,6 +158,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             name: field.name,
             field_descs: vec![],
             type_name: "".to_string(),
+            description: None,
             generated_or_default_column: None,
         })
         .collect_vec();

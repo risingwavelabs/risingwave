@@ -204,6 +204,7 @@ impl CatalogWriter for MockCatalogWriter {
             name: db_name.to_string(),
             id: database_id,
             owner,
+            description: None,
         });
         self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner)
             .await?;
@@ -226,6 +227,7 @@ impl CatalogWriter for MockCatalogWriter {
             name: schema_name.to_string(),
             database_id: db_id,
             owner,
+            description: None,
         });
         self.add_schema_id(id, db_id);
         Ok(())
@@ -314,6 +316,15 @@ impl CatalogWriter for MockCatalogWriter {
         _schema_id: u32,
         _owner_id: u32,
         _connection: create_connection_request::Payload,
+    ) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn create_comment(
+        &self,
+        _table_id: TableId,
+        _column_index: u32,
+        _comment: Option<String>,
     ) -> Result<()> {
         unreachable!()
     }
@@ -497,24 +508,28 @@ impl MockCatalogWriter {
             id: 0,
             name: DEFAULT_DATABASE_NAME.to_string(),
             owner: DEFAULT_SUPER_USER_ID,
+            description: None,
         });
         catalog.write().create_schema(&PbSchema {
             id: 1,
             name: DEFAULT_SCHEMA_NAME.to_string(),
             database_id: 0,
             owner: DEFAULT_SUPER_USER_ID,
+            description: None,
         });
         catalog.write().create_schema(&PbSchema {
             id: 2,
             name: PG_CATALOG_SCHEMA_NAME.to_string(),
             database_id: 0,
             owner: DEFAULT_SUPER_USER_ID,
+            description: None,
         });
         catalog.write().create_schema(&PbSchema {
             id: 3,
             name: RW_CATALOG_SCHEMA_NAME.to_string(),
             database_id: 0,
             owner: DEFAULT_SUPER_USER_ID,
+            description: None,
         });
         let mut map: HashMap<u32, DatabaseId> = HashMap::new();
         map.insert(1_u32, 0_u32);

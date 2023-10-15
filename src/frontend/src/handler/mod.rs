@@ -39,6 +39,7 @@ mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
 pub mod cancel_job;
+mod comment;
 pub mod create_connection;
 mod create_database;
 pub mod create_function;
@@ -523,6 +524,11 @@ pub async fn handle(
             session,
         } => transaction::handle_set(handler_args, modes, snapshot, session).await,
         Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
+        Statement::Comment {
+            object_type,
+            object_name,
+            comment,
+        } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
         _ => Err(
             ErrorCode::NotImplemented(format!("Unhandled statement: {}", stmt), None.into()).into(),
         ),

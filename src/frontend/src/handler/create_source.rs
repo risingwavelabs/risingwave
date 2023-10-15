@@ -647,6 +647,7 @@ pub(crate) async fn try_bind_columns_from_source(
                         name: "_id".to_string(),
                         field_descs: vec![],
                         type_name: "".to_string(),
+                        description: None,
                         generated_or_default_column: None,
                     },
                     is_hidden: false,
@@ -658,6 +659,7 @@ pub(crate) async fn try_bind_columns_from_source(
                         name: "payload".to_string(),
                         field_descs: vec![],
                         type_name: "".to_string(),
+                        description: None,
                         generated_or_default_column: None,
                     },
                     is_hidden: false,
@@ -792,6 +794,7 @@ fn check_and_add_timestamp_column(
                 name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
                 field_descs: vec![],
                 type_name: "".to_string(),
+                description: None,
                 generated_or_default_column: None,
             },
 
@@ -809,6 +812,7 @@ fn add_upsert_default_key_column(columns: &mut Vec<ColumnCatalog>) {
             name: DEFAULT_KEY_COLUMN_NAME.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
+            description: None,
             generated_or_default_column: None,
         },
         is_hidden: true,
@@ -1152,6 +1156,7 @@ pub async fn handle_create_source(
         initialized_at_epoch: None,
         created_at_epoch: None,
         optional_associated_table_id: None,
+        description: None,
         version: INITIAL_SOURCE_VERSION_ID,
     };
 

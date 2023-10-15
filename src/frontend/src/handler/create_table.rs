@@ -187,6 +187,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 name: name.real_value(),
                 field_descs,
                 type_name: "".to_string(),
+                description: None,
                 generated_or_default_column: None,
             },
             is_hidden: false,
@@ -685,6 +686,7 @@ fn gen_table_plan_inner(
         optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
             TableId::placeholder().table_id,
         )),
+        description: None,
         version: INITIAL_SOURCE_VERSION_ID,
     });
 

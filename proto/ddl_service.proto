@@ -314,6 +314,17 @@ message GetTablesResponse {
   map<uint32, catalog.Table> tables = 1;
 }
 
+message CreateCommentRequest {
+  uint32 table_id = 1;
+  uint32 column_index = 2;
+  optional string comment = 3;
+}
+
+message CreateCommentResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -342,5 +353,6 @@ service DdlService {
   rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);
   rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
   rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
+  rpc CreateComment(CreateCommentRequest) returns (CreateCommentResponse);
   rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
 }

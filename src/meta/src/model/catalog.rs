@@ -84,6 +84,7 @@ mod tests {
             id,
             name: format!("database_{}", id),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
+            description: None,
         }
     }
 

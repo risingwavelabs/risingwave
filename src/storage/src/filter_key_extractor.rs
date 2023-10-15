@@ -551,6 +551,7 @@ mod tests {
             cleaned_by_watermark: false,
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
+            description: None,
         }
     }
 

@@ -28,6 +28,8 @@ pub struct ViewCatalog {
     pub properties: WithOptions,
     pub sql: String,
     pub columns: Vec<Field>,
+
+    pub description: Option<String>,
 }
 
 impl From<&PbView> for ViewCatalog {
@@ -39,6 +41,7 @@ impl From<&PbView> for ViewCatalog {
             properties: WithOptions::new(view.properties.clone()),
             sql: view.sql.clone(),
             columns: view.columns.iter().map(|f| f.into()).collect(),
+            description: view.description.clone(),
         }
     }
 }

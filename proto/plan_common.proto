@@ -37,6 +37,8 @@ message ColumnDesc {
     GeneratedColumnDesc generated_column = 6;
     DefaultColumnDesc default_column = 7;
   }
+
+  optional string description = 8;
 }
 
 message ColumnCatalog {

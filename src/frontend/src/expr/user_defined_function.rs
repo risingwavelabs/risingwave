@@ -56,6 +56,7 @@ impl UserDefinedFunction {
             language: udf.get_language().clone(),
             identifier: udf.get_identifier().clone(),
             link: udf.get_link().clone(),
+            description: None,
         };
 
         Ok(Self {

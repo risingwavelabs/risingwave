@@ -34,7 +34,8 @@ use risingwave_common::catalog::{
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source, Table, View,
+    Comment, Connection, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source, Table,
+    View,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
@@ -217,6 +218,7 @@ impl CatalogManager {
                 database_id: database.id,
                 name: schema_name.to_string(),
                 owner: database.owner,
+                description: None,
             };
             schemas.insert(schema.id, schema.clone());
             schemas_added.push(schema);
@@ -2190,6 +2192,38 @@ impl CatalogManager {
         // occur after it's created. We may need to add a new tracker for `alter` procedure.s
         database_core.unmark_creating(&key);
         Ok(())
+    }
+
+    pub async fn create_comment(&self, comment: Comment) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_table_view_or_source_id(&comment.table_id)?;
+
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+
+        // TODO: dont unwrap
+        let mut table = tables.get_mut(comment.table_id).unwrap();
+        let col_idx = comment.column_index;
+        if col_idx > 0 {
+            let column = table
+                .columns
+                .iter_mut()
+                .find(|col| col.column_desc.clone().unwrap().column_id == col_idx as i32)
+                .unwrap();
+            column.column_desc.as_mut().unwrap().description = comment.description;
+        } else {
+            table.description = comment.description;
+        }
+
+        let new_table = table.clone();
+
+        commit_meta!(self, tables)?;
+
+        let version = self
+            .notify_frontend_relation_info(Operation::Update, RelationInfo::Table(new_table))
+            .await;
+
+        Ok(version)
     }
 
     pub async fn list_connections(&self) -> Vec<Connection> {

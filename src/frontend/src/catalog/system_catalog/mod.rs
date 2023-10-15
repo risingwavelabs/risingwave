@@ -57,6 +57,8 @@ pub struct SystemTableCatalog {
 
     // owner of table, should always be default super user, keep it for compatibility.
     pub owner: u32,
+
+    pub description: Option<String>,
 }
 
 impl SystemTableCatalog {
@@ -165,6 +167,7 @@ impl From<&BuiltinTable> for SystemTableCatalog {
                 .collect(),
             pk: val.pk.to_vec(),
             owner: DEFAULT_SUPER_USER_ID,
+            description: None,
         }
     }
 }
@@ -182,6 +185,7 @@ impl From<&BuiltinView> for ViewCatalog {
             sql: val.sql.to_string(),
             owner: DEFAULT_SUPER_USER_ID,
             properties: Default::default(),
+            description: None,
         }
     }
 }
@@ -412,6 +416,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_HUMMOCK_BRANCHED_OBJECTS), read_hummock_branched_objects await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACTION_GROUP_CONFIGS), read_hummock_compaction_group_configs await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_META_CONFIGS), read_hummock_meta_configs await},
+    { BuiltinCatalog::Table(&RW_DESCRIPTION), read_rw_description },
 }
 
 #[cfg(test)]
