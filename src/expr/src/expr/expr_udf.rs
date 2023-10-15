@@ -16,9 +16,10 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
+use arrow_schema::{Field, Fields, Schema};
 use await_tree::InstrumentAwait;
 use cfg_or_panic::cfg_or_panic;
-use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
@@ -33,6 +34,7 @@ pub struct UdfExpression {
     children: Vec<BoxedExpression>,
     arg_types: Vec<DataType>,
     return_type: DataType,
+    arg_schema: Arc<Schema>,
     client: Arc<ArrowFlightUdfClient>,
     identifier: String,
     span: await_tree::Span,
@@ -77,9 +79,23 @@ impl UdfExpression {
         vis: &risingwave_common::buffer::Bitmap,
     ) -> Result<ArrayRef> {
         let chunk = DataChunk::new(columns, vis.clone());
-        let visible_rows: Vec<usize> = vis.iter_ones().collect();
         let compacted_chunk = chunk.compact_cow();
-        let input = arrow_array::RecordBatch::try_from(compacted_chunk.as_ref())?;
+        let compacted_columns: Vec<arrow_array::ArrayRef> = compacted_chunk
+            .columns()
+            .iter()
+            .map(|c| {
+                c.as_ref().try_into().expect(
+                    "failed covert risingwave::common::array::ArrayRef to arrow_array::ArrayRef",
+                )
+            })
+            .collect();
+        let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(vis.len()));
+        let input = arrow_array::RecordBatch::try_new_with_options(
+            self.arg_schema.clone(),
+            compacted_columns,
+            &opts,
+        )
+        .expect("failed to build record batch");
 
         let output = self
             .client
@@ -93,10 +109,14 @@ impl UdfExpression {
                 vis.len(),
             );
         }
-        let Some(arrow_array) = output.columns().get(0) else {
+
+        let data_chunk =
+            DataChunk::try_from(&output).expect("failed to convert UDF output to DataChunk");
+        let output = data_chunk.uncompact(vis.clone());
+
+        let Some(array) = output.columns().get(0) else {
             bail!("UDF returned no columns");
         };
-        let array = ArrayImpl::try_from(arrow_array)?;
         if !array.data_type().equals_datatype(&self.return_type) {
             bail!(
                 "UDF returned {:?}, but expected {:?}",
@@ -104,31 +124,8 @@ impl UdfExpression {
                 self.return_type,
             );
         }
-        let mut uncompact_builder = array.create_builder(vis.len());
-        let mut last_u = None;
-        for (idx, u) in visible_rows.into_iter().enumerate() {
-            // pad unvisible rows with NULL
-            let zeros = if let Some(last_u) = last_u {
-                u - last_u - 1
-            } else {
-                u
-            };
-            for _ in 0..zeros {
-                uncompact_builder.append_null();
-            }
-            uncompact_builder.append(array.datum_at(idx));
-            last_u = Some(u);
-        }
-        let zeros = if let Some(last_u) = last_u {
-            vis.len() - last_u - 1
-        } else {
-            vis.len()
-        };
-        for _ in 0..zeros {
-            uncompact_builder.append_null();
-        }
-        let array = uncompact_builder.finish();
-        Ok(Arc::new(array))
+
+        Ok(array.clone())
     }
 }
 
@@ -143,10 +140,26 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
         // connect to UDF service
         let client = get_or_create_client(&udf.link)?;
 
+        let arg_schema = Arc::new(Schema::new(
+            udf.arg_types
+                .iter()
+                .map::<Result<_>, _>(|t| {
+                    Ok(Field::new(
+                        "",
+                        DataType::from(t)
+                            .try_into()
+                            .map_err(risingwave_udf::Error::Unsupported)?,
+                        true,
+                    ))
+                })
+                .try_collect::<Fields>()?,
+        ));
+
         Ok(Self {
             children: udf.children.iter().map(build_from_prost).try_collect()?,
             arg_types: udf.arg_types.iter().map(|t| t.into()).collect(),
             return_type,
+            arg_schema,
             client,
             identifier: udf.identifier.clone(),
             span: format!("expr_udf_call ({})", udf.identifier).into(),
