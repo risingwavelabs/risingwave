@@ -487,7 +487,7 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ supplier_s_acctbal, supplier_s_name, nation_n_name, part_p_partkey, part_p_mfgr, supplier_s_address, supplier_s_phone, supplier_s_comment, region_r_regionkey, nation_n_nationkey, supplier_s_suppkey, part_p_partkey_0, partsupp_ps_partkey, partsupp_ps_suppkey, min(partsupp_ps_supplycost), $expr1 ], primary key: [ $0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ supplier_s_acctbal, supplier_s_name, nation_n_name, part_p_partkey, part_p_mfgr, supplier_s_address, supplier_s_phone, supplier_s_comment, region_r_regionkey, nation_n_nationkey, supplier_s_suppkey, part_p_partkey_0, partsupp_ps_partkey, partsupp_ps_suppkey, min(partsupp_ps_supplycost), $expr1 ], primary key: [ $0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ supplier_s_acctbal, supplier_s_name, nation_n_name, part_p_partkey, part_p_mfgr, supplier_s_address, supplier_s_phone, supplier_s_comment, region_r_regionkey, nation_n_nationkey, supplier_s_suppkey, part_p_partkey_0, partsupp_ps_partkey, partsupp_ps_suppkey, min(partsupp_ps_supplycost), $expr1 ], primary key: [ $15 ASC, $0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ], distribution key: [ 10 ], read pk prefix len hint: 1, vnode column idx: 15 }
 
@@ -735,7 +735,7 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ lineitem_l_orderkey, sum($expr1), orders_o_orderdate, orders_o_shippriority, $expr2 ], primary key: [ $1 DESC, $2 ASC, $0 ASC, $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ lineitem_l_orderkey, sum($expr1), orders_o_orderdate, orders_o_shippriority, $expr2 ], primary key: [ $1 DESC, $2 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
     ├── columns: [ lineitem_l_orderkey, sum($expr1), orders_o_orderdate, orders_o_shippriority, $expr2 ]
@@ -2302,7 +2302,7 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ customer_c_custkey, customer_c_name, sum($expr1), customer_c_acctbal, nation_n_name, customer_c_address, customer_c_phone, customer_c_comment, $expr2 ], primary key: [ $2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC, $8 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ customer_c_custkey, customer_c_name, sum($expr1), customer_c_acctbal, nation_n_name, customer_c_address, customer_c_phone, customer_c_comment, $expr2 ], primary key: [ $2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1
     ├── columns: [ customer_c_custkey, customer_c_name, sum($expr1), customer_c_acctbal, nation_n_name, customer_c_address, customer_c_phone, customer_c_comment, $expr2 ]
@@ -3814,7 +3814,7 @@
 
     Table 0
     ├── columns: [ customer_c_name, customer_c_custkey, orders_o_orderkey, orders_o_orderdate, orders_o_totalprice, sum(lineitem_l_quantity), $expr1 ]
-    ├── primary key: [ $4 DESC, $3 ASC, $1 ASC, $0 ASC, $2 ASC, $6 ASC ]
+    ├── primary key: [ $4 DESC, $3 ASC, $1 ASC, $0 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
@@ -4465,7 +4465,7 @@
             ├── Upstream
             └── BatchPlanNode
 
-    Table 0 { columns: [ supplier_s_name, count, $expr1 ], primary key: [ $1 DESC, $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ supplier_s_name, count, $expr1 ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ supplier_s_name, count, $expr1 ], primary key: [ $2 ASC, $1 DESC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 2 }
 
