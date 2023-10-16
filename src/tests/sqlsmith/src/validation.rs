@@ -73,6 +73,12 @@ fn is_overlay_start_error(db_error: &str) -> bool {
     db_error.contains("Invalid parameter start") && db_error.contains("is not positive")
 }
 
+/// Unrecognized encoding
+/// `decode('8mmqFAxAHQ', 'tTAmH8WncR')`
+fn is_encdec_format_error(db_error: &str) -> bool {
+    db_error.contains("Invalid parameter format: unrecognized encoding")
+}
+
 /// Broken channel error
 fn is_broken_channel_error(db_error: &str) -> bool {
     db_error.contains("failed to finish command: channel closed")
@@ -114,6 +120,7 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || is_numeric_overflow_error(db_error)
         || is_neg_substr_error(db_error)
         || is_overlay_start_error(db_error)
+        || is_encdec_format_error(db_error)
         || is_broken_channel_error(db_error)
         || is_neg_exp_error(db_error)
 }
