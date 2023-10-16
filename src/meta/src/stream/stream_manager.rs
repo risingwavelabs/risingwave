@@ -247,10 +247,8 @@ impl GlobalStreamManager {
                         .inspect_err(|_| tracing::warn!("failed to notify created: {table_id}"));
                 }
                 Err(err) => {
-                    if create_type == CreateType::Foreground {
-                        for revert_func in revert_funcs.into_iter().rev() {
-                            revert_func.await;
-                        }
+                    for revert_func in revert_funcs.into_iter().rev() {
+                        revert_func.await;
                     }
                     let _ = sender
                         .send(CreatingState::Failed {
@@ -439,8 +437,10 @@ impl GlobalStreamManager {
             table_fragments.internal_table_ids().len() + mv_table_id.map_or(0, |_| 1)
         );
         revert_funcs.push(Box::pin(async move {
-            if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
-                tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", registered_table_ids, e);
+            if create_type == CreateType::Foreground {
+                if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
+                    tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", registered_table_ids, e);
+                }
             }
         }));
 
