@@ -88,7 +88,7 @@ pub async fn prepare_start_parameters(
         &storage_memory_config,
     )));
     let total_memory_available_bytes =
-        (resource_util::memory::total_memory_available_bytes() as f64
+        (resource_util::memory::system_memory_available_bytes() as f64
             * config.storage.compactor_memory_available_proportion) as usize;
     let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {

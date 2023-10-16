@@ -17,34 +17,58 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
+use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{PbStreamFsFetch, StreamFsFetchNode};
 
-use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, StreamNode};
+use super::{PlanBase, PlanRef, PlanTreeNodeUnary};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::utils::column_names_pretty;
+use crate::optimizer::plan_node::utils::{childless_record, Distill};
+use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-/// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamSource {
+pub struct StreamFsFetch {
     pub base: PlanBase,
-    pub(crate) logical: generic::Source,
+    input: PlanRef,
+    logical: generic::Source,
 }
 
-impl StreamSource {
-    pub fn new(logical: generic::Source) -> Self {
+impl PlanTreeNodeUnary for StreamFsFetch {
+    fn input(&self) -> PlanRef {
+        self.input.clone()
+    }
+
+    fn clone_with_input(&self, input: PlanRef) -> Self {
+        Self::new(input, self.logical.clone())
+    }
+}
+impl_plan_tree_node_for_unary! { StreamFsFetch }
+
+impl StreamFsFetch {
+    pub fn new(input: PlanRef, source: generic::Source) -> Self {
         let base = PlanBase::new_stream_with_logical(
-            &logical,
+            &source,
             Distribution::SomeShard,
-            logical.catalog.as_ref().map_or(true, |s| s.append_only),
+            source.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
-            FixedBitSet::with_capacity(logical.column_catalog.len()),
+            FixedBitSet::with_capacity(source.column_catalog.len()),
         );
-        Self { base, logical }
+
+        Self {
+            base,
+            input,
+            logical: source,
+        }
+    }
+
+    fn get_columns(&self) -> Vec<&str> {
+        self.logical
+            .column_catalog
+            .iter()
+            .map(|column| column.name())
+            .collect()
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
@@ -52,25 +76,25 @@ impl StreamSource {
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamSource }
-
-impl Distill for StreamSource {
+impl Distill for StreamFsFetch {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let fields = if let Some(catalog) = self.source_catalog() {
-            let src = Pretty::from(catalog.name.clone());
-            let col = column_names_pretty(self.schema());
-            vec![("source", src), ("columns", col)]
-        } else {
-            vec![]
-        };
-        childless_record("StreamSource", fields)
+        let columns = self
+            .get_columns()
+            .iter()
+            .map(|ele| Pretty::from(ele.to_string()))
+            .collect();
+        let col = Pretty::Array(columns);
+        childless_record("StreamFsFetch", vec![("columns", col)])
     }
 }
 
-impl StreamNode for StreamSource {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
+impl ExprRewritable for StreamFsFetch {}
+
+impl StreamNode for StreamFsFetch {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
+        // `StreamFsFetch` is same as source in proto def, so the following code is the same as `StreamSource`
         let source_catalog = self.source_catalog();
-        let source_inner = source_catalog.map(|source_catalog| PbStreamSource {
+        let source_inner = source_catalog.map(|source_catalog| PbStreamFsFetch {
             source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
             state_table: Some(
@@ -94,8 +118,8 @@ impl StreamNode for StreamSource {
                 .config()
                 .get_streaming_rate_limit(),
         });
-        PbNodeBody::Source(SourceNode { source_inner })
+        NodeBody::StreamFsFetch(StreamFsFetchNode {
+            node_inner: source_inner,
+        })
     }
 }
-
-impl ExprRewritable for StreamSource {}
