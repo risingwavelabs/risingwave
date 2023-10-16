@@ -475,7 +475,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             // Concat all iterators if not to preserve order.
             _ if !ordered => {
                 futures::stream::iter(iterators.into_iter().map(Box::pin).collect_vec())
-                    .flatten_unordered(10)
+                    .flatten_unordered(1024)
             }
             // Merge all iterators if to preserve order.
             _ => merge_sort(iterators.into_iter().map(Box::pin).collect()),
