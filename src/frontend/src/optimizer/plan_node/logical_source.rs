@@ -17,11 +17,14 @@ use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, Schema, KAFKA_TIMESTAMP_COLUMN_NAME};
-use risingwave_common::error::Result;
-use risingwave_connector::source::DataType;
+use risingwave_common::catalog::{
+    ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
+};
+use risingwave_common::error::{ErrorCode, Result, RwError, TrackingIssue};
+use risingwave_connector::source::{ConnectorProperties, DataType};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 
@@ -35,10 +38,13 @@ use super::{
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::stream_fs_fetch::StreamFsFetch;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
+    ToStreamContext,
 };
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 
 /// `LogicalSource` returns contents of a table or other equivalent object
@@ -152,6 +158,73 @@ impl LogicalSource {
         Ok(Some(exprs))
     }
 
+    fn rewrite_new_s3_plan(&self) -> Result<PlanRef> {
+        let logical_source = generic::Source {
+            catalog: self.core.catalog.clone(),
+            column_catalog: vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "filename".to_string(),
+                            data_type: DataType::Varchar,
+                            sub_fields: vec![],
+                            type_name: "".to_string(),
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "last_edit_time".to_string(),
+                            data_type: DataType::Timestamp,
+                            sub_fields: vec![],
+                            type_name: "".to_string(),
+                        },
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "file_size".to_string(),
+                            data_type: DataType::Int64,
+                            sub_fields: vec![],
+                            type_name: "".to_string(),
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+            ],
+            row_id_index: None,
+            gen_row_id: false,
+            ..self.core.clone()
+        };
+        let mut new_s3_plan: PlanRef = StreamSource {
+            base: PlanBase::new_stream_with_logical(
+                &logical_source,
+                Distribution::Single,
+                true, // `list` will keep listing all objects, it must be append-only
+                false,
+                FixedBitSet::with_capacity(logical_source.column_catalog.len()),
+            ),
+            logical: logical_source,
+        }
+        .into();
+        new_s3_plan = RequiredDist::shard_by_key(3, &[0])
+            .enforce_if_not_satisfies(new_s3_plan, &Order::any())?;
+        new_s3_plan = StreamDedup::new(generic::Dedup {
+            input: new_s3_plan,
+            dedup_cols: vec![0],
+        })
+        .into();
+
+        Ok(new_s3_plan)
+    }
+
     /// `row_id_index` in source node should rule out generated column
     #[must_use]
     fn rewrite_row_id_idx(columns: &[ColumnCatalog], row_id_index: Option<usize>) -> Option<usize> {
@@ -200,14 +273,18 @@ impl LogicalSource {
         }
     }
 
-    fn wrap_with_optional_generated_columns_stream_proj(&self) -> Result<PlanRef> {
+    fn wrap_with_optional_generated_columns_stream_proj(
+        &self,
+        input: Option<PlanRef>,
+    ) -> Result<PlanRef> {
         if let Some(exprs) = &self.output_exprs {
-            let source = StreamSource::new(self.rewrite_to_stream_batch_source());
-            let logical_project = generic::Project::new(exprs.to_vec(), source.into());
+            let source: PlanRef =
+                dispatch_new_s3_plan(self.rewrite_to_stream_batch_source(), input);
+            let logical_project = generic::Project::new(exprs.to_vec(), source);
             Ok(StreamProject::new(logical_project).into())
         } else {
-            let source = StreamSource::new(self.core.clone());
-            Ok(source.into())
+            let source = dispatch_new_s3_plan(self.core.clone(), input);
+            Ok(source)
         }
     }
 
@@ -369,8 +446,7 @@ fn expr_to_kafka_timestamp_range(
 
     match &expr {
         ExprImpl::FunctionCall(function_call) => {
-            if let Some((timestampz_literal, reverse)) = extract_timestampz_literal(&expr).unwrap()
-            {
+            if let Ok(Some((timestampz_literal, reverse))) = extract_timestampz_literal(&expr) {
                 match function_call.func_type() {
                     ExprType::GreaterThan => {
                         if reverse {
@@ -453,6 +529,16 @@ impl PredicatePushdown for LogicalSource {
 
 impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
+        if self.core.catalog.is_some()
+            && ConnectorProperties::is_new_fs_connector_b_tree_map(
+                &self.core.catalog.as_ref().unwrap().properties,
+            )
+        {
+            return Err(RwError::from(ErrorCode::NotImplemented(
+                "New S3 connector for batch".to_string(),
+                TrackingIssue::from(None),
+            )));
+        }
         let source = self.wrap_with_optional_generated_columns_batch_proj()?;
         Ok(source)
     }
@@ -460,11 +546,20 @@ impl ToBatch for LogicalSource {
 
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        let mut plan = if self.core.for_table {
-            StreamSource::new(self.rewrite_to_stream_batch_source()).into()
+        let mut plan_prefix: Option<PlanRef> = None;
+        let mut plan: PlanRef;
+        if self.core.catalog.is_some()
+            && ConnectorProperties::is_new_fs_connector_b_tree_map(
+                &self.core.catalog.as_ref().unwrap().properties,
+            )
+        {
+            plan_prefix = Some(self.rewrite_new_s3_plan()?);
+        }
+        plan = if self.core.for_table {
+            dispatch_new_s3_plan(self.rewrite_to_stream_batch_source(), plan_prefix)
         } else {
             // Create MV on source.
-            self.wrap_with_optional_generated_columns_stream_proj()?
+            self.wrap_with_optional_generated_columns_stream_proj(plan_prefix)?
         };
 
         if let Some(catalog) = self.source_catalog()
@@ -489,5 +584,14 @@ impl ToStream for LogicalSource {
             self.clone().into(),
             ColIndexMapping::identity(self.schema().len()),
         ))
+    }
+}
+
+#[inline]
+fn dispatch_new_s3_plan(source: generic::Source, input: Option<PlanRef>) -> PlanRef {
+    if let Some(input) = input {
+        StreamFsFetch::new(input, source).into()
+    } else {
+        StreamSource::new(source).into()
     }
 }

@@ -29,41 +29,80 @@ flush() {
   run_sql "FLUSH;"
 }
 
-test_basic() {
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_base_table.sql
+basic() {
+  echo "--- e2e, test_backfill_basic"
+  cargo make ci-start ci-backfill
+  run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
 
   # Provide snapshot
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql &
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
 
   wait
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/select.sql </dev/null
+
+  run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
+
+  echo "--- Kill cluster"
+  cargo make kill
+}
+
+# Lots of upstream tombstone, backfill should still proceed.
+test_backfill_tombstone() {
+  echo "--- e2e, test_backfill_tombstone"
+  cargo make ci-start ci-backfill
+  ./risedev psql -c "
+  CREATE TABLE tomb (v1 int)
+  WITH (
+    connector = 'datagen',
+    fields.v1._.kind = 'sequence',
+    datagen.rows.per.second = '10000000'
+  )
+  FORMAT PLAIN
+  ENCODE JSON;
+  "
+
+  sleep 30
+
+  bash -c '
+    set -euo pipefail
+
+    for i in $(seq 1 1000)
+    do
+      ./risedev psql -c "DELETE FROM tomb; FLUSH;"
+      sleep 1
+    done
+  ' 1>deletes.log 2>&1 &
+
+  ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
+  echo "--- Kill cluster"
+  cargo make kill
 }
 
 test_replication_with_column_pruning() {
-   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_base_table.sql
-   # Provide snapshot
-   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql
+  echo "--- e2e, test_backfill_basic"
+  cargo make ci-start ci-backfill
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_base_table.sql
+  # Provide snapshot
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql
 
-   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_mv.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/create_mv.sql &
 
-   # Provide upstream updates
-   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql &
+  # Provide upstream updates
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/insert.sql &
 
-   wait
+  wait
 
-   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/select.sql </dev/null
-   run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/drop.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/select.sql </dev/null
+  run_sql_file "$PARENT_PATH"/sql/backfill/replication_with_column_pruning/drop.sql
+  echo "--- Kill cluster"
+  cargo make kill
 }
 
 main() {
-  set -euo pipefail
-  echo "--- Basic test"
-  test_basic
-  echo "--- Replication with Column pruning"
+  basic
+  test_backfill_tombstone
   test_replication_with_column_pruning
-  echo "Backfill tests complete"
 }
 
 main

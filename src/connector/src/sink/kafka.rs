@@ -12,21 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::fmt::Debug;
+use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::future::try_join_all;
-use futures::{Future, FutureExt};
-use rdkafka::error::{KafkaError, KafkaResult};
+use futures::future::{select, Either};
+use futures::{Future, FutureExt, TryFuture};
+use rdkafka::error::KafkaError;
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
-use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::drop_either_future;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
@@ -34,11 +35,13 @@ use strum_macros::{Display, EnumString};
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam};
 use crate::common::KafkaCommon;
+use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
-use crate::sink::writer::{
-    FormattedSink, LogSinkerOf, SinkWriterExt, SinkWriterV1, SinkWriterV1Adapter,
+use crate::sink::log_store::{
+    DeliveryFutureManager, DeliveryFutureManagerAddFuture, LogReader, LogStoreReadItem,
 };
-use crate::sink::{DummySinkCommitCoordinator, Result, SinkWriterParam};
+use crate::sink::writer::FormattedSink;
+use crate::sink::{DummySinkCommitCoordinator, LogSinker, Result, SinkWriterParam};
 use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkProducerContext};
 use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
@@ -78,6 +81,11 @@ enum CompressionCodec {
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RdKafkaPropertiesProducer {
+    /// Allow automatic topic creation on the broker when subscribing to or assigning non-existent topics.
+    #[serde(rename = "properties.allow.auto.create.topics")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub allow_auto_create_topics: Option<bool>,
+
     /// Maximum number of messages allowed on the producer queue. This queue is shared by all
     /// topics and partitions. A value of 0 disables this limit.
     #[serde(rename = "properties.queue.buffering.max.messages")]
@@ -157,6 +165,9 @@ pub struct RdKafkaPropertiesProducer {
 
 impl RdKafkaPropertiesProducer {
     pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+        if let Some(v) = self.allow_auto_create_topics {
+            c.set("allow.auto.create.topics", v.to_string());
+        }
         if let Some(v) = self.queue_buffering_max_messages {
             c.set("queue.buffering.max.messages", v.to_string());
         }
@@ -288,25 +299,23 @@ impl TryFrom<SinkParam> for KafkaSink {
 
 impl Sink for KafkaSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<SinkWriterV1Adapter<KafkaSinkWriter>>;
+    type LogSinker = KafkaLogSinker;
 
     const SINK_NAME: &'static str = KAFKA_SINK;
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(SinkWriterV1Adapter::new(
-            KafkaSinkWriter::new(
-                self.config.clone(),
-                SinkFormatterImpl::new(
-                    &self.format_desc,
-                    self.schema.clone(),
-                    self.pk_indices.clone(),
-                    self.db_name.clone(),
-                    self.sink_from_name.clone(),
-                )?,
-            )
-            .await?,
-        )
-        .into_log_sinker(writer_param.sink_metrics))
+    fn default_sink_decouple(desc: &SinkDesc) -> bool {
+        desc.sink_type.is_append_only()
+    }
+
+    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        let formatter = SinkFormatterImpl::new(
+            &self.format_desc,
+            self.schema.clone(),
+            self.pk_indices.clone(),
+            self.db_name.clone(),
+            self.sink_from_name.clone(),
+        )?;
+        KafkaLogSinker::new(self.config.clone(), formatter).await
     }
 
     async fn validate(&self) -> Result<()> {
@@ -345,20 +354,23 @@ const KAFKA_WRITER_MAX_QUEUE_SIZE_RATIO: f32 = 1.2;
 /// <https://github.com/confluentinc/librdkafka/blob/1cb80090dfc75f5a36eae3f4f8844b14885c045e/CONFIGURATION.md>
 const KAFKA_WRITER_MAX_QUEUE_SIZE: usize = 100000;
 
-struct KafkaPayloadWriter {
+struct KafkaPayloadWriter<'a> {
+    inner: &'a FutureProducer<PrivateLinkProducerContext>,
+    add_future: DeliveryFutureManagerAddFuture<'a, KafkaSinkDeliveryFuture>,
+    config: &'a KafkaConfig,
+}
+
+type KafkaSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
+
+pub struct KafkaLogSinker {
+    formatter: SinkFormatterImpl,
     inner: FutureProducer<PrivateLinkProducerContext>,
-    future_delivery_buffer: VecDeque<DeliveryFuture>,
+    future_manager: DeliveryFutureManager<KafkaSinkDeliveryFuture>,
     config: KafkaConfig,
 }
 
-pub struct KafkaSinkWriter {
-    pub config: KafkaConfig,
-    payload_writer: KafkaPayloadWriter,
-    formatter: SinkFormatterImpl,
-}
-
-impl KafkaSinkWriter {
-    pub async fn new(config: KafkaConfig, formatter: SinkFormatterImpl) -> Result<Self> {
+impl KafkaLogSinker {
+    async fn new(config: KafkaConfig, formatter: SinkFormatterImpl) -> Result<Self> {
         let inner: FutureProducer<PrivateLinkProducerContext> = {
             let mut c = ClientConfig::new();
 
@@ -381,25 +393,27 @@ impl KafkaSinkWriter {
             c.create_with_context(producer_ctx).await?
         };
 
-        Ok(KafkaSinkWriter {
-            config: config.clone(),
-            payload_writer: KafkaPayloadWriter {
-                inner,
-                future_delivery_buffer: VecDeque::new(),
-                config,
-            },
+        let max_delivery_buffer_size = (config
+            .rdkafka_properties
+            .queue_buffering_max_messages
+            .as_ref()
+            .cloned()
+            .unwrap_or(KAFKA_WRITER_MAX_QUEUE_SIZE) as f32
+            * KAFKA_WRITER_MAX_QUEUE_SIZE_RATIO) as usize;
+
+        Ok(KafkaLogSinker {
             formatter,
+            inner,
+            config: config.clone(),
+            future_manager: DeliveryFutureManager::new(max_delivery_buffer_size),
         })
     }
 }
 
-impl KafkaPayloadWriter {
+impl<'w> KafkaPayloadWriter<'w> {
     /// The actual `send_result` function, will be called when the `KafkaSinkWriter` needs to sink
     /// messages
-    async fn send_result<'a, K, P>(
-        &'a mut self,
-        mut record: FutureRecord<'a, K, P>,
-    ) -> KafkaResult<()>
+    async fn send_result<'a, K, P>(&'a mut self, mut record: FutureRecord<'a, K, P>) -> Result<()>
     where
         K: ToBytes + ?Sized,
         P: ToBytes + ?Sized,
@@ -408,36 +422,21 @@ impl KafkaPayloadWriter {
 
         let mut ret = Ok(());
 
-        let max_delivery_buffer_size = (self
-            .config
-            .rdkafka_properties
-            .queue_buffering_max_messages
-            .as_ref()
-            .cloned()
-            .unwrap_or(KAFKA_WRITER_MAX_QUEUE_SIZE) as f32
-            * KAFKA_WRITER_MAX_QUEUE_SIZE_RATIO) as usize;
-
         for i in 0..self.config.max_retry_num {
             match self.inner.send_result(record) {
                 Ok(delivery_future) => {
-                    // First check if the current length is
-                    // greater than the preset limit
-                    while self.future_delivery_buffer.len() >= max_delivery_buffer_size {
+                    if self
+                        .add_future
+                        .add_future_may_await(Self::map_delivery_future(delivery_future))
+                        .await?
+                    {
                         tracing::warn!(
                             "Number of records being delivered ({}) >= expected kafka producer queue size ({}).
                             This indicates the default value of queue.buffering.max.messages has changed.",
-                            self.future_delivery_buffer.len(),
-                            max_delivery_buffer_size
+                            self.add_future.future_count(),
+                            self.add_future.max_future_count()
                         );
-                        Self::map_future_result(
-                            self.future_delivery_buffer
-                                .pop_front()
-                                .expect("Expect the future not to be None")
-                                .await,
-                        )?;
                     }
-
-                    self.future_delivery_buffer.push_back(delivery_future);
                     success_flag = true;
                     break;
                 }
@@ -455,18 +454,13 @@ impl KafkaPayloadWriter {
                         KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) => {
                             tracing::warn!(
                                 "Producer queue full. Delivery future buffer size={}. Await and retry #{}",
-                                self.future_delivery_buffer.len(),
+                                self.add_future.future_count(),
                                 i
                             );
-                            Self::map_future_result(
-                                self.future_delivery_buffer
-                                    .pop_front()
-                                    .expect("Expect the future not to be None")
-                                    .await,
-                            )?;
+                            self.add_future.await_one_delivery().await?;
                             continue;
                         }
-                        _ => return Err(e),
+                        _ => return Err(e.into()),
                     }
                 }
             }
@@ -475,7 +469,7 @@ impl KafkaPayloadWriter {
         if !success_flag {
             // In this case, after trying `max_retry_num`
             // The enqueue buffer is still full
-            ret = Err(KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull));
+            ret = Err(KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull).into());
         }
 
         ret
@@ -487,14 +481,12 @@ impl KafkaPayloadWriter {
         event_object: Option<Vec<u8>>,
     ) -> Result<()> {
         let topic = self.config.common.topic.clone();
-        // here we assume the key part always exists and value part is optional.
-        // if value is None, we will skip the payload part.
-        let key_str = event_key_object.unwrap();
-        let mut record = FutureRecord::<[u8], [u8]>::to(topic.as_str()).key(&key_str);
-        let payload;
-        if let Some(value) = event_object {
-            payload = value;
-            record = record.payload(&payload);
+        let mut record = FutureRecord::<[u8], [u8]>::to(topic.as_str());
+        if let Some(key_str) = &event_key_object {
+            record = record.key(key_str);
+        }
+        if let Some(payload) = &event_object {
+            record = record.payload(payload);
         }
         // Send the data but not wait it to finish sinking
         // Will join all `DeliveryFuture` during commit
@@ -502,9 +494,7 @@ impl KafkaPayloadWriter {
         Ok(())
     }
 
-    fn map_future_result(
-        delivery_future_result: <DeliveryFuture as Future>::Output,
-    ) -> KafkaResult<()> {
+    fn map_future_result(delivery_future_result: <DeliveryFuture as Future>::Output) -> Result<()> {
         match delivery_future_result {
             // Successfully sent the record
             // Will return the partition and offset of the message (i32, i64)
@@ -515,37 +505,20 @@ impl KafkaPayloadWriter {
             // i.e., (KafkaError, OwnedMessage)
             // We will just stop the loop, and return the error
             // The sink executor will back to the latest checkpoint
-            Ok(Err((k_err, _msg))) => Err(k_err),
+            Ok(Err((k_err, _msg))) => Err(k_err.into()),
             // This represents the producer is dropped
             // before the delivery status is received
             // Return `KafkaError::Canceled`
-            Err(_) => Err(KafkaError::Canceled),
+            Err(_) => Err(KafkaError::Canceled.into()),
         }
     }
 
-    async fn commit_inner(&mut self) -> Result<()> {
-        let _v = try_join_all(
-            self.future_delivery_buffer
-                .drain(..)
-                .map(|delivery_future| {
-                    delivery_future.map(|delivery_future_result| {
-                        Self::map_future_result(delivery_future_result).map_err(SinkError::Kafka)
-                    })
-                }),
-        )
-        .await?;
-
-        // Sanity check
-        debug_assert!(
-            self.future_delivery_buffer.is_empty(),
-            "The buffer after `commit_inner` must be empty"
-        );
-
-        Ok(())
+    fn map_delivery_future(future: DeliveryFuture) -> KafkaSinkDeliveryFuture {
+        future.map(KafkaPayloadWriter::<'static>::map_future_result)
     }
 }
 
-impl FormattedSink for KafkaPayloadWriter {
+impl<'a> FormattedSink for KafkaPayloadWriter<'a> {
     type K = Vec<u8>;
     type V = Vec<u8>;
 
@@ -554,32 +527,47 @@ impl FormattedSink for KafkaPayloadWriter {
     }
 }
 
-#[async_trait::async_trait]
-impl SinkWriterV1 for KafkaSinkWriter {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
-            self.payload_writer.write_chunk(chunk, formatter).await
-        })
-    }
-
-    /// ---------------------------------------------------------------------------------------
-    /// Note: The following functions are just to satisfy `SinkWriterV1` trait                |
-    /// We do not need transaction-related functionality for sink executor, return Ok(())     |
-    /// ---------------------------------------------------------------------------------------
-    // Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
-    // transaction.
-    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
-        Ok(())
-    }
-
-    async fn commit(&mut self) -> Result<()> {
-        // Group delivery (await the `FutureRecord`) here
-        self.payload_writer.commit_inner().await?;
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
+impl LogSinker for KafkaLogSinker {
+    async fn consume_log_and_sink(mut self, mut log_reader: impl LogReader) -> Result<()> {
+        log_reader.init().await?;
+        loop {
+            let select_result = drop_either_future(
+                select(
+                    pin!(log_reader.next_item()),
+                    pin!(self.future_manager.next_truncate_offset()),
+                )
+                .await,
+            );
+            match select_result {
+                Either::Left(item_result) => {
+                    let (epoch, item) = item_result?;
+                    match item {
+                        LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
+                            dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+                                let mut writer = KafkaPayloadWriter {
+                                    inner: &self.inner,
+                                    add_future: self
+                                        .future_manager
+                                        .start_write_chunk(epoch, chunk_id),
+                                    config: &self.config,
+                                };
+                                writer.write_chunk(chunk, formatter).await?;
+                            })
+                        }
+                        LogStoreReadItem::Barrier {
+                            is_checkpoint: _is_checkpoint,
+                        } => {
+                            self.future_manager.add_barrier(epoch);
+                        }
+                        LogStoreReadItem::UpdateVnodeBitmap(_) => {}
+                    }
+                }
+                Either::Right(offset_result) => {
+                    let offset = offset_result?;
+                    log_reader.truncate(offset).await?;
+                }
+            }
+        }
     }
 }
 
@@ -747,19 +735,14 @@ mod test {
             },
         ]);
 
-        // We do not specify primary key for this schema
-        let pk_indices = vec![];
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
 
         // Create the actual sink writer to Kafka
-        let mut sink = KafkaSinkWriter::new(
+        let mut sink = KafkaLogSinker::new(
             kafka_config.clone(),
             SinkFormatterImpl::AppendOnlyJson(AppendOnlyFormatter::new(
-                JsonEncoder::new(
-                    schema.clone(),
-                    Some(pk_indices),
-                    TimestampHandlingMode::Milli,
-                ),
+                // We do not specify primary key for this schema
+                None,
                 JsonEncoder::new(schema, None, TimestampHandlingMode::Milli),
             )),
         )
@@ -767,12 +750,14 @@ mod test {
         .unwrap();
 
         for i in 0..10 {
-            let mut fail_flag = false;
-            sink.begin_epoch(i).await?;
             println!("epoch: {}", i);
             for j in 0..100 {
-                match sink
-                    .payload_writer
+                let mut writer = KafkaPayloadWriter {
+                    inner: &sink.inner,
+                    add_future: sink.future_manager.start_write_chunk(i, j),
+                    config: &sink.config,
+                };
+                match writer
                     .send_result(
                         FutureRecord::to(kafka_config.common.topic.as_str())
                             .payload(format!("value-{}", j).as_bytes())
@@ -782,15 +767,10 @@ mod test {
                 {
                     Ok(_) => {}
                     Err(e) => {
-                        fail_flag = true;
                         println!("{:?}", e);
-                        sink.abort().await?;
+                        break;
                     }
                 };
-            }
-            if !fail_flag {
-                sink.commit().await?;
-                println!("commit success");
             }
         }
 

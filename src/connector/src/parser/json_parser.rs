@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use apache_avro::Schema;
+use itertools::{Either, Itertools};
 use jst::{convert_avro, Context};
 use risingwave_common::error::ErrorCode::{self, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -111,29 +112,27 @@ impl JsonParser {
         let value = simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         let values = if let simd_json::BorrowedValue::Array(arr) = value {
-            arr
+            Either::Left(arr.into_iter())
         } else {
-            vec![value]
+            Either::Right(std::iter::once(value))
         };
+
         let mut errors = Vec::new();
-        let mut guard = None;
         for value in values {
             let accessor = JsonAccess::new(value);
             match apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer) {
-                Ok(this_guard) => guard = Some(this_guard),
+                Ok(_) => {}
                 Err(err) => errors.push(err),
             }
         }
 
-        if let Some(guard) = guard {
-            if !errors.is_empty() {
-                tracing::error!(?errors, "failed to parse some columns");
-            }
-            Ok(guard)
+        if errors.is_empty() {
+            Ok(())
         } else {
             Err(RwError::from(ErrorCode::InternalError(format!(
-                "failed to parse all columns: {:?}",
-                errors
+                "failed to parse {} row(s) in a single json message: {}",
+                errors.len(),
+                errors.iter().join(", ")
             ))))
         }
     }

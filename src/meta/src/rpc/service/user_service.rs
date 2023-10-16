@@ -151,7 +151,7 @@ impl UserService for UserServiceImpl {
         let update_fields = req
             .update_fields
             .iter()
-            .map(|i| UpdateField::from_i32(*i).unwrap())
+            .map(|i| UpdateField::try_from(*i).unwrap())
             .collect_vec();
         let user = req.get_user()?.clone();
         let version = self

@@ -639,6 +639,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_contained_in_jk_l,
                     metrics.clone(),
                     ctx.id,
+                    ctx.fragment_id,
                     "left",
                 ),
                 join_key_indices: join_key_indices_l,
@@ -666,6 +667,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_contained_in_jk_r,
                     metrics.clone(),
                     ctx.id,
+                    ctx.fragment_id,
                     "right",
                 ),
                 join_key_indices: join_key_indices_r,
@@ -712,6 +714,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
         let actor_id_str = self.ctx.id.to_string();
+        let fragment_id_str = self.ctx.fragment_id.to_string();
         let mut start_time = Instant::now();
 
         while let Some(msg) = aligned_stream
@@ -721,7 +724,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         {
             self.metrics
                 .join_actor_input_waiting_duration_ns
-                .with_label_values(&[&actor_id_str])
+                .with_label_values(&[&actor_id_str, &fragment_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             match msg? {
                 AlignedMessage::WatermarkLeft(watermark) => {
@@ -761,7 +764,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     left_time += left_start_time.elapsed();
                     self.metrics
                         .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, "left"])
+                        .with_label_values(&[&actor_id_str, &fragment_id_str, "left"])
                         .inc_by(left_time.as_nanos() as u64);
                 }
                 AlignedMessage::Right(chunk) => {
@@ -787,7 +790,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     right_time += right_start_time.elapsed();
                     self.metrics
                         .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, "right"])
+                        .with_label_values(&[&actor_id_str, &fragment_id_str, "right"])
                         .inc_by(right_time.as_nanos() as u64);
                 }
                 AlignedMessage::Barrier(barrier) => {
@@ -811,23 +814,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
                     // Report metrics of cached join rows/entries
                     for (side, ht) in [("left", &self.side_l.ht), ("right", &self.side_r.ht)] {
-                        // TODO(yuhao): Those two metric calculation cost too much time (>250ms).
-                        // Those will result in that barrier is always ready
-                        // in source. Since select barrier is preferred,
-                        // chunk would never be selected.
-                        // self.metrics
-                        //     .join_cached_rows
-                        //     .with_label_values(&[&actor_id_str, side])
-                        //     .set(ht.cached_rows() as i64);
                         self.metrics
-                            .join_cached_entries
-                            .with_label_values(&[&actor_id_str, side])
+                            .join_cached_entry_count
+                            .with_label_values(&[&actor_id_str, &fragment_id_str, side])
                             .set(ht.entry_count() as i64);
                     }
 
                     self.metrics
                         .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, "barrier"])
+                        .with_label_values(&[&actor_id_str, &fragment_id_str, "barrier"])
                         .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                     yield Message::Barrier(barrier);
                 }

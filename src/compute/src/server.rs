@@ -26,6 +26,7 @@ use risingwave_common::config::{
     load_config, AsyncStackTraceOption, MetricLevel, StorageMemoryConfig,
     MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
+use risingwave_common::heap_profiling::HeapProfiler;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -284,18 +285,18 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
 
-    let memory_mgr = GlobalMemoryManager::new(
-        streaming_metrics.clone(),
-        total_memory_bytes,
-        config.server.heap_profiling.clone(),
-    );
-    // Run a background memory monitor
+    let memory_mgr = GlobalMemoryManager::new(streaming_metrics.clone(), total_memory_bytes);
+    // Run a background memory manager
     tokio::spawn(memory_mgr.clone().run(
         batch_mgr_clone,
         stream_mgr_clone,
         system_params.barrier_interval_ms(),
         system_params_manager.watch_params(),
     ));
+
+    let heap_profiler = HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
+    // Run a background heap profiler
+    heap_profiler.start();
 
     let watermark_epoch = memory_mgr.get_watermark_epoch();
     // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead

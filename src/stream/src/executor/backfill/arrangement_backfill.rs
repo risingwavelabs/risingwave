@@ -576,9 +576,8 @@ where
             let range_bounds = range_bounds.unwrap();
 
             let vnode_row_iter = upstream_table
-                .iter_row_with_pk_range(&range_bounds, vnode, Default::default())
-                .await?
-                .map(|r| r.map(|r| r.into_owned_row()));
+                .iter_with_vnode(vnode, &range_bounds, Default::default())
+                .await?;
 
             // TODO: Is there some way to avoid double-pin here?
             let vnode_row_iter = Box::pin(vnode_row_iter);

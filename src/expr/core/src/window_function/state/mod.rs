@@ -14,6 +14,7 @@
 
 use std::collections::BTreeSet;
 
+use itertools::Itertools;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Datum, DefaultOrdered};
@@ -21,7 +22,6 @@ use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use smallvec::SmallVec;
 
 use super::{WindowFuncCall, WindowFuncKind};
-use crate::sig::FuncSigDebug;
 use crate::{ExprError, Result};
 
 mod buffer;
@@ -116,19 +116,11 @@ pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState 
         RowNumber => Box::new(row_number::RowNumberState::new(call)),
         Aggregate(_) => Box::new(aggregate::AggregateState::new(call)?),
         kind => {
-            let args = (call.args.arg_types().iter())
-                .map(|t| t.into())
-                .collect::<Vec<_>>();
             return Err(ExprError::UnsupportedFunction(format!(
-                "{:?}",
-                FuncSigDebug {
-                    func: kind,
-                    inputs_type: &args,
-                    ret_type: call.return_type.clone().into(),
-                    set_returning: false,
-                    deprecated: false,
-                    append_only: false,
-                }
+                "{}({}) -> {}",
+                kind,
+                call.args.arg_types().iter().format(", "),
+                &call.return_type,
             )));
         }
     })

@@ -26,7 +26,8 @@ public class JniSinkWriterHandler {
         // For jni.rs
         java.lang.Thread.currentThread()
                 .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
-        JniSinkResponseObserver responseObserver = new JniSinkResponseObserver(responseTxPtr);
+        JniSinkWriterResponseObserver responseObserver =
+                new JniSinkWriterResponseObserver(responseTxPtr);
         SinkWriterStreamObserver sinkWriterStreamObserver =
                 new SinkWriterStreamObserver(responseObserver);
         try {

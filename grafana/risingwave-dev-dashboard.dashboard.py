@@ -641,11 +641,6 @@ def section_object_storage(outer_panels):
 
 def section_streaming(outer_panels):
     panels = outer_panels.sub_panel()
-    sink_filter = "executor_identity=~\".*SinkExecutor.*\""
-    mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
-    table_type_filter = "table_type=~\"MATERIALIZED_VIEW\""
-    mv_throughput_query = f'sum(rate({metric("stream_executor_row_count", filter=mv_filter)}[$__rate_interval]) * on(actor_id) group_left(materialized_view_id, table_name) (group({metric("table_info", filter=table_type_filter)}) by (actor_id, materialized_view_id, table_name))) by (materialized_view_id, table_name)'
-    sink_throughput_query = f'sum(rate({metric("stream_executor_row_count", filter=sink_filter)}[$__rate_interval]) * on(actor_id) group_left(sink_name) (group({metric("sink_info")}) by (actor_id, sink_name))) by (sink_name)'
     return [
         outer_panels.row_collapsed(
             "Streaming",
@@ -740,22 +735,41 @@ def section_streaming(outer_panels):
                 ),
                 panels.timeseries_rowsps(
                     "Sink Throughput(rows/s)",
-                    "The figure shows the number of rows output by each sink per second.",
+                    "The number of rows streamed into each sink per second.",
                     [
                         panels.target(
-                            sink_throughput_query,
-                            "sink {{sink_name}}",
+                            f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)",
+                            "sink {{sink_id}} {{sink_name}}",
                         ),
                     ],
                 ),
-
+                panels.timeseries_rowsps(
+                    "Sink Throughput(rows/s) per Partition",
+                    "The number of rows streamed into each sink per second.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}",
+                            "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_rowsps(
                     "Materialized View Throughput(rows/s)",
                     "The figure shows the number of rows written into each materialized view per second.",
                     [
                         panels.target(
-                            mv_throughput_query,
-                            "materialized view {{table_name}} table_id {{materialized_view_id}}",
+                            f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
+                            "mview {{table_id}} {{table_name}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Materialized View Throughput(rows/s) per Partition",
+                    "The figure shows the number of rows written into each materialized view per second.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (actor_id, table_id) * on(actor_id, table_id) group_left(table_name) {metric('table_info')}",
+                            "mview {{table_id}} {{table_name}} - actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -899,8 +913,8 @@ def section_streaming_actors(outer_panels):
                     "When enabled, this metric shows the input throughput of each executor.",
                     [
                         panels.target(
-                            f"rate({metric('stream_executor_row_count')}[$__rate_interval]) > 0",
-                            "actor {{actor_id}}->{{executor_identity}}",
+                            f"rate({metric('stream_executor_row_count')}[$__rate_interval])",
+                            "{{executor_identity}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -1050,6 +1064,20 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_actor_ops(
+                    "Over Window Executor Cache",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({table_metric('stream_over_window_cache_lookup_count')}[$__rate_interval])",
+                            "cache lookup count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                        panels.target(
+                            f"rate({table_metric('stream_over_window_cache_miss_count')}[$__rate_interval])",
+                            "cache miss count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                    ]
+                ),
                 panels.timeseries_percentage(
                     "Executor Cache Miss Ratio",
                     "",
@@ -1058,42 +1086,34 @@ def section_streaming_actors(outer_panels):
                             f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
                             "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Distinct agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Stream group top n cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_appendonly_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Stream group top n appendonly cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_lookup_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Stream lookup cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_temporal_join_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Stream temporal join cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
-
                         panels.target(
                             f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "materialize executor cache miss ratio - table {{table_id}} actor {{actor_id}}  {{instance}}",
                         ),
-
                         panels.target(
                             f"(sum(rate({metric('stream_over_window_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_over_window_cache_lookup_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Over window cache miss ratio - table {{table_id}} actor {{actor_id}} ",
@@ -1138,29 +1158,11 @@ def section_streaming_actors(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Join Cached Entries",
+                    "Join Cached Keys",
                     "Multiple rows with distinct primary keys may have the same join key. This metric counts the "
                     "number of join keys in the executor cache.",
                     [
-                        panels.target(f"{metric('stream_join_cached_entries')}",
-                                      "{{actor_id}} {{side}}"),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Join Cached Rows",
-                    "Multiple rows with distinct primary keys may have the same join key. This metric counts the "
-                    "number of rows in the executor cache.",
-                    [
-                        panels.target(f"{metric('stream_join_cached_rows')}",
-                                      "{{actor_id}} {{side}}"),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Join Cached Estimated Size",
-                    "Multiple rows with distinct primary keys may have the same join key. This metric counts the "
-                    "size of rows in the executor cache.",
-                    [
-                        panels.target(f"{metric('stream_join_cached_estimated_size')}",
+                        panels.target(f"{metric('stream_join_cached_entry_count')}",
                                       "{{actor_id}} {{side}}"),
                     ],
                 ),
@@ -1189,31 +1191,43 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])",
-                            "cache miss - table {{table_id}} actor {{actor_id}}",
+                            "stream agg cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
-                        panels.target(
-                            f"rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])",
-                            "Distinct agg cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-
-                        panels.target(
-                            f"rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])",
-                            "Group top n cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-
-                        panels.target(
-                            f"rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])",
-                            "Group top n appendonly cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-
                         panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
                             "stream agg total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
-
+                        panels.target(
+                            f"rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])",
+                            "distinct agg cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])",
+                            "distinct agg total lookups - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])",
+                            "group top n cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_group_top_n_total_query_cache_count')}[$__rate_interval])",
+                            "group top n total lookups - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])",
+                            "group top n appendonly cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_group_top_n_appendonly_total_query_cache_count')}[$__rate_interval])",
+                            "group top n appendonly total lookups - table {{table_id}} actor {{actor_id}}",
+                        ),
                         panels.target(
                             f"rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])",
-                            "Lookup executor cache miss - table {{table_id}} actor {{actor_id}}",
+                            "lookup executor cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_lookup_total_query_cache_count')}[$__rate_interval])",
+                            "lookup executor total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -1235,26 +1249,26 @@ def section_streaming_actors(outer_panels):
                     "Aggregation Cached Keys",
                     "The number of keys cached in each hash aggregation executor's executor cache.",
                     [
-                        panels.target(f"{metric('stream_agg_cached_keys')}",
+                        panels.target(f"{metric('stream_agg_cached_entry_count')}",
                                       "stream agg cached keys count | table {{table_id}} actor {{actor_id}}"),
-                        panels.target(f"{metric('stream_agg_distinct_cached_keys')}",
+                        panels.target(f"{metric('stream_agg_distinct_cached_entry_count')}",
                                       "stream agg distinct cached keys count |table {{table_id}} actor {{actor_id}}"),
                     ],
                 ),
                 panels.timeseries_count(
-                    "Aggregation Dirty Group Count",
-                    "Statistics for dirty (unflushed) groups in each hash aggregation executor's executor cache.",
+                    "Aggregation Dirty Groups Count",
+                    "The number of dirty (unflushed) groups in each hash aggregation executor's executor cache.",
                     [
-                        panels.target(f"{metric('stream_agg_dirty_group_count')}",
-                                      "stream agg dirty group count | table {{table_id}} actor {{actor_id}}"),
+                        panels.target(f"{metric('stream_agg_dirty_groups_count')}",
+                                      "stream agg dirty groups count | table {{table_id}} actor {{actor_id}}"),
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Aggregation Dirty Group Heap Size",
-                    "Statistics for dirty (unflushed) groups in each hash aggregation executor's executor cache.",
+                    "Aggregation Dirty Groups Heap Size",
+                    "The total heap size of dirty (unflushed) groups in each hash aggregation executor's executor cache.",
                     [
-                        panels.target(f"{metric('stream_agg_dirty_group_heap_size')}",
-                                      "stream agg dirty group heap size | table {{table_id}} actor {{actor_id}}"),
+                        panels.target(f"{metric('stream_agg_dirty_groups_heap_size')}",
+                                      "stream agg dirty groups heap size | table {{table_id}} actor {{actor_id}}"),
                     ],
                 ),
                 panels.timeseries_count(
@@ -1268,7 +1282,7 @@ def section_streaming_actors(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Temporal Join Cache Count",
+                    "Temporal Join Cache Keys",
                     "The number of keys cached in temporal join executor's executor cache.",
                     [
                         panels.target(f"{metric('stream_temporal_join_cached_entry_count')}",
@@ -1276,7 +1290,6 @@ def section_streaming_actors(outer_panels):
 
                     ],
                 ),
-
                 panels.timeseries_count(
                     "Lookup Cached Keys",
                     "The number of keys cached in lookup executor's executor cache.",
@@ -1286,24 +1299,13 @@ def section_streaming_actors(outer_panels):
 
                     ],
                 ),
-
-                panels.timeseries_actor_ops(
-                    "Over Window Executor Cache",
-                    "",
+                panels.timeseries_count(
+                    "Over Window Cached Keys",
+                    "The number of keys cached in over window executor's executor cache.",
                     [
-                        panels.target(
-                            f"rate({table_metric('stream_over_window_cached_entry_count')}[$__rate_interval])",
-                            "cached entry count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
-                        ),
-                        panels.target(
-                            f"rate({table_metric('stream_over_window_cache_lookup_count')}[$__rate_interval])",
-                            "cache lookup count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
-                        ),
-                        panels.target(
-                            f"rate({table_metric('stream_over_window_cache_miss_count')}[$__rate_interval])",
-                            "cache miss count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
-                        ),
-                    ]
+                        panels.target(f"{metric('stream_over_window_cached_entry_count')}",
+                                      "over window cached count | table {{table_id}} actor {{actor_id}}"),
+                    ],
                 ),
             ],
         )
@@ -3226,6 +3228,142 @@ def section_connector_node(outer_panels):
         )
     ]
 
+def section_sink_metrics(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Sink Metrics",
+            [
+                panels.timeseries_latency(
+                    "Commit Duration",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('sink_commit_duration_bucket')}[$__rate_interval])) by (le, connector, sink_id))",
+                                f"p{legend}" + " @ {{connector}} {{sink_id}}",
+                            ),
+                            [50, 99, "max"],
+                        ),
+                        panels.target(
+                            f"sum by(le, connector, sink_id)(rate({metric('sink_commit_duration_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('sink_commit_duration_count')}[$__rate_interval]))",
+                            "avg - {{connector}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_id(
+                    "Log Store Read/Write Epoch",
+                    "",
+                    [
+                        panels.target(f"{metric('log_store_latest_write_epoch')}",
+                                      "latest write epoch @ {{connector}} {{sink_id}} {{executor_id}}"),
+                        panels.target(f"{metric('log_store_latest_read_epoch')}",
+                                      "latest read epoch @ {{connector}} {{sink_id}} {{executor_id}}"),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Log Store Lag",
+                    "",
+                    [
+                        panels.target(f"(max({metric('log_store_latest_write_epoch')}) by (connector, sink_id, executor_id)"
+                                      + f"- max({metric('log_store_latest_read_epoch')}) by (connector, sink_id, executor_id)) / (2^16) / 1000",
+                                      "Consume lag @ {{connector}} {{sink_id}} {{executor_id}}"
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Log Store Consume Persistent Log Lag",
+                    "",
+                    [
+                        panels.target(f"clamp_min((max({metric('log_store_first_write_epoch')}) by (connector, sink_id, executor_id)"
+                                      + f"- max({metric('log_store_latest_read_epoch')}) by (connector, sink_id, executor_id)) / (2^16) / 1000, 0)",
+                                      "Consume persistent log lag @ {{connector}} {{sink_id}} {{executor_id}}"
+                                      ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Log Store Consume Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('log_store_read_rows')}[$__rate_interval])) by (connector, sink_id)",
+                            "sink={{connector}} {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Executor Log Store Consume Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('log_store_read_rows')}[$__rate_interval])) by (instance, connector, sink_id, executor_id)",
+                            "sink={{connector}} {{sink_id}} @ {{executor_id}} {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Log Store Write Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by (connector, sink_id)",
+                            "sink={{connector}} {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Executor Log Store Write Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('log_store_write_rows')}[$__rate_interval])) by (instance, connector, sink_id, executor_id)",
+                            "sink={{connector}} {{sink_id}} @ {{executor_id}} {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Kv Log Store Read Storage Row Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('kv_log_store_storage_read_count')}[$__rate_interval])) by (executor_id, connector, sink_id)",
+                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Kv Log Store Read Storage Size",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('kv_log_store_storage_read_size')}[$__rate_interval])) by (executor_id, connector, sink_id)",
+                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ]
+                ),
+                panels.timeseries_ops(
+                    "Kv Log Store Write Storage Row Ops",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('kv_log_store_storage_write_count')}[$__rate_interval])) by (executor_id, connector, sink_id)",
+                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Kv Log Store Write Storage Size",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('kv_log_store_storage_write_size')}[$__rate_interval])) by (executor_id, connector, sink_id)",
+                            "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ]
+                ),
+            ],
+        )
+    ]
 
 def section_network_connection(outer_panels):
     panels = outer_panels.sub_panel()
@@ -3540,6 +3678,7 @@ dashboard = Dashboard(
         *section_frontend(panels),
         *section_memory_manager(panels),
         *section_connector_node(panels),
+        *section_sink_metrics(panels),
         *section_kafka_native_metrics(panels),
         *section_network_connection(panels)
     ],

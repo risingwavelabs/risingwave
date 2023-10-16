@@ -211,6 +211,7 @@ async fn compaction_test(
         0,
         FileCache::none(),
         FileCache::none(),
+        None,
     ));
 
     let store = HummockStorage::new(

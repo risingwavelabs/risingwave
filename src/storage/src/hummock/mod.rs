@@ -25,7 +25,7 @@ use risingwave_pb::hummock::SstableInfo;
 mod block_cache;
 pub use block_cache::*;
 
-mod file_cache;
+pub mod file_cache;
 pub use file_cache::*;
 
 pub mod sstable;
