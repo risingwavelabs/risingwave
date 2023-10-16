@@ -11060,6 +11060,7 @@ dependencies = [
  "url",
  "uuid",
  "whoami",
+ "zstd-sys",
 ]
 
 [[package]]
