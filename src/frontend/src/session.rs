@@ -51,7 +51,7 @@ use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
-use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
+use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
 use tokio::runtime::Builder;
@@ -86,6 +86,7 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
+use crate::utils::infer_stmt_row_desc::infer_show_object;
 use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod transaction;
@@ -1090,25 +1091,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
         Statement::ShowObjects {
             object: show_object,
             ..
-        } => match show_object {
-            ShowObject::Columns { table: _ } => Ok(vec![
-                PgFieldDescriptor::new(
-                    "Name".to_owned(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-                PgFieldDescriptor::new(
-                    "Type".to_owned(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-            ]),
-            _ => Ok(vec![PgFieldDescriptor::new(
-                "Name".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            )]),
-        },
+        } => Ok(infer_show_object(&show_object)),
         Statement::ShowCreateObject { .. } => Ok(vec![
             PgFieldDescriptor::new(
                 "Name".to_owned(),
