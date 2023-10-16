@@ -681,9 +681,9 @@ where
         progress_key_num += 1;
 
         if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
-                task_progress.inc_progress_key(progress_key_num);
-                progress_key_num = 0;
-            }
+            task_progress.inc_progress_key(progress_key_num);
+            progress_key_num = 0;
+        }
 
         let mut iter_key = iter.key();
         compaction_statistics.iter_total_key_counts += 1;
@@ -729,7 +729,14 @@ where
                     })
                     .await?;
             }
+
+            progress_key_num += 1;
+            if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+                task_progress.inc_progress_key(progress_key_num);
+                progress_key_num = 0;
+            }
         }
+
         let earliest_range_delete_which_can_see_iter_key = del_iter.earliest_delete_since(epoch);
 
         // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
@@ -830,13 +837,18 @@ where
                     event_key,
                 })
                 .await?;
+            progress_key_num += 1;
+            if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+                task_progress.inc_progress_key(progress_key_num);
+                progress_key_num = 0;
+            }
         }
     }
 
     if let Some(task_progress) = task_progress.as_ref() && progress_key_num > 0 {
-            // Avoid losing the progress_key_num in the last Interval
-            task_progress.inc_progress_key(progress_key_num);
-        }
+        // Avoid losing the progress_key_num in the last Interval
+        task_progress.inc_progress_key(progress_key_num);
+    }
 
     if let Some(last_table_id) = last_table_id.take() {
         table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
@@ -882,18 +894,19 @@ mod tests {
                 1,
             ),
         ];
-        let mut sstable_info_1 = gen_test_sstable_with_range_tombstone(
+        let mut sstable_info_1 = gen_test_sstable_impl::<Bytes, Xor16FilterBuilder>(
             default_builder_opt_for_test(),
             1,
             kv_pairs.clone().into_iter(),
             range_tombstones.clone(),
             sstable_store.clone(),
+            CachePolicy::NotFill,
         )
-        .await
-        .get_sstable_info();
+        .await;
         sstable_info_1.table_ids = vec![1];
 
-        let mut sstable_info_2 = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+
+        let mut sstable_info_2 = gen_test_sstable_impl::<Bytes, Xor16FilterBuilder>(
             default_builder_opt_for_test(),
             2,
             kv_pairs.into_iter(),

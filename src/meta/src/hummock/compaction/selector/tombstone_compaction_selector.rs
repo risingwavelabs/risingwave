@@ -44,11 +44,16 @@ impl CompactionSelector for TombstoneCompactionSelector {
         _selector_stats: &mut LocalSelectorStatistic,
         _table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactionTask> {
+        if group.compaction_config.tombstone_reclaim_ratio == 0 {
+            // it might cause full-compaction when tombstone_reclaim_ratio == 0
+            return None;
+        }
+
         let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
         let picker = TombstoneReclaimCompactionPicker::new(
             create_overlap_strategy(group.compaction_config.compaction_mode()),
-            group.compaction_config.max_compaction_bytes,
+            group.compaction_config.max_space_reclaim_bytes,
             group.compaction_config.tombstone_reclaim_ratio as u64,
             group.compaction_config.tombstone_reclaim_ratio as u64 / 2,
         );

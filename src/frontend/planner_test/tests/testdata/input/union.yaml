@@ -53,3 +53,45 @@
   expected_outputs:
   - batch_plan
   - optimized_logical_plan_for_batch
+- name: test merged union stream key (2 columns, row_id + src_col)
+  sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, c bigint);
+    create table t3 (a int, b numeric, c bigint);
+    create table t4 (a int, b numeric, c bigint);
+    create table t5 (a int, b numeric, c bigint);
+    select * from t1 union all select * from t2 union all select * from t3 union all select * from t4 union all select * from t5;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+    - stream_dist_plan
+- name: test merged union stream key (5 columns, row_id + src_col + a + b + c)
+  sql: |
+    create table t1 (a int, b numeric, c bigint, primary key (a));
+    create table t2 (a int, b numeric, c bigint, primary key (b));
+    create table t3 (a int, b numeric, c bigint, primary key (c));
+    create table t4 (a int, b numeric, c bigint);
+    create table t5 (a int, b numeric, c bigint, primary key (a, b));
+    select * from t1 union all select * from t2 union all select * from t3 union all select * from t4 union all select * from t5;
+  expected_outputs:
+    - stream_dist_plan
+- name: test merged union stream key (4 columns, row_id + src_col + a + b)
+  sql: |
+    create table t1 (a int, b numeric, c bigint, primary key (a));
+    create table t2 (a int, b numeric, c bigint, primary key (b));
+    create table t3 (a int, b numeric, c bigint);
+    create table t4 (a int, b numeric, c bigint);
+    create table t5 (a int, b numeric, c bigint, primary key (a, b));
+    select * from t1 union all select * from t2 union all select * from t3 union all select * from t4 union all select * from t5;
+  expected_outputs:
+    - stream_dist_plan
+- name: test merged union stream key (3 columns, src_col + a + b)
+  sql: |
+    create table t1 (a int, b numeric, c bigint, primary key (a));
+    create table t2 (a int, b numeric, c bigint, primary key (b));
+    create table t3 (a int, b numeric, c bigint, primary key (b));
+    create table t4 (a int, b numeric, c bigint, primary key (b, a));
+    create table t5 (a int, b numeric, c bigint, primary key (a, b));
+    select * from t1 union all select * from t2 union all select * from t3 union all select * from t4 union all select * from t5;
+  expected_outputs:
+    - stream_dist_plan

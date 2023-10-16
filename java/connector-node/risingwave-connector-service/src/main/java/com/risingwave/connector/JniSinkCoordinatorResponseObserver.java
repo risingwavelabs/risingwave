@@ -20,31 +20,33 @@ import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class JniSinkResponseObserver
-        implements StreamObserver<ConnectorServiceProto.SinkWriterStreamResponse> {
-    private static final Logger LOG = LoggerFactory.getLogger(JniSinkResponseObserver.class);
+public class JniSinkCoordinatorResponseObserver
+        implements StreamObserver<ConnectorServiceProto.SinkCoordinatorStreamResponse> {
+    private static final Logger LOG =
+            LoggerFactory.getLogger(JniSinkCoordinatorResponseObserver.class);
     private long responseTxPtr;
 
     private boolean success;
 
-    public JniSinkResponseObserver(long responseTxPtr) {
+    public JniSinkCoordinatorResponseObserver(long responseTxPtr) {
         this.responseTxPtr = responseTxPtr;
     }
 
     @Override
-    public void onNext(ConnectorServiceProto.SinkWriterStreamResponse response) {
+    public void onNext(ConnectorServiceProto.SinkCoordinatorStreamResponse response) {
         this.success =
-                Binding.sendSinkWriterResponseToChannel(this.responseTxPtr, response.toByteArray());
+                Binding.sendSinkCoordinatorResponseToChannel(
+                        this.responseTxPtr, response.toByteArray());
     }
 
     @Override
     public void onError(Throwable throwable) {
-        LOG.error("JniSinkWriterHandler onError: ", throwable);
+        LOG.error("JniSinkCoordinatorHandler onError: ", throwable);
     }
 
     @Override
     public void onCompleted() {
-        LOG.info("JniSinkWriterHandler onCompleted");
+        LOG.info("JniSinkCoordinatorHandler onCompleted");
     }
 
     public boolean isSuccess() {

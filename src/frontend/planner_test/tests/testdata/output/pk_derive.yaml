@@ -20,7 +20,7 @@
     ON
         Tone.id = Ttwo.id;
   stream_plan: |-
-    StreamMaterialize { columns: [max_v1, max_v2, t1.id(hidden), t2.id(hidden)], stream_key: [t1.id, t2.id], pk_columns: [t1.id, t2.id], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [max_v1, max_v2, t1.id(hidden), t2.id(hidden)], stream_key: [t1.id], pk_columns: [t1.id], pk_conflict: NoCheck }
     └─StreamHashJoin { type: Inner, predicate: t1.id = t2.id, output: [max(t1.v1), max(t2.v2), t1.id, t2.id] }
       ├─StreamProject { exprs: [t1.id, max(t1.v1)] }
       │ └─StreamHashAgg { group_key: [t1.id], aggs: [max(t1.v1), count] }
@@ -50,7 +50,7 @@
     ON
         Tone.id = Ttwo.id;
   stream_plan: |-
-    StreamMaterialize { columns: [max_v, min_v, t.id(hidden), t.id#1(hidden)], stream_key: [t.id, t.id#1], pk_columns: [t.id, t.id#1], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [max_v, min_v, t.id(hidden), t.id#1(hidden)], stream_key: [t.id], pk_columns: [t.id], pk_conflict: NoCheck }
     └─StreamHashJoin { type: Inner, predicate: t.id = t.id, output: [max(t.v), min(t.v), t.id, t.id] }
       ├─StreamProject { exprs: [t.id, max(t.v)] }
       │ └─StreamHashAgg { group_key: [t.id], aggs: [max(t.v), count] }

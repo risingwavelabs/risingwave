@@ -23,7 +23,9 @@ use anyhow::anyhow;
 use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
+
+use crate::sink::SinkMetrics;
 
 pub type LogStoreResult<T> = Result<T, anyhow::Error>;
 pub type ChunkId = usize;
@@ -102,7 +104,7 @@ pub enum LogStoreReadItem {
     UpdateVnodeBitmap(Arc<Bitmap>),
 }
 
-pub trait LogWriter {
+pub trait LogWriter: Send {
     /// Initialize the log writer with an epoch
     fn init(&mut self, epoch: EpochPair) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
@@ -131,6 +133,8 @@ pub trait LogReader: Send + Sized + 'static {
     fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
     /// Emit the next item.
+    ///
+    /// The implementation should ensure that the future is cancellation safe.
     fn next_item(
         &mut self,
     ) -> impl Future<Output = LogStoreResult<(u64, LogStoreReadItem)>> + Send + '_;
@@ -182,7 +186,37 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
     }
 }
 
-#[easy_ext::ext(LogStoreTransformChunkLogReader)]
+pub struct MonitoredLogReader<R: LogReader> {
+    inner: R,
+    read_epoch: u64,
+    metrics: SinkMetrics,
+}
+
+impl<R: LogReader> LogReader for MonitoredLogReader<R> {
+    async fn init(&mut self) -> LogStoreResult<()> {
+        self.inner.init().await
+    }
+
+    async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+        self.inner.next_item().await.inspect(|(epoch, item)| {
+            if self.read_epoch != *epoch {
+                self.read_epoch = *epoch;
+                self.metrics.log_store_latest_read_epoch.set(*epoch as _);
+            }
+            if let LogStoreReadItem::StreamChunk { chunk, .. } = item {
+                self.metrics
+                    .log_store_read_rows
+                    .inc_by(chunk.cardinality() as _);
+            }
+        })
+    }
+
+    async fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        self.inner.truncate(offset).await
+    }
+}
+
+#[easy_ext::ext(LogReaderExt)]
 impl<T> T
 where
     T: LogReader,
@@ -192,6 +226,69 @@ where
         f: F,
     ) -> TransformChunkLogReader<F, Self> {
         TransformChunkLogReader { f, inner: self }
+    }
+
+    pub fn monitored(self, metrics: SinkMetrics) -> MonitoredLogReader<T> {
+        MonitoredLogReader {
+            read_epoch: INVALID_EPOCH,
+            inner: self,
+            metrics,
+        }
+    }
+}
+
+pub struct MonitoredLogWriter<W: LogWriter> {
+    inner: W,
+    metrics: SinkMetrics,
+}
+
+impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
+    async fn init(&mut self, epoch: EpochPair) -> LogStoreResult<()> {
+        self.metrics
+            .log_store_first_write_epoch
+            .set(epoch.curr as _);
+        self.metrics
+            .log_store_latest_write_epoch
+            .set(epoch.curr as _);
+        self.inner.init(epoch).await
+    }
+
+    async fn write_chunk(&mut self, chunk: StreamChunk) -> LogStoreResult<()> {
+        self.metrics
+            .log_store_write_rows
+            .inc_by(chunk.cardinality() as _);
+        self.inner.write_chunk(chunk).await
+    }
+
+    async fn flush_current_epoch(
+        &mut self,
+        next_epoch: u64,
+        is_checkpoint: bool,
+    ) -> LogStoreResult<()> {
+        self.inner
+            .flush_current_epoch(next_epoch, is_checkpoint)
+            .await?;
+        self.metrics
+            .log_store_latest_write_epoch
+            .set(next_epoch as _);
+        Ok(())
+    }
+
+    async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
+        self.inner.update_vnode_bitmap(new_vnodes).await
+    }
+}
+
+#[easy_ext::ext(LogWriterExt)]
+impl<T> T
+where
+    T: LogWriter + Sized,
+{
+    pub fn monitored(self, metrics: SinkMetrics) -> MonitoredLogWriter<T> {
+        MonitoredLogWriter {
+            inner: self,
+            metrics,
+        }
     }
 }
 

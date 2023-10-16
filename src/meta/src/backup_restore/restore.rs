@@ -152,7 +152,6 @@ async fn restore_default_cf<S: MetaStore>(
 
 async fn restore_metadata<S: MetaStore>(meta_store: S, snapshot: MetaSnapshot) -> BackupResult<()> {
     restore_default_cf(&meta_store, &snapshot).await?;
-    restore_metadata_model(&meta_store, &[snapshot.metadata.hummock_version]).await?;
     restore_metadata_model(&meta_store, &[snapshot.metadata.version_stats]).await?;
     restore_metadata_model(
         &meta_store,
@@ -290,7 +289,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
     use risingwave_common::config::{MetaBackend, SystemConfig};
-    use risingwave_pb::hummock::HummockVersion;
+    use risingwave_pb::hummock::{HummockVersion, HummockVersionStats};
     use risingwave_pb::meta::SystemParams;
 
     use crate::backup_restore::restore::restore_impl;
@@ -331,8 +330,8 @@ mod tests {
         let backup_store = get_backup_store(opts.clone()).await.unwrap();
         let nonempty_meta_store = get_meta_store(opts.clone()).await.unwrap();
         dispatch_meta_store!(nonempty_meta_store.clone(), store, {
-            let hummock_version = HummockVersion::default();
-            hummock_version.insert(&store).await.unwrap();
+            let stats = HummockVersionStats::default();
+            stats.insert(&store).await.unwrap();
         });
         let empty_meta_store = get_meta_store(opts.clone()).await.unwrap();
         let system_param = get_system_params();
@@ -377,13 +376,6 @@ mod tests {
         .unwrap();
 
         dispatch_meta_store!(empty_meta_store, store, {
-            let restored_hummock_version = HummockVersion::list(&store)
-                .await
-                .unwrap()
-                .into_iter()
-                .next()
-                .unwrap();
-            assert_eq!(restored_hummock_version.id, 123);
             let restored_system_param = SystemParams::get(&store).await.unwrap().unwrap();
             assert_eq!(restored_system_param, system_param);
         });
@@ -547,7 +539,6 @@ mod tests {
         .unwrap();
 
         dispatch_meta_store!(empty_meta_store, store, {
-            assert!(HummockVersion::list(&store).await.unwrap().is_empty());
             assert!(SystemParams::get(&store).await.unwrap().is_none());
         });
     }
