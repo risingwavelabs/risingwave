@@ -16,13 +16,13 @@ use risingwave_pb::catalog::PbView;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue;
 
-use crate::model_v2::{FieldArray, Property};
+use crate::model_v2::{FieldArray, Property, ViewId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "view")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub view_id: i32,
+    pub view_id: ViewId,
     pub name: String,
     pub properties: Property,
     pub sql: String,

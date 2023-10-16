@@ -18,11 +18,13 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, FromJsonQueryResult};
 use serde::{Deserialize, Serialize};
 
+use crate::model_v2::ConnectionId;
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "connection")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub connection_id: i32,
+    pub connection_id: ConnectionId,
     pub name: String,
     pub info: PrivateLinkService,
 }

@@ -48,6 +48,21 @@ pub mod view;
 pub mod worker;
 pub mod worker_property;
 
+pub type WorkerId = u32;
+pub type TransactionId = u32;
+
+pub type ObjectId = u32;
+pub type DatabaseId = ObjectId;
+pub type SchemaId = ObjectId;
+pub type TableId = ObjectId;
+pub type SourceId = ObjectId;
+pub type SinkId = ObjectId;
+pub type IndexId = ObjectId;
+pub type ViewId = ObjectId;
+pub type FunctionId = ObjectId;
+pub type ConnectionId = ObjectId;
+pub type UserId = u32;
+
 #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Eq, Serialize, Deserialize, Default)]
 pub struct I32Array(pub Vec<i32>);
 

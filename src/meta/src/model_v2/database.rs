@@ -14,11 +14,13 @@
 
 use sea_orm::entity::prelude::*;
 
+use crate::model_v2::DatabaseId;
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "database")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub database_id: i32,
+    pub database_id: DatabaseId,
     #[sea_orm(unique)]
     pub name: String,
 }

@@ -14,13 +14,13 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::I32Array;
+use crate::model_v2::{I32Array, WorkerId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "worker_property")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub worker_id: i32,
+    pub worker_id: WorkerId,
     pub parallel_unit_ids: I32Array,
     pub is_streaming: bool,
     pub is_serving: bool,

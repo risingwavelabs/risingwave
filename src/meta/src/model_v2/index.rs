@@ -14,16 +14,16 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::I32Array;
+use crate::model_v2::{I32Array, IndexId, TableId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "index")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub index_id: i32,
+    pub index_id: IndexId,
     pub name: String,
-    pub index_table_id: i32,
-    pub primary_table_id: i32,
+    pub index_table_id: TableId,
+    pub primary_table_id: TableId,
     pub index_items: Option<Json>,
     pub original_columns: Option<I32Array>,
 }

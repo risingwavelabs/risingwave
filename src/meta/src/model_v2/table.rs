@@ -14,7 +14,7 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::{I32Array, Property};
+use crate::model_v2::{I32Array, Property, SourceId, TableId};
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
@@ -33,9 +33,9 @@ pub enum TableType {
 #[sea_orm(table_name = "table")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub table_id: i32,
+    pub table_id: TableId,
     pub name: String,
-    pub optional_associated_source_id: Option<i32>,
+    pub optional_associated_source_id: Option<SourceId>,
     pub table_type: TableType,
     pub columns: Json,
     pub pk: Json,

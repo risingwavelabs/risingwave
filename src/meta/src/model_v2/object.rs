@@ -14,6 +14,8 @@
 
 use sea_orm::entity::prelude::*;
 
+use crate::model_v2::{DatabaseId, ObjectId, SchemaId, UserId};
+
 #[derive(Clone, Debug, PartialEq, Eq, Copy, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum ObjectType {
@@ -57,11 +59,11 @@ impl ObjectType {
 #[sea_orm(table_name = "object")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub oid: i32,
+    pub oid: ObjectId,
     pub obj_type: ObjectType,
-    pub owner_id: i32,
-    pub schema_id: Option<i32>,
-    pub database_id: Option<i32>,
+    pub owner_id: UserId,
+    pub schema_id: Option<SchemaId>,
+    pub database_id: Option<DatabaseId>,
     pub initialized_at: DateTime,
     pub created_at: DateTime,
 }

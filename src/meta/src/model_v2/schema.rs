@@ -14,11 +14,13 @@
 
 use sea_orm::entity::prelude::*;
 
+use crate::model_v2::SchemaId;
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "schema")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub schema_id: i32,
+    pub schema_id: SchemaId,
     pub name: String,
 }
 

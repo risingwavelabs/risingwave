@@ -56,18 +56,6 @@ impl SqlMetaStore {
     }
 }
 
-pub type ObjectId = i32;
-pub type DatabaseId = ObjectId;
-pub type SchemaId = ObjectId;
-pub type TableId = ObjectId;
-pub type SourceId = ObjectId;
-pub type SinkId = ObjectId;
-pub type IndexId = ObjectId;
-pub type ViewId = ObjectId;
-pub type FunctionId = ObjectId;
-pub type ConnectionId = ObjectId;
-pub type UserId = i32;
-
 pub struct ObjectModel<M: ModelTrait>(M, object::Model);
 
 impl From<ObjectModel<database::Model>> for PbDatabase {

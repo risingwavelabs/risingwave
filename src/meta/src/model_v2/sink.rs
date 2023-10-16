@@ -14,7 +14,7 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::I32Array;
+use crate::model_v2::{ConnectionId, I32Array, SinkId};
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
@@ -31,7 +31,7 @@ pub enum SinkType {
 #[sea_orm(table_name = "sink")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub sink_id: i32,
+    pub sink_id: SinkId,
     pub name: String,
     pub columns: Option<Json>,
     pub pk_column_ids: Option<Json>,
@@ -40,7 +40,7 @@ pub struct Model {
     pub sink_type: SinkType,
     pub properties: Option<Json>,
     pub definition: String,
-    pub connection_id: Option<i32>,
+    pub connection_id: Option<ConnectionId>,
     pub db_name: String,
     pub sink_from_name: String,
 }

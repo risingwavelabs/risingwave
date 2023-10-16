@@ -17,7 +17,7 @@ use risingwave_pb::catalog::PbFunction;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue;
 
-use crate::model_v2::{DataType, DataTypeArray};
+use crate::model_v2::{DataType, DataTypeArray, FunctionId};
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
@@ -34,7 +34,7 @@ pub enum FunctionKind {
 #[sea_orm(table_name = "function")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub function_id: i32,
+    pub function_id: FunctionId,
     pub name: String,
     pub arg_types: DataTypeArray,
     pub return_type: DataType,

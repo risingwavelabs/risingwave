@@ -24,12 +24,11 @@ use sea_orm::{
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
 
-use crate::controller::{DatabaseId, ObjectId, SchemaId, UserId};
 use crate::model_v2::object::ObjectType;
 use crate::model_v2::prelude::*;
 use crate::model_v2::{
     connection, function, index, object, object_dependency, schema, sink, source, table, view,
-    DataTypeArray,
+    DataTypeArray, DatabaseId, ObjectId, SchemaId, UserId,
 };
 use crate::{MetaError, MetaResult};
 
@@ -304,7 +303,10 @@ where
             .count(db)
             .await?
     } else {
-        ObjectDependency::find_by_id(object_id).count(db).await?
+        ObjectDependency::find()
+            .filter(object_dependency::Column::Oid.eq(object_id))
+            .count(db)
+            .await?
     };
     if count != 0 {
         return Err(MetaError::permission_denied(format!(
