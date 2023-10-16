@@ -526,7 +526,7 @@ steps:
     retry: *auto-retry
 
   - label: "enable ci/skip-ci only in draft PRs"
-    if: build.pull_request.labels includes "ci/skip-ci" && build.pull_request.labels includes "!build.pull_request.draft"
+    if: build.pull_request.labels includes "ci/skip-ci" && !build.pull_request.draft
     commands:
       - echo "ci/skip-ci is only usable for draft Pull Requests"
       - exit 1
