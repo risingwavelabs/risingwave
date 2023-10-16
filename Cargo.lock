@@ -213,7 +213,7 @@ dependencies = [
  "uuid",
  "xz2",
  "zerocopy",
- "zstd",
+ "zstd 0.12.4",
 ]
 
 [[package]]
@@ -1774,9 +1774,9 @@ dependencies = [
 
 [[package]]
 name = "cmsketch"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "467e460587e81453bf9aeb43cd534e9c5ad670042023bd6c3f377c23b76cc2f0"
+checksum = "93710598b87c37ea250ab17a36f9f79dbaf3bd20e55806cf09345103bc26d60e"
 dependencies = [
  "paste",
 ]
@@ -3014,7 +3014,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=41b1d39#41b1d3934cc92976737a9296273b4c5bee6422a0"
+source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -3025,21 +3025,21 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=41b1d39#41b1d3934cc92976737a9296273b4c5bee6422a0"
+source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
+ "madsim-tokio",
  "parking_lot 0.12.1",
  "paste",
  "rand",
- "tokio",
  "tracing",
 ]
 
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=41b1d39#41b1d3934cc92976737a9296273b4c5bee6422a0"
+source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -3056,11 +3056,10 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=41b1d39#41b1d3934cc92976737a9296273b4c5bee6422a0"
+source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
 dependencies = [
  "anyhow",
  "async-channel",
- "async-trait",
  "bitflags 2.4.0",
  "bitmaps",
  "bytes",
@@ -3071,6 +3070,7 @@ dependencies = [
  "futures",
  "itertools 0.11.0",
  "libc",
+ "madsim-tokio",
  "memoffset",
  "nix 0.27.1",
  "parking_lot 0.12.1",
@@ -3078,7 +3078,6 @@ dependencies = [
  "prometheus",
  "rand",
  "thiserror",
- "tokio",
  "tracing",
  "twox-hash",
 ]
@@ -3086,7 +3085,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=41b1d39#41b1d3934cc92976737a9296273b4c5bee6422a0"
+source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
 dependencies = [
  "crossbeam-utils",
  "either",
@@ -3097,7 +3096,6 @@ dependencies = [
  "hyper",
  "itertools 0.10.5",
  "libc",
- "lock_api",
  "memchr",
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.8",
@@ -3105,8 +3103,8 @@ dependencies = [
  "quote",
  "rand",
  "regex",
- "regex-automata 0.3.8",
- "regex-syntax 0.7.5",
+ "regex-automata 0.4.1",
+ "regex-syntax 0.8.0",
  "syn 2.0.37",
  "tokio",
  "tracing",
@@ -4544,8 +4542,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.2.22"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=fedb1e3#fedb1e3a0a8758650c9e15076941c999150bdb31"
+version = "0.3.0+0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00f9ab2d0545a55e4f209fc72c180a7e7b45a4e7baee7b4994c4628a877c5525"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -5649,7 +5648,7 @@ dependencies = [
  "thrift",
  "tokio",
  "twox-hash",
- "zstd",
+ "zstd 0.12.4",
 ]
 
 [[package]]
@@ -6619,8 +6618,9 @@ dependencies = [
 
 [[package]]
 name = "rdkafka-sys"
-version = "4.3.0+1.9.2"
-source = "git+https://github.com/MaterializeInc/rust-rdkafka?rev=8ea07c4#8ea07c4d2b96636ff093e670bc921892aee0d56a"
+version = "4.6.0+2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad63c279fca41a27c231c450a2d2ad18288032e9cbb159ad16c9d96eba35aaaf"
 dependencies = [
  "cmake",
  "libc",
@@ -6667,14 +6667,14 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.9.5"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "697061221ea1b4a94a624f67d0ae2bfe4e22b8a17b6a192afb11046542cc8c47"
+checksum = "d119d7c7ca818f8a53c300863d4f87566aac09943aef5b355bb83969dae75d87"
 dependencies = [
  "aho-corasick",
  "memchr",
- "regex-automata 0.3.8",
- "regex-syntax 0.7.5",
+ "regex-automata 0.4.1",
+ "regex-syntax 0.8.0",
 ]
 
 [[package]]
@@ -6688,13 +6688,13 @@ dependencies = [
 
 [[package]]
 name = "regex-automata"
-version = "0.3.8"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2f401f4955220693b56f8ec66ee9c78abffd8d1c4f23dc41a23839eb88f0795"
+checksum = "465c6fc0621e4abc4187a2bda0937bfd4f722c2730b29562e19689ea796c9a4b"
 dependencies = [
  "aho-corasick",
  "memchr",
- "regex-syntax 0.7.5",
+ "regex-syntax 0.8.0",
 ]
 
 [[package]]
@@ -6708,6 +6708,12 @@ name = "regex-syntax"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbb5fb1acd8a1a18b3dd5be62d25485eb770e05afb408a9627d14d451bae12da"
+
+[[package]]
+name = "regex-syntax"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3cbb081b9784b07cceb8824c8583f86db4814d172ab043f3c23f7dc600bf83d"
 
 [[package]]
 name = "rend"
@@ -8033,7 +8039,7 @@ dependencies = [
  "workspace-hack",
  "xorf",
  "xxhash-rust",
- "zstd",
+ "zstd 0.13.0",
 ]
 
 [[package]]
@@ -10966,8 +10972,8 @@ dependencies = [
  "rand_chacha",
  "rand_core",
  "regex",
- "regex-automata 0.3.8",
- "regex-syntax 0.7.5",
+ "regex-automata 0.4.1",
+ "regex-syntax 0.8.0",
  "reqwest",
  "ring",
  "rust_decimal",
@@ -11102,7 +11108,16 @@ version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a27595e173641171fc74a1232b7b1c7a7cb6e18222c11e9dfb9888fa424c53c"
 dependencies = [
- "zstd-safe",
+ "zstd-safe 6.0.6",
+]
+
+[[package]]
+name = "zstd"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bffb3309596d527cfcba7dfc6ed6052f1d39dfbd7c867aa2e865e4a449c10110"
+dependencies = [
+ "zstd-safe 7.0.0",
 ]
 
 [[package]]
@@ -11112,6 +11127,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee98ffd0b48ee95e6c5168188e44a54550b1564d9d530ee21d5f0eaed1069581"
 dependencies = [
  "libc",
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43747c7422e2924c11144d5229878b98180ef8b06cca4ab5af37afc8a8d8ea3e"
+dependencies = [
  "zstd-sys",
 ]
 

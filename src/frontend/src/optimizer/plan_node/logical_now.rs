@@ -41,7 +41,12 @@ impl LogicalNow {
             sub_fields: vec![],
             type_name: String::default(),
         }]);
-        let base = PlanBase::new_logical(ctx, schema, vec![], FunctionalDependencySet::default());
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            Some(vec![]),
+            FunctionalDependencySet::default(),
+        );
         Self { base }
     }
 }

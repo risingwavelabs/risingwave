@@ -308,13 +308,7 @@ pub mod agg_kinds {
     #[macro_export]
     macro_rules! unimplemented_in_stream {
         () => {
-            AggKind::BitAnd
-                | AggKind::BitOr
-                | AggKind::JsonbAgg
-                | AggKind::JsonbObjectAgg
-                | AggKind::PercentileCont
-                | AggKind::PercentileDisc
-                | AggKind::Mode
+            AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
         };
     }
     pub use unimplemented_in_stream;
@@ -408,6 +402,8 @@ pub mod agg_kinds {
                 //  after we support general merge in stateless_simple_agg
                 | AggKind::BoolAnd
                 | AggKind::BoolOr
+                | AggKind::BitAnd
+                | AggKind::BitOr
         };
     }
     pub use simply_cannot_two_phase;
@@ -420,6 +416,8 @@ pub mod agg_kinds {
             AggKind::Sum
                 | AggKind::Sum0
                 | AggKind::Count
+                | AggKind::BitAnd
+                | AggKind::BitOr
                 | AggKind::BitXor
                 | AggKind::BoolAnd
                 | AggKind::BoolOr
@@ -452,12 +450,7 @@ impl AggKind {
     /// Get the total phase agg kind from the partial phase agg kind.
     pub fn partial_to_total(self) -> Option<Self> {
         match self {
-            AggKind::BitAnd
-            | AggKind::BitOr
-            | AggKind::BitXor
-            | AggKind::Min
-            | AggKind::Max
-            | AggKind::Sum => Some(self),
+            AggKind::BitXor | AggKind::Min | AggKind::Max | AggKind::Sum => Some(self),
             AggKind::Sum0 | AggKind::Count => Some(AggKind::Sum0),
             agg_kinds::simply_cannot_two_phase!() => None,
             agg_kinds::rewritten!() => None,

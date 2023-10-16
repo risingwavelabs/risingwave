@@ -48,11 +48,12 @@ use risingwave_common::metrics::{
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
-use risingwave_rpc_client::{ConnectorClient, MetaClient};
+use risingwave_rpc_client::MetaClient;
 use thiserror::Error;
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
+use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::LogReader;
 use crate::sink::writer::SinkWriter;
@@ -102,7 +103,8 @@ macro_rules! dispatch_sink {
 
 #[macro_export]
 macro_rules! match_sink_name_str {
-    ({$({$variant_name:ident, $sink_type:ty}),*}, $name_str:tt, $type_name:ident, $body:tt, $on_other_closure:tt) => {
+    ({$({$variant_name:ident, $sink_type:ty}),*}, $name_str:tt, $type_name:ident, $body:tt, $on_other_closure:tt) => {{
+        use $crate::sink::Sink;
         match $name_str {
             $(
                 <$sink_type>::SINK_NAME => {
@@ -114,7 +116,7 @@ macro_rules! match_sink_name_str {
             )*
             other => ($on_other_closure)(other),
         }
-    };
+    }};
     ($name_str:expr, $type_name:ident, $body:expr, $on_other_closure:expr) => {{
         $crate::for_all_sinks! {$crate::match_sink_name_str, {$name_str}, $type_name, {$body}, {$on_other_closure}}
     }};
@@ -263,13 +265,14 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
+    fn default_sink_decouple(_desc: &SinkDesc) -> bool {
+        false
+    }
+
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
     #[expect(clippy::unused_async)]
-    async fn new_coordinator(
-        &self,
-        _connector_client: Option<ConnectorClient>,
-    ) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
@@ -370,8 +373,8 @@ pub enum SinkError {
     Kinesis(anyhow::Error),
     #[error("Remote sink error: {0}")]
     Remote(anyhow::Error),
-    #[error("Json parse error: {0}")]
-    JsonParse(String),
+    #[error("Encode error: {0}")]
+    Encode(String),
     #[error("Iceberg error: {0}")]
     Iceberg(anyhow::Error),
     #[error("config error: {0}")]

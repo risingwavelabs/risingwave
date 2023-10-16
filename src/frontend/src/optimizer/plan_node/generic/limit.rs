@@ -43,7 +43,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Limit<PlanRef> {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        Some(self.input.stream_key().to_vec())
+        Some(self.input.stream_key()?.to_vec())
     }
 }
 impl<PlanRef> Limit<PlanRef> {
