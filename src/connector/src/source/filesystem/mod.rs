@@ -16,5 +16,7 @@ pub use s3::{S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR};
 
 mod file_common;
 pub mod nd_streaming;
-pub use file_common::FsSplit;
+pub use file_common::{FsPage, FsPageItem, FsSplit};
 mod s3;
+pub mod s3_v2;
+pub const S3_V2_CONNECTOR: &str = "s3_v2";

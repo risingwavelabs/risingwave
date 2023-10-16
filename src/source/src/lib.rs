@@ -21,6 +21,7 @@
 #![feature(hash_extract_if)]
 #![feature(type_alias_impl_trait)]
 #![feature(box_patterns)]
+#![feature(stmt_expr_attributes)]
 
 pub use table::*;
 
