@@ -74,10 +74,14 @@ impl MySqlCdcSplit {
                     self.inner.split_id
                 )
             })?;
-            snapshot_done = match dbz_offset.source_offset.snapshot {
-                Some(val) => !val,
-                None => true,
-            };
+
+            // heartbeat event should not update the `snapshot_done` flag
+            if !dbz_offset.is_heartbeat {
+                snapshot_done = match dbz_offset.source_offset.snapshot {
+                    Some(val) => !val,
+                    None => true,
+                };
+            }
         }
         self.inner.start_offset = Some(start_offset);
         self.inner.snapshot_done = snapshot_done;
@@ -109,10 +113,14 @@ impl PostgresCdcSplit {
                     self.inner.split_id
                 )
             })?;
-            snapshot_done = dbz_offset
-                .source_offset
-                .last_snapshot_record
-                .unwrap_or(false);
+
+            // heartbeat event should not update the `snapshot_done` flag
+            if !dbz_offset.is_heartbeat {
+                snapshot_done = dbz_offset
+                    .source_offset
+                    .last_snapshot_record
+                    .unwrap_or(false);
+            }
         }
         self.inner.start_offset = Some(start_offset);
         // if snapshot_done is already true, it won't be updated

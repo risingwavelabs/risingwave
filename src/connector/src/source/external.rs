@@ -160,6 +160,8 @@ pub struct DebeziumOffset {
     pub source_partition: HashMap<String, String>,
     #[serde(rename = "sourceOffset")]
     pub source_offset: DebeziumSourceOffset,
+    #[serde(rename = "isHeartbeat")]
+    pub is_heartbeat: bool,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
