@@ -213,7 +213,7 @@ dependencies = [
  "uuid",
  "xz2",
  "zerocopy",
- "zstd",
+ "zstd 0.12.4",
 ]
 
 [[package]]
@@ -4541,8 +4541,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.2.22"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=fedb1e3#fedb1e3a0a8758650c9e15076941c999150bdb31"
+version = "0.3.0+0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00f9ab2d0545a55e4f209fc72c180a7e7b45a4e7baee7b4994c4628a877c5525"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -5646,7 +5647,7 @@ dependencies = [
  "thrift",
  "tokio",
  "twox-hash",
- "zstd",
+ "zstd 0.12.4",
 ]
 
 [[package]]
@@ -6616,8 +6617,9 @@ dependencies = [
 
 [[package]]
 name = "rdkafka-sys"
-version = "4.3.0+1.9.2"
-source = "git+https://github.com/MaterializeInc/rust-rdkafka?rev=8ea07c4#8ea07c4d2b96636ff093e670bc921892aee0d56a"
+version = "4.6.0+2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad63c279fca41a27c231c450a2d2ad18288032e9cbb159ad16c9d96eba35aaaf"
 dependencies = [
  "cmake",
  "libc",
@@ -8036,7 +8038,7 @@ dependencies = [
  "workspace-hack",
  "xorf",
  "xxhash-rust",
- "zstd",
+ "zstd 0.13.0",
 ]
 
 [[package]]
@@ -11104,7 +11106,16 @@ version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a27595e173641171fc74a1232b7b1c7a7cb6e18222c11e9dfb9888fa424c53c"
 dependencies = [
- "zstd-safe",
+ "zstd-safe 6.0.6",
+]
+
+[[package]]
+name = "zstd"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bffb3309596d527cfcba7dfc6ed6052f1d39dfbd7c867aa2e865e4a449c10110"
+dependencies = [
+ "zstd-safe 7.0.0",
 ]
 
 [[package]]
@@ -11114,6 +11125,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee98ffd0b48ee95e6c5168188e44a54550b1564d9d530ee21d5f0eaed1069581"
 dependencies = [
  "libc",
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43747c7422e2924c11144d5229878b98180ef8b06cca4ab5af37afc8a8d8ea3e"
+dependencies = [
  "zstd-sys",
 ]
 

@@ -516,7 +516,7 @@ pub struct StorageConfig {
     pub compactor_max_task_multiplier: f32,
 
     /// The percentage of memory available when compactor is deployed separately.
-    /// total_memory_available_bytes = total_memory_available_bytes *
+    /// total_memory_available_bytes = system_memory_available_bytes *
     /// compactor_memory_available_proportion
     #[serde(default = "default::storage::compactor_memory_available_proportion")]
     pub compactor_memory_available_proportion: f64,
