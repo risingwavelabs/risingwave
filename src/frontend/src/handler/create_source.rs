@@ -34,11 +34,12 @@ use risingwave_connector::source::cdc::{
     CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
-use risingwave_connector::source::filesystem::S3_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
+use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
     SourceEncode, SourceFormat, SourceStruct, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
-    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR,
+    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
+    S3_V2_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
@@ -60,7 +61,7 @@ use crate::handler::create_table::{
 use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
-use crate::utils::resolve_connection_in_with_option;
+use crate::utils::resolve_privatelink_in_with_option;
 use crate::{bind_data_type, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -252,7 +253,7 @@ fn consume_string_from_options(
     ))))
 }
 
-fn get_json_schema_location(
+pub fn get_json_schema_location(
     row_options: &mut BTreeMap<String, String>,
 ) -> Result<Option<(AstString, bool)>> {
     let schema_location = try_consume_string_from_options(row_options, "schema.location");
@@ -892,6 +893,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 S3_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json],
                 ),
+                S3_V2_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Csv, Encode::Json],
+                ),
                 MYSQL_CDC_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
@@ -907,6 +911,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 NATS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json],
                 ),
+                TEST_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Json],
+                )
         ))
     });
 
@@ -921,8 +928,9 @@ pub fn validate_compatibility(
         .get(&connector)
         .ok_or_else(|| {
             RwError::from(ProtocolError(format!(
-                "connector {} is not supported",
-                connector
+                "connector {:?} is not supported, accept {:?}",
+                connector,
+                CONNECTORS_COMPATIBLE_FORMATS.keys()
             )))
         })?;
     if connector != KAFKA_CONNECTOR {
@@ -1068,7 +1076,10 @@ pub async fn handle_create_source(
         )));
     }
 
-    let source_schema = stmt.source_schema.into_source_schema_v2();
+    let (source_schema, notice) = stmt.source_schema.into_source_schema_v2();
+    if let Some(notice) = notice {
+        session.notice_to_user(notice)
+    };
 
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
     validate_compatibility(&source_schema, &mut with_properties)?;
@@ -1107,7 +1118,13 @@ pub async fn handle_create_source(
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
 
-    bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
+    bind_sql_column_constraints(
+        &session,
+        name.clone(),
+        &mut columns,
+        stmt.columns,
+        &pk_column_ids,
+    )?;
 
     check_source_schema(&with_properties, row_id_index, &columns)?;
 
@@ -1116,10 +1133,10 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
-    // resolve privatelink connection for Kafka source
     let mut with_options = WithOptions::new(with_properties);
+    // resolve privatelink connection for Kafka source
     let connection_id =
-        resolve_connection_in_with_option(&mut with_options, &schema_name, &session)?;
+        resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
     let definition = handler_args.normalized_sql;
 
     let source = PbSource {

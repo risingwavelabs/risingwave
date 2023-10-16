@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 use tracing::error;
 
-use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::CompactorContext;
 use crate::hummock::compactor::{CompactOutput, Compactor};
@@ -41,7 +41,6 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferVersionedEntry,
 };
 use crate::hummock::sstable::CompactionDeleteRangesBuilder;
-use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -49,16 +48,18 @@ use crate::hummock::{
     CompactionDeleteRanges, GetObjectId, HummockError, HummockResult, SstableBuilderOptions,
     SstableObjectIdManagerRef,
 };
+use crate::mem_table::ImmutableMemtable;
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
 const GC_WATERMARK_FOR_FLUSH: u64 = 0;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
-    context: Arc<CompactorContext>,
+    context: CompactorContext,
     sstable_object_id_manager: SstableObjectIdManagerRef,
     payload: UploadTaskPayload,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
+    filter_key_extractor_manager: FilterKeyExtractorManager,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
     for imm in payload {
@@ -75,7 +76,7 @@ pub async fn compact(
         };
         grouped_payload
             .entry(compaction_group_id)
-            .or_insert_with(std::vec::Vec::new)
+            .or_default()
             .push(imm);
     }
 
@@ -86,6 +87,7 @@ pub async fn compact(
             compact_shared_buffer(
                 context.clone(),
                 sstable_object_id_manager.clone(),
+                filter_key_extractor_manager.clone(),
                 group_payload,
             )
             .map_ok(move |results| {
@@ -110,8 +112,9 @@ pub async fn compact(
 
 /// For compaction from shared buffer to level 0, this is the only function gets called.
 async fn compact_shared_buffer(
-    context: Arc<CompactorContext>,
+    context: CompactorContext,
     sstable_object_id_manager: SstableObjectIdManagerRef,
+    filter_key_extractor_manager: FilterKeyExtractorManager,
     mut payload: UploadTaskPayload,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     // Local memory compaction looks at all key ranges.
@@ -124,8 +127,7 @@ async fn compact_shared_buffer(
 
     assert!(!existing_table_ids.is_empty());
 
-    let multi_filter_key_extractor = context
-        .filter_key_extractor_manager
+    let multi_filter_key_extractor = filter_key_extractor_manager
         .acquire(existing_table_ids.clone())
         .await?;
     if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
@@ -453,7 +455,7 @@ impl SharedBufferCompactRunner {
     pub fn new(
         split_index: usize,
         key_range: KeyRange,
-        context: Arc<CompactorContext>,
+        context: CompactorContext,
         sub_compaction_sstable_size: usize,
         split_weight_by_vnode: u32,
         use_block_based_filter: bool,

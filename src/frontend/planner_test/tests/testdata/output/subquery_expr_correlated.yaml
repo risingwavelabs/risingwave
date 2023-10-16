@@ -466,14 +466,14 @@
                     └─LogicalScan { table: c, columns: [c.c1, c.c2, c.c3, c._row_id] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count] }
-    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a3, a.a3) AND IsNotDistinctFrom(b.b2, b.b2), output: [] }
+    └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a3, first_value(a.a3 order_by(a.a3 ASC))) AND IsNotDistinctFrom(b.b2, b.b2), output: [] }
       ├─LogicalJoin { type: Inner, on: (a.a3 = b.b2), output: all }
       │ ├─LogicalScan { table: a, columns: [a.a3] }
       │ └─LogicalScan { table: b, columns: [b.b2] }
       └─LogicalFilter { predicate: (3:Int32 = count(1:Int32)) }
-        └─LogicalAgg { group_key: [a.a3, b.b2], aggs: [count(1:Int32)] }
-          └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a3, c.c3) AND IsNotDistinctFrom(b.b2, c.c2), output: [a.a3, b.b2, 1:Int32] }
-            ├─LogicalAgg { group_key: [a.a3, b.b2], aggs: [] }
+        └─LogicalAgg { group_key: [first_value(a.a3 order_by(a.a3 ASC)), b.b2], aggs: [count(1:Int32)] }
+          └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(first_value(a.a3 order_by(a.a3 ASC)), c.c3) AND IsNotDistinctFrom(b.b2, c.c2), output: [first_value(a.a3 order_by(a.a3 ASC)), b.b2, 1:Int32] }
+            ├─LogicalAgg { group_key: [b.b2], aggs: [first_value(a.a3 order_by(a.a3 ASC))] }
             │ └─LogicalJoin { type: Inner, on: (a.a3 = b.b2), output: all }
             │   ├─LogicalScan { table: a, columns: [a.a3] }
             │   └─LogicalScan { table: b, columns: [b.b2] }

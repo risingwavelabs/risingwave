@@ -36,10 +36,10 @@ use crate::hummock::compactor::{merge_imms_in_memory, CompactionExecutor};
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::store::version::StagingSstableInfo;
 use crate::hummock::utils::MemoryTracker;
-use crate::hummock::{HummockError, HummockResult};
+use crate::hummock::{HummockError, HummockResult, ImmutableMemtable};
+use crate::mem_table::ImmId;
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 
@@ -436,7 +436,7 @@ impl SealedData {
             .rev()
             // in `imms`, newer data comes first
             .flat_map(|(_epoch, imms)| imms)
-            .chain(merged_imms.into_iter())
+            .chain(merged_imms)
             .collect_vec();
 
         if !payload.is_empty() {
@@ -1044,9 +1044,9 @@ mod tests {
     };
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-    use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
+    use crate::mem_table::{ImmId, ImmutableMemtable};
     use crate::monitor::HummockStateStoreMetrics;
     use crate::opts::StorageOpts;
     use crate::storage_value::StorageValue;
@@ -1081,7 +1081,7 @@ mod tests {
         limiter: Option<&MemoryLimiter>,
     ) -> ImmutableMemtable {
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(vec![(
-            Bytes::from(dummy_table_key()),
+            TableKey(Bytes::from(dummy_table_key())),
             StorageValue::new_delete(),
         )]);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
@@ -1334,11 +1334,9 @@ mod tests {
             assert_eq!(epoch, uploader.max_sealed_epoch);
             // check sealed data has two imms
             let imms_by_epoch = uploader.sealed_data.imms_by_epoch();
-            imms_by_epoch.last_key_value().map_or((), |(e, imms)| {
-                if *e == epoch {
-                    assert_eq!(2, imms.len());
-                }
-            });
+            if let Some((e, imms)) = imms_by_epoch.last_key_value() && *e == epoch{
+                assert_eq!(2, imms.len());
+            }
 
             let epoch_cnt = (epoch - INITIAL_EPOCH) as usize;
             if epoch_cnt < imm_merge_threshold {
@@ -1356,18 +1354,14 @@ mod tests {
 
                 let imms_by_shard = &mut uploader.sealed_data.imms_by_table_shard;
                 // check shard 1
-                imms_by_shard
-                    .get(&(TEST_TABLE_ID, 1 as LocalInstanceId))
-                    .map_or((), |imms| {
-                        assert_eq!(imm_merge_threshold, imms.len());
-                    });
+                if let Some(imms) = imms_by_shard.get(&(TEST_TABLE_ID, 1 as LocalInstanceId)) {
+                    assert_eq!(imm_merge_threshold, imms.len());
+                }
 
                 // check shard 2
-                imms_by_shard
-                    .get(&(TEST_TABLE_ID, 2 as LocalInstanceId))
-                    .map_or((), |imms| {
-                        assert_eq!(imm_merge_threshold, imms.len());
-                    });
+                if let Some(imms) = imms_by_shard.get(&(TEST_TABLE_ID, 2 as LocalInstanceId)) {
+                    assert_eq!(imm_merge_threshold, imms.len());
+                }
 
                 // we have enough sealed imms, start merging task
                 println!("start merging task for epoch {}", epoch);
@@ -1376,20 +1370,20 @@ mod tests {
                 assert!(uploader.sealed_data.spilled_data.is_empty());
 
                 // check after generate merging task
-                uploader
+                if let Some(imms) = uploader
                     .sealed_data
                     .imms_by_table_shard
                     .get(&(TEST_TABLE_ID, 1 as LocalInstanceId))
-                    .map_or((), |imms| {
-                        assert_eq!(0, imms.len());
-                    });
-                uploader
+                {
+                    assert_eq!(0, imms.len());
+                }
+                if let Some(imms) = uploader
                     .sealed_data
                     .imms_by_table_shard
                     .get(&(TEST_TABLE_ID, 2 as LocalInstanceId))
-                    .map_or((), |imms| {
-                        assert_eq!(0, imms.len());
-                    });
+                {
+                    assert_eq!(0, imms.len());
+                }
 
                 // poll the merging task and check the result
                 match uploader.next_event().await {
@@ -1648,6 +1642,9 @@ mod tests {
         (buffer_tracker, uploader, new_task_notifier)
     }
 
+    // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+    // TODO: remove `allow` here after the issued is closed.
+    #[expect(clippy::needless_pass_by_ref_mut)]
     async fn assert_uploader_pending(uploader: &mut HummockUploader) {
         for _ in 0..10 {
             yield_now().await;

@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_pb::backup_service::MetaBackupManifestId;
-use risingwave_pb::catalog::Table;
+use risingwave_pb::catalog::{PbStreamJobStatus, Table};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::WriteLimits;
@@ -35,30 +35,26 @@ use crate::manager::{
     NotificationVersion, WorkerKey,
 };
 use crate::serving::ServingVnodeMappingRef;
-use crate::storage::MetaStore;
 
-pub struct NotificationServiceImpl<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct NotificationServiceImpl {
+    env: MetaSrvEnv,
 
-    catalog_manager: CatalogManagerRef<S>,
-    cluster_manager: ClusterManagerRef<S>,
-    hummock_manager: HummockManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
-    backup_manager: BackupManagerRef<S>,
+    catalog_manager: CatalogManagerRef,
+    cluster_manager: ClusterManagerRef,
+    hummock_manager: HummockManagerRef,
+    fragment_manager: FragmentManagerRef,
+    backup_manager: BackupManagerRef,
     serving_vnode_mapping: ServingVnodeMappingRef,
 }
 
-impl<S> NotificationServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl NotificationServiceImpl {
     pub fn new(
-        env: MetaSrvEnv<S>,
-        catalog_manager: CatalogManagerRef<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        hummock_manager: HummockManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        backup_manager: BackupManagerRef<S>,
+        env: MetaSrvEnv,
+        catalog_manager: CatalogManagerRef,
+        cluster_manager: ClusterManagerRef,
+        hummock_manager: HummockManagerRef,
+        fragment_manager: FragmentManagerRef,
+        backup_manager: BackupManagerRef,
         serving_vnode_mapping: ServingVnodeMappingRef,
     ) -> Self {
         Self {
@@ -124,7 +120,15 @@ where
 
     async fn get_tables_and_creating_tables_snapshot(&self) -> (Vec<Table>, NotificationVersion) {
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        let mut tables = catalog_guard.database.list_tables();
+        let mut tables = catalog_guard
+            .database
+            .list_tables()
+            .into_iter()
+            .filter(|t| {
+                t.stream_job_status == PbStreamJobStatus::Unspecified as i32
+                    || t.stream_job_status == PbStreamJobStatus::Created as i32
+            })
+            .collect_vec();
         tables.extend(catalog_guard.database.list_creating_tables());
         let notification_version = self.env.notification_manager().current_version().await;
         (tables, notification_version)
@@ -209,10 +213,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> NotificationService for NotificationServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl NotificationService for NotificationServiceImpl {
     type SubscribeStream = UnboundedReceiverStream<Notification>;
 
     #[cfg_attr(coverage, no_coverage)]

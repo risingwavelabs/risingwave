@@ -2,7 +2,7 @@
 version: "3"
 services:
   compactor-0:
-    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.0.0}"
+    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.2.0}"
     command:
       - compactor-node
       - "--listen-addr"
@@ -11,8 +11,6 @@ services:
       - "compactor-0:6660"
       - "--prometheus-listener-addr"
       - "0.0.0.0:1260"
-      - "--metrics-level"
-      - "1"
       - "--meta-address"
       - "http://meta-node-0:5690"
       - "--config-path"
@@ -39,7 +37,7 @@ services:
       timeout: 5s
       retries: 5
   compute-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.0.0}"
+    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.2.0}"
     command:
       - compute-node
       - "--listen-addr"
@@ -48,8 +46,6 @@ services:
       - "compute-node-0:5688"
       - "--prometheus-listener-addr"
       - "0.0.0.0:1222"
-      - "--metrics-level"
-      - "1"
       - "--meta-address"
       - "http://meta-node-0:5690"
       - "--connector-rpc-endpoint"
@@ -126,7 +122,7 @@ services:
       timeout: 5s
       retries: 5
   frontend-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.0.0}"
+    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.2.0}"
     command:
       - frontend-node
       - "--listen-addr"
@@ -139,8 +135,6 @@ services:
       - /risingwave.toml
       - "--prometheus-listener-addr"
       - "0.0.0.0:2222"
-      - "--metrics-level"
-      - "1"
     expose:
       - "4566"
     ports:
@@ -185,7 +179,7 @@ services:
       timeout: 5s
       retries: 5
   meta-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.0.0}"
+    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.2.0}"
     command:
       - meta-node
       - "--listen-addr"
@@ -301,7 +295,7 @@ services:
       timeout: 5s
       retries: 5
   connector-node:
-    image: ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.0.0}
+    image: ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.2.0}
     entrypoint: "/risingwave/bin/connector-node/start-service.sh"
     ports:
       - 50051

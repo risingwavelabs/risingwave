@@ -13,7 +13,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 20
+    timeout_in_minutes: 25
     retry: *auto-retry
 
   - label: "build other components"
@@ -29,7 +29,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - GITHUB_TOKEN
-    timeout_in_minutes: 10
+    timeout_in_minutes: 12
     retry: *auto-retry
 
   - label: "build (deterministic simulation)"
@@ -68,6 +68,40 @@ steps:
     timeout_in_minutes: 60
     retry: *auto-retry
 
+  - label: "end-to-end test (parallel) (release)"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
+    depends_on:
+      - "build"
+      - "docslt"
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - test-collector#v1.0.0:
+          files: "*-junit.xml"
+          format: "junit"
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end test (parallel, in-memory) (release)"
+    command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-release"
+    depends_on:
+      - "build"
+      - "docslt"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 12
+    retry: *auto-retry
+
   - label: "end-to-end source test (release)"
     command: "ci/scripts/e2e-source-test.sh -p ci-release"
     depends_on:
@@ -80,6 +114,20 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
+    retry: *auto-retry
+
+  - label: "end-to-end sink test (release)"
+    command: "ci/scripts/e2e-sink-test.sh -p ci-release"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 35
     retry: *auto-retry
 
   - label: "fuzz test"
@@ -111,7 +159,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 17
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
@@ -197,8 +245,52 @@ steps:
     timeout_in_minutes: 5
     retry: *auto-retry
 
+  - label: "end-to-end iceberg sink test (release)"
+    command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
+    retry: *auto-retry
+
+  - label: "end-to-end iceberg sink v2 test (release)"
+    command: "ci/scripts/e2e-iceberg-sink-v2-test.sh -p ci-release"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "e2e java-binding test (release)"
+    command: "ci/scripts/java-binding-test.sh -p ci-release"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    # Extra 2 minutes to account for docker-compose latency.
+    # See: https://github.com/risingwavelabs/risingwave/issues/9423#issuecomment-1521222169
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "S3 source check on AWS (json parser)"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s run"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s run.py"
     depends_on: build
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -215,7 +307,7 @@ steps:
     retry: *auto-retry
 
   - label: "S3 source check on AWS (json parser)"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s json_file"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s json_file.py"
     depends_on: build
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -232,7 +324,41 @@ steps:
     retry: *auto-retry
 
   - label: "S3 source check on AWS (csv parser)"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s run_csv"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s run_csv.py"
+    depends_on: build
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 25
+    retry: *auto-retry
+
+  - label: "S3_v2 source check on AWS (json parser)"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_v2.py json'"
+    depends_on: build
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - S3_SOURCE_TEST_CONF
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 25
+    retry: *auto-retry
+
+  - label: "S3_v2 source check on AWS (csv parser)"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s 'fs_source_v2.py csv_without_header'"
     depends_on: build
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -352,7 +478,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "e2e standalone binary test"
@@ -367,5 +493,129 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 21
+    timeout_in_minutes: 25
+    retry: *auto-retry
+
+  - label: "end-to-end test for opendal (parallel)"
+    command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-release"
+    depends_on:
+      - "build"
+      - "docslt"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 14
+    retry: *auto-retry
+
+  - label: "end-to-end clickhouse sink test"
+    command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-release"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end pulsar sink test"
+    command: "ci/scripts/e2e-pulsar-sink-test.sh -p ci-release"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: sink-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "connector node integration test Java {{matrix.java_version}}"
+    command: "ci/scripts/connector-node-integration-test.sh -p ci-release -v {{matrix.java_version}}"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    matrix:
+      setup:
+        java_version:
+          - "11"
+          - "17"
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "release"
+    command: "ci/scripts/release.sh"
+    if: build.tag != null
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - docker-compose#v4.9.0:
+          run: release-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - GITHUB_TOKEN
+            - BUILDKITE_TAG
+            - BUILDKITE_SOURCE
+    timeout_in_minutes: 60
+    retry: *auto-retry
+
+  - label: "release docker image: amd64"
+    command: "ci/scripts/docker.sh"
+    key: "build-amd64"
+    if: build.tag != null
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
+            GITHUB_TOKEN: github-token
+    timeout_in_minutes: 60
+    retry: *auto-retry
+
+  - label: "docker-build-push: aarch64"
+    command: "ci/scripts/docker.sh"
+    key: "build-aarch64"
+    if: build.tag != null
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
+            GITHUB_TOKEN: github-token
+    timeout_in_minutes: 60
+    agents:
+      queue: "linux-arm64"
+    retry: *auto-retry
+
+  - label: "multi arch image create push"
+    command: "ci/scripts/multi-arch-docker.sh"
+    if: build.tag != null
+    depends_on:
+      - "build-amd64"
+      - "build-aarch64"
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
+    timeout_in_minutes: 10
     retry: *auto-retry

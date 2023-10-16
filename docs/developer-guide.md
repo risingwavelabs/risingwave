@@ -23,9 +23,8 @@ http://ecotrust-canada.github.io/markdown-toc/
   * [Start the playground with RiseDev](#start-the-playground-with-risedev)
   * [Start the playground with cargo](#start-the-playground-with-cargo)
 - [Debug playground using vscode](#debug-playground-using-vscode)
+- [Use standalone-mode](#use-standalone-mode)
 - [Develop the dashboard](#develop-the-dashboard)
-  * [Dashboard v1](#dashboard-v1)
-  * [Dashboard v2](#dashboard-v2)
 - [Observability components](#observability-components)
   * [Cluster Control](#cluster-control)
   * [Monitoring](#monitoring)
@@ -61,7 +60,7 @@ You can also read the [crate level documentation](https://risingwavelabs.github.
 - The `docker` folder contains Docker files to build and start RisingWave.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 - The `docs` folder contains the design docs. If you want to learn about how RisingWave is designed and implemented, check out the design docs here.
-- The `dashboard` folder contains RisingWave dashboard v2.
+- The `dashboard` folder contains RisingWave dashboard.
 
 The [src/README.md](../src/README.md) file contains more details about Design Patterns in RisingWave.
 
@@ -86,7 +85,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl postgresql-client tmux lld pkg-config libssl-dev
+sudo apt install make build-essential cmake protobuf-compiler curl postgresql-client tmux lld pkg-config libssl-dev libsasl2-dev
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -155,7 +154,6 @@ For example, you can modify the default section to:
   default:
     - use: minio
     - use: meta-node
-      enable-dashboard-v2: false
     - use: compute-node
     - use: frontend
     - use: prometheus
@@ -209,25 +207,17 @@ psql -h localhost -p 4566 -d dev -U root
 
 To step through risingwave locally with a debugger you can use the `launch.json` and the `tasks.json` provided in `vscode_suggestions`. After adding these files to your local `.vscode` folder you can debug and set breakpoints by launching `Launch 'risingwave p' debug`.
 
+## Use standalone-mode
+
+Please refer to [README](../src/cmd_all/src/README.md) for more details.
+
 ## Develop the dashboard
 
 Currently, RisingWave has two versions of dashboards. You can use RiseDev config to select which version to use.
 
 The dashboard will be available at `http://127.0.0.1:5691/` on meta node.
 
-### Dashboard v1
-
-Dashboard v1 is a single HTML page. To preview and develop this version, install Node.js, and run this command:
-
-```shell
-cd src/meta/src/dashboard && npx reload -b
-```
-
-Dashboard v1 is bundled by default along with meta node. When the cluster is started, you may use the dashboard without any configuration.
-
-### Dashboard v2
-
-The development instructions for dashboard v2 are available [here](../dashboard/README.md).
+The development instructions for dashboard are available [here](../dashboard/README.md).
 
 ## Observability components
 
@@ -272,7 +262,10 @@ The Rust components use `tokio-tracing` to handle both logging and tracing. The 
 * Third-party libraries: warn
 * Other libraries: debug
 
-If you need to adjust log levels, change the logging filters in `src/utils/runtime/src/lib.rs`.
+If you need to override the default log levels, launch RisingWave with the environment variable `RUST_LOG` set as described [here](https://docs.rs/tracing-subscriber/0.3/tracing_subscriber/filter/struct.EnvFilter.html).
+
+There're also some logs designated for debugging purposes with target names starting with `events::`.
+For example, by setting `RUST_LOG=events::stream::message::chunk=trace`, all chunk messages will be logged as it passes through the executors in the streaming engine. Search in the codebase to find more of them.
 
 
 ## Test your code changes
@@ -468,6 +461,18 @@ You may use that to reproduce it in your local environment. For example:
 ```shell
 MADSIM_TEST_SEED=4 ./risedev sit-test test_backfill_with_upstream_and_snapshot_read
 ```
+
+### Backwards Compatibility tests
+
+This tests backwards compatibility between the earliest minor version
+and latest minor version of Risingwave (e.g. 1.0.0 vs 1.1.0).
+
+You can run it locally with:
+```bash
+./risedev backwards-compat-test
+```
+
+In CI, you can make sure the PR runs it by adding the label `ci/run-backwards-compat-tests`.
 
 ## Miscellaneous checks
 

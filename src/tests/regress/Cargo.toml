@@ -28,3 +28,6 @@ workspace-hack = { path = "../../workspace-hack" }
 [[bin]]
 name = "risingwave_regress_test"
 path = "src/bin/main.rs"
+
+[lints]
+workspace = true

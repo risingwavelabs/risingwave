@@ -451,8 +451,8 @@ impl<'a> BeMessage<'a> {
 
                 // Parameter names and values are passed as null-terminated strings
                 let iov = &mut [name, b"\0", value, b"\0"].map(IoSlice::new);
-                let mut buffer = [0u8; 64]; // this should be enough
-                let cnt = buffer.as_mut().write_vectored(iov).unwrap();
+                let mut buffer = vec![];
+                let cnt = buffer.write_vectored(iov).unwrap();
 
                 buf.put_u8(b'S');
                 write_body(buf, |stream| {
@@ -544,7 +544,7 @@ impl<'a> BeMessage<'a> {
                 buf.put_u8(b'T');
                 write_body(buf, |buf| {
                     buf.put_i16(row_descs.len() as i16); // # of fields
-                    for pg_field in row_descs.iter() {
+                    for pg_field in *row_descs {
                         write_cstr(buf, pg_field.get_name().as_bytes())?;
                         buf.put_i32(pg_field.get_table_oid()); // table oid
                         buf.put_i16(pg_field.get_col_attr_num()); // attnum
@@ -598,7 +598,7 @@ impl<'a> BeMessage<'a> {
                 buf.put_u8(b't');
                 write_body(buf, |buf| {
                     buf.put_i16(para_descs.len() as i16);
-                    for oid in para_descs.iter() {
+                    for oid in *para_descs {
                         buf.put_i32(*oid);
                     }
                     Ok(())

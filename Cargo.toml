@@ -10,12 +10,15 @@ members = [
   "src/compute",
   "src/connector",
   "src/ctl",
-  "src/expr",
+  "src/expr/core",
+  "src/expr/impl",
   "src/expr/macro",
   "src/frontend",
   "src/frontend/planner_test",
   "src/java_binding",
+  "src/jni_core",
   "src/meta",
+  "src/meta/src/model_v2/migration",
   "src/object_store",
   "src/prost",
   "src/prost/helpers",
@@ -27,7 +30,6 @@ members = [
   "src/sqlparser/test_runner",
   "src/storage",
   "src/storage/backup",
-  "src/storage/backup/cmd",
   "src/storage/compactor",
   "src/storage/hummock_sdk",
   "src/storage/hummock_test",
@@ -51,7 +53,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "1.1.0-alpha"
+version = "1.3.0-alpha"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -60,31 +62,65 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 await-tree = "0.1.1"
-aws-config = { version = "0.55", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
-aws-sdk-kinesis = { version = "0.28", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.28", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-ec2 = { version = "0.28", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-sqs = { version = "0.28", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-client = { version = "0.55", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-config = { version = "0.55", default-features = false, features = [
+  "rt-tokio",
+  "native-tls",
+] }
+aws-credential-types = { version = "0.55", default-features = false, features = [
+  "hardcoded-credentials",
+] }
+aws-sdk-kinesis = { version = "0.28", default-features = false, features = [
+  "rt-tokio",
+  "native-tls",
+] }
+aws-sdk-s3 = { version = "0.28", default-features = false, features = [
+  "rt-tokio",
+  "native-tls",
+] }
+aws-sdk-ec2 = { version = "0.28", default-features = false, features = [
+  "rt-tokio",
+  "native-tls",
+] }
+aws-sdk-sqs = { version = "0.28", default-features = false, features = [
+  "rt-tokio",
+  "native-tls",
+] }
+aws-smithy-client = { version = "0.55", default-features = false, features = [
+  "rt-tokio",
+  "native-tls",
+] }
 aws-smithy-http = "0.55"
 aws-smithy-types = "0.55"
 aws-endpoint = "0.55"
 aws-types = "0.55"
-etcd-client = { package = "madsim-etcd-client", version = "0.3" }
+etcd-client = { package = "madsim-etcd-client", version = "0.4" }
 futures-async-stream = "0.2"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim.git", rev = "bb8f063", features = ["cmake-build"] }
-hashbrown = { version = "0.14.0", features = ["ahash", "inline-more", "nightly"] }
+rdkafka = { package = "madsim-rdkafka", version = "0.3.0", features = [
+  "cmake-build",
+] }
+hashbrown = { version = "0.14.0", features = [
+  "ahash",
+  "inline-more",
+  "nightly",
+] }
 criterion = { version = "0.5", features = ["async_futures"] }
-tonic = { package = "madsim-tonic", version = "0.3.1" }
-tonic-build = { package = "madsim-tonic-build", version = "0.3.1" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "a6790d17094754959e351fac1e11147e37643e97" }
-arrow-array = "46"
-arrow-schema = "46"
-arrow-buffer = "46"
-arrow-flight = "46"
-arrow-select = "46"
+tonic = { package = "madsim-tonic", version = "0.4.0" }
+tonic-build = { package = "madsim-tonic-build", version = "0.4.0" }
+prost = { version = "0.12" }
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "16dab0e36ab337e58ee8002d828def2d212fa116" }
+arrow-array = "47"
+arrow-cast = "47"
+arrow-schema = "47"
+arrow-buffer = "47"
+arrow-flight = "47"
+arrow-select = "47"
+arrow-ord = "47"
+tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
+tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
+  "profiling",
+  "stats",
+], rev = "64a2d9" }
 
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
@@ -95,7 +131,8 @@ risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
-risingwave_expr = { path = "./src/expr" }
+risingwave_expr = { path = "./src/expr/core" }
+risingwave_expr_impl = { path = "./src/expr/impl" }
 risingwave_frontend = { path = "./src/frontend" }
 risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
 risingwave_hummock_test = { path = "./src/storage/hummock_test" }
@@ -113,13 +150,42 @@ risingwave_stream = { path = "./src/stream" }
 risingwave_test_runner = { path = "./src/test_runner" }
 risingwave_udf = { path = "./src/udf" }
 risingwave_variables = { path = "./src/utils/variables" }
+risingwave_java_binding = { path = "./src/java_binding" }
+risingwave_jni_core = { path = "src/jni_core" }
+
+[workspace.lints.rust]
+# `forbid` will also prevent the misuse of `#[allow(unused)]`
+unused_must_use = "forbid"
+future_incompatible = "warn"
+nonstandard_style = "warn"
+rust_2018_idioms = "warn"
+
+[workspace.lints.clippy]
+uninlined_format_args = "allow"
+dbg_macro = "warn"
+disallowed_methods = "warn"
+disallowed_types = "warn"
+doc_markdown = "warn"
+explicit_into_iter_loop = "warn"
+explicit_iter_loop = "warn"
+inconsistent_struct_constructor = "warn"
+unused_async = "warn"
+map_flatten = "warn"
+no_effect_underscore_binding = "warn"
+await_holding_lock = "warn"
+
+[workspace.lints.rustdoc]
+private_intra_doc_links = "allow"
+# Explicit lints don't hurt, and sometimes rust-analyzer works better with explicit links.
+redundant_explicit_links = "allow"
 
 [profile.dev]
 lto = 'off'
 
 [profile.release]
-debug = 1
-lto = 'thin'
+debug = "full"
+split-debuginfo = "packed"
+lto = "thin"
 
 # The profile used for CI in main branch.
 # This profile inherits from the release profile, but turns on some checks and assertions for us to
@@ -128,6 +194,7 @@ lto = 'thin'
 inherits = "release"
 incremental = false
 debug = "line-tables-only"
+split-debuginfo = "off"
 debug-assertions = true
 overflow-checks = true
 
@@ -162,6 +229,6 @@ quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "8daf97e" }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
-tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6" }
+tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 # patch: unlimit 4MB message size for grpc client
-etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "d55550a" }
+etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }

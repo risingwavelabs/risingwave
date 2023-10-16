@@ -19,68 +19,100 @@ use std::sync::{Arc, LazyLock};
 use std::task::{ready, Context, Poll};
 use std::time::{Duration, Instant};
 
+use foyer::common::code::Key;
 use futures::future::{join_all, try_join_all};
 use futures::{Future, FutureExt};
 use itertools::Itertools;
-use prometheus::core::{AtomicU64, GenericCounter};
+use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
-    register_histogram_vec_with_registry, register_histogram_with_registry,
-    register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, HistogramVec,
-    IntGauge, Registry,
+    register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_with_registry, Histogram, HistogramVec, IntGauge, Registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
+use crate::hummock::file_cache::preclude::*;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::{HummockResult, SstableStoreRef, TableHolder};
+use crate::hummock::{
+    Block, HummockError, HummockResult, Sstable, SstableBlockIndex, SstableStoreRef, TableHolder,
+};
 use crate::monitor::StoreLocalStatistic;
 
 pub static GLOBAL_CACHE_REFILL_METRICS: LazyLock<CacheRefillMetrics> =
     LazyLock::new(|| CacheRefillMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
 pub struct CacheRefillMetrics {
-    pub data_refill_duration: HistogramVec,
+    pub refill_duration: HistogramVec,
+    pub refill_total: GenericCounterVec<AtomicU64>,
+    pub refill_bytes: GenericCounterVec<AtomicU64>,
 
-    pub data_refill_duration_admitted: Histogram,
-    pub data_refill_duration_rejected: Histogram,
+    pub data_refill_success_duration: Histogram,
+    pub meta_refill_success_duration: Histogram,
+
     pub data_refill_filtered_total: GenericCounter<AtomicU64>,
+    pub data_refill_attempts_total: GenericCounter<AtomicU64>,
+    pub data_refill_started_total: GenericCounter<AtomicU64>,
+    pub meta_refill_attempts_total: GenericCounter<AtomicU64>,
 
-    pub meta_refill_duration: Histogram,
+    pub data_refill_ideal_bytes: GenericCounter<AtomicU64>,
+    pub data_refill_success_bytes: GenericCounter<AtomicU64>,
 
     pub refill_queue_total: IntGauge,
 }
 
 impl CacheRefillMetrics {
     pub fn new(registry: &Registry) -> Self {
-        let data_refill_duration = register_histogram_vec_with_registry!(
-            "data_refill_duration",
-            "data refill duration",
-            &["op"],
+        let refill_duration = register_histogram_vec_with_registry!(
+            "refill_duration",
+            "refill duration",
+            &["type", "op"],
             registry,
         )
         .unwrap();
-        let data_refill_duration_admitted = data_refill_duration
-            .get_metric_with_label_values(&["admitted"])
+        let refill_total = register_int_counter_vec_with_registry!(
+            "refill_total",
+            "refill total",
+            &["type", "op"],
+            registry,
+        )
+        .unwrap();
+        let refill_bytes = register_int_counter_vec_with_registry!(
+            "refill_bytes",
+            "refill bytes",
+            &["type", "op"],
+            registry,
+        )
+        .unwrap();
+
+        let data_refill_success_duration = refill_duration
+            .get_metric_with_label_values(&["data", "success"])
             .unwrap();
-        let data_refill_duration_rejected = data_refill_duration
-            .get_metric_with_label_values(&["rejected"])
+        let meta_refill_success_duration = refill_duration
+            .get_metric_with_label_values(&["meta", "success"])
             .unwrap();
 
-        let data_refill_filtered_total = register_int_counter_with_registry!(
-            "data_refill_filtered_total",
-            "data refill filtered total",
-            registry,
-        )
-        .unwrap();
+        let data_refill_filtered_total = refill_total
+            .get_metric_with_label_values(&["data", "filtered"])
+            .unwrap();
+        let data_refill_attempts_total = refill_total
+            .get_metric_with_label_values(&["data", "attempts"])
+            .unwrap();
+        let data_refill_started_total = refill_total
+            .get_metric_with_label_values(&["data", "started"])
+            .unwrap();
+        let meta_refill_attempts_total = refill_total
+            .get_metric_with_label_values(&["meta", "attempts"])
+            .unwrap();
 
-        let meta_refill_duration = register_histogram_with_registry!(
-            "meta_refill_duration",
-            "meta refill duration",
-            registry,
-        )
-        .unwrap();
+        let data_refill_ideal_bytes = refill_bytes
+            .get_metric_with_label_values(&["data", "ideal"])
+            .unwrap();
+        let data_refill_success_bytes = refill_bytes
+            .get_metric_with_label_values(&["data", "success"])
+            .unwrap();
 
         let refill_queue_total = register_int_gauge_with_registry!(
             "refill_queue_total",
@@ -90,11 +122,20 @@ impl CacheRefillMetrics {
         .unwrap();
 
         Self {
-            data_refill_duration,
-            data_refill_duration_admitted,
-            data_refill_duration_rejected,
+            refill_duration,
+            refill_total,
+            refill_bytes,
+
+            data_refill_success_duration,
+            meta_refill_success_duration,
             data_refill_filtered_total,
-            meta_refill_duration,
+            data_refill_attempts_total,
+            data_refill_started_total,
+            meta_refill_attempts_total,
+
+            data_refill_ideal_bytes,
+            data_refill_success_bytes,
+
             refill_queue_total,
         }
     }
@@ -102,9 +143,22 @@ impl CacheRefillMetrics {
 
 #[derive(Debug)]
 pub struct CacheRefillConfig {
+    /// Cache refill timeout.
     pub timeout: Duration,
+
+    /// Data file cache refill levels.
     pub data_refill_levels: HashSet<u32>,
+
+    /// Data file cache refill concurrency.
     pub concurrency: usize,
+
+    /// Data file cache refill unit (blocks).
+    pub unit: usize,
+
+    /// Data file cache reill unit threshold.
+    ///
+    /// Only units whose admit rate > threshold will be refilled.
+    pub threshold: f64,
 }
 
 struct Item {
@@ -211,7 +265,7 @@ impl CacheRefillTask {
                     let holders = match Self::meta_cache_refill(&context, delta).await {
                         Ok(holders) => holders,
                         Err(e) => {
-                            tracing::warn!("meeta cache refill error: {:?}", e);
+                            tracing::warn!("meta cache refill error: {:?}", e);
                             return;
                         }
                     };
@@ -228,19 +282,22 @@ impl CacheRefillTask {
         context: &CacheRefillContext,
         delta: &SstDeltaInfo,
     ) -> HummockResult<Vec<TableHolder>> {
-        let stats = StoreLocalStatistic::default();
         let tasks = delta
             .insert_sst_infos
             .iter()
             .map(|info| async {
-                let _timer = GLOBAL_CACHE_REFILL_METRICS
-                    .meta_refill_duration
-                    .start_timer();
-                context.sstable_store.sstable_syncable(info, &stats).await
+                let mut stats = StoreLocalStatistic::default();
+                GLOBAL_CACHE_REFILL_METRICS.meta_refill_attempts_total.inc();
+
+                let now = Instant::now();
+                let res = context.sstable_store.sstable(info, &mut stats).await;
+                GLOBAL_CACHE_REFILL_METRICS
+                    .meta_refill_success_duration
+                    .observe(now.elapsed().as_secs_f64());
+                res
             })
             .collect_vec();
-        let res = try_join_all(tasks).await?;
-        let holders = res.into_iter().map(|(holder, _, _)| holder).collect_vec();
+        let holders = try_join_all(tasks).await?;
         Ok(holders)
     }
 
@@ -249,10 +306,8 @@ impl CacheRefillTask {
         delta: &SstDeltaInfo,
         holders: Vec<TableHolder>,
     ) {
-        let now = Instant::now();
-
         // return if data file cache is disabled
-        let Some(filter) = context.sstable_store.data_file_cache_refill_filter() else {
+        let Some(filter) = context.sstable_store.data_recent_filter() else {
             return;
         };
 
@@ -271,44 +326,133 @@ impl CacheRefillTask {
                 .iter()
                 .any(|id| filter.contains(id))
         {
-            let blocks = holders
-                .iter()
-                .map(|meta| meta.value().block_count() as u64)
-                .sum();
-            GLOBAL_CACHE_REFILL_METRICS
-                .data_refill_filtered_total
-                .inc_by(blocks);
+            GLOBAL_CACHE_REFILL_METRICS.data_refill_filtered_total.inc();
             return;
         }
 
         let mut tasks = vec![];
         for sst_info in &holders {
-            for block_index in 0..sst_info.value().block_count() {
-                let meta = sst_info.value();
-                let mut stat = StoreLocalStatistic::default();
+            let task = async move {
+                if let Err(e) = Self::data_file_cache_refill_impl(context, sst_info.value()).await {
+                    tracing::warn!("data cache refill error: {:?}", e);
+                }
+            };
+            tasks.push(task);
+        }
+
+        join_all(tasks).await;
+    }
+
+    async fn data_file_cache_refill_impl(
+        context: &CacheRefillContext,
+        sst: &Sstable,
+    ) -> HummockResult<()> {
+        let sstable_store = &context.sstable_store;
+        let object_id = sst.id;
+        let unit = context.config.unit;
+        let threshold = context.config.threshold;
+
+        if let Some(filter) = sstable_store.data_recent_filter() {
+            filter.insert(object_id);
+        }
+
+        let mut tasks = vec![];
+
+        // unit-level refill:
+        //
+        // Although file cache receivces item by block, a larger range of data is still recommended to reduce
+        // S3 iops and per request base latency waste.
+        //
+        // To decide which unit to refill, we calculate the ratio that the block of a unit will be received by
+        // file cache. If the ratio is higher than a threshold, we fetich and refill the whole unit by block.
+
+        for block_index_start in (0..sst.block_count()).step_by(unit) {
+            let block_index_end = std::cmp::min(block_index_start + unit, sst.block_count());
+
+            let (range_first, _) = sst.calculate_block_info(block_index_start);
+            let (range_last, _) = sst.calculate_block_info(block_index_end - 1);
+            let range = range_first.start..range_last.end;
+
+            GLOBAL_CACHE_REFILL_METRICS
+                .data_refill_ideal_bytes
+                .inc_by((range.end - range.start) as u64);
+
+            let mut writers = Vec::with_capacity(block_index_end - block_index_start);
+            let mut ranges = Vec::with_capacity(block_index_end - block_index_start);
+            let mut admits = 0;
+
+            for block_index in block_index_start..block_index_end {
+                let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
+                let key = SstableBlockIndex {
+                    sst_id: object_id,
+                    block_idx: block_index as u64,
+                };
+                let mut writer = sstable_store
+                    .data_file_cache()
+                    .writer(key, key.serialized_len() + uncompressed_capacity);
+
+                if writer.judge() {
+                    admits += 1;
+                }
+
+                writers.push(writer);
+                ranges.push(range);
+            }
+
+            if admits as f64 / writers.len() as f64 >= threshold {
                 let task = async move {
+                    GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
+
                     let permit = context.concurrency.acquire().await.unwrap();
-                    match context
-                        .sstable_store
-                        .may_fill_data_file_cache(meta, block_index, &mut stat)
-                        .await
-                    {
-                        Ok(true) => GLOBAL_CACHE_REFILL_METRICS
-                            .data_refill_duration_admitted
-                            .observe(now.elapsed().as_secs_f64()),
-                        Ok(false) => GLOBAL_CACHE_REFILL_METRICS
-                            .data_refill_duration_rejected
-                            .observe(now.elapsed().as_secs_f64()),
-                        Err(e) => {
-                            tracing::warn!("data cache refill error: {:?}", e);
-                        }
+
+                    GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
+
+                    let timer = GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_success_duration
+                        .start_timer();
+
+                    let data = sstable_store
+                        .store()
+                        .read(&sstable_store.get_sst_data_path(object_id), range.clone())
+                        .await?;
+                    let mut futures = vec![];
+                    for (mut writer, r) in writers.into_iter().zip_eq_fast(ranges) {
+                        let offset = r.start - range.start;
+                        let len = r.end - r.start;
+                        let bytes = data.slice(offset..offset + len);
+
+                        let future = async move {
+                            let block = Block::decode(
+                                bytes,
+                                writer.weight() - writer.key().serialized_len(),
+                            )?;
+                            let block = Box::new(block);
+                            writer.force();
+                            let res = writer.finish(block).await.map_err(HummockError::file_cache);
+                            if matches!(res, Ok(true)) {
+                                GLOBAL_CACHE_REFILL_METRICS
+                                    .data_refill_success_bytes
+                                    .inc_by(len as u64);
+                            }
+                            res
+                        };
+                        futures.push(future);
                     }
+                    try_join_all(futures)
+                        .await
+                        .map_err(HummockError::file_cache)?;
+
                     drop(permit);
+                    drop(timer);
+
+                    Ok::<_, HummockError>(())
                 };
                 tasks.push(task);
             }
         }
 
-        join_all(tasks).await;
+        try_join_all(tasks).await?;
+
+        Ok(())
     }
 }

@@ -23,7 +23,7 @@ etcd-client = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 inquire = "0.6.2"
 itertools = "0.11"
-regex = "1.9.4"
+regex = "1.10.0"
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_frontend = { workspace = true }
@@ -52,3 +52,6 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
+
+[lints]
+workspace = true

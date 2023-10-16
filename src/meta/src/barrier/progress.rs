@@ -27,7 +27,6 @@ use super::command::CommandContext;
 use super::notifier::Notifier;
 use crate::barrier::Command;
 use crate::model::ActorId;
-use crate::storage::MetaStore;
 
 type CreateMviewEpoch = Epoch;
 type ConsumedRows = u64;
@@ -36,7 +35,7 @@ type ConsumedRows = u64;
 enum ChainState {
     Init,
     ConsumingUpstream(Epoch, ConsumedRows),
-    Done,
+    Done(ConsumedRows),
 }
 
 /// Progress of all actors containing chain nodes while creating mview.
@@ -94,18 +93,17 @@ impl Progress {
         match self.states.remove(&actor).unwrap() {
             ChainState::Init => {}
             ChainState::ConsumingUpstream(_, old_consumed_rows) => {
-                if !matches!(new_state, ChainState::Done) {
-                    self.consumed_rows -= old_consumed_rows;
-                }
+                self.consumed_rows -= old_consumed_rows;
             }
-            ChainState::Done => panic!("should not report done multiple times"),
+            ChainState::Done(_) => panic!("should not report done multiple times"),
         };
         match &new_state {
             ChainState::Init => {}
             ChainState::ConsumingUpstream(_, new_consumed_rows) => {
                 self.consumed_rows += new_consumed_rows;
             }
-            ChainState::Done => {
+            ChainState::Done(new_consumed_rows) => {
+                self.consumed_rows += new_consumed_rows;
                 self.done_count += 1;
             }
         };
@@ -142,9 +140,9 @@ impl Progress {
 }
 
 /// The command tracking by the [`CreateMviewProgressTracker`].
-pub(super) struct TrackingCommand<S: MetaStore> {
+pub(super) struct TrackingCommand {
     /// The context of the command.
-    pub context: Arc<CommandContext<S>>,
+    pub context: Arc<CommandContext>,
 
     /// Should be called when the command is finished.
     pub notifiers: Vec<Notifier>,
@@ -152,15 +150,15 @@ pub(super) struct TrackingCommand<S: MetaStore> {
 
 /// Track the progress of all creating mviews. When creation is done, `notify_finished` will be
 /// called on registered notifiers.
-pub(super) struct CreateMviewProgressTracker<S: MetaStore> {
+pub(super) struct CreateMviewProgressTracker {
     /// Progress of the create-mview DDL indicated by the epoch.
-    progress_map: HashMap<CreateMviewEpoch, (Progress, TrackingCommand<S>)>,
+    progress_map: HashMap<CreateMviewEpoch, (Progress, TrackingCommand)>,
 
     /// Find the epoch of the create-mview DDL by the actor containing the chain node.
     actor_map: HashMap<ActorId, CreateMviewEpoch>,
 }
 
-impl<S: MetaStore> CreateMviewProgressTracker<S> {
+impl CreateMviewProgressTracker {
     pub fn new() -> Self {
         Self {
             progress_map: Default::default(),
@@ -185,7 +183,7 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
     pub fn find_cancelled_command(
         &mut self,
         actors_to_cancel: HashSet<ActorId>,
-    ) -> Option<TrackingCommand<S>> {
+    ) -> Option<TrackingCommand> {
         let epochs = actors_to_cancel
             .into_iter()
             .map(|actor_id| self.actor_map.get(&actor_id))
@@ -205,9 +203,9 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
     /// If the actors to track is empty, return the given command as it can be finished immediately.
     pub fn add(
         &mut self,
-        command: TrackingCommand<S>,
+        command: TrackingCommand,
         version_stats: &HummockVersionStats,
-    ) -> Option<TrackingCommand<S>> {
+    ) -> Option<TrackingCommand> {
         let actors = command.context.actors_to_track();
         if actors.is_empty() {
             // The command can be finished immediately.
@@ -279,17 +277,24 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
         &mut self,
         progress: &CreateMviewProgress,
         version_stats: &HummockVersionStats,
-    ) -> Option<TrackingCommand<S>> {
+    ) -> Option<TrackingCommand> {
         let actor = progress.chain_actor_id;
         let Some(epoch) = self.actor_map.get(&actor).copied() else {
-            panic!(
-                "no tracked progress for actor {}, is it already finished?",
+            // On restart, backfill will ALWAYS notify CreateMviewProgressTracker,
+            // even if backfill is finished on recovery.
+            // This is because we don't know if only this actor is finished,
+            // OR the entire stream job is finished.
+            // For the first case, we must notify meta.
+            // For the second case, we can still notify meta, but ignore it here.
+            tracing::info!(
+                "no tracked progress for actor {}, the stream job could already be finished",
                 actor
             );
+            return None;
         };
 
         let new_state = if progress.done {
-            ChainState::Done
+            ChainState::Done(progress.consumed_rows)
         } else {
             ChainState::ConsumingUpstream(progress.consumed_epoch.into(), progress.consumed_rows)
         };

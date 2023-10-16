@@ -26,9 +26,6 @@ profile:
       # - use: aws-s3
       #   bucket: test-bucket
 
-      # If you want to create CDC source table, uncomment the following line
-      # - use: connector-node
-
       # if you want to enable etcd backend, uncomment the following lines.
       # - use: etcd
       #   unsafe-no-fsync: true
@@ -110,22 +107,6 @@ profile:
       - use: kafka
         persist-data: true
 
-  full-with-connector:
-    steps:
-      - use: minio
-      - use: etcd
-      - use: meta-node
-      - use: compute-node
-      - use: frontend
-      - use: compactor
-      - use: prometheus
-      - use: grafana
-      - use: zookeeper
-        persist-data: true
-      - use: kafka
-        persist-data: true
-      - use: connector-node
-
   standalone-full-peripherals:
     steps:
       - use: minio
@@ -137,13 +118,26 @@ profile:
       - use: frontend
         user-managed: true
       - use: compactor
+        user-managed: true
       - use: prometheus
       - use: grafana
       - use: zookeeper
         persist-data: true
       - use: kafka
         persist-data: true
-      - use: connector-node
+
+  standalone-minio-etcd:
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+        user-managed: true
+      - use: compute-node
+        user-managed: true
+      - use: frontend
+        user-managed: true
+      - use: compactor
+        user-managed: true
 
   standalone-minio-etcd-compactor:
     steps:
@@ -156,23 +150,6 @@ profile:
       - use: frontend
         user-managed: true
       - use: compactor
-
-  standalone-full-peripherals-without-kafka:
-    steps:
-      - use: minio
-      - use: etcd
-      - use: meta-node
-        user-managed: true
-      - use: compute-node
-        user-managed: true
-      - use: frontend
-        user-managed: true
-      - use: compactor
-      - use: prometheus
-      - use: grafana
-      - use: zookeeper
-        persist-data: true
-      - use: connector-node
 
   hdfs:
     steps:
@@ -805,6 +782,16 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-pulsar-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
   hummock-trace:
     config-path: src/config/hummock-trace.toml
     steps:
@@ -815,7 +802,7 @@ profile:
       - use: compactor
 
   ci-backfill:
-    config-path: "src/config/backfill.toml"
+    config-path: "src/config/ci-backfill.toml"
     steps:
       - use: minio
       - use: etcd
@@ -927,9 +914,6 @@ template:
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
 
-    # RPC endpoint for connector node
-    connector-rpc-endpoint: "127.0.0.1:50051"
-
     # Minio instances used by this compute node
     provide-minio: "minio*"
 
@@ -974,9 +958,6 @@ template:
 
     # Id of this instance
     id: meta-node-${port}
-
-    # RPC endpoint for connector node colocated with Meta
-    connector-rpc-endpoint: "127.0.0.1:50051"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
@@ -1051,9 +1032,6 @@ template:
     # Frontend used by this Prometheus instance
     provide-frontend: "frontend*"
 
-    # Connector-node used by this Prometheus instance
-    provide-connector-node: "connector*"
-
   frontend:
     # Advertise address of frontend
     address: "127.0.0.1"
@@ -1110,19 +1088,6 @@ template:
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
-  connector-node:
-    # Connector node advertise address
-    address: "127.0.0.1"
-
-    # Connector node listen port
-    port: 50051
-
-    # Prometheus exporter listen port
-    exporter-port: 50052
-
-    # Id of this instance
-    id: connector-${port}
-
   grafana:
     # Listen address of Grafana
     listen-address: ${address}
@@ -1166,7 +1131,6 @@ template:
     namenode: 127.0.0.1:9000
 
     bucket: risingwave-test
-
 
   # aws-s3 is a placeholder service to provide configurations
   aws-s3:

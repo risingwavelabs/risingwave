@@ -14,6 +14,7 @@
 
 //! Parse the tokens of the macro.
 
+use quote::ToTokens;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::{LitStr, Token};
@@ -27,9 +28,10 @@ impl Parse for FunctionAttr {
 
         let sig = input.parse::<LitStr>()?;
         let sig_str = sig.value();
-        let (name_args, ret) = sig_str
-            .split_once("->")
-            .ok_or_else(|| Error::new_spanned(&sig, "expected '->'"))?;
+        let (name_args, ret) = match sig_str.split_once("->") {
+            Some((name_args, ret)) => (name_args, ret),
+            None => (sig_str.as_str(), "void"),
+        };
         let (name, args) = name_args
             .split_once('(')
             .ok_or_else(|| Error::new_spanned(&sig, "expected '('"))?;
@@ -73,8 +75,14 @@ impl Parse for FunctionAttr {
                 parsed.prebuild = Some(get_value()?);
             } else if meta.path().is_ident("type_infer") {
                 parsed.type_infer = Some(get_value()?);
+            } else if meta.path().is_ident("generic") {
+                parsed.generic = Some(get_value()?);
+            } else if meta.path().is_ident("volatile") {
+                parsed.volatile = true;
             } else if meta.path().is_ident("deprecated") {
                 parsed.deprecated = true;
+            } else if meta.path().is_ident("append_only") {
+                parsed.append_only = true;
             } else {
                 return Err(Error::new(
                     meta.span(),
@@ -89,43 +97,117 @@ impl Parse for FunctionAttr {
 impl Parse for UserFunctionAttr {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let itemfn: syn::ItemFn = input.parse()?;
-        let sig = &itemfn.sig;
-        let (return_type, iterator_item_type) = match &sig.output {
-            syn::ReturnType::Default => (ReturnType::T, None),
+        Ok(UserFunctionAttr::from(&itemfn.sig))
+    }
+}
+
+impl From<&syn::Signature> for UserFunctionAttr {
+    fn from(sig: &syn::Signature) -> Self {
+        let (return_type_kind, iterator_item_kind, core_return_type) = match &sig.output {
+            syn::ReturnType::Default => (ReturnTypeKind::T, None, "()".into()),
             syn::ReturnType::Type(_, ty) => {
-                let (return_type, inner) = check_type(ty);
-                let iterator_item_type = strip_iterator(inner).map(|ty| check_type(ty).0);
-                (return_type, iterator_item_type)
+                let (kind, inner) = check_type(ty);
+                match strip_iterator(inner) {
+                    Some(ty) => {
+                        let (inner_kind, inner) = check_type(ty);
+                        (kind, Some(inner_kind), inner.to_token_stream().to_string())
+                    }
+                    None => (kind, None, inner.to_token_stream().to_string()),
+                }
             }
         };
-        Ok(UserFunctionAttr {
+        UserFunctionAttr {
             name: sig.ident.to_string(),
-            write: last_arg_is_write(sig),
+            async_: sig.asyncness.is_some(),
+            write: sig.inputs.iter().any(arg_is_write),
+            context: sig.inputs.iter().any(arg_is_context),
             retract: last_arg_is_retract(sig),
             arg_option: args_contain_option(sig),
-            return_type,
-            iterator_item_type,
+            return_type_kind,
+            iterator_item_kind,
+            core_return_type,
             generic: sig.generics.params.len(),
             return_type_span: sig.output.span(),
+        }
+    }
+}
+
+impl Parse for AggregateImpl {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let itemimpl: syn::ItemImpl = input.parse()?;
+        let parse_function = |name: &str| {
+            itemimpl.items.iter().find_map(|item| match item {
+                syn::ImplItem::Fn(syn::ImplItemFn { sig, .. }) if sig.ident == name => {
+                    Some(UserFunctionAttr::from(sig))
+                }
+                _ => None,
+            })
+        };
+        let self_path = itemimpl.self_ty.to_token_stream().to_string();
+        let struct_name = match self_path.split_once('<') {
+            Some((path, _)) => path.trim().into(), // remove generic parameters
+            None => self_path,
+        };
+        Ok(AggregateImpl {
+            struct_name,
+            accumulate: parse_function("accumulate").expect("expect accumulate function"),
+            retract: parse_function("retract"),
+            merge: parse_function("merge"),
+            finalize: parse_function("finalize"),
+            create_state: parse_function("create_state"),
+            encode_state: parse_function("encode_state"),
+            decode_state: parse_function("decode_state"),
         })
     }
 }
 
-/// Check if the last argument is `&mut dyn Write`.
-fn last_arg_is_write(sig: &syn::Signature) -> bool {
-    let Some(syn::FnArg::Typed(arg)) = sig.inputs.last() else {
+impl Parse for AggregateFnOrImpl {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        // consume attributes
+        let _ = input.call(syn::Attribute::parse_outer)?;
+        if input.peek(Token![impl]) {
+            Ok(AggregateFnOrImpl::Impl(input.parse()?))
+        } else {
+            Ok(AggregateFnOrImpl::Fn(input.parse()?))
+        }
+    }
+}
+
+/// Check if the argument is `&mut impl Write`.
+fn arg_is_write(arg: &syn::FnArg) -> bool {
+    let syn::FnArg::Typed(arg) = arg else {
         return false;
     };
     let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else {
         return false;
     };
-    let syn::Type::TraitObject(syn::TypeTraitObject { bounds, .. }) = elem.as_ref() else {
+    let syn::Type::ImplTrait(syn::TypeImplTrait { bounds, .. }) = elem.as_ref() else {
         return false;
     };
     let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else {
         return false;
     };
-    path.segments.last().map_or(false, |s| s.ident == "Write")
+    let Some(seg) = path.segments.last() else {
+        return false;
+    };
+    seg.ident == "Write"
+}
+
+/// Check if the argument is `&Context`.
+fn arg_is_context(arg: &syn::FnArg) -> bool {
+    let syn::FnArg::Typed(arg) = arg else {
+        return false;
+    };
+    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else {
+        return false;
+    };
+    let syn::Type::Path(path) = elem.as_ref() else {
+        return false;
+    };
+    let Some(seg) = path.path.segments.last() else {
+        return false;
+    };
+    seg.ident == "Context"
 }
 
 /// Check if the last argument is `retract: bool`.
@@ -162,19 +244,19 @@ fn args_contain_option(sig: &syn::Signature) -> bool {
 }
 
 /// Check the return type.
-fn check_type(ty: &syn::Type) -> (ReturnType, &syn::Type) {
+fn check_type(ty: &syn::Type) -> (ReturnTypeKind, &syn::Type) {
     if let Some(inner) = strip_outer_type(ty, "Result") {
         if let Some(inner) = strip_outer_type(inner, "Option") {
-            (ReturnType::ResultOption, inner)
+            (ReturnTypeKind::ResultOption, inner)
         } else {
-            (ReturnType::Result, inner)
+            (ReturnTypeKind::Result, inner)
         }
     } else if let Some(inner) = strip_outer_type(ty, "Option") {
-        (ReturnType::Option, inner)
+        (ReturnTypeKind::Option, inner)
     } else if let Some(inner) = strip_outer_type(ty, "DatumRef") {
-        (ReturnType::Option, inner)
+        (ReturnTypeKind::Option, inner)
     } else {
-        (ReturnType::T, ty)
+        (ReturnTypeKind::T, ty)
     }
 }
 

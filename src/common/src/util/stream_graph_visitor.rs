@@ -95,7 +95,7 @@ fn visit_stream_node_tables_inner<F>(
             // Aggregation
             NodeBody::HashAgg(node) => {
                 assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
-                always!(node.result_table, "HashAggResult");
+                always!(node.intermediate_state_table, "HashAggState");
                 for (call_idx, state) in node.agg_call_states.iter_mut().enumerate() {
                     match state.inner.as_mut().unwrap() {
                         agg_call_state::Inner::ValueState(_) => {}
@@ -110,7 +110,7 @@ fn visit_stream_node_tables_inner<F>(
             }
             NodeBody::SimpleAgg(node) => {
                 assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
-                always!(node.result_table, "SimpleAggResult");
+                always!(node.intermediate_state_table, "SimpleAggState");
                 for (call_idx, state) in node.agg_call_states.iter_mut().enumerate() {
                     match state.inner.as_mut().unwrap() {
                         agg_call_state::Inner::ValueState(_) => {}
@@ -145,6 +145,11 @@ fn visit_stream_node_tables_inner<F>(
             NodeBody::Source(node) => {
                 if let Some(source) = &mut node.source_inner {
                     always!(source.state_table, "Source");
+                }
+            }
+            NodeBody::StreamFsFetch(node) => {
+                if let Some(source) = &mut node.node_inner {
+                    always!(source.state_table, "FsFetch");
                 }
             }
 

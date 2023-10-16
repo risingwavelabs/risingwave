@@ -41,13 +41,14 @@ use hyper::Body;
 use itertools::Itertools;
 use risingwave_common::config::default::s3_objstore_config;
 use risingwave_common::monitor::connection::monitor_connector;
+use risingwave_common::range::RangeBoundsExt;
 use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
-    BlockLocation, BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectResult,
+    BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectRangeBounds, ObjectResult,
     ObjectStore, StreamingUploader,
 };
 use crate::object::{try_update_failure_metric, ObjectMetadataIter};
@@ -347,29 +348,16 @@ impl ObjectStore for S3ObjectStore {
     }
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+    async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         fail_point!("s3_read_err", |_| Err(ObjectError::internal(
             "s3 read error"
         )));
-
-        let (start_pos, end_pos) = block_loc.as_ref().map_or((None, None), |block_loc| {
-            (
-                Some(block_loc.offset),
-                Some(
-                    block_loc.offset + block_loc.size - 1, // End is inclusive.
-                ),
-            )
-        });
 
         // retry if occurs AWS EC2 HTTP timeout error.
         let resp = tokio_retry::RetryIf::spawn(
             self.config.get_retry_strategy(),
             || async {
-                match self
-                    .obj_store_request(path, start_pos, end_pos)
-                    .send()
-                    .await
-                {
+                match self.obj_store_request(path, range.clone()).send().await {
                     Ok(resp) => Ok(resp),
                     Err(err) => {
                         if let SdkError::DispatchFailure(e) = &err
@@ -391,24 +379,17 @@ impl ObjectStore for S3ObjectStore {
 
         let val = resp.body.collect().await?.into_bytes();
 
-        if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
+        if let Some(len) = range.len() && len != val.len() {
             return Err(ObjectError::internal(format!(
                 "mismatched size: expected {}, found {} when reading {} at {:?}",
-                block_loc.as_ref().unwrap().size,
+                len,
                 val.len(),
                 path,
-                block_loc.as_ref().unwrap()
+                range,
             )));
         }
-        Ok(val)
-    }
 
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
-        let futures = block_locs
-            .iter()
-            .map(|block_loc| self.read(path, Some(*block_loc)))
-            .collect_vec();
-        try_join_all(futures).await
+        Ok(val)
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -448,7 +429,11 @@ impl ObjectStore for S3ObjectStore {
         let resp = tokio_retry::RetryIf::spawn(
             self.config.get_retry_strategy(),
             || async {
-                match self.obj_store_request(path, start_pos, None).send().await {
+                match self
+                    .obj_store_request(path, start_pos.unwrap_or_default()..)
+                    .send()
+                    .await
+                {
                     Ok(resp) => Ok(resp),
                     Err(err) => {
                         if let SdkError::DispatchFailure(e) = &err
@@ -631,7 +616,16 @@ impl S3ObjectStore {
     pub async fn with_minio(server: &str, metrics: Arc<ObjectStoreMetrics>) -> Self {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
-        let (secret_access_key, rest) = rest.split_once('@').unwrap();
+        let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
+        let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
+            rest = rest_stripped;
+            "https://"
+        } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
+            rest = rest_stripped;
+            "http://"
+        } else {
+            "http://"
+        };
         let (address, bucket) = rest.split_once('/').unwrap();
 
         #[cfg(madsim)]
@@ -641,10 +635,9 @@ impl S3ObjectStore {
             aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
                 .force_path_style(true)
                 .http_connector(Self::new_http_connector(&S3ObjectStoreConfig::default()));
-
         let config = builder
             .region(Region::new("custom"))
-            .endpoint_url(format!("http://{}", address))
+            .endpoint_url(format!("{}{}", endpoint_prefix, address))
             .credentials_provider(Credentials::from_keys(
                 access_key_id,
                 secret_access_key,
@@ -675,25 +668,18 @@ impl S3ObjectStore {
     fn obj_store_request(
         &self,
         path: &str,
-        start_pos: Option<usize>,
-        end_pos: Option<usize>,
+        range: impl ObjectRangeBounds,
     ) -> GetObjectFluentBuilder {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
 
-        match (start_pos, end_pos) {
-            (None, None) => {
-                // No range is given. Return request as is.
-                req
-            }
-            _ => {
-                // At least one boundary is given. Return request with range limitation.
-                req.range(format!(
-                    "bytes={}-{}",
-                    start_pos.map_or(String::new(), |pos| pos.to_string()),
-                    end_pos.map_or(String::new(), |pos| pos.to_string())
-                ))
-            }
+        if range.is_full() {
+            return req;
         }
+
+        let start = range.start().map(|v| v.to_string()).unwrap_or_default();
+        let end = range.end().map(|v| (v - 1).to_string()).unwrap_or_default(); // included
+
+        req.range(format!("bytes={}-{}", start, end))
     }
 
     // When multipart upload is aborted, if any part uploads are in progress, those part uploads
@@ -722,7 +708,7 @@ impl S3ObjectStore {
             .send()
             .await;
         if let Ok(config) = &get_config_result {
-            for rule in config.rules().unwrap_or_default().iter() {
+            for rule in config.rules().unwrap_or_default() {
                 if matches!(rule.status().unwrap(), ExpirationStatus::Enabled)
                     && rule.abort_incomplete_multipart_upload().is_some()
                 {

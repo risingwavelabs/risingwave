@@ -3,7 +3,7 @@
 [server]
 heartbeat_interval_ms = 1000
 connection_pool_size = 16
-metrics_level = 0
+metrics_level = "Info"
 telemetry_enabled = true
 
 [server.auto_dump_heap_profile]
@@ -75,6 +75,7 @@ stream_exchange_initial_permits = 2048
 stream_exchange_batched_permits = 256
 stream_exchange_concurrent_barriers = 1
 stream_dml_channel_initial_permits = 32768
+stream_hash_agg_max_dirty_groups_heap_size = 67108864
 
 [storage]
 share_buffers_sync_parallelism = 1
@@ -146,5 +147,4 @@ block_size_kb = 64
 bloom_false_positive = 0.001
 backup_storage_url = "memory"
 backup_storage_directory = "backup"
-telemetry_enabled = true
 max_concurrent_creating_streaming_jobs = 1

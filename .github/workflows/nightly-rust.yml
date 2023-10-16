@@ -11,6 +11,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      -  name: Maximize build space
+         uses: easimon/maximize-build-space@master
+         with:
+           remove-dotnet: 'true'
+           remove-android: 'true'
+           remove-haskell: 'true'
+           remove-codeql: 'true'
+           remove-docker-images: 'true'
+           root-reserve-mb: 2048
       - uses: actions/checkout@v3
       - name: Setup Rust toolchain
         run: |
@@ -18,6 +27,8 @@ jobs:
           rustup update nightly
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
-      - name: cargo build
+      - name: cargo check
         run: |
-          cargo build
+          export CARGO_INCREMENTAL=0
+          export CARGO_PROFILE_DEV_DEBUG=false
+          cargo check

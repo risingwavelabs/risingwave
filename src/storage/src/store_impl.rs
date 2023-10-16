@@ -15,6 +15,7 @@
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -22,15 +23,12 @@ use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::error::StorageResult;
-use crate::filter_key_extractor::{
-    FilterKeyExtractorManager, RemoteTableAccessor, RpcFilterKeyExtractorManager,
-};
-use crate::hummock::backup_reader::BackupReaderRef;
+use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
+use crate::hummock::file_cache::preclude::*;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError, HummockStorage, MemoryLimiter,
-    SstableObjectIdManagerRef, SstableStore,
+    set_foyer_metrics_registry, FileCache, FileCacheConfig, HummockError, HummockStorage,
+    RecentFilter, SstableStore,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -41,9 +39,9 @@ use crate::monitor::{
 use crate::opts::StorageOpts;
 use crate::StateStore;
 
-pub type HummockStorageType = impl StateStore + AsHummockTrait;
-pub type MemoryStateStoreType = impl StateStore + AsHummockTrait;
-pub type SledStateStoreType = impl StateStore + AsHummockTrait;
+pub type HummockStorageType = impl StateStore + AsHummock;
+pub type MemoryStateStoreType = impl StateStore + AsHummock;
+pub type SledStateStoreType = impl StateStore + AsHummock;
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
@@ -66,9 +64,7 @@ pub enum StateStoreImpl {
     SledStateStore(Monitored<SledStateStoreType>),
 }
 
-fn may_dynamic_dispatch(
-    state_store: impl StateStore + AsHummockTrait,
-) -> impl StateStore + AsHummockTrait {
+fn may_dynamic_dispatch(state_store: impl StateStore + AsHummock) -> impl StateStore + AsHummock {
     #[cfg(not(debug_assertions))]
     {
         state_store
@@ -80,7 +76,7 @@ fn may_dynamic_dispatch(
     }
 }
 
-fn may_verify(state_store: impl StateStore + AsHummockTrait) -> impl StateStore + AsHummockTrait {
+fn may_verify(state_store: impl StateStore + AsHummock) -> impl StateStore + AsHummock {
     #[cfg(not(debug_assertions))]
     {
         state_store
@@ -143,30 +139,11 @@ impl StateStoreImpl {
         )
     }
 
-    pub fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
-        {
-            match self {
-                StateStoreImpl::HummockStateStore(hummock) => Some(
-                    hummock
-                        .inner()
-                        .as_hummock_trait()
-                        .expect("should be hummock"),
-                ),
-                _ => None,
-            }
-        }
-    }
-
     pub fn as_hummock(&self) -> Option<&HummockStorage> {
         match self {
-            StateStoreImpl::HummockStateStore(hummock) => Some(
-                hummock
-                    .inner()
-                    .as_hummock_trait()
-                    .expect("should be hummock")
-                    .as_hummock()
-                    .expect("should be hummock"),
-            ),
+            StateStoreImpl::HummockStateStore(hummock) => {
+                Some(hummock.inner().as_hummock().expect("should be hummock"))
+            }
             _ => None,
         }
     }
@@ -230,13 +207,15 @@ pub mod verify {
     use bytes::Bytes;
     use futures::{pin_mut, TryStreamExt};
     use futures_async_stream::try_stream;
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
     use crate::error::{StorageError, StorageResult};
+    use crate::hummock::HummockStorage;
     use crate::storage_value::StorageValue;
     use crate::store::*;
-    use crate::store_impl::{AsHummockTrait, HummockTrait};
+    use crate::store_impl::AsHummock;
     use crate::StateStore;
 
     fn assert_result_eq<Item: PartialEq + Debug, E>(
@@ -263,9 +242,9 @@ pub mod verify {
         pub expected: Option<E>,
     }
 
-    impl<A: AsHummockTrait, E> AsHummockTrait for VerifyStateStore<A, E> {
-        fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
-            self.actual.as_hummock_trait()
+    impl<A: AsHummock, E> AsHummock for VerifyStateStore<A, E> {
+        fn as_hummock(&self) -> Option<&HummockStorage> {
+            self.actual.as_hummock()
         }
     }
 
@@ -274,7 +253,7 @@ pub mod verify {
 
         async fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>> {
@@ -294,7 +273,7 @@ pub mod verify {
         #[allow(clippy::manual_async_fn)]
         fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
@@ -340,7 +319,7 @@ pub mod verify {
     impl<A: StateStoreWrite, E: StateStoreWrite> StateStoreWrite for VerifyStateStore<A, E> {
         async fn ingest_batch(
             &self,
-            kv_pairs: Vec<(Bytes, StorageValue)>,
+            kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
             write_options: WriteOptions,
         ) -> StorageResult<usize> {
@@ -379,13 +358,17 @@ pub mod verify {
         // be consistent across different state store backends.
         fn may_exist(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
             self.actual.may_exist(key_range, read_options)
         }
 
-        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
+        async fn get(
+            &self,
+            key: TableKey<Bytes>,
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>> {
             let actual = self.actual.get(key.clone(), read_options.clone()).await;
             if let Some(expected) = &self.expected {
                 let expected = expected.get(key, read_options).await;
@@ -397,7 +380,7 @@ pub mod verify {
         #[allow(clippy::manual_async_fn)]
         fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
             async move {
@@ -417,7 +400,7 @@ pub mod verify {
 
         fn insert(
             &mut self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()> {
@@ -429,7 +412,7 @@ pub mod verify {
             Ok(())
         }
 
-        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
             if let Some(expected) = &mut self.expected {
                 expected.delete(key.clone(), old_val.clone())?;
             }
@@ -454,11 +437,12 @@ pub mod verify {
             self.actual.try_flush().await
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.actual.init(epoch);
+        async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+            self.actual.init(options.clone()).await?;
             if let Some(expected) = &mut self.expected {
-                expected.init(epoch);
+                expected.init(options).await?;
             }
+            Ok(())
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -548,12 +532,15 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
-        let data_file_cache = if opts.data_file_cache_dir.is_empty() {
-            FileCache::none()
+        set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
+
+        let (data_file_cache, recent_filter) = if opts.data_file_cache_dir.is_empty() {
+            (FileCache::none(), None)
         } else {
             const MB: usize = 1024 * 1024;
 
-            let foyer_store_config = FoyerStoreConfig {
+            let config = FileCacheConfig {
+                name: "data".to_string(),
                 dir: PathBuf::from(opts.data_file_cache_dir.clone()),
                 capacity: opts.data_file_cache_capacity_mb * MB,
                 file_capacity: opts.data_file_cache_file_capacity_mb * MB,
@@ -562,24 +549,27 @@ impl StateStoreImpl {
                 device_io_size: opts.data_file_cache_device_io_size,
                 lfu_window_to_cache_size_ratio: opts.data_file_cache_lfu_window_to_cache_size_ratio,
                 lfu_tiny_lru_capacity_ratio: opts.data_file_cache_lfu_tiny_lru_capacity_ratio,
-                rated_random_rate: opts.data_file_cache_rated_random_rate_mb * MB,
+                insert_rate_limit: opts.data_file_cache_insert_rate_limit_mb * MB,
                 flushers: opts.data_file_cache_flushers,
                 reclaimers: opts.data_file_cache_reclaimers,
                 flush_rate_limit: opts.data_file_cache_flush_rate_limit_mb * MB,
                 reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
-                event_listener: vec![],
-                prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.clone()),
-                prometheus_namespace: Some("data".to_string()),
-                enable_filter: !opts.cache_refill_data_refill_levels.is_empty(),
+                allocator_bits: opts.data_file_cache_allocation_bits,
+                allocation_timeout: Duration::from_millis(
+                    opts.data_file_cache_allocation_timeout_ms as u64,
+                ),
+                admissions: vec![],
+                reinsertions: vec![],
             };
-            let config = FoyerRuntimeConfig {
-                foyer_store_config,
-                runtime_worker_threads: None,
-            };
-            FileCache::foyer(config)
+            let cache = FileCache::open(config)
                 .await
-                .map_err(HummockError::file_cache)?
+                .map_err(HummockError::file_cache)?;
+            let filter = Some(Arc::new(RecentFilter::new(
+                opts.cache_refill_recent_filter_layers,
+                Duration::from_millis(opts.cache_refill_recent_filter_rotate_interval_ms as u64),
+            )));
+            (cache, filter)
         };
 
         let meta_file_cache = if opts.meta_file_cache_dir.is_empty() {
@@ -587,7 +577,8 @@ impl StateStoreImpl {
         } else {
             const MB: usize = 1024 * 1024;
 
-            let foyer_store_config = FoyerStoreConfig {
+            let config = FileCacheConfig {
+                name: "meta".to_string(),
                 dir: PathBuf::from(opts.meta_file_cache_dir.clone()),
                 capacity: opts.meta_file_cache_capacity_mb * MB,
                 file_capacity: opts.meta_file_cache_file_capacity_mb * MB,
@@ -596,22 +587,20 @@ impl StateStoreImpl {
                 device_io_size: opts.meta_file_cache_device_io_size,
                 lfu_window_to_cache_size_ratio: opts.meta_file_cache_lfu_window_to_cache_size_ratio,
                 lfu_tiny_lru_capacity_ratio: opts.meta_file_cache_lfu_tiny_lru_capacity_ratio,
-                rated_random_rate: opts.meta_file_cache_rated_random_rate_mb * MB,
+                insert_rate_limit: opts.meta_file_cache_insert_rate_limit_mb * MB,
                 flushers: opts.meta_file_cache_flushers,
                 reclaimers: opts.meta_file_cache_reclaimers,
                 flush_rate_limit: opts.meta_file_cache_flush_rate_limit_mb * MB,
                 reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
-                event_listener: vec![],
-                prometheus_registry: Some(GLOBAL_METRICS_REGISTRY.clone()),
-                prometheus_namespace: Some("meta".to_string()),
-                enable_filter: false,
+                allocator_bits: opts.meta_file_cache_allocation_bits,
+                allocation_timeout: Duration::from_millis(
+                    opts.meta_file_cache_allocation_timeout_ms as u64,
+                ),
+                admissions: vec![],
+                reinsertions: vec![],
             };
-            let config = FoyerRuntimeConfig {
-                foyer_store_config,
-                runtime_worker_threads: None,
-            };
-            FileCache::foyer(config)
+            FileCache::open(config)
                 .await
                 .map_err(HummockError::file_cache)?
         };
@@ -639,6 +628,7 @@ impl StateStoreImpl {
                     opts.high_priority_ratio,
                     data_file_cache,
                     meta_file_cache,
+                    recent_filter,
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
@@ -677,60 +667,24 @@ impl StateStoreImpl {
     }
 }
 
-/// This trait is for aligning some common methods of `state_store_impl` for external use
-pub trait HummockTrait {
-    fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef;
-    fn sstable_store(&self) -> SstableStoreRef;
-    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManager;
-    fn get_memory_limiter(&self) -> Arc<MemoryLimiter>;
-    fn backup_reader(&self) -> BackupReaderRef;
+pub trait AsHummock {
     fn as_hummock(&self) -> Option<&HummockStorage>;
 }
 
-impl HummockTrait for HummockStorage {
-    fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
-        self.sstable_object_id_manager()
-    }
-
-    fn sstable_store(&self) -> SstableStoreRef {
-        self.sstable_store()
-    }
-
-    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManager {
-        self.filter_key_extractor_manager()
-    }
-
-    fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
-        self.get_memory_limiter()
-    }
-
-    fn backup_reader(&self) -> BackupReaderRef {
-        self.backup_reader()
-    }
-
+impl AsHummock for HummockStorage {
     fn as_hummock(&self) -> Option<&HummockStorage> {
         Some(self)
     }
 }
 
-pub trait AsHummockTrait {
-    fn as_hummock_trait(&self) -> Option<&dyn HummockTrait>;
-}
-
-impl AsHummockTrait for HummockStorage {
-    fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
-        Some(self)
-    }
-}
-
-impl AsHummockTrait for MemoryStateStore {
-    fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
+impl AsHummock for MemoryStateStore {
+    fn as_hummock(&self) -> Option<&HummockStorage> {
         None
     }
 }
 
-impl AsHummockTrait for SledStateStore {
-    fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
+impl AsHummock for SledStateStore {
+    fn as_hummock(&self) -> Option<&HummockStorage> {
         None
     }
 }
@@ -741,13 +695,16 @@ pub mod boxed_state_store {
     use std::ops::{Bound, Deref, DerefMut};
 
     use bytes::Bytes;
+    use dyn_clone::{clone_trait_object, DynClone};
     use futures::stream::BoxStream;
     use futures::StreamExt;
+    use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
+    use crate::hummock::HummockStorage;
     use crate::store::*;
-    use crate::store_impl::{AsHummockTrait, HummockTrait};
+    use crate::store_impl::AsHummock;
     use crate::StateStore;
 
     // For StateStoreRead
@@ -758,14 +715,14 @@ pub mod boxed_state_store {
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
         async fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>>;
 
         async fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIterStream>;
@@ -775,7 +732,7 @@ pub mod boxed_state_store {
     impl<S: StateStoreRead> DynamicDispatchedStateStoreRead for S {
         async fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>> {
@@ -784,7 +741,7 @@ pub mod boxed_state_store {
 
         async fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIterStream> {
@@ -798,26 +755,30 @@ pub mod boxed_state_store {
     pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
         async fn may_exist(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<bool>;
 
-        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>>;
+        async fn get(
+            &self,
+            key: TableKey<Bytes>,
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>>;
 
         async fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>>;
 
         fn insert(
             &mut self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()>;
 
-        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
+        fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()>;
 
         async fn flush(
             &mut self,
@@ -830,7 +791,7 @@ pub mod boxed_state_store {
 
         fn is_dirty(&self) -> bool;
 
-        fn init(&mut self, epoch: u64);
+        async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
         fn seal_current_epoch(&mut self, next_epoch: u64);
     }
@@ -839,19 +800,23 @@ pub mod boxed_state_store {
     impl<S: LocalStateStore> DynamicDispatchedLocalStateStore for S {
         async fn may_exist(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<bool> {
             self.may_exist(key_range, read_options).await
         }
 
-        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
+        async fn get(
+            &self,
+            key: TableKey<Bytes>,
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>> {
             self.get(key, read_options).await
         }
 
         async fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>> {
             Ok(self.iter(key_range, read_options).await?.boxed())
@@ -859,14 +824,14 @@ pub mod boxed_state_store {
 
         fn insert(
             &mut self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()> {
             self.insert(key, new_val, old_val)
         }
 
-        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
             self.delete(key, old_val)
         }
 
@@ -889,8 +854,8 @@ pub mod boxed_state_store {
             self.is_dirty()
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.init(epoch)
+        async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
+            self.init(options).await
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -905,7 +870,7 @@ pub mod boxed_state_store {
 
         fn may_exist(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<bool>> + Send + '_ {
             self.deref().may_exist(key_range, read_options)
@@ -913,7 +878,7 @@ pub mod boxed_state_store {
 
         fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
             self.deref().get(key, read_options)
@@ -921,7 +886,7 @@ pub mod boxed_state_store {
 
         fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
             self.deref().iter(key_range, read_options)
@@ -929,14 +894,14 @@ pub mod boxed_state_store {
 
         fn insert(
             &mut self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()> {
             self.deref_mut().insert(key, new_val, old_val)
         }
 
-        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
             self.deref_mut().delete(key, old_val)
         }
 
@@ -959,8 +924,11 @@ pub mod boxed_state_store {
             self.deref().is_dirty()
         }
 
-        fn init(&mut self, epoch: u64) {
-            self.deref_mut().init(epoch)
+        fn init(
+            &mut self,
+            options: InitOptions,
+        ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            self.deref_mut().init(options)
         }
 
         fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -1019,7 +987,7 @@ pub mod boxed_state_store {
 
         fn get(
             &self,
-            key: Bytes,
+            key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
@@ -1028,7 +996,7 @@ pub mod boxed_state_store {
 
         fn iter(
             &self,
-            key_range: IterKeyRange,
+            key_range: TableKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
@@ -1036,44 +1004,23 @@ pub mod boxed_state_store {
         }
     }
 
-    // With this trait, we can implement `Clone` for BoxDynamicDispatchedStateStore
-    pub trait DynamicDispatchedStateStoreCloneBox {
-        fn clone_box(&self) -> BoxDynamicDispatchedStateStore;
+    pub trait DynamicDispatchedStateStore:
+        DynClone + DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreExt + AsHummock
+    {
     }
 
-    pub trait DynamicDispatchedStateStore:
-        DynamicDispatchedStateStoreCloneBox
-        + DynamicDispatchedStateStoreRead
-        + DynamicDispatchedStateStoreExt
-        + AsHummockTrait
-    {
+    clone_trait_object!(DynamicDispatchedStateStore);
+
+    impl AsHummock for BoxDynamicDispatchedStateStore {
+        fn as_hummock(&self) -> Option<&HummockStorage> {
+            self.deref().as_hummock()
+        }
     }
 
     impl<
-            S: DynamicDispatchedStateStoreCloneBox
-                + DynamicDispatchedStateStoreRead
-                + DynamicDispatchedStateStoreExt
-                + AsHummockTrait,
+            S: DynClone + DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreExt + AsHummock,
         > DynamicDispatchedStateStore for S
     {
-    }
-
-    impl<S: StateStore + AsHummockTrait> DynamicDispatchedStateStoreCloneBox for S {
-        fn clone_box(&self) -> BoxDynamicDispatchedStateStore {
-            Box::new(self.clone())
-        }
-    }
-
-    impl AsHummockTrait for BoxDynamicDispatchedStateStore {
-        fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
-            self.deref().as_hummock_trait()
-        }
-    }
-
-    impl Clone for BoxDynamicDispatchedStateStore {
-        fn clone(&self) -> Self {
-            self.deref().clone_box()
-        }
     }
 
     impl StateStore for BoxDynamicDispatchedStateStore {

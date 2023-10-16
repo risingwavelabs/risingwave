@@ -534,7 +534,7 @@
                 └─BatchExchange { order: [], dist: HashShard(t.x) }
                   └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, k, sum_x, t.x(hidden)], stream_key: [k, t.x, x], pk_columns: [k, t.x, x], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, k, sum_x, t.x(hidden)], stream_key: [k, x], pk_columns: [k, x], pk_conflict: NoCheck }
     └─StreamHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, t.y, t.k, sum(Unnest($0)), t.x] }
       ├─StreamExchange { dist: HashShard(t.x) }
       │ └─StreamTableScan { table: t, columns: [t.x, t.y, t.k], pk: [t.k], dist: UpstreamHashShard(t.k) }
@@ -582,29 +582,29 @@
     create table t(x int[], y int[], k int primary key);
     select *, (select sum(i) from (select unnest(x) i, 1 c) Q where k = c ) as sum_x from t;
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.y, t.k, sum(Unnest($0))] }
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, first_value(t.x order_by(t.x ASC))) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.y, t.k, sum(Unnest($0))] }
     ├─LogicalScan { table: t, columns: [t.x, t.y, t.k] }
-    └─LogicalAgg { group_key: [t.x, t.k], aggs: [sum(Unnest($0))] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.k, Unnest($0)] }
-        ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+    └─LogicalAgg { group_key: [first_value(t.x order_by(t.x ASC)), t.k], aggs: [sum(Unnest($0))] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(first_value(t.x order_by(t.x ASC)), first_value(t.x order_by(t.x ASC))) AND IsNotDistinctFrom(t.k, t.k), output: [first_value(t.x order_by(t.x ASC)), t.k, Unnest($0)] }
+        ├─LogicalAgg { group_key: [t.k], aggs: [first_value(t.x order_by(t.x ASC))] }
         │ └─LogicalScan { table: t, columns: [t.x, t.k] }
-        └─LogicalProject { exprs: [t.x, t.k, Unnest($0)] }
+        └─LogicalProject { exprs: [first_value(t.x order_by(t.x ASC)), t.k, Unnest($0)] }
           └─LogicalProjectSet { select_list: [$0, $1, Unnest($0)] }
-            └─LogicalJoin { type: Inner, on: true, output: all }
-              ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+            └─LogicalJoin { type: Inner, on: true, output: [first_value(t.x order_by(t.x ASC)), t.k] }
+              ├─LogicalAgg { group_key: [t.k], aggs: [first_value(t.x order_by(t.x ASC))] }
               │ └─LogicalScan { table: t, columns: [t.x, t.k], predicate: (t.k = 1:Int32) }
               └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan_for_stream: |-
-    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.y, t.k, sum(Unnest($0))] }
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, first_value(t.x order_by(t.x ASC))) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.y, t.k, sum(Unnest($0))] }
     ├─LogicalScan { table: t, columns: [t.x, t.y, t.k] }
-    └─LogicalAgg { group_key: [t.x, t.k], aggs: [sum(Unnest($0))] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t.x, t.x) AND IsNotDistinctFrom(t.k, t.k), output: [t.x, t.k, Unnest($0)] }
-        ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+    └─LogicalAgg { group_key: [first_value(t.x order_by(t.x ASC)), t.k], aggs: [sum(Unnest($0))] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(first_value(t.x order_by(t.x ASC)), first_value(t.x order_by(t.x ASC))) AND IsNotDistinctFrom(t.k, t.k), output: [first_value(t.x order_by(t.x ASC)), t.k, Unnest($0)] }
+        ├─LogicalAgg { group_key: [t.k], aggs: [first_value(t.x order_by(t.x ASC))] }
         │ └─LogicalScan { table: t, columns: [t.x, t.k] }
-        └─LogicalProject { exprs: [t.x, t.k, Unnest($0)] }
+        └─LogicalProject { exprs: [first_value(t.x order_by(t.x ASC)), t.k, Unnest($0)] }
           └─LogicalProjectSet { select_list: [$0, $1, Unnest($0)] }
-            └─LogicalJoin { type: Inner, on: true, output: all }
-              ├─LogicalAgg { group_key: [t.x, t.k], aggs: [] }
+            └─LogicalJoin { type: Inner, on: true, output: [first_value(t.x order_by(t.x ASC)), t.k] }
+              ├─LogicalAgg { group_key: [t.k], aggs: [first_value(t.x order_by(t.x ASC))] }
               │ └─LogicalScan { table: t, columns: [t.x, t.k], predicate: (t.k = 1:Int32) }
               └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: CorrelatedInputRef in ProjectSet and apply on condition refers to table function.
@@ -631,7 +631,7 @@
                     └─BatchFilter { predicate: IsNotNull(integers.i) }
                       └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [i, col, integers._row_id(hidden), integers.i(hidden)], stream_key: [integers._row_id, integers.i, i], pk_columns: [i, integers._row_id, integers.i], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [i, col, integers._row_id(hidden), integers.i(hidden)], stream_key: [integers._row_id, i], pk_columns: [i, integers._row_id], pk_conflict: NoCheck }
     └─StreamHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, row_number, integers._row_id, integers.i] }
       ├─StreamExchange { dist: HashShard(integers.i) }
       │ └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], pk: [integers._row_id], dist: UpstreamHashShard(integers._row_id) }
@@ -689,7 +689,7 @@
                     └─BatchFilter { predicate: IsNotNull(integers.i) }
                       └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [i, col, integers._row_id(hidden), integers.i(hidden)], stream_key: [integers._row_id, integers.i, i], pk_columns: [i, integers._row_id, integers.i], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [i, col, integers._row_id(hidden), integers.i(hidden)], stream_key: [integers._row_id, i], pk_columns: [i, integers._row_id], pk_conflict: NoCheck }
     └─StreamHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, sum, integers._row_id, integers.i] }
       ├─StreamExchange { dist: HashShard(integers.i) }
       │ └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], pk: [integers._row_id], dist: UpstreamHashShard(integers._row_id) }
@@ -833,3 +833,27 @@
               └─StreamProject { exprs: [rows.correlated_col, rows.k, rows.v, rows._row_id] }
                 └─StreamFilter { predicate: IsNotNull(rows.correlated_col) }
                   └─StreamTableScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col, rows._row_id], pk: [rows._row_id], dist: UpstreamHashShard(rows._row_id) }
+- name: test hop window subquery 1
+  sql: |
+    create table t1 (k int primary key, ts timestamp);
+    select * from (select 1 as col union select 2) u , lateral(select * from hop(t1, ts, interval '10' minute, interval '30' minute) where col = k);
+  batch_plan: |-
+    BatchHopWindow { time_col: t1.ts, slide: 00:10:00, size: 00:30:00, output: all }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchFilter { predicate: IsNotNull(t1.ts) }
+        └─BatchLookupJoin { type: Inner, predicate: 1:Int32 = t1.k AND IsNotNull(t1.ts), output: all }
+          └─BatchExchange { order: [], dist: UpstreamHashShard(1:Int32) }
+            └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
+              └─BatchExchange { order: [], dist: HashShard(1:Int32) }
+                └─BatchValues { rows: [[1:Int32], [2:Int32]] }
+  stream_plan: |-
+    StreamMaterialize { columns: [col, k, ts, window_start, window_end], stream_key: [col, window_start, window_end], pk_columns: [col, window_start, window_end], pk_conflict: NoCheck }
+    └─StreamHashJoin { type: Inner, predicate: 1:Int32 = t1.k, output: all }
+      ├─StreamAppendOnlyDedup { dedup_cols: [1:Int32] }
+      │ └─StreamExchange { dist: HashShard(1:Int32) }
+      │   └─StreamProject { exprs: [1:Int32] }
+      │     └─StreamValues { rows: [[1:Int32, 0:Int64], [2:Int32, 1:Int64]] }
+      └─StreamExchange { dist: HashShard(t1.k) }
+        └─StreamHopWindow { time_col: t1.ts, slide: 00:10:00, size: 00:30:00, output: all }
+          └─StreamFilter { predicate: IsNotNull(t1.ts) }
+            └─StreamTableScan { table: t1, columns: [t1.k, t1.ts], pk: [t1.k], dist: UpstreamHashShard(t1.k) }

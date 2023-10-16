@@ -37,7 +37,7 @@ use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitImpl,
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta,
     StreamChunkWithState,
 };
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
@@ -55,7 +55,7 @@ pub struct S3FileReader {
 
 impl S3FileReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    async fn stream_read_object(
+    pub async fn stream_read_object(
         client_for_s3: s3_client::Client,
         bucket_name: String,
         split: FsSplit,
@@ -137,7 +137,7 @@ impl S3FileReader {
         }
     }
 
-    async fn get_object(
+    pub async fn get_object(
         client_for_s3: &s3_client::Client,
         bucket_name: &str,
         object_name: &str,
@@ -164,10 +164,11 @@ impl S3FileReader {
 #[async_trait]
 impl SplitReader for S3FileReader {
     type Properties = S3Properties;
+    type Split = FsSplit;
 
     async fn new(
         props: S3Properties,
-        state: Vec<SplitImpl>,
+        splits: Vec<FsSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
@@ -179,10 +180,6 @@ impl SplitReader for S3FileReader {
         let bucket_name = props.bucket_name;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
 
-        let splits = state
-            .into_iter()
-            .map(|split| split.into_fs().expect("not a fs split"))
-            .collect();
         let s3_file_reader = S3FileReader {
             split_offset: HashMap::new(),
             bucket_name,
@@ -271,8 +268,6 @@ mod tests {
                 .unwrap();
         let splits = enumerator.list_splits().await.unwrap();
         println!("splits {:?}", splits);
-
-        let splits = splits.into_iter().map(SplitImpl::S3).collect();
 
         let descs = vec![
             SourceColumnDesc::simple("id", DataType::Int64, 1.into()),

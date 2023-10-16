@@ -1,22 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
+  <!-- remove this section if you want to build the project independently -->
   <parent>
-    <artifactId>java-parent</artifactId>
-    <groupId>com.risingwave.java</groupId>
-    <version>1.0-SNAPSHOT</version>
+    <groupId>com.risingwave</groupId>
+    <artifactId>risingwave-java-root</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
 
-  <groupId>com.example</groupId>
-  <artifactId>udf-example</artifactId>
-  <version>1.0-SNAPSHOT</version>
+  <groupId>com.risingwave</groupId>
+  <artifactId>risingwave-udf-example</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
 
   <name>udf-example</name>
-  <url>http://maven.apache.org</url>
+  <url>https://docs.risingwave.com/docs/current/udf-java</url>
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -26,9 +28,14 @@
 
   <dependencies>
     <dependency>
-      <groupId>com.risingwave.java</groupId>
+      <groupId>com.risingwave</groupId>
       <artifactId>risingwave-udf</artifactId>
-      <version>0.0.1</version>
+      <version>0.1.0-SNAPSHOT</version>
+    </dependency>
+    <dependency>
+      <groupId>com.google.code.gson</groupId>
+      <artifactId>gson</artifactId>
+      <version>2.10.1</version>
     </dependency>
   </dependencies>
 
@@ -37,7 +44,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.0.0-M6</version>
+        <version>3.0.0</version>
         <configuration>
           <argLine>--add-opens=java.base/java.nio=ALL-UNNAMED</argLine>
         </configuration>

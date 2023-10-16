@@ -23,7 +23,7 @@ pub enum Error {
     #[error("failed to connect to UDF service: {0}")]
     Connect(#[from] tonic::transport::Error),
 
-    #[error("failed to check UDF: {0}")]
+    #[error("failed to send requests to UDF service: {0}")]
     Tonic(#[from] Box<tonic::Status>),
 
     #[error("failed to call UDF: {0}")]
@@ -40,9 +40,12 @@ pub enum Error {
 
     #[error("UDF service returned no data")]
     NoReturned,
+
+    #[error("Flight service error: {0}")]
+    ServiceError(String),
 }
 
-static_assertions::const_assert_eq!(std::mem::size_of::<Error>(), 32);
+static_assertions::const_assert_eq!(std::mem::size_of::<Error>(), 40);
 
 impl From<tonic::Status> for Error {
     fn from(status: tonic::Status) -> Self {

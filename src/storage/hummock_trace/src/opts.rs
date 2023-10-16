@@ -15,6 +15,7 @@
 use bincode::{Decode, Encode};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::TracedBytes;
@@ -182,4 +183,33 @@ impl From<TracedHummockReadEpoch> for HummockReadEpoch {
             TracedHummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+pub struct TracedEpochPair {
+    pub curr: TracedHummockEpoch,
+    pub prev: TracedHummockEpoch,
+}
+
+impl From<EpochPair> for TracedEpochPair {
+    fn from(value: EpochPair) -> Self {
+        TracedEpochPair {
+            curr: value.curr,
+            prev: value.prev,
+        }
+    }
+}
+
+impl From<TracedEpochPair> for EpochPair {
+    fn from(value: TracedEpochPair) -> Self {
+        EpochPair {
+            curr: value.curr,
+            prev: value.prev,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+pub struct TracedInitOptions {
+    pub epoch: TracedEpochPair,
 }

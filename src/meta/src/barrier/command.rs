@@ -21,6 +21,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::update_mutation::*;
@@ -36,8 +37,7 @@ use super::info::BarrierActorInfo;
 use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
-use crate::model::{ActorId, DispatcherId, FragmentId, PausedReason, TableFragments};
-use crate::storage::MetaStore;
+use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
 use crate::MetaResult;
 
@@ -139,6 +139,7 @@ pub enum Command {
         new_table_fragments: TableFragments,
         merge_updates: Vec<MergeUpdate>,
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+        init_split_assignment: SplitAssignment,
     },
 
     /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
@@ -214,8 +215,8 @@ impl Command {
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
-pub struct CommandContext<S: MetaStore> {
-    fragment_manager: FragmentManagerRef<S>,
+pub struct CommandContext {
+    fragment_manager: FragmentManagerRef,
 
     client_pool: StreamClientPoolRef,
 
@@ -232,7 +233,7 @@ pub struct CommandContext<S: MetaStore> {
 
     pub kind: BarrierKind,
 
-    source_manager: SourceManagerRef<S>,
+    source_manager: SourceManagerRef,
 
     /// The tracing span of this command.
     ///
@@ -242,10 +243,10 @@ pub struct CommandContext<S: MetaStore> {
     pub span: tracing::Span,
 }
 
-impl<S: MetaStore> CommandContext<S> {
+impl CommandContext {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
-        fragment_manager: FragmentManagerRef<S>,
+        fragment_manager: FragmentManagerRef,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
         prev_epoch: TracedEpoch,
@@ -253,7 +254,7 @@ impl<S: MetaStore> CommandContext<S> {
         current_paused_reason: Option<PausedReason>,
         command: Command,
         kind: BarrierKind,
-        source_manager: SourceManagerRef<S>,
+        source_manager: SourceManagerRef,
         span: tracing::Span,
     ) -> Self {
         Self {
@@ -271,10 +272,7 @@ impl<S: MetaStore> CommandContext<S> {
     }
 }
 
-impl<S> CommandContext<S>
-where
-    S: MetaStore,
-{
+impl CommandContext {
     /// Generate a mutation for the given command.
     pub async fn to_mutation(&self) -> MetaResult<Option<Mutation>> {
         let mutation = match &self.command {
@@ -355,6 +353,7 @@ where
                 old_table_fragments,
                 merge_updates,
                 dispatchers,
+                init_split_assignment,
                 ..
             } => {
                 let dropped_actors = old_table_fragments.actor_ids();
@@ -371,17 +370,23 @@ where
                     })
                     .collect();
 
+                let actor_splits = init_split_assignment
+                    .values()
+                    .flat_map(build_actor_connector_splits)
+                    .collect();
+
                 Some(Mutation::Update(UpdateMutation {
                     actor_new_dispatchers,
                     merge_update: merge_updates.clone(),
                     dropped_actors,
+                    actor_splits,
                     ..Default::default()
                 }))
             }
 
             Command::RescheduleFragment { reschedules, .. } => {
                 let mut dispatcher_update = HashMap::new();
-                for (_fragment_id, reschedule) in reschedules.iter() {
+                for reschedule in reschedules.values() {
                     for &(upstream_fragment_id, dispatcher_id) in
                         &reschedule.upstream_fragment_dispatcher_ids
                     {
@@ -466,7 +471,7 @@ where
                 let merge_update = merge_update.into_values().collect();
 
                 let mut actor_vnode_bitmap_update = HashMap::new();
-                for (_fragment_id, reschedule) in reschedules.iter() {
+                for reschedule in reschedules.values() {
                     // Record updates for all actors in this fragment.
                     for (&actor_id, bitmap) in &reschedule.vnode_bitmap_updates {
                         let bitmap = bitmap.to_protobuf();
@@ -550,7 +555,7 @@ where
                 .values()
                 .flatten()
                 .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
-                .chain(table_fragments.values_actor_ids().into_iter())
+                .chain(table_fragments.values_actor_ids())
                 .collect(),
             _ => Default::default(),
         }
@@ -764,6 +769,7 @@ where
                 new_table_fragments,
                 merge_updates,
                 dispatchers,
+                ..
             } => {
                 let table_ids = HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
 

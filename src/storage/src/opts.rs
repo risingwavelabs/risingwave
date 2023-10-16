@@ -75,13 +75,19 @@ pub struct StorageOpts {
     pub data_file_cache_recover_concurrency: usize,
     pub data_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub data_file_cache_lfu_tiny_lru_capacity_ratio: f64,
-    pub data_file_cache_rated_random_rate_mb: usize,
+    pub data_file_cache_insert_rate_limit_mb: usize,
     pub data_file_cache_flush_rate_limit_mb: usize,
     pub data_file_cache_reclaim_rate_limit_mb: usize,
+    pub data_file_cache_allocation_bits: usize,
+    pub data_file_cache_allocation_timeout_ms: usize,
 
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
     pub cache_refill_concurrency: usize,
+    pub cache_refill_recent_filter_layers: usize,
+    pub cache_refill_recent_filter_rotate_interval_ms: usize,
+    pub cache_refill_unit: usize,
+    pub cache_refill_threshold: f64,
 
     pub meta_file_cache_dir: String,
     pub meta_file_cache_capacity_mb: usize,
@@ -94,9 +100,11 @@ pub struct StorageOpts {
     pub meta_file_cache_recover_concurrency: usize,
     pub meta_file_cache_lfu_window_to_cache_size_ratio: usize,
     pub meta_file_cache_lfu_tiny_lru_capacity_ratio: f64,
-    pub meta_file_cache_rated_random_rate_mb: usize,
+    pub meta_file_cache_insert_rate_limit_mb: usize,
     pub meta_file_cache_flush_rate_limit_mb: usize,
     pub meta_file_cache_reclaim_rate_limit_mb: usize,
+    pub meta_file_cache_allocation_bits: usize,
+    pub meta_file_cache_allocation_timeout_ms: usize,
 
     /// The storage url for storing backups.
     pub backup_storage_url: String,
@@ -117,6 +125,8 @@ pub struct StorageOpts {
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
     pub compactor_max_sst_size: u64,
+    /// enable FastCompactorRunner.
+    pub enable_fast_compaction: bool,
 }
 
 impl Default for StorageOpts {
@@ -171,9 +181,11 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .data_file_cache
                 .lfu_tiny_lru_capacity_ratio,
-            data_file_cache_rated_random_rate_mb: c.storage.data_file_cache.rated_random_rate_mb,
+            data_file_cache_insert_rate_limit_mb: c.storage.data_file_cache.insert_rate_limit_mb,
             data_file_cache_flush_rate_limit_mb: c.storage.data_file_cache.flush_rate_limit_mb,
             data_file_cache_reclaim_rate_limit_mb: c.storage.data_file_cache.reclaim_rate_limit_mb,
+            data_file_cache_allocation_bits: c.storage.data_file_cache.allocation_bits,
+            data_file_cache_allocation_timeout_ms: c.storage.data_file_cache.allocation_timeout_ms,
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
             meta_file_cache_file_capacity_mb: c.storage.meta_file_cache.file_capacity_mb,
@@ -191,12 +203,21 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .meta_file_cache
                 .lfu_tiny_lru_capacity_ratio,
-            meta_file_cache_rated_random_rate_mb: c.storage.meta_file_cache.rated_random_rate_mb,
+            meta_file_cache_insert_rate_limit_mb: c.storage.meta_file_cache.insert_rate_limit_mb,
             meta_file_cache_flush_rate_limit_mb: c.storage.meta_file_cache.flush_rate_limit_mb,
             meta_file_cache_reclaim_rate_limit_mb: c.storage.meta_file_cache.reclaim_rate_limit_mb,
+            meta_file_cache_allocation_bits: c.storage.meta_file_cache.allocation_bits,
+            meta_file_cache_allocation_timeout_ms: c.storage.meta_file_cache.allocation_timeout_ms,
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,
+            cache_refill_recent_filter_layers: c.storage.cache_refill.recent_filter_layers,
+            cache_refill_recent_filter_rotate_interval_ms: c
+                .storage
+                .cache_refill
+                .recent_filter_rotate_interval_ms,
+            cache_refill_unit: c.storage.cache_refill.unit,
+            cache_refill_threshold: c.storage.cache_refill.threshold,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             object_store_streaming_read_timeout_ms: c
                 .storage
@@ -213,6 +234,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_max_sst_key_count: c.storage.compactor_max_sst_key_count,
             compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
             compactor_max_sst_size: c.storage.compactor_max_sst_size,
+            enable_fast_compaction: c.storage.enable_fast_compaction,
         }
     }
 }

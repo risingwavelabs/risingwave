@@ -130,7 +130,7 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
-        self.state_table.init_epoch(first_barrier.epoch);
+        self.state_table.init_epoch(first_barrier.epoch).await?;
 
         let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
 
@@ -428,7 +428,7 @@ where
                     barrier.epoch,
                     &mut self.state_table,
                     false,
-                    &mut backfill_state,
+                    &backfill_state,
                     &mut committed_progress,
                     &mut temporary_state,
                 )
@@ -468,12 +468,12 @@ where
                         barrier.epoch,
                         &mut self.state_table,
                         false,
-                        &mut backfill_state,
+                        &backfill_state,
                         &mut committed_progress,
                         &mut temporary_state,
                     ).await?;
 
-                    self.progress.finish(barrier.epoch.curr);
+                    self.progress.finish(barrier.epoch.curr, total_snapshot_processed_rows);
                     yield msg;
                     break;
                 }
@@ -548,7 +548,7 @@ where
             let range_bounds = range_bounds.unwrap();
 
             let vnode_row_iter = upstream_table
-                .iter_row_with_pk_range(&range_bounds, vnode, Default::default())
+                .iter_with_vnode(vnode, &range_bounds, Default::default())
                 .await?;
 
             // TODO: Is there some way to avoid double-pin here?

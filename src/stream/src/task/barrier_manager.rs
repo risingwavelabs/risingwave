@@ -101,7 +101,11 @@ impl LocalBarrierManager {
 
     /// Register sender for source actors, used to send barriers.
     pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Barrier>) {
-        tracing::trace!(actor_id = actor_id, "register sender");
+        tracing::debug!(
+            target: "events::stream::barrier::manager",
+            actor_id = actor_id,
+            "register sender"
+        );
         self.senders.entry(actor_id).or_default().push(sender);
     }
 
@@ -128,7 +132,8 @@ impl LocalBarrierManager {
             }
         };
         let to_collect: HashSet<ActorId> = actor_ids_to_collect.into_iter().collect();
-        trace!(
+        debug!(
+            target: "events::stream::barrier::manager::send",
             "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
             barrier,
             to_send,
@@ -167,7 +172,11 @@ impl LocalBarrierManager {
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
         if let Some(actors) = barrier.all_stop_actors() {
-            trace!("remove actors {:?} from senders", actors);
+            debug!(
+                target: "events::stream::barrier::manager",
+                "remove actors {:?} from senders",
+                actors
+            );
             for actor in actors {
                 self.senders.remove(actor);
             }

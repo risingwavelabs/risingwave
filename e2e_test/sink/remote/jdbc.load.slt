@@ -130,6 +130,42 @@ CREATE SINK s_pg_0 FROM tt1 WITH (
 );
 
 statement ok
+CREATE TABLE tt2 (
+    "aBc" INTEGER PRIMARY KEY
+);
+
+statement ok
+CREATE SINK s_pg_t2 FROM tt2 WITH (
+    connector='jdbc',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name='t2',
+    schema.name='biz',
+    type='append-only',
+    force_append_only=true
+);
+
+
+statement ok
+create table t1_uuid (v1 int primary key, v2 varchar, v3 varchar);
+
+statement ok
+CREATE SINK s1_uuid FROM t1_uuid WITH (
+    connector='jdbc',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name='t1_uuid',
+    primary_key='v1',
+    type='upsert'
+);
+
+statement ok
+INSERT INTO t1_uuid values (221, '74605c5a-a7bb-4b3b-8742-2a12e9709dea', 'hello world');
+
+statement ok
+INSERT INTO tt2 VALUES
+    (1),
+    (2);
+
+statement ok
 INSERT INTO tt1 VALUES
     (1, 'aaa'),
     (1, 'bbb'),

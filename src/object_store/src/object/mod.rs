@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::RangeBounds;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -41,6 +42,8 @@ pub type ObjectStreamingUploader = MonitoredStreamingUploader;
 
 type BoxedStreamingUploader = Box<dyn StreamingUploader>;
 
+pub trait ObjectRangeBounds = RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static;
+
 /// Partitions a set of given paths into two vectors. The first vector contains all local paths, and
 /// the second contains all remote paths.
 pub fn partition_object_store_paths(paths: &[String]) -> Vec<String> {
@@ -55,12 +58,6 @@ pub fn partition_object_store_paths(paths: &[String]) -> Vec<String> {
     vec_rem
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct BlockLocation {
-    pub offset: usize,
-    pub size: usize,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectMetadata {
     // Full path
@@ -68,17 +65,6 @@ pub struct ObjectMetadata {
     // Seconds since unix epoch.
     pub last_modified: f64,
     pub total_size: usize,
-}
-
-impl BlockLocation {
-    /// Generates the http bytes range specifier.
-    pub fn byte_range_specifier(&self) -> Option<String> {
-        Some(format!(
-            "bytes={}-{}",
-            self.offset,
-            self.offset + self.size - 1
-        ))
-    }
 }
 
 #[async_trait::async_trait]
@@ -101,13 +87,10 @@ pub trait ObjectStore: Send + Sync {
 
     async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader>;
 
-    /// If the `block_loc` is None, the whole object will be returned.
     /// If objects are PUT using a multipart upload, it's a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
     /// <https://d1.awsstatic.com/whitepapers/AmazonS3BestPractices.pdf?stod_obj2>
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes>;
-
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>>;
+    async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes>;
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
     /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
@@ -208,16 +191,8 @@ impl ObjectStoreImpl {
         object_store_impl_method_body!(self, streaming_upload, dispatch_async, path)
     }
 
-    pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        object_store_impl_method_body!(self, read, dispatch_async, path, block_loc)
-    }
-
-    pub async fn readv(
-        &self,
-        path: &str,
-        block_locs: &[BlockLocation],
-    ) -> ObjectResult<Vec<Bytes>> {
-        object_store_impl_method_body!(self, readv, dispatch_async, path, block_locs)
+    pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
+        object_store_impl_method_body!(self, read, dispatch_async, path, range)
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -469,6 +444,9 @@ impl MonitoredStreamingReader {
         }
     }
 
+    // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
+    // TODO: remove `allow` here after the issued is closed.
+    #[expect(clippy::needless_pass_by_ref_mut)]
     pub async fn read_bytes(&mut self, buf: &mut [u8]) -> ObjectResult<usize> {
         let operation_type = "streaming_read_read_bytes";
         let data_len = buf.len();
@@ -623,7 +601,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         ))
     }
 
-    pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+    pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         let operation_type = "read";
         let _timer = self
             .object_store_metrics
@@ -632,7 +610,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .start_timer();
         let future = async {
             self.inner
-                .read(path, block_loc)
+                .read(path, range)
                 .verbose_instrument_await("object_store_read")
                 .await
         };
@@ -653,43 +631,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_size
             .with_label_values(&[operation_type])
             .observe(data.len() as f64);
-        Ok(data)
-    }
-
-    pub async fn readv(
-        &self,
-        path: &str,
-        block_locs: &[BlockLocation],
-    ) -> ObjectResult<Vec<Bytes>> {
-        let operation_type = "readv";
-        let _timer = self
-            .object_store_metrics
-            .operation_latency
-            .with_label_values(&[self.media_type(), operation_type])
-            .start_timer();
-
-        let future = async {
-            self.inner
-                .readv(path, block_locs)
-                .verbose_instrument_await("object_store_readv")
-                .await
-        };
-        let res = match self.read_timeout.as_ref() {
-            None => future.await,
-            Some(timeout) => tokio::time::timeout(*timeout, future)
-                .await
-                .unwrap_or_else(|_| Err(ObjectError::internal("readv timeout"))),
-        };
-
-        try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
-
-        let data = res?;
-        let data_len = data.iter().map(|block| block.len()).sum::<usize>() as u64;
-        self.object_store_metrics.read_bytes.inc_by(data_len);
-        self.object_store_metrics
-            .operation_size
-            .with_label_values(&[operation_type])
-            .observe(data_len as f64);
         Ok(data)
     }
 
@@ -941,7 +882,7 @@ pub async fn parse_remote_object_store(
         }
         other => {
             unimplemented!(
-                "{} remote object store only supports s3, minio, disk, memory, and memory-shared for now.",
+                "{} remote object store only supports s3, minio, gcs, oss, cos, azure blob, hdfs, disk, memory, and memory-shared.",
                 other
             )
         }

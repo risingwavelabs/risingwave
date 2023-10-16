@@ -16,18 +16,19 @@ use std::borrow::BorrowMut;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet};
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SplitEnumeratorImpl,
-    SplitId, SplitImpl, SplitMetaData,
+    ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
+    SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::Source;
-use risingwave_pb::connector_service::PbTableSchema;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_rpc_client::ConnectorClient;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -40,17 +41,16 @@ use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId};
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
-pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
+pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
 
-pub struct SourceManager<S: MetaStore> {
+pub struct SourceManager {
     pub(crate) paused: Mutex<()>,
-    env: MetaSrvEnv<S>,
-    barrier_scheduler: BarrierScheduler<S>,
-    core: Mutex<SourceManagerCore<S>>,
+    env: MetaSrvEnv,
+    barrier_scheduler: BarrierScheduler,
+    core: Mutex<SourceManagerCore>,
     metrics: Arc<MetaMetrics>,
 }
 
@@ -62,23 +62,29 @@ struct SharedSplitMap {
 
 type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
 
-struct ConnectorSourceWorker {
+struct ConnectorSourceWorker<P: SourceProperties> {
     source_id: SourceId,
     source_name: String,
     current_splits: SharedSplitMapRef,
-    enumerator: SplitEnumeratorImpl,
+    enumerator: P::SplitEnumerator,
     period: Duration,
     metrics: Arc<MetaMetrics>,
-    connector_properties: ConnectorProperties,
+    connector_properties: P,
     connector_client: Option<ConnectorClient>,
     fail_cnt: u32,
 }
 
-impl ConnectorSourceWorker {
-    const DEFAULT_SOURCE_WORKER_TICK_INTERVAL: Duration = Duration::from_secs(30);
+fn extract_prop_from_source(source: &Source) -> MetaResult<ConnectorProperties> {
+    let mut properties = ConnectorProperties::extract(source.properties.clone())?;
+    properties.init_from_pb_source(source);
+    Ok(properties)
+}
 
+const DEFAULT_SOURCE_WORKER_TICK_INTERVAL: Duration = Duration::from_secs(30);
+
+impl<P: SourceProperties> ConnectorSourceWorker<P> {
     async fn refresh(&mut self) -> MetaResult<()> {
-        let enumerator = SplitEnumeratorImpl::create(
+        let enumerator = P::SplitEnumerator::new(
             self.connector_properties.clone(),
             Arc::new(SourceEnumeratorContext {
                 metrics: self.metrics.source_enumerator_metrics.clone(),
@@ -98,17 +104,13 @@ impl ConnectorSourceWorker {
     pub async fn create(
         connector_client: &Option<ConnectorClient>,
         source: &Source,
+        connector_properties: P,
         period: Duration,
         splits: Arc<Mutex<SharedSplitMap>>,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
-        let mut properties = ConnectorProperties::extract(source.properties.clone())?;
-        if properties.is_cdc_connector() {
-            let table_schema = Self::extract_source_schema(source);
-            properties.init_cdc_properties(table_schema);
-        }
-        let enumerator = SplitEnumeratorImpl::create(
-            properties.clone(),
+        let enumerator = P::SplitEnumerator::new(
+            connector_properties.clone(),
             Arc::new(SourceEnumeratorContext {
                 metrics: metrics.source_enumerator_metrics.clone(),
                 info: SourceEnumeratorInfo {
@@ -126,7 +128,7 @@ impl ConnectorSourceWorker {
             enumerator,
             period,
             metrics,
-            connector_properties: properties,
+            connector_properties,
             connector_client: connector_client.clone(),
             fail_cnt: 0,
         })
@@ -178,35 +180,11 @@ impl ConnectorSourceWorker {
         current_splits.splits.replace(
             splits
                 .into_iter()
-                .map(|split| (split.id(), split))
+                .map(|split| (split.id(), P::Split::into(split)))
                 .collect(),
         );
 
         Ok(())
-    }
-
-    fn extract_source_schema(source: &Source) -> PbTableSchema {
-        let pk_indices = source
-            .pk_column_ids
-            .iter()
-            .map(|&id| {
-                source
-                    .columns
-                    .iter()
-                    .position(|col| col.column_desc.as_ref().unwrap().column_id == id)
-                    .unwrap() as u32
-            })
-            .collect_vec();
-
-        PbTableSchema {
-            columns: source
-                .columns
-                .iter()
-                .flat_map(|col| &col.column_desc)
-                .cloned()
-                .collect(),
-            pk_indices,
-        }
     }
 }
 
@@ -214,6 +192,7 @@ struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
+    enable_scale_in: bool,
 }
 
 impl ConnectorSourceWorkerHandle {
@@ -222,8 +201,8 @@ impl ConnectorSourceWorkerHandle {
     }
 }
 
-pub struct SourceManagerCore<S: MetaStore> {
-    fragment_manager: FragmentManagerRef<S>,
+pub struct SourceManagerCore {
+    fragment_manager: FragmentManagerRef,
 
     /// Managed source loops
     managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
@@ -236,12 +215,9 @@ pub struct SourceManagerCore<S: MetaStore> {
     actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
-impl<S> SourceManagerCore<S>
-where
-    S: MetaStore,
-{
+impl SourceManagerCore {
     fn new(
-        fragment_manager: FragmentManagerRef<S>,
+        fragment_manager: FragmentManagerRef,
         managed_sources: HashMap<SourceId, ConnectorSourceWorkerHandle>,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
@@ -308,7 +284,9 @@ where
                         *fragment_id,
                         prev_actor_splits,
                         &discovered_splits,
-                        SplitDiffOptions::default(),
+                        SplitDiffOptions {
+                            enable_scale_in: handle.enable_scale_in,
+                        },
                     ) {
                         split_assignment.insert(*fragment_id, change);
                     }
@@ -333,7 +311,7 @@ where
 
                 self.source_fragments
                     .entry(source_id)
-                    .or_insert_with(BTreeSet::default)
+                    .or_default()
                     .append(&mut fragment_ids);
             }
         }
@@ -401,7 +379,7 @@ impl<T: SplitMetaData + Clone> PartialEq<Self> for ActorSplitsAssignment<T> {
 
 impl<T: SplitMetaData + Clone> PartialOrd<Self> for ActorSplitsAssignment<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        other.splits.len().partial_cmp(&self.splits.len())
+        Some(self.cmp(other))
     }
 }
 
@@ -510,18 +488,15 @@ where
     )
 }
 
-impl<S> SourceManager<S>
-where
-    S: MetaStore,
-{
+impl SourceManager {
     const DEFAULT_SOURCE_TICK_INTERVAL: Duration = Duration::from_secs(10);
     const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
     pub async fn new(
-        env: MetaSrvEnv<S>,
-        barrier_scheduler: BarrierScheduler<S>,
-        catalog_manager: CatalogManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
+        env: MetaSrvEnv,
+        barrier_scheduler: BarrierScheduler,
+        catalog_manager: CatalogManagerRef,
+        fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
@@ -533,8 +508,7 @@ where
                     source,
                     &mut managed_sources,
                     metrics.clone(),
-                )
-                .await
+                )?
             }
         }
 
@@ -632,6 +606,7 @@ where
             fragment_id,
             empty_actor_splits,
             &prev_splits,
+            // pre-allocate splits is the first time getting splits and it does not have scale in scene
             SplitDiffOptions::default(),
         )
         .unwrap_or_default();
@@ -715,12 +690,12 @@ where
         Ok(())
     }
 
-    async fn create_source_worker_async(
+    fn create_source_worker_async(
         connector_client: Option<ConnectorClient>,
         source: Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
         metrics: Arc<MetaMetrics>,
-    ) {
+    ) -> MetaResult<()> {
         tracing::info!("spawning new watcher for source {}", source.id);
 
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -729,32 +704,37 @@ where
         let current_splits_ref = splits.clone();
         let source_id = source.id;
 
+        let connector_properties = extract_prop_from_source(&source)?;
+        let enable_scale_in = connector_properties.enable_split_scale_in();
         let handle = tokio::spawn(async move {
             let mut ticker = time::interval(Self::DEFAULT_SOURCE_TICK_INTERVAL);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-            let mut worker = loop {
-                ticker.tick().await;
+            dispatch_source_prop!(connector_properties, prop, {
+                let mut worker = loop {
+                    ticker.tick().await;
 
-                match ConnectorSourceWorker::create(
-                    &connector_client,
-                    &source,
-                    ConnectorSourceWorker::DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
-                    splits.clone(),
-                    metrics.clone(),
-                )
-                .await
-                {
-                    Ok(worker) => {
-                        break worker;
+                    match ConnectorSourceWorker::create(
+                        &connector_client,
+                        &source,
+                        prop.deref().clone(),
+                        DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
+                        splits.clone(),
+                        metrics.clone(),
+                    )
+                    .await
+                    {
+                        Ok(worker) => {
+                            break worker;
+                        }
+                        Err(e) => {
+                            tracing::warn!("failed to create source worker: {}", e);
+                        }
                     }
-                    Err(e) => {
-                        tracing::warn!("failed to create source worker: {}", e);
-                    }
-                }
-            };
+                };
 
-            worker.run(sync_call_rx).await
+                worker.run(sync_call_rx).await
+            });
         });
 
         managed_sources.insert(
@@ -763,8 +743,10 @@ where
                 handle,
                 sync_call_tx,
                 splits: current_splits_ref,
+                enable_scale_in,
             },
         );
+        Ok(())
     }
 
     async fn create_source_worker(
@@ -775,38 +757,42 @@ where
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<()> {
         let current_splits_ref = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
-        let mut worker = ConnectorSourceWorker::create(
-            &connector_client,
-            source,
-            ConnectorSourceWorker::DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
-            current_splits_ref.clone(),
-            metrics,
-        )
-        .await?;
-
-        tracing::info!("spawning new watcher for source {}", source.id);
-
-        // don't force tick in process of recovery. One source down should not lead to meta recovery
-        // failure.
-        if force_tick {
-            // if fail to fetch meta info, will refuse to create source
-
-            // todo: make the timeout configurable, longer than `properties.sync.call.timeout` in
-            // kafka
-            tokio::time::timeout(Self::DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
-                .await
-                .map_err(|_e| {
-                    anyhow!(
-                        "failed to fetch meta info for source {}, error: timeout {}",
-                        source.id,
-                        Self::DEFAULT_SOURCE_TICK_TIMEOUT.as_secs()
-                    )
-                })??;
-        }
-
+        let connector_properties = extract_prop_from_source(source)?;
+        let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
+        let handle = dispatch_source_prop!(connector_properties, prop, {
+            let mut worker = ConnectorSourceWorker::create(
+                &connector_client,
+                source,
+                *prop,
+                DEFAULT_SOURCE_WORKER_TICK_INTERVAL,
+                current_splits_ref.clone(),
+                metrics,
+            )
+            .await?;
 
-        let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
+            tracing::info!("spawning new watcher for source {}", source.id);
+
+            // don't force tick in process of recovery. One source down should not lead to meta
+            // recovery failure.
+            if force_tick {
+                // if fail to fetch meta info, will refuse to create source
+
+                // todo: make the timeout configurable, longer than `properties.sync.call.timeout`
+                // in kafka
+                tokio::time::timeout(Self::DEFAULT_SOURCE_TICK_TIMEOUT, worker.tick())
+                    .await
+                    .map_err(|_e| {
+                        anyhow!(
+                            "failed to fetch meta info for source {}, error: timeout {}",
+                            source.id,
+                            Self::DEFAULT_SOURCE_TICK_TIMEOUT.as_secs()
+                        )
+                    })??;
+            }
+
+            tokio::spawn(async move { worker.run(sync_call_rx).await })
+        });
 
         managed_sources.insert(
             source.id,
@@ -814,6 +800,7 @@ where
                 handle,
                 sync_call_tx,
                 splits: current_splits_ref,
+                enable_scale_in,
             },
         );
 
@@ -931,6 +918,10 @@ mod tests {
 
         fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
             serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+        }
+
+        fn update_with_offset(&mut self, _start_offset: String) -> anyhow::Result<()> {
+            Ok(())
         }
     }
 

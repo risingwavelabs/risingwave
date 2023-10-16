@@ -27,7 +27,11 @@ either = "1"
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-governor = { version = "0.6", default-features = false, features = ["std", "dashmap", "jitter"] }
+governor = { version = "0.6", default-features = false, features = [
+    "std",
+    "dashmap",
+    "jitter",
+] }
 hytra = "0.1.2"
 iter-chunks = "0.1"
 itertools = "0.11"
@@ -35,18 +39,17 @@ local_stats_alloc = { path = "../utils/local_stats_alloc" }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 maplit = "1.0.2"
 memcomparable = "0.2"
-multimap = "0.8"
+multimap = "0.9"
 num-traits = "0.2"
 parking_lot = "0.12"
 parse-display = "0.8"
 pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.11"
+prost = { workspace = true }
 rand = "0.8"
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_expr = { workspace = true }
-risingwave_frontend = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
@@ -81,6 +84,7 @@ workspace-hack = { path = "../workspace-hack" }
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 expect-test = "1"
+risingwave_expr_impl = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
     "test",
 ] }
@@ -95,3 +99,6 @@ harness = false
 [[bench]]
 name = "bench_state_table"
 harness = false
+
+[lints]
+workspace = true

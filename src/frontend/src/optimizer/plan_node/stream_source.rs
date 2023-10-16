@@ -23,6 +23,7 @@ use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, StreamNode};
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -31,7 +32,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSource {
     pub base: PlanBase,
-    logical: generic::Source,
+    pub(crate) logical: generic::Source,
 }
 
 impl StreamSource {
@@ -86,6 +87,12 @@ impl StreamNode for StreamSource {
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
             properties: source_catalog.properties.clone().into_iter().collect(),
+            rate_limit: self
+                .base
+                .ctx()
+                .session_ctx()
+                .config()
+                .get_streaming_rate_limit(),
         });
         PbNodeBody::Source(SourceNode { source_inner })
     }

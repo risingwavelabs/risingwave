@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::fmt;
 use std::cmp::Ordering;
+use std::fmt;
 use std::fmt::Debug;
 use std::future::Future;
 use std::hash::Hash;
 use std::mem::size_of;
+use std::ops::{Index, IndexMut};
 
 use bytes::{Buf, BufMut};
 use either::Either;
@@ -30,8 +31,7 @@ use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultPartialOrd, Scalar, ScalarRefImpl, ToDatumRef,
-    ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarRefImpl, ToDatumRef, ToText,
 };
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
@@ -350,13 +350,27 @@ pub struct ListValue {
 
 impl PartialOrd for ListValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for ListValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
+        self.as_scalar_ref().cmp(&other.as_scalar_ref())
+    }
+}
+
+impl Index<usize> for ListValue {
+    type Output = Datum;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.values[index]
+    }
+}
+
+impl IndexMut<usize> for ListValue {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.values[index]
     }
 }
 
@@ -486,7 +500,7 @@ impl<'a> ListRef<'a> {
     }
 
     /// Get the element at the given index. Returns `None` if the index is out of bounds.
-    pub fn elem_at(self, index: usize) -> Option<DatumRef<'a>> {
+    pub fn get(self, index: usize) -> Option<DatumRef<'a>> {
         iter_elems_ref!(self, it, {
             let mut it = it;
             it.nth(index)
@@ -532,11 +546,19 @@ impl PartialEq for ListRef<'_> {
     }
 }
 
+impl Eq for ListRef<'_> {}
+
 impl PartialOrd for ListRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ListRef<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
         iter_elems_ref!(*self, lhs, {
             iter_elems_ref!(*other, rhs, {
-                lhs.partial_cmp_by(rhs, |lv, rv| lv.default_partial_cmp(&rv))
+                lhs.cmp_by(rhs, |lv, rv| lv.default_cmp(&rv))
             })
         })
     }
@@ -544,12 +566,9 @@ impl PartialOrd for ListRef<'_> {
 
 impl Debug for ListRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        iter_elems_ref!(*self, it, {
-            for v in it {
-                Debug::fmt(&v, f)?;
-            }
-            Ok(())
-        })
+        let mut f = f.debug_list();
+        iter_elems_ref!(*self, it, { f.entries(it) });
+        f.finish()
     }
 }
 
@@ -599,12 +618,9 @@ impl ToText for ListRef<'_> {
     }
 }
 
-impl Eq for ListRef<'_> {}
-
-impl Ord for ListRef<'_> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // The order between two lists is deterministic.
-        self.partial_cmp(other).unwrap()
+impl<'a> From<&'a ListValue> for ListRef<'a> {
+    fn from(val: &'a ListValue) -> Self {
+        ListRef::ValueRef { val }
     }
 }
 
@@ -1016,7 +1032,7 @@ mod tests {
         );
 
         // Get 2nd value from ListRef
-        let scalar = list_ref.elem_at(1).unwrap();
+        let scalar = list_ref.get(1).unwrap();
         assert_eq!(scalar, Some(types::ScalarRefImpl::Int32(5)));
     }
 }

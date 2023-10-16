@@ -111,13 +111,19 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
         buf
     }
 
+    /// Hash the datums of this row into the given hasher.
+    ///
+    /// Implementors should delegate [`std::hash::Hash::hash`] to this method.
+    fn hash_datums_into<H: Hasher>(&self, state: &mut H) {
+        for datum in self.iter() {
+            hash_datum(datum, state);
+        }
+    }
+
     /// Returns the hash code of the row.
-    #[inline]
     fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode<H> {
         let mut hasher = hash_builder.build_hasher();
-        for datum in self.iter() {
-            hash_datum(datum, &mut hasher);
-        }
+        self.hash_datums_into(&mut hasher);
         hasher.finish().into()
     }
 
@@ -250,6 +256,10 @@ macro_rules! deref_forward_row {
             (**self).hash(hash_builder)
         }
 
+        fn hash_datums_into<H: std::hash::Hasher>(&self, state: &mut H) {
+            (**self).hash_datums_into(state)
+        }
+
         fn eq(this: &Self, other: impl Row) -> bool {
             Row::eq(&(**this), other)
         }
@@ -337,8 +347,8 @@ impl<R: Row> Row for Option<R> {
 
     fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
         match self {
-            Some(row) => itertools::Either::Left(row.iter()),
-            None => itertools::Either::Right(EMPTY.iter()),
+            Some(row) => either::Either::Left(row.iter()),
+            None => either::Either::Right(EMPTY.iter()),
         }
     }
 
@@ -366,6 +376,69 @@ impl<R: Row> Row for Option<R> {
         if let Some(row) = self {
             row.memcmp_serialize_into(serde, buf);
         }
+    }
+}
+
+/// Implements [`Row`] for an [`either::Either`] of two different types of rows.
+impl<R1: Row, R2: Row> Row for either::Either<R1, R2> {
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        either::for_both!(self, row => row.datum_at(index))
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        either::for_both!(self, row => row.datum_at_unchecked(index))
+    }
+
+    fn len(&self) -> usize {
+        either::for_both!(self, row => row.len())
+    }
+
+    fn is_empty(&self) -> bool {
+        either::for_both!(self, row => row.is_empty())
+    }
+
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
+        self.as_ref().map_either(Row::iter, Row::iter)
+    }
+
+    fn to_owned_row(&self) -> OwnedRow {
+        either::for_both!(self, row => row.to_owned_row())
+    }
+
+    fn into_owned_row(self) -> OwnedRow {
+        either::for_both!(self, row => row.into_owned_row())
+    }
+
+    fn value_serialize_into(&self, buf: impl BufMut) {
+        either::for_both!(self, row => row.value_serialize_into(buf))
+    }
+
+    fn value_serialize(&self) -> Vec<u8> {
+        either::for_both!(self, row => row.value_serialize())
+    }
+
+    fn value_serialize_bytes(&self) -> Bytes {
+        either::for_both!(self, row => row.value_serialize_bytes())
+    }
+
+    fn memcmp_serialize_into(&self, serde: &OrderedRowSerde, buf: impl BufMut) {
+        either::for_both!(self, row => row.memcmp_serialize_into(serde, buf))
+    }
+
+    fn memcmp_serialize(&self, serde: &OrderedRowSerde) -> Vec<u8> {
+        either::for_both!(self, row => row.memcmp_serialize(serde))
+    }
+
+    fn hash_datums_into<H: Hasher>(&self, state: &mut H) {
+        either::for_both!(self, row => row.hash_datums_into(state))
+    }
+
+    fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode<H> {
+        either::for_both!(self, row => row.hash(hash_builder))
+    }
+
+    fn eq(this: &Self, other: impl Row) -> bool {
+        either::for_both!(this, row => Row::eq(row, other))
     }
 }
 

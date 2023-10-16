@@ -35,7 +35,7 @@
 - input: CREATE TABLE T (a STRUCT<v1 INT>)
   formatted_sql: CREATE TABLE T (a STRUCT<v1 INT>)
 - input: CREATE TABLE T (FULL INT)
-  error_msg: 'sql parser error: syntax error at or near "FULL"'
+  error_msg: 'sql parser error: syntax error at or near FULL at line:1, column:21'
 - input: CREATE TABLE T ("FULL" INT)
   formatted_sql: CREATE TABLE T ("FULL" INT)
 - input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
@@ -48,6 +48,24 @@
   formatted_sql: CREATE SINK IF NOT EXISTS snk FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
 - input: CREATE SINK IF NOT EXISTS snk AS SELECT count(*) AS cnt FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
   formatted_sql: CREATE SINK IF NOT EXISTS snk AS SELECT count(*) AS cnt FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
+- input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic', type = 'append-only');
+  formatted_sql: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic', type = 'append-only')
+- input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format plain encode json;
+  formatted_sql: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') FORMAT PLAIN ENCODE JSON
+- input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format upsert encode protobuf (schema.location = 'location', message = 'main_message');
+  formatted_sql: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') FORMAT UPSERT ENCODE PROTOBUF (schema.location = 'location', message = 'main_message')
+- input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format;
+  error_msg: |-
+    sql parser error: Expected identifier, found: ; at line:1, column:123
+    Near " topic = 'test_topic') format;"
+- input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format debezium;
+  error_msg: |-
+    sql parser error: Expected ENCODE, found: ; at line:1, column:132
+    Near "topic = 'test_topic') format debezium"
+- input: CREATE SINK snk FROM mv WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 'test_topic') format debezium encode;
+  error_msg: |-
+    sql parser error: Expected identifier, found: ; at line:1, column:139
+    Near " 'test_topic') format debezium encode;"
 - input: create user tmp createdb nocreatedb
   error_msg: 'sql parser error: conflicting or redundant options'
 - input: create user tmp createdb createdb

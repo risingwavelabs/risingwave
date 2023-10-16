@@ -3,9 +3,9 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <parent>
-        <artifactId>java-parent</artifactId>
-        <groupId>com.risingwave.java</groupId>
-        <version>1.0-SNAPSHOT</version>
+        <artifactId>risingwave-java-root</artifactId>
+        <groupId>com.risingwave</groupId>
+        <version>0.1.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
@@ -18,19 +18,20 @@
         <maven.compiler.source>11</maven.compiler.source>
         <file.encoding>UTF-8</file.encoding>
         <maven.compiler.target>11</maven.compiler.target>
+        <maven.javadoc.skip>true</maven.javadoc.skip>
     </properties>
 
     <dependencies>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>proto</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>java-binding</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>connector-api</artifactId>
         </dependency>
 
@@ -73,30 +74,36 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- Specific connectors dependencies managed by the assembly plugin, refer to assembly/pom.xml for more details -->
+        <!-- Specific connectors dependencies managed by the assembly plugin, refer to
+        assembly/pom.xml for more details -->
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-source-cdc</artifactId>
             <scope>provided</scope>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-jdbc</artifactId>
             <scope>provided</scope>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-iceberg</artifactId>
             <scope>provided</scope>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-deltalake</artifactId>
             <scope>provided</scope>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-es-7</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
+            <artifactId>risingwave-sink-cassandra</artifactId>
             <scope>provided</scope>
         </dependency>
     </dependencies>

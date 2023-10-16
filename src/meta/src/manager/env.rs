@@ -18,33 +18,37 @@ use std::sync::Arc;
 use risingwave_common::config::{CompactionConfig, DefaultParallelism};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
+use sea_orm::EntityTrait;
 
 use super::{SystemParamsManager, SystemParamsManagerRef};
+use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
+use crate::controller::SqlMetaStore;
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
 };
 use crate::model::ClusterId;
+use crate::model_v2::prelude::Cluster;
+use crate::storage::MetaStoreRef;
 #[cfg(any(test, feature = "test"))]
-use crate::storage::MemStore;
-use crate::storage::MetaStore;
+use crate::storage::{MemStore, MetaStoreBoxExt};
 use crate::MetaResult;
 
 /// [`MetaSrvEnv`] is the global environment in Meta service. The instance will be shared by all
 /// kind of managers inside Meta.
 #[derive(Clone)]
-pub struct MetaSrvEnv<S>
-where
-    S: MetaStore,
-{
+pub struct MetaSrvEnv {
     /// id generator manager.
-    id_gen_manager: IdGeneratorManagerRef<S>,
+    id_gen_manager: IdGeneratorManagerRef,
 
     /// meta store.
-    meta_store: Arc<S>,
+    meta_store: MetaStoreRef,
+
+    /// sql meta store.
+    meta_store_sql: Option<SqlMetaStore>,
 
     /// notification manager.
-    notification_manager: NotificationManagerRef<S>,
+    notification_manager: NotificationManagerRef,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
@@ -53,7 +57,10 @@ where
     idle_manager: IdleManagerRef,
 
     /// system param manager.
-    system_params_manager: SystemParamsManagerRef<S>,
+    system_params_manager: SystemParamsManagerRef,
+
+    /// system param controller.
+    system_params_controller: Option<SystemParamsControllerRef>,
 
     /// Unique identifier of the cluster.
     cluster_id: ClusterId,
@@ -203,22 +210,20 @@ impl MetaOpts {
     }
 }
 
-impl<S> MetaSrvEnv<S>
-where
-    S: MetaStore,
-{
+impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
         init_system_params: SystemParams,
-        meta_store: Arc<S>,
+        meta_store: MetaStoreRef,
+        meta_store_sql: Option<SqlMetaStore>,
     ) -> MetaResult<Self> {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
-        let (cluster_id, cluster_first_launch) =
-            if let Some(id) = ClusterId::from_meta_store(meta_store.deref()).await? {
+        let (mut cluster_id, cluster_first_launch) =
+            if let Some(id) = ClusterId::from_meta_store(&meta_store).await? {
                 (id, false)
             } else {
                 (ClusterId::new(), true)
@@ -227,21 +232,43 @@ where
             SystemParamsManager::new(
                 meta_store.clone(),
                 notification_manager.clone(),
-                init_system_params,
+                init_system_params.clone(),
                 cluster_first_launch,
             )
             .await?,
         );
+        // TODO: remove `cluster_first_launch` and check equality of cluster id stored in hummock to
+        // make sure the data dir of hummock is not used by another cluster.
+        let system_params_controller = match &meta_store_sql {
+            Some(store) => {
+                cluster_id = Cluster::find()
+                    .one(&store.conn)
+                    .await?
+                    .map(|c| c.cluster_id.to_string().into())
+                    .unwrap();
+                Some(Arc::new(
+                    SystemParamsController::new(
+                        store.clone(),
+                        notification_manager.clone(),
+                        init_system_params,
+                    )
+                    .await?,
+                ))
+            }
+            None => None,
+        };
 
         let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
 
         Ok(Self {
             id_gen_manager,
             meta_store,
+            meta_store_sql,
             notification_manager,
             stream_client_pool,
             idle_manager,
             system_params_manager,
+            system_params_controller,
             cluster_id,
             cluster_first_launch,
             connector_client,
@@ -249,27 +276,31 @@ where
         })
     }
 
-    pub fn meta_store_ref(&self) -> Arc<S> {
+    pub fn meta_store_ref(&self) -> MetaStoreRef {
         self.meta_store.clone()
     }
 
-    pub fn meta_store(&self) -> &S {
-        self.meta_store.deref()
+    pub fn meta_store(&self) -> &MetaStoreRef {
+        &self.meta_store
     }
 
-    pub fn id_gen_manager_ref(&self) -> IdGeneratorManagerRef<S> {
+    pub fn sql_meta_store(&self) -> Option<SqlMetaStore> {
+        self.meta_store_sql.clone()
+    }
+
+    pub fn id_gen_manager_ref(&self) -> IdGeneratorManagerRef {
         self.id_gen_manager.clone()
     }
 
-    pub fn id_gen_manager(&self) -> &IdGeneratorManager<S> {
+    pub fn id_gen_manager(&self) -> &IdGeneratorManager {
         self.id_gen_manager.deref()
     }
 
-    pub fn notification_manager_ref(&self) -> NotificationManagerRef<S> {
+    pub fn notification_manager_ref(&self) -> NotificationManagerRef {
         self.notification_manager.clone()
     }
 
-    pub fn notification_manager(&self) -> &NotificationManager<S> {
+    pub fn notification_manager(&self) -> &NotificationManager {
         self.notification_manager.deref()
     }
 
@@ -281,12 +312,20 @@ where
         self.idle_manager.deref()
     }
 
-    pub fn system_params_manager_ref(&self) -> SystemParamsManagerRef<S> {
+    pub fn system_params_manager_ref(&self) -> SystemParamsManagerRef {
         self.system_params_manager.clone()
     }
 
-    pub fn system_params_manager(&self) -> &SystemParamsManager<S> {
+    pub fn system_params_manager(&self) -> &SystemParamsManager {
         self.system_params_manager.deref()
+    }
+
+    pub fn system_params_controller_ref(&self) -> Option<SystemParamsControllerRef> {
+        self.system_params_controller.clone()
+    }
+
+    pub fn system_params_controller(&self) -> Option<&SystemParamsControllerRef> {
+        self.system_params_controller.as_ref()
     }
 
     pub fn stream_client_pool_ref(&self) -> StreamClientPoolRef {
@@ -311,7 +350,7 @@ where
 }
 
 #[cfg(any(test, feature = "test"))]
-impl MetaSrvEnv<MemStore> {
+impl MetaSrvEnv {
     // Instance for test.
     pub async fn for_test() -> Self {
         Self::for_test_opts(MetaOpts::test(false).into()).await
@@ -319,7 +358,12 @@ impl MetaSrvEnv<MemStore> {
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
-        let meta_store = Arc::new(MemStore::default());
+        let meta_store = MemStore::default().into_ref();
+        #[cfg(madsim)]
+        let meta_store_sql: Option<SqlMetaStore> = None;
+        #[cfg(not(madsim))]
+        let meta_store_sql = Some(SqlMetaStore::for_test().await);
+
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -335,14 +379,29 @@ impl MetaSrvEnv<MemStore> {
             .await
             .unwrap(),
         );
+        let system_params_controller = if let Some(store) = &meta_store_sql {
+            Some(Arc::new(
+                SystemParamsController::new(
+                    store.clone(),
+                    notification_manager.clone(),
+                    risingwave_common::system_param::system_params_for_test(),
+                )
+                .await
+                .unwrap(),
+            ))
+        } else {
+            None
+        };
 
         Self {
             id_gen_manager,
             meta_store,
+            meta_store_sql,
             notification_manager,
             stream_client_pool,
             idle_manager,
             system_params_manager,
+            system_params_controller,
             cluster_id,
             cluster_first_launch,
             connector_client: None,

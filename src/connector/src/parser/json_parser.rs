@@ -15,24 +15,24 @@
 use std::collections::HashMap;
 
 use apache_avro::Schema;
+use itertools::{Either, Itertools};
 use jst::{convert_avro, Context};
 use risingwave_common::error::ErrorCode::{self, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::plan_common::ColumnDesc;
-use url::Url;
 
 use super::avro::schema_resolver::ConfluentSchemaResolver;
 use super::schema_registry::Client;
 use super::util::{get_kafka_topic, read_schema_from_http, read_schema_from_local};
 use super::{EncodingProperties, SchemaRegistryAuth, SpecificParserConfig};
+use crate::only_parse_payload;
 use crate::parser::avro::util::avro_schema_to_column_descs;
+use crate::parser::schema_registry::handle_sr_list;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_accessor_on_stream_chunk_writer;
 use crate::parser::unified::AccessImpl;
-use crate::parser::{
-    AccessBuilder, ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard,
-};
+use crate::parser::{AccessBuilder, ByteStreamSourceParser, SourceStreamChunkRowWriter};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -106,41 +106,33 @@ impl JsonParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        mut payload: Option<Vec<u8>>,
+        mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        if payload.is_none() {
-            return Err(RwError::from(ErrorCode::InternalError(
-                "Empty payload with nonempty key for non-upsert".into(),
-            )));
-        }
-        let value =
-            simd_json::to_borrowed_value(&mut payload.as_mut().unwrap()[self.payload_start_idx..])
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+    ) -> Result<()> {
+        let value = simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         let values = if let simd_json::BorrowedValue::Array(arr) = value {
-            arr
+            Either::Left(arr.into_iter())
         } else {
-            vec![value]
+            Either::Right(std::iter::once(value))
         };
+
         let mut errors = Vec::new();
-        let mut guard = None;
         for value in values {
             let accessor = JsonAccess::new(value);
             match apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer) {
-                Ok(this_guard) => guard = Some(this_guard),
+                Ok(_) => {}
                 Err(err) => errors.push(err),
             }
         }
 
-        if let Some(guard) = guard {
-            if !errors.is_empty() {
-                tracing::error!(?errors, "failed to parse some columns");
-            }
-            Ok(guard)
+        if errors.is_empty() {
+            Ok(())
         } else {
             Err(RwError::from(ErrorCode::InternalError(format!(
-                "failed to parse all columns: {:?}",
-                errors
+                "failed to parse {} row(s) in a single json message: {}",
+                errors.len(),
+                errors.iter().join(", ")
             ))))
         }
     }
@@ -151,8 +143,7 @@ pub async fn schema_to_columns(
     use_schema_registry: bool,
     props: &HashMap<String, String>,
 ) -> anyhow::Result<Vec<ColumnDesc>> {
-    let url = Url::parse(schema_location)
-        .map_err(|e| InternalError(format!("failed to parse url ({}): {}", schema_location, e)))?;
+    let url = handle_sr_list(schema_location)?;
     let schema_content = if use_schema_registry {
         let schema_registry_auth = SchemaRegistryAuth::from(props);
         let client = Client::new(url, &schema_registry_auth)?;
@@ -163,9 +154,10 @@ pub async fn schema_to_columns(
             .await?
             .content
     } else {
+        let url = url.get(0).unwrap();
         match url.scheme() {
             "file" => read_schema_from_local(url.path()),
-            "https" | "http" => read_schema_from_http(&url).await,
+            "https" | "http" => read_schema_from_http(url).await,
             scheme => Err(RwError::from(ProtocolError(format!(
                 "path scheme {} is not supported",
                 scheme
@@ -194,23 +186,21 @@ impl ByteStreamSourceParser for JsonParser {
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
-        self.parse_inner(payload, writer).await
+    ) -> Result<()> {
+        only_parse_payload!(self, payload, writer)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
     use std::vec;
 
     use itertools::Itertools;
     use risingwave_common::array::{Op, StructValue};
-    use risingwave_common::cast::{str_to_date, str_to_timestamp};
     use risingwave_common::catalog::ColumnDesc;
     use risingwave_common::row::Row;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
+    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
 
     use super::JsonParser;
     use crate::parser::upsert_parser::UpsertParser;
@@ -257,7 +247,7 @@ mod tests {
 
         for payload in get_payload() {
             let writer = builder.row_writer();
-            parser.parse_inner(Some(payload), writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
 
         let chunk = builder.finish();
@@ -294,19 +284,17 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(7).to_owned_datum(),
-                (Some(ScalarImpl::Date(str_to_date("2021-01-01").unwrap())))
+                (Some(ScalarImpl::Date("2021-01-01".parse().unwrap())))
             );
             assert_eq!(
                 row.datum_at(8).to_owned_datum(),
                 (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
+                    "2021-01-01 16:06:12.269".parse().unwrap()
                 )))
             );
             assert_eq!(
                 row.datum_at(9).to_owned_datum(),
-                (Some(ScalarImpl::Decimal(
-                    Decimal::from_str("12345.67890").unwrap()
-                )))
+                (Some(ScalarImpl::Decimal("12345.67890".parse().unwrap())))
             );
         }
 
@@ -362,7 +350,7 @@ mod tests {
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#.to_vec();
-            parser.parse_inner(Some(payload), writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
 
         // Parse an incorrect record.
@@ -371,14 +359,14 @@ mod tests {
             // `v2` overflowed.
             let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#.to_vec();
             // ignored the error, and fill None at v2.
-            parser.parse_inner(Some(payload), writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
 
         // Parse a correct record.
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#.to_vec();
-            parser.parse_inner(Some(payload), writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
 
         let chunk = builder.finish();
@@ -448,7 +436,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
         {
             let writer = builder.row_writer();
-            parser.parse_inner(Some(payload), writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
@@ -458,7 +446,7 @@ mod tests {
         let expected = vec![
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2022-07-13 20:48:37.07").unwrap()
+                    "2022-07-13 20:48:37.07".parse().unwrap()
                 )),
                 Some(ScalarImpl::Utf8("1732524418112319151".into())),
                 Some(ScalarImpl::Utf8("Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.".into())),
@@ -466,7 +454,7 @@ mod tests {
             ]))),
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2018-01-29 12:19:11.07").unwrap()
+                    "2018-01-29 12:19:11.07".parse().unwrap()
                 )),
                 Some(ScalarImpl::Utf8("7772634297".into())),
                 Some(ScalarImpl::Utf8("Lily Frami yet".into())),
@@ -508,7 +496,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
         {
             let writer = builder.row_writer();
-            parser.parse_inner(Some(payload), writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();

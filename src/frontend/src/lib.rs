@@ -13,13 +13,12 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![allow(rustdoc::private_intra_doc_links)]
 #![feature(map_try_insert)]
 #![feature(negative_impls)]
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(trait_alias)]
-#![feature(drain_filter)]
+#![feature(extract_if)]
 #![feature(if_let_guard)]
 #![feature(let_chains)]
 #![feature(assert_matches)]
@@ -35,6 +34,9 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(async_fn_in_trait)]
 #![recursion_limit = "256"]
+
+#[cfg(test)]
+risingwave_expr_impl::enable!();
 
 #[macro_use]
 mod catalog;
@@ -52,7 +54,7 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
-use risingwave_common::config::OverrideConfig;
+use risingwave_common::config::{MetricLevel, OverrideConfig};
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
@@ -129,7 +131,7 @@ pub struct FrontendOpts {
     /// >0 = enable metrics
     #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
-    pub metrics_level: Option<u32>,
+    pub metrics_level: Option<MetricLevel>,
 
     #[clap(long, env = "RW_ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]

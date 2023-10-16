@@ -272,7 +272,7 @@ def test_jdbc_sink(input_file, param):
 
 def test_elasticsearch_sink(param):
     prop = {
-        "connector": "elasticsearch-7",
+        "connector": "elasticsearch",
         "url": "http://127.0.0.1:9200",
         "index": "test",
     }

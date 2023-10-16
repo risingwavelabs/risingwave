@@ -45,7 +45,16 @@ pub struct StreamMaterialize {
 impl StreamMaterialize {
     #[must_use]
     pub fn new(input: PlanRef, table: TableCatalog) -> Self {
-        let base = PlanBase::derive_stream_plan_base(&input);
+        let base = PlanBase::new_stream(
+            input.ctx(),
+            input.schema().clone(),
+            Some(table.stream_key.clone()),
+            input.functional_dependency().clone(),
+            input.distribution().clone(),
+            input.append_only(),
+            input.emit_on_window_close(),
+            input.watermark_columns().clone(),
+        );
         Self { base, input, table }
     }
 
@@ -140,7 +149,7 @@ impl StreamMaterialize {
                 TableType::MaterializedView => {
                     assert_matches!(user_distributed_by, RequiredDist::Any);
                     // ensure the same pk will not shuffle to different node
-                    RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
+                    RequiredDist::shard_by_key(input.schema().len(), input.expect_stream_key())
                 }
                 TableType::Index => {
                     assert_matches!(
@@ -182,24 +191,25 @@ impl StreamMaterialize {
         let append_only = input.append_only();
         let watermark_columns = input.watermark_columns().clone();
 
-        let (pk, stream_key) = if let Some(pk_column_indices) = pk_column_indices {
-            let pk = pk_column_indices
+        let (table_pk, stream_key) = if let Some(pk_column_indices) = pk_column_indices {
+            let table_pk = pk_column_indices
                 .iter()
                 .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
                 .collect();
-            // No order by for create table, so stream key is identical to pk.
-            (pk, pk_column_indices)
+            // No order by for create table, so stream key is identical to table pk.
+            (table_pk, pk_column_indices)
         } else {
             derive_pk(input, user_order_by, &columns)
         };
+        // assert: `stream_key` is a subset of `table_pk`
 
-        let read_prefix_len_hint = stream_key.len();
+        let read_prefix_len_hint = table_pk.len();
         Ok(TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
             name,
             columns,
-            pk,
+            pk: table_pk,
             stream_key,
             distribution_key,
             table_type,
@@ -292,7 +302,7 @@ impl PlanTreeNodeUnary for StreamMaterialize {
                 assert_eq!(a.type_name, b.type_name);
                 assert_eq!(a.sub_fields, b.sub_fields);
             });
-        assert_eq!(new.plan_base().logical_pk, self.plan_base().logical_pk);
+        assert_eq!(new.plan_base().stream_key, self.plan_base().stream_key);
         new
     }
 }

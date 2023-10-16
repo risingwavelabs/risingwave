@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::max;
+use std::collections::BTreeMap;
+
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
@@ -28,6 +31,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
+use crate::Explain;
 
 /// `LogicalUnion` returns the union of the rows of its inputs.
 /// If `all` is false, it needs to eliminate duplicates.
@@ -125,11 +129,10 @@ impl ToBatch for LogicalUnion {
         // Convert union to union all + agg
         if !self.all() {
             let batch_union = BatchUnion::new(new_logical).into();
-            Ok(BatchHashAgg::new(generic::Agg::new(
-                vec![],
-                (0..self.base.schema.len()).collect(),
-                batch_union,
-            ))
+            Ok(BatchHashAgg::new(
+                generic::Agg::new(vec![], (0..self.base.schema.len()).collect(), batch_union)
+                    .with_enable_two_phase(false),
+            )
             .into())
         } else {
             Ok(BatchUnion::new(new_logical).into())
@@ -140,7 +143,12 @@ impl ToBatch for LogicalUnion {
 impl ToStream for LogicalUnion {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         // TODO: use round robin distribution instead of using hash distribution of all inputs.
-        let dist = RequiredDist::hash_shard(self.base.logical_pk());
+        let dist = RequiredDist::hash_shard(self.base.stream_key().unwrap_or_else(|| {
+            panic!(
+                "should always have a stream key in the stream plan but not, sub plan: {}",
+                PlanRef::from(self.clone()).explain_to_string()
+            )
+        }));
         let new_inputs: Result<Vec<_>> = self
             .inputs()
             .iter()
@@ -169,18 +177,18 @@ impl ToStream for LogicalUnion {
             rewrites.push(input.logical_rewrite_for_stream(ctx)?);
         }
 
-        let original_schema_contain_all_input_pks =
+        let original_schema_contain_all_input_stream_keys =
             rewrites.iter().all(|(new_input, col_index_mapping)| {
                 let original_schema_new_pos = (0..original_schema_len)
                     .map(|x| col_index_mapping.map(x))
                     .collect_vec();
                 new_input
-                    .logical_pk()
+                    .expect_stream_key()
                     .iter()
                     .all(|x| original_schema_new_pos.contains(x))
             });
 
-        if original_schema_contain_all_input_pks {
+        if original_schema_contain_all_input_stream_keys {
             // Add one more column at the end of the original schema to identify the record came
             // from which input. [original_schema + source_col]
             let new_inputs = rewrites
@@ -218,29 +226,45 @@ impl ToStream for LogicalUnion {
             Ok((new_union.into(), out_col_change))
         } else {
             // In order to ensure all inputs have the same schema for new union, we construct new
-            // schema like that: [original_schema + input1_pk + input2_pk + ... +
-            // source_col]
-            let input_pk_types = rewrites
-                .iter()
-                .flat_map(|(new_input, _)| {
-                    new_input
-                        .logical_pk()
-                        .iter()
-                        .map(|x| new_input.schema().fields[*x].data_type())
-                })
-                .collect_vec();
-            let input_pk_nulls = input_pk_types
+            // schema like that: [original_schema + merged_stream_key + source_col]
+            // where merged_stream_key is merged by the types of each input stream key.
+            // If all inputs have the same stream key column types, we have a small merged_stream_key. Otherwise, we will have a large merged_stream_key.
+
+            let (merged_stream_key_types, types_offset) = {
+                let mut max_types_counter = BTreeMap::default();
+                for (new_input, _) in &rewrites {
+                    let mut types_counter = BTreeMap::default();
+                    for x in new_input.expect_stream_key() {
+                        types_counter
+                            .entry(new_input.schema().fields[*x].data_type())
+                            .and_modify(|x| *x += 1)
+                            .or_insert(1);
+                    }
+                    for (key, val) in types_counter {
+                        max_types_counter
+                            .entry(key)
+                            .and_modify(|x| *x = max(*x, val))
+                            .or_insert(val);
+                    }
+                }
+
+                let mut merged_stream_key_types = vec![];
+                let mut types_offset = BTreeMap::default();
+                let mut offset = 0;
+                for (key, val) in max_types_counter {
+                    let _ = types_offset.insert(key.clone(), offset);
+                    offset += val;
+                    merged_stream_key_types.extend(std::iter::repeat(key.clone()).take(val));
+                }
+
+                (merged_stream_key_types, types_offset)
+            };
+
+            let input_stream_key_nulls = merged_stream_key_types
                 .iter()
                 .map(|t| ExprImpl::Literal(Literal::new(None, t.clone()).into()))
                 .collect_vec();
-            let input_pk_lens = rewrites
-                .iter()
-                .map(|(new_input, _)| new_input.logical_pk().len())
-                .collect_vec();
-            let mut input_pk_offsets = vec![0];
-            for (i, len) in input_pk_lens.into_iter().enumerate() {
-                input_pk_offsets.push(input_pk_offsets[i] + len)
-            }
+
             let new_inputs = rewrites
                 .into_iter()
                 .enumerate()
@@ -257,18 +281,22 @@ impl ToStream for LogicalUnion {
                             )
                         })
                         .collect_vec();
-                    // input1_pk + input2_pk + ...
-                    let mut input_pks = input_pk_nulls.clone();
-                    for (j, pk_idx) in new_input.logical_pk().iter().enumerate() {
-                        input_pks[input_pk_offsets[i] + j] = ExprImpl::InputRef(
-                            InputRef::new(
-                                *pk_idx,
-                                new_input.schema().fields[*pk_idx].data_type.clone(),
-                            )
-                            .into(),
-                        );
+                    // merged_stream_key
+                    let mut input_stream_keys = input_stream_key_nulls.clone();
+                    let mut types_counter = BTreeMap::default();
+                    for stream_key_idx in new_input.expect_stream_key() {
+                        let data_type =
+                            new_input.schema().fields[*stream_key_idx].data_type.clone();
+                        let count = *types_counter
+                            .entry(data_type.clone())
+                            .and_modify(|x| *x += 1)
+                            .or_insert(1);
+                        let type_start_offset = *types_offset.get(&data_type).unwrap();
+
+                        input_stream_keys[type_start_offset + count - 1] =
+                            ExprImpl::InputRef(InputRef::new(*stream_key_idx, data_type).into());
                     }
-                    exprs.extend(input_pks);
+                    exprs.extend(input_stream_keys);
                     // source_col
                     exprs.push(ExprImpl::Literal(
                         Literal::new(Some((i as i32).to_scalar_value()), DataType::Int32).into(),
@@ -280,7 +308,7 @@ impl ToStream for LogicalUnion {
             let new_union = LogicalUnion::new_with_source_col(
                 self.all(),
                 new_inputs,
-                Some(original_schema_len + input_pk_types.len()),
+                Some(original_schema_len + merged_stream_key_types.len()),
             );
             // We have already used project to map rewrite input to the origin schema, so we can use
             // identity with the new schema len.

@@ -29,7 +29,6 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
@@ -125,7 +124,7 @@ pub struct CompactorManagerInner {
 }
 
 impl CompactorManagerInner {
-    pub async fn with_meta<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+    pub async fn with_meta(env: MetaSrvEnv) -> MetaResult<Self> {
         // Retrieve the existing task assignments from metastore.
         let task_assignment = CompactTaskAssignment::list(env.meta_store()).await?;
         let mut manager = Self {
@@ -370,7 +369,7 @@ pub struct CompactorManager {
 }
 
 impl CompactorManager {
-    pub async fn with_meta<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
+    pub async fn with_meta(env: MetaSrvEnv) -> MetaResult<Self> {
         let inner = CompactorManagerInner::with_meta(env).await?;
 
         Ok(Self {
@@ -454,7 +453,7 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::CompactTaskProgress;
 
-    use crate::hummock::compaction::default_level_selector;
+    use crate::hummock::compaction::selector::default_compaction_selector;
     use crate::hummock::test_utils::{
         add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
     };
@@ -478,7 +477,7 @@ mod tests {
             hummock_manager
                 .get_compact_task(
                     StaticCompactionGroupId::StateDefault.into(),
-                    &mut default_level_selector(),
+                    &mut default_compaction_selector(),
                 )
                 .await
                 .unwrap()

@@ -11,8 +11,6 @@ services:
       - "compactor-0:6660"
       - "--prometheus-listener-addr"
       - "0.0.0.0:1260"
-      - "--metrics-level"
-      - "1"
       - "--meta-address"
       - "http://meta-node-0:5690"
       - "--config-path"
@@ -46,8 +44,6 @@ services:
       - "compute-node-0:5688"
       - "--prometheus-listener-addr"
       - "0.0.0.0:1222"
-      - "--metrics-level"
-      - "1"
       - "--meta-address"
       - "http://meta-node-0:5690"
       - "--connector-rpc-endpoint"
@@ -136,8 +132,6 @@ services:
       - /risingwave.toml
       - "--prometheus-listener-addr"
       - "0.0.0.0:2222"
-      - "--metrics-level"
-      - "1"
     expose:
       - "4566"
     ports:
@@ -198,7 +192,7 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+hdfs://<cluster_name>@<data_path>"
+      - "hummock+hdfs://<cluster_name>"
       - "--data-directory"
       - "hummock_001"
       - "--config-path"

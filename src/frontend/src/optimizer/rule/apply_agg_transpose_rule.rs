@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::DataType;
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{ApplyOffsetRewriter, BoxedRule, Rule};
@@ -52,7 +52,8 @@ impl Rule for ApplyAggTransposeRule {
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
         let agg: &LogicalAgg = right.as_logical_agg()?;
-        let (mut agg_calls, agg_group_key, grouping_sets, agg_input) = agg.clone().decompose();
+        let (mut agg_calls, agg_group_key, grouping_sets, agg_input, enable_two_phase) =
+            agg.clone().decompose();
         assert!(grouping_sets.is_empty());
         let is_scalar_agg = agg_group_key.is_empty();
         let apply_left_len = left.schema().len();
@@ -147,7 +148,9 @@ impl Rule for ApplyAggTransposeRule {
             }
             let mut group_keys: IndexSet = (0..apply_left_len).collect();
             group_keys.extend(agg_group_key.indices().map(|key| key + apply_left_len));
-            Agg::new(agg_calls, group_keys, node).into()
+            Agg::new(agg_calls, group_keys, node)
+                .with_enable_two_phase(enable_two_phase)
+                .into()
         };
 
         let filter = LogicalFilter::create(group_agg, on);

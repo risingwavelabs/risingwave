@@ -17,8 +17,8 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::agg::AggKind;
-use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
+use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
@@ -653,7 +653,7 @@ impl ColPrunable for LogicalOverWindow {
 
         let (req_cols_input_part, req_cols_win_func_part) = {
             let mut in_input = required_cols.to_vec();
-            let in_win_funcs: IndexSet = in_input.drain_filter(|i| *i >= input_len).collect();
+            let in_win_funcs: IndexSet = in_input.extract_if(|i| *i >= input_len).collect();
             (IndexSet::from(in_input), in_win_funcs)
         };
 

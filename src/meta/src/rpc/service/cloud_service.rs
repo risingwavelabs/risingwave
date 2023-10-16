@@ -17,9 +17,10 @@ use std::sync::LazyLock;
 
 use async_trait::async_trait;
 use regex::Regex;
+use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::kafka::private_link::insert_privatelink_broker_rewrite_map;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceEnumeratorContext, SplitEnumeratorImpl,
+    ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
 };
 use risingwave_pb::catalog::connection::Info::PrivateLinkService;
 use risingwave_pb::cloud_service::cloud_service_server::CloudService;
@@ -31,18 +32,14 @@ use tonic::{Request, Response, Status};
 
 use crate::manager::CatalogManagerRef;
 use crate::rpc::cloud_provider::AwsEc2Client;
-use crate::storage::MetaStore;
 
-pub struct CloudServiceImpl<S>
-where
-    S: MetaStore,
-{
-    catalog_manager: CatalogManagerRef<S>,
+pub struct CloudServiceImpl {
+    catalog_manager: CatalogManagerRef,
     aws_client: Option<AwsEc2Client>,
 }
 
-impl<S: MetaStore> CloudServiceImpl<S> {
-    pub fn new(catalog_manager: CatalogManagerRef<S>, aws_client: Option<AwsEc2Client>) -> Self {
+impl CloudServiceImpl {
+    pub fn new(catalog_manager: CatalogManagerRef, aws_client: Option<AwsEc2Client>) -> Self {
         Self {
             catalog_manager,
             aws_client,
@@ -65,10 +62,7 @@ fn new_rwc_validate_fail_response(
 }
 
 #[async_trait]
-impl<S> CloudService for CloudServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl CloudService for CloudServiceImpl {
     async fn rw_cloud_validate_source(
         &self,
         request: Request<RwCloudValidateSourceRequest>,
@@ -123,7 +117,9 @@ where
                     }
                     _ => (),
                 };
-                if let Err(e) = insert_privatelink_broker_rewrite_map(&service, &mut source_cfg) {
+                if let Err(e) =
+                    insert_privatelink_broker_rewrite_map(&mut source_cfg, Some(&service), None)
+                {
                     return Ok(new_rwc_validate_fail_response(
                         ErrorType::PrivatelinkResolveErr,
                         e.to_string(),
@@ -146,36 +142,43 @@ where
                 e.to_string(),
             ));
         };
-        let enumerator =
-            SplitEnumeratorImpl::create(props.unwrap(), SourceEnumeratorContext::default().into())
-                .await;
-        if let Err(e) = enumerator {
-            return Ok(new_rwc_validate_fail_response(
-                ErrorType::KafkaInvalidProperties,
-                e.to_string(),
-            ));
+
+        async fn new_enumerator<P: SourceProperties>(
+            props: P,
+        ) -> Result<P::SplitEnumerator, anyhow::Error> {
+            P::SplitEnumerator::new(props, SourceEnumeratorContext::default().into()).await
         }
-        if let Err(e) = enumerator.unwrap().list_splits().await {
-            let error_message = e.to_string();
-            if error_message.contains("BrokerTransportFailure") {
+
+        dispatch_source_prop!(props.unwrap(), props, {
+            let enumerator = new_enumerator(*props).await;
+            if let Err(e) = enumerator {
                 return Ok(new_rwc_validate_fail_response(
-                    ErrorType::KafkaBrokerUnreachable,
+                    ErrorType::KafkaInvalidProperties,
                     e.to_string(),
                 ));
             }
-            static TOPIC_NOT_FOUND: LazyLock<Regex> =
-                LazyLock::new(|| Regex::new(r"topic .* not found").unwrap());
-            if TOPIC_NOT_FOUND.is_match(error_message.as_str()) {
+            if let Err(e) = enumerator.unwrap().list_splits().await {
+                let error_message = e.to_string();
+                if error_message.contains("BrokerTransportFailure") {
+                    return Ok(new_rwc_validate_fail_response(
+                        ErrorType::KafkaBrokerUnreachable,
+                        e.to_string(),
+                    ));
+                }
+                static TOPIC_NOT_FOUND: LazyLock<Regex> =
+                    LazyLock::new(|| Regex::new(r"topic .* not found").unwrap());
+                if TOPIC_NOT_FOUND.is_match(error_message.as_str()) {
+                    return Ok(new_rwc_validate_fail_response(
+                        ErrorType::KafkaTopicNotFound,
+                        e.to_string(),
+                    ));
+                }
                 return Ok(new_rwc_validate_fail_response(
-                    ErrorType::KafkaTopicNotFound,
+                    ErrorType::KafkaOther,
                     e.to_string(),
                 ));
             }
-            return Ok(new_rwc_validate_fail_response(
-                ErrorType::KafkaOther,
-                e.to_string(),
-            ));
-        }
+        });
         Ok(Response::new(RwCloudValidateSourceResponse {
             ok: true,
             error: None,

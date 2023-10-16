@@ -12,20 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Display;
 use std::mem::size_of;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::{fmt, mem};
 
+use either::Either;
 use itertools::Itertools;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use risingwave_pb::data::{PbOp, PbStreamChunk};
 
-use super::vis::VisMut;
-use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt};
-use crate::array::{DataChunk, Vis};
-use crate::buffer::Bitmap;
+use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt, RowRef};
+use crate::array::DataChunk;
+use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::catalog::Schema;
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
 use crate::row::Row;
@@ -56,15 +58,25 @@ impl Op {
     }
 
     pub fn from_protobuf(prost: &i32) -> ArrayResult<Op> {
-        let op = match PbOp::from_i32(*prost) {
-            Some(PbOp::Insert) => Op::Insert,
-            Some(PbOp::Delete) => Op::Delete,
-            Some(PbOp::UpdateInsert) => Op::UpdateInsert,
-            Some(PbOp::UpdateDelete) => Op::UpdateDelete,
-            Some(PbOp::Unspecified) => unreachable!(),
-            None => bail!("No such op type"),
+        let op = match PbOp::try_from(*prost) {
+            Ok(PbOp::Insert) => Op::Insert,
+            Ok(PbOp::Delete) => Op::Delete,
+            Ok(PbOp::UpdateInsert) => Op::UpdateInsert,
+            Ok(PbOp::UpdateDelete) => Op::UpdateDelete,
+            Ok(PbOp::Unspecified) => unreachable!(),
+            Err(_) => bail!("No such op type"),
         };
         Ok(op)
+    }
+
+    /// convert `UpdateDelete` to `Delete` and `UpdateInsert` to Insert
+    pub fn normalize_update(self) -> Op {
+        match self {
+            Op::Insert => Op::Insert,
+            Op::Delete => Op::Delete,
+            Op::UpdateDelete => Op::Delete,
+            Op::UpdateInsert => Op::Insert,
+        }
     }
 }
 
@@ -91,21 +103,24 @@ impl Default for StreamChunk {
 }
 
 impl StreamChunk {
-    pub fn new(
+    /// Create a new `StreamChunk` with given ops and columns.
+    pub fn new(ops: impl Into<Arc<[Op]>>, columns: Vec<ArrayRef>) -> Self {
+        let ops = ops.into();
+        let visibility = Bitmap::ones(ops.len());
+        Self::with_visibility(ops, columns, visibility)
+    }
+
+    /// Create a new `StreamChunk` with given ops, columns and visibility.
+    pub fn with_visibility(
         ops: impl Into<Arc<[Op]>>,
         columns: Vec<ArrayRef>,
-        visibility: Option<Bitmap>,
+        visibility: Bitmap,
     ) -> Self {
         let ops = ops.into();
         for col in &columns {
             assert_eq!(col.len(), ops.len());
         }
-
-        let vis = match visibility {
-            Some(b) => Vis::Bitmap(b),
-            None => Vis::Compact(ops.len()),
-        };
-        let data = DataChunk::new(columns, vis);
+        let data = DataChunk::new(columns, visibility);
         StreamChunk { ops, data }
     }
 
@@ -129,7 +144,7 @@ impl StreamChunk {
             .into_iter()
             .map(|builder| builder.finish().into())
             .collect::<Vec<_>>();
-        StreamChunk::new(ops, new_columns, None)
+        StreamChunk::new(ops, new_columns)
     }
 
     /// Get the reference of the underlying data chunk.
@@ -139,25 +154,24 @@ impl StreamChunk {
 
     /// compact the `StreamChunk` with its visibility map
     pub fn compact(self) -> Self {
-        if self.visibility().is_none() {
+        if self.is_compacted() {
             return self;
         }
 
         let (ops, columns, visibility) = self.into_inner();
-        let visibility = visibility.as_visibility().unwrap();
 
         let cardinality = visibility
             .iter()
             .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
         let columns: Vec<_> = columns
             .into_iter()
-            .map(|col| col.compact(visibility, cardinality).into())
+            .map(|col| col.compact(&visibility, cardinality).into())
             .collect();
         let mut new_ops = Vec::with_capacity(cardinality);
         for idx in visibility.iter_ones() {
             new_ops.push(ops[idx]);
         }
-        StreamChunk::new(new_ops, columns, None)
+        StreamChunk::new(new_ops, columns)
     }
 
     pub fn into_parts(self) -> (DataChunk, Arc<[Op]>) {
@@ -166,15 +180,18 @@ impl StreamChunk {
 
     pub fn from_parts(ops: impl Into<Arc<[Op]>>, data_chunk: DataChunk) -> Self {
         let (columns, vis) = data_chunk.into_parts();
-        Self::new(ops, columns, vis.into_visibility())
+        Self::with_visibility(ops, columns, vis)
     }
 
-    pub fn into_inner(self) -> (Arc<[Op]>, Vec<ArrayRef>, Vis) {
+    pub fn into_inner(self) -> (Arc<[Op]>, Vec<ArrayRef>, Bitmap) {
         let (columns, vis) = self.data.into_parts();
         (self.ops, columns, vis)
     }
 
     pub fn to_protobuf(&self) -> PbStreamChunk {
+        if !self.is_compacted() {
+            return self.clone().compact().to_protobuf();
+        }
         PbStreamChunk {
             cardinality: self.cardinality() as u32,
             ops: self.ops.iter().map(|op| op.to_protobuf() as i32).collect(),
@@ -192,23 +209,41 @@ impl StreamChunk {
         for column in prost.get_columns() {
             columns.push(ArrayImpl::from_protobuf(column, cardinality)?.into());
         }
-        Ok(StreamChunk::new(ops, columns, None))
+        Ok(StreamChunk::new(ops, columns))
     }
 
     pub fn ops(&self) -> &[Op] {
         &self.ops
     }
 
-    /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
-    pub fn to_pretty_string(&self) -> String {
+    /// Returns a table-like text representation of the `StreamChunk`.
+    pub fn to_pretty(&self) -> impl Display {
+        self.to_pretty_inner(None)
+    }
+
+    /// Returns a table-like text representation of the `StreamChunk` with a header of column names
+    /// from the given `schema`.
+    pub fn to_pretty_with_schema(&self, schema: &Schema) -> impl Display {
+        self.to_pretty_inner(Some(schema))
+    }
+
+    fn to_pretty_inner(&self, schema: Option<&Schema>) -> impl Display {
         use comfy_table::{Cell, CellAlignment, Table};
 
         if self.cardinality() == 0 {
-            return "(empty)".to_owned();
+            return Either::Left("(empty)");
         }
 
         let mut table = Table::new();
-        table.load_preset("||--+-++|    ++++++");
+        table.load_preset(DataChunk::PRETTY_TABLE_PRESET);
+
+        if let Some(schema) = schema {
+            assert_eq!(self.dimension(), schema.len());
+            let cells = std::iter::once(String::new())
+                .chain(schema.fields().iter().map(|f| f.name.clone()));
+            table.set_header(cells);
+        }
+
         for (op, row_ref) in self.rows() {
             let mut cells = Vec::with_capacity(row_ref.len() + 1);
             cells.push(
@@ -229,7 +264,8 @@ impl StreamChunk {
             }
             table.add_row(cells);
         }
-        table.to_string()
+
+        Either::Right(table)
     }
 
     /// Reorder (and possibly remove) columns.
@@ -245,7 +281,7 @@ impl StreamChunk {
     }
 
     /// Reorder columns and set visibility.
-    pub fn project_with_vis(&self, indices: &[usize], vis: Vis) -> Self {
+    pub fn project_with_vis(&self, indices: &[usize], vis: Bitmap) -> Self {
         Self {
             ops: self.ops.clone(),
             data: self.data.project_with_vis(indices, vis),
@@ -253,7 +289,7 @@ impl StreamChunk {
     }
 
     /// Clone the `StreamChunk` with a new visibility.
-    pub fn with_visibility(&self, vis: Vis) -> Self {
+    pub fn clone_with_vis(&self, vis: Bitmap) -> Self {
         Self {
             ops: self.ops.clone(),
             data: self.data.with_visibility(vis),
@@ -290,7 +326,7 @@ impl fmt::Debug for StreamChunk {
                 "StreamChunk {{ cardinality: {}, capacity: {}, data: \n{}\n }}",
                 self.cardinality(),
                 self.capacity(),
-                self.to_pretty_string()
+                self.to_pretty()
             )
         } else {
             f.debug_struct("StreamChunk")
@@ -327,7 +363,19 @@ impl OpsMut {
         }
     }
 
+    pub fn len(&self) -> usize {
+        match &self.state {
+            OpsMutState::ArcRef(v) => v.len(),
+            OpsMutState::Mut(v) => v.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn set(&mut self, n: usize, val: Op) {
+        debug_assert!(n < self.len());
         if let OpsMutState::Mut(v) = &mut self.state {
             v[n] = val;
         } else {
@@ -338,6 +386,14 @@ impl OpsMut {
             };
             v[n] = val;
             self.state = OpsMutState::Mut(v);
+        }
+    }
+
+    pub fn get(&self, n: usize) -> Op {
+        debug_assert!(n < self.len());
+        match &self.state {
+            OpsMutState::ArcRef(v) => v[n],
+            OpsMutState::Mut(v) => v[n],
         }
     }
 }
@@ -352,10 +408,10 @@ impl From<OpsMut> for Arc<[Op]> {
 
 /// A mutable wrapper for `StreamChunk`. can only set the visibilities and ops in place, can not
 /// change the length.
-struct StreamChunkMut {
+pub struct StreamChunkMut {
     columns: Arc<[ArrayRef]>,
     ops: OpsMut,
-    vis: VisMut,
+    vis: BitmapBuilder,
 }
 
 impl From<StreamChunk> for StreamChunkMut {
@@ -372,21 +428,43 @@ impl From<StreamChunk> for StreamChunkMut {
 
 impl From<StreamChunkMut> for StreamChunk {
     fn from(c: StreamChunkMut) -> Self {
-        StreamChunk::from_parts(c.ops, DataChunk::from_parts(c.columns, c.vis.into()))
+        StreamChunk::from_parts(c.ops, DataChunk::from_parts(c.columns, c.vis.finish()))
     }
 }
+
 pub struct OpRowMutRef<'a> {
     c: &'a mut StreamChunkMut,
     i: usize,
 }
 
 impl OpRowMutRef<'_> {
+    pub fn index(&self) -> usize {
+        self.i
+    }
+
+    pub fn vis(&self) -> bool {
+        self.c.vis.is_set(self.i)
+    }
+
+    pub fn op(&self) -> Op {
+        self.c.ops.get(self.i)
+    }
+
     pub fn set_vis(&mut self, val: bool) {
         self.c.set_vis(self.i, val);
     }
 
     pub fn set_op(&mut self, val: Op) {
         self.c.set_op(self.i, val);
+    }
+
+    pub fn row_ref(&self) -> RowRef<'_> {
+        RowRef::with_columns(self.c.columns(), self.i)
+    }
+
+    /// return if the two row ref is in the same chunk
+    pub fn same_chunk(&self, other: &Self) -> bool {
+        std::ptr::eq(self.c, other.c)
     }
 }
 
@@ -399,14 +477,23 @@ impl StreamChunkMut {
         self.ops.set(n, val);
     }
 
+    pub fn columns(&self) -> &[ArrayRef] {
+        &self.columns
+    }
+
     /// get the mut reference of the stream chunk.
-    pub fn to_mut_rows(&self) -> impl Iterator<Item = OpRowMutRef<'_>> {
+    pub fn to_rows_mut(&mut self) -> impl Iterator<Item = (RowRef<'_>, OpRowMutRef<'_>)> {
         unsafe {
-            (0..self.vis.len()).map(|i| {
-                let p = self as *const StreamChunkMut;
-                let p = p as *mut StreamChunkMut;
-                OpRowMutRef { c: &mut *p, i }
-            })
+            (0..self.vis.len())
+                .filter(|i| self.vis.is_set(*i))
+                .map(|i| {
+                    let p = self as *const StreamChunkMut;
+                    let p = p as *mut StreamChunkMut;
+                    (
+                        RowRef::with_columns(self.columns(), i),
+                        OpRowMutRef { c: &mut *p, i },
+                    )
+                })
         }
     }
 }
@@ -526,7 +613,7 @@ impl StreamChunkTestExt for StreamChunk {
     fn valid(&self) -> bool {
         let len = self.ops.len();
         let data = &self.data;
-        data.vis().len() == len && data.columns().iter().all(|col| col.len() == len)
+        data.visibility().len() == len && data.columns().iter().all(|col| col.len() == len)
     }
 
     fn concat(chunks: Vec<StreamChunk>) -> StreamChunk {
@@ -636,7 +723,7 @@ mod tests {
             U+ 4 .",
         );
         assert_eq!(
-            chunk.to_pretty_string(),
+            chunk.to_pretty().to_string(),
             "\
 +----+---+---+
 |  + | 1 | 6 |

@@ -143,7 +143,6 @@ impl SstableStreamIterator {
             if !block_iter.is_valid() {
                 // `seek_key` is larger than everything in the first block.
                 self.next_block().await?;
-            } else {
             }
         }
 
@@ -160,7 +159,7 @@ impl SstableStreamIterator {
             loop {
                 let now = Instant::now();
                 let ret = match &mut self.block_stream {
-                    Some(block_stream) => block_stream.next().await,
+                    Some(block_stream) => block_stream.next_block().await,
                     None => {
                         self.create_stream().await?;
                         continue;
@@ -511,7 +510,7 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable_and_info, test_key_of, test_value_of,
+        default_builder_opt_for_test, gen_test_sstable_info, test_key_of, test_value_of,
         TEST_KEYS_COUNT,
     };
     use crate::hummock::value::HummockValue;
@@ -523,7 +522,7 @@ mod tests {
         for object_id in 0..3 {
             let start_index = object_id * TEST_KEYS_COUNT;
             let end_index = (object_id + 1) * TEST_KEYS_COUNT;
-            let (_table, table_info) = gen_test_sstable_and_info(
+            let table_info = gen_test_sstable_info(
                 default_builder_opt_for_test(),
                 object_id as u64,
                 (start_index..end_index)
@@ -643,7 +642,7 @@ mod tests {
         for object_id in 0..3 {
             let start_index = object_id * TEST_KEYS_COUNT + TEST_KEYS_COUNT / 2;
             let end_index = (object_id + 1) * TEST_KEYS_COUNT;
-            let (_table, table_info) = gen_test_sstable_and_info(
+            let table_info = gen_test_sstable_info(
                 default_builder_opt_for_test(),
                 object_id as u64,
                 (start_index..end_index)

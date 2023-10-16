@@ -20,14 +20,13 @@ use std::sync::LazyLock;
 use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::format::{Formatter, FormatterNode, SpecifierType};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
 use risingwave_common::{GIT_SHA, RW_VERSION};
-use risingwave_expr::agg::{agg_kinds, AggKind};
-use risingwave_expr::function::window::{
+use risingwave_expr::aggregate::{agg_kinds, AggKind};
+use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
@@ -60,12 +59,27 @@ impl Binder {
             [schema, name] => {
                 let schema_name = schema.real_value();
                 if schema_name == PG_CATALOG_SCHEMA_NAME {
+                    // pg_catalog is always effectively part of the search path, so we can always bind the function.
+                    // Ref: https://www.postgresql.org/docs/current/ddl-schemas.html#DDL-SCHEMAS-CATALOG
                     name.real_value()
+                } else if schema_name == INFORMATION_SCHEMA_SCHEMA_NAME {
+                    // definition of information_schema: https://github.com/postgres/postgres/blob/e0b2eed047df9045664da6f724cb42c10f8b12f0/src/backend/catalog/information_schema.sql
+                    //
+                    // FIXME: handle schema correctly, so that the functions are hidden if the schema is not in the search path.
+                    let function_name = name.real_value();
+                    if function_name != "_pg_expandarray" {
+                        return Err(ErrorCode::NotImplemented(
+                            format!("Unsupported function name under schema: {}", schema_name),
+                            12422.into(),
+                        )
+                        .into());
+                    }
+                    function_name
                 } else {
-                    return Err(ErrorCode::BindError(format!(
-                        "Unsupported function name under schema: {}",
-                        schema_name
-                    ))
+                    return Err(ErrorCode::NotImplemented(
+                        format!("Unsupported function name under schema: {}", schema_name),
+                        12422.into(),
+                    )
                     .into());
                 }
             }
@@ -139,7 +153,7 @@ impl Binder {
         }
 
         // user defined function
-        // TODO: resolve schema name
+        // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
         if let Ok(schema) = self.first_valid_schema() &&
             let Some(func) = schema.get_function_by_name_args(
                 &function_name,
@@ -185,10 +199,16 @@ impl Binder {
             }
         };
 
-        let ast::FunctionArgExpr::Expr(ast::Expr::LambdaFunction { args: lambda_args, body: lambda_body }) = lambda.get_expr() else {
+        let ast::FunctionArgExpr::Expr(ast::Expr::LambdaFunction {
+            args: lambda_args,
+            body: lambda_body,
+        }) = lambda.get_expr()
+        else {
             return Err(ErrorCode::BindError(
-                "The `lambda` argument for `array_transform` should be a lambda function".to_string()
-            ).into());
+                "The `lambda` argument for `array_transform` should be a lambda function"
+                    .to_string(),
+            )
+            .into());
         };
 
         let [lambda_arg] = <[Ident; 1]>::try_from(lambda_args).map_err(|args| -> RwError {
@@ -749,7 +769,7 @@ impl Binder {
                     rewrite(ExprType::ConcatWs, Binder::rewrite_concat_to_concat_ws),
                 ),
                 ("concat_ws", raw_call(ExprType::ConcatWs)),
-                ("format", rewrite(ExprType::ConcatWs, Binder::rewrite_format_to_concat_ws)),
+                ("format", raw_call(ExprType::Format)),
                 ("translate", raw_call(ExprType::Translate)),
                 ("split_part", raw_call(ExprType::SplitPart)),
                 ("char_length", raw_call(ExprType::CharLength)),
@@ -788,10 +808,14 @@ impl Binder {
                 ("array_prepend", raw_call(ExprType::ArrayPrepend)),
                 ("array_to_string", raw_call(ExprType::ArrayToString)),
                 ("array_distinct", raw_call(ExprType::ArrayDistinct)),
+                ("array_min", raw_call(ExprType::ArrayMin)),
+                ("array_sort", raw_call(ExprType::ArraySort)),
                 ("array_length", raw_call(ExprType::ArrayLength)),
                 ("cardinality", raw_call(ExprType::Cardinality)),
                 ("array_remove", raw_call(ExprType::ArrayRemove)),
                 ("array_replace", raw_call(ExprType::ArrayReplace)),
+                ("array_max", raw_call(ExprType::ArrayMax)),
+                ("array_sum", raw_call(ExprType::ArraySum)),
                 ("array_position", raw_call(ExprType::ArrayPosition)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
@@ -1118,7 +1142,7 @@ impl Binder {
                 // TODO: really implement them.
                 // https://www.postgresql.org/docs/9.5/functions-info.html#FUNCTIONS-INFO-COMMENT-TABLE
                 // WARN: Hacked in [`Binder::bind_function`]!!!
-                ("col_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
+                ("col_description", raw_call(ExprType::ColDescription)),
                 ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("pg_is_in_recovery", raw_literal(ExprImpl::literal_bool(false))),
@@ -1133,7 +1157,17 @@ impl Binder {
                 // non-deterministic
                 ("now", now()),
                 ("current_timestamp", now()),
-                ("proctime", proctime())
+                ("proctime", proctime()),
+                ("pg_sleep", raw_call(ExprType::PgSleep)),
+                ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
+                // TODO: implement pg_sleep_until
+                // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
+
+                // cast functions
+                // only functions required by the existing PostgreSQL tool are implemented
+                ("date", guard_by_len(1, raw(|_binder, inputs| {
+                    inputs[0].clone().cast_explicit(DataType::Date).map_err(Into::into)
+                }))),
             ]
             .into_iter()
             .collect()
@@ -1188,75 +1222,6 @@ impl Binder {
                 .collect();
             Ok(inputs)
         }
-    }
-
-    fn rewrite_format_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
-        let Some((format_expr, args)) = inputs.split_first() else {
-            return Err(ErrorCode::BindError(
-                "Function `format` takes at least 1 arguments (0 given)".to_string(),
-            )
-            .into());
-        };
-        let ExprImpl::Literal(expr_literal) = format_expr else {
-            return Err(ErrorCode::BindError(
-                "Function `format` takes a literal string as the first argument".to_string(),
-            )
-            .into());
-        };
-        let Some(ScalarImpl::Utf8(format_str)) = expr_literal.get_data() else {
-            return Err(ErrorCode::BindError(
-                "Function `format` takes a literal string as the first argument".to_string(),
-            )
-            .into());
-        };
-        let formatter = Formatter::parse(format_str)
-            .map_err(|err| -> RwError { ErrorCode::BindError(err.to_string()).into() })?;
-
-        let specifier_count = formatter
-            .nodes()
-            .iter()
-            .filter(|f_node| matches!(f_node, FormatterNode::Specifier(_)))
-            .count();
-        if specifier_count != args.len() {
-            return Err(ErrorCode::BindError(format!(
-                "Function `format` required {} arguments based on the `formatstr`, but {} found.",
-                specifier_count,
-                args.len()
-            ))
-            .into());
-        }
-
-        // iter the args.
-        let mut j = 0;
-        let new_args = [Ok(ExprImpl::literal_varchar("".to_string()))]
-            .into_iter()
-            .chain(formatter.nodes().iter().map(move |f_node| -> Result<_> {
-                let new_arg = match f_node {
-                    FormatterNode::Specifier(sp) => {
-                        // We've checked the count.
-                        let arg = &args[j];
-                        j += 1;
-                        match sp.ty {
-                            SpecifierType::SimpleString => arg.clone(),
-                            SpecifierType::SqlIdentifier => {
-                                FunctionCall::new(ExprType::QuoteIdent, vec![arg.clone()])?.into()
-                            }
-                            SpecifierType::SqlLiteral => {
-                                return Err::<_, RwError>(
-                                    ErrorCode::BindError(
-                                        "unsupported specifier type 'L'".to_string(),
-                                    )
-                                    .into(),
-                                )
-                            }
-                        }
-                    }
-                    FormatterNode::Literal(literal) => ExprImpl::literal_varchar(literal.clone()),
-                };
-                Ok(new_arg)
-            }))
-            .try_collect()?;
-        Ok(new_args)
     }
 
     /// Make sure inputs only have 2 value and rewrite the arguments.

@@ -13,15 +13,15 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![allow(rustdoc::private_intra_doc_links)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
 #![feature(result_option_inspect)]
 #![feature(generators)]
-#![feature(hash_drain_filter)]
+#![feature(hash_extract_if)]
 #![feature(type_alias_impl_trait)]
 #![feature(box_patterns)]
+#![feature(stmt_expr_attributes)]
 
 pub use table::*;
 

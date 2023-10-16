@@ -121,6 +121,70 @@ JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_rowGetStringV
 
 /*
  * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetTimestampValue
+ * Signature: (JI)Ljava/sql/Timestamp;
+ */
+JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_rowGetTimestampValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetDecimalValue
+ * Signature: (JI)Ljava/math/BigDecimal;
+ */
+JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_rowGetDecimalValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetTimeValue
+ * Signature: (JI)Ljava/sql/Time;
+ */
+JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_rowGetTimeValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetDateValue
+ * Signature: (JI)Ljava/sql/Date;
+ */
+JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_rowGetDateValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetIntervalValue
+ * Signature: (JI)Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_rowGetIntervalValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetJsonbValue
+ * Signature: (JI)Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_rowGetJsonbValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetByteaValue
+ * Signature: (JI)[B
+ */
+JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_rowGetByteaValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetArrayValue
+ * Signature: (JILjava/lang/Class;)Ljava/lang/Object;
+ */
+JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_rowGetArrayValue
+  (JNIEnv *, jclass, jlong, jint, jclass);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
  * Method:    rowClose
  * Signature: (J)V
  */
@@ -150,6 +214,54 @@ JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIter
  */
 JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIteratorClose
   (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    streamChunkIteratorFromPretty
+ * Signature: (Ljava/lang/String;)J
+ */
+JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIteratorFromPretty
+  (JNIEnv *, jclass, jstring);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    sendCdcSourceMsgToChannel
+ * Signature: (J[B)Z
+ */
+JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToChannel
+  (JNIEnv *, jclass, jlong, jbyteArray);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    recvSinkWriterRequestFromChannel
+ * Signature: (J)[B
+ */
+JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_recvSinkWriterRequestFromChannel
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    sendSinkWriterResponseToChannel
+ * Signature: (J[B)Z
+ */
+JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_sendSinkWriterResponseToChannel
+  (JNIEnv *, jclass, jlong, jbyteArray);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    recvSinkCoordinatorRequestFromChannel
+ * Signature: (J)[B
+ */
+JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_recvSinkCoordinatorRequestFromChannel
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    sendSinkCoordinatorResponseToChannel
+ * Signature: (J[B)Z
+ */
+JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_sendSinkCoordinatorResponseToChannel
+  (JNIEnv *, jclass, jlong, jbyteArray);
 
 #ifdef __cplusplus
 }

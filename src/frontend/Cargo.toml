@@ -18,14 +18,14 @@ normal = ["workspace-hack"]
 anyhow = "1"
 arc-swap = "1"
 arrow-schema = { workspace = true }
-async-recursion = "1.0.4"
+async-recursion = "1.0.5"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
 bk-tree = "0.5.0"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
 downcast-rs = "1.2"
-dyn-clone = "1.0.13"
+dyn-clone = "1.0.14"
 easy-ext = "1"
 educe = "0.4"
 enum-as-inner = "0.6"
@@ -64,7 +64,7 @@ risingwave_variables = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10.7"
-smallvec = { version = "1.11.0", features = ["serde"] }
+smallvec = { version = "1.11.1", features = ["serde"] }
 tempfile = "3"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -87,4 +87,8 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
+risingwave_expr_impl = { workspace = true }
 tempfile = "3"
+
+[lints]
+workspace = true

@@ -20,10 +20,11 @@ use itertools::{Either, Itertools};
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
-use risingwave_common::util::value_encoding;
-use risingwave_expr::agg::{agg_kinds, AggKind};
-use risingwave_pb::data::PbDatum;
+use risingwave_common::util::value_encoding::DatumToProtoExt;
+use risingwave_expr::aggregate::{agg_kinds, AggKind};
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
@@ -52,6 +53,7 @@ pub struct Agg<PlanRef> {
     pub group_key: IndexSet,
     pub grouping_sets: Vec<IndexSet>,
     pub input: PlanRef,
+    pub enable_two_phase: bool,
 }
 
 impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
@@ -88,8 +90,8 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         self.ctx().session_ctx().config().get_force_two_phase_agg()
     }
 
-    fn two_phase_agg_enabled(&self) -> bool {
-        self.ctx().session_ctx().config().get_enable_two_phase_agg()
+    pub fn two_phase_agg_enabled(&self) -> bool {
+        self.enable_two_phase
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
@@ -136,26 +138,28 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: IndexSet, input: PlanRef) -> Self {
+        let enable_two_phase = input
+            .ctx()
+            .session_ctx()
+            .config()
+            .get_enable_two_phase_agg();
         Self {
             agg_calls,
             group_key,
             input,
             grouping_sets: vec![],
+            enable_two_phase,
         }
     }
 
-    pub fn new_with_grouping_sets(
-        agg_calls: Vec<PlanAggCall>,
-        group_key: IndexSet,
-        grouping_sets: Vec<IndexSet>,
-        input: PlanRef,
-    ) -> Self {
-        Self {
-            agg_calls,
-            group_key,
-            grouping_sets,
-            input,
-        }
+    pub fn with_grouping_sets(mut self, grouping_sets: Vec<IndexSet>) -> Self {
+        self.grouping_sets = grouping_sets;
+        self
+    }
+
+    pub fn with_enable_two_phase(mut self, enable_two_phase: bool) -> Self {
+        self.enable_two_phase = enable_two_phase;
+        self
     }
 }
 
@@ -190,7 +194,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
         Schema { fields }
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         Some((0..self.group_key.len()).collect())
     }
 
@@ -270,7 +274,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         HashMap<usize, TableCatalog>,
     ) {
         (
-            self.infer_result_table(me, vnode_col_idx, window_col_idx),
+            self.infer_intermediate_state_table(me, vnode_col_idx, window_col_idx),
             self.infer_stream_agg_state(me, vnode_col_idx, window_col_idx),
             self.infer_distinct_dedup_tables(me, vnode_col_idx, window_col_idx),
         )
@@ -339,7 +343,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         window_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
         let in_fields = self.input.schema().fields().to_vec();
-        let in_pks = self.input.logical_pk().to_vec();
+        let in_pks = self.input.stream_key().unwrap().to_vec();
         let in_append_only = self.input.append_only();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
 
@@ -408,7 +412,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 | AggKind::FirstValue
                 | AggKind::LastValue
                 | AggKind::StringAgg
-                | AggKind::ArrayAgg => {
+                | AggKind::ArrayAgg
+                | AggKind::JsonbAgg
+                | AggKind::JsonbObjectAgg => {
                     // columns with order requirement in state table
                     let sort_keys = {
                         match agg_call.agg_kind {
@@ -421,7 +427,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                             AggKind::FirstValue
                             | AggKind::LastValue
                             | AggKind::StringAgg
-                            | AggKind::ArrayAgg => {
+                            | AggKind::ArrayAgg
+                            | AggKind::JsonbAgg => {
                                 if agg_call.order_by.is_empty() {
                                     me.ctx().warn_to_user(format!(
                                         "{} without ORDER BY may produce non-deterministic result",
@@ -443,6 +450,11 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                     })
                                     .collect()
                             }
+                            AggKind::JsonbObjectAgg => agg_call
+                                .order_by
+                                .iter()
+                                .map(|o| (o.order_type, o.column_index))
+                                .collect(),
                             _ => unreachable!(),
                         }
                     };
@@ -451,7 +463,11 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         AggKind::FirstValue
                         | AggKind::LastValue
                         | AggKind::StringAgg
-                        | AggKind::ArrayAgg => agg_call.inputs.iter().map(|i| i.index).collect(),
+                        | AggKind::ArrayAgg
+                        | AggKind::JsonbAgg
+                        | AggKind::JsonbObjectAgg => {
+                            agg_call.inputs.iter().map(|i| i.index).collect()
+                        }
                         _ => vec![],
                     };
                     let state = gen_materialized_input_state(sort_keys, include_keys);
@@ -467,13 +483,46 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .collect()
     }
 
-    pub fn infer_result_table(
+    /// table schema:
+    /// group key | state for AGG1 | state for AGG2 | ...
+    pub fn infer_intermediate_state_table(
         &self,
         me: &impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> TableCatalog {
-        let out_fields = me.schema().fields();
+        let mut out_fields = me.schema().fields().to_vec();
+
+        // rewrite data types in fields
+        let in_append_only = self.input.append_only();
+        for (agg_call, field) in self
+            .agg_calls
+            .iter()
+            .zip_eq_fast(&mut out_fields[self.group_key.len()..])
+        {
+            let sig = FUNCTION_REGISTRY
+                .get_aggregate(
+                    agg_call.agg_kind,
+                    &agg_call
+                        .inputs
+                        .iter()
+                        .map(|input| input.data_type.clone())
+                        .collect_vec(),
+                    &agg_call.return_type,
+                    in_append_only,
+                )
+                .expect("agg not found");
+            if !in_append_only && sig.append_only {
+                // we use materialized input state for non-retractable aggregate function.
+                // for backward compatibility, the state type is same as the return type.
+                // its values in the intermediate state table are always null.
+            } else {
+                field.data_type = sig
+                    .state_type
+                    .clone()
+                    .unwrap_or(sig.ret_type.as_exact().clone());
+            }
+        }
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
         let n_group_key_cols = self.group_key.len();
 
@@ -551,12 +600,13 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .collect()
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef) {
+    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef, bool) {
         (
             self.agg_calls,
             self.group_key,
             self.grouping_sets,
             self.input,
+            self.enable_two_phase,
         )
     }
 
@@ -679,9 +729,7 @@ impl PlanAggCall {
                 .direct_args
                 .iter()
                 .map(|x| PbConstant {
-                    datum: Some(PbDatum {
-                        body: value_encoding::serialize_datum(x.get_data()),
-                    }),
+                    datum: Some(x.get_data().to_protobuf()),
                     r#type: Some(x.return_type().to_protobuf()),
                 })
                 .collect(),

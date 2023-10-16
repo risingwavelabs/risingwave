@@ -359,21 +359,19 @@ pub struct ServerConfig {
     #[serde(default = "default::server::connection_pool_size")]
     pub connection_pool_size: u16,
 
-    #[serde(default = "default::server::metrics_level")]
     /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
-    pub metrics_level: u32,
+    #[serde(default = "default::server::metrics_level")]
+    pub metrics_level: MetricLevel,
 
     #[serde(default = "default::server::telemetry_enabled")]
     pub telemetry_enabled: bool,
 
+    /// Enable heap profile dump when memory usage is high.
+    #[serde(default)]
+    pub heap_profiling: HeapProfilingConfig,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
-
-    /// Enable heap profile dump when memory usage is high.
-    #[serde(default = "default::server::auto_dump_heap_profile")]
-    pub auto_dump_heap_profile: AutoDumpHeapProfileConfig,
 }
 
 /// The section `[batch]` in `risingwave.toml`.
@@ -424,8 +422,8 @@ pub struct StreamingConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
-pub enum StorageMetricLevel {
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+pub enum MetricLevel {
     #[default]
     Disabled = 0,
     Critical = 1,
@@ -433,13 +431,28 @@ pub enum StorageMetricLevel {
     Debug = 3,
 }
 
-impl PartialEq<Self> for StorageMetricLevel {
+impl clap::ValueEnum for MetricLevel {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Disabled, Self::Critical, Self::Info, Self::Debug]
+    }
+
+    fn to_possible_value<'a>(&self) -> ::std::option::Option<clap::builder::PossibleValue> {
+        match self {
+            Self::Disabled => Some(clap::builder::PossibleValue::new("disabled").alias("0")),
+            Self::Critical => Some(clap::builder::PossibleValue::new("critical")),
+            Self::Info => Some(clap::builder::PossibleValue::new("info").alias("1")),
+            Self::Debug => Some(clap::builder::PossibleValue::new("debug")),
+        }
+    }
+}
+
+impl PartialEq<Self> for MetricLevel {
     fn eq(&self, other: &Self) -> bool {
         (*self as u8).eq(&(*other as u8))
     }
 }
 
-impl PartialOrd for StorageMetricLevel {
+impl PartialOrd for MetricLevel {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         (*self as u8).partial_cmp(&(*other as u8))
     }
@@ -503,7 +516,7 @@ pub struct StorageConfig {
     pub compactor_max_task_multiplier: f32,
 
     /// The percentage of memory available when compactor is deployed separately.
-    /// total_memory_available_bytes = total_memory_available_bytes *
+    /// total_memory_available_bytes = system_memory_available_bytes *
     /// compactor_memory_available_proportion
     #[serde(default = "default::storage::compactor_memory_available_proportion")]
     pub compactor_memory_available_proportion: f64,
@@ -565,24 +578,43 @@ pub struct StorageConfig {
     pub compact_iter_recreate_timeout_ms: u64,
     #[serde(default = "default::storage::compactor_max_sst_size")]
     pub compactor_max_sst_size: u64,
-
-    #[serde(default = "default::storage::storage_metric_level")]
-    pub storage_metric_level: StorageMetricLevel,
-
+    #[serde(default = "default::storage::enable_fast_compaction")]
+    pub enable_fast_compaction: bool,
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct CacheRefillConfig {
+    /// SSTable levels to refill.
     #[serde(default = "default::cache_refill::data_refill_levels")]
     pub data_refill_levels: Vec<u32>,
 
+    /// Cache refill maximum timeout to apply version delta.
     #[serde(default = "default::cache_refill::timeout_ms")]
     pub timeout_ms: u64,
 
+    /// Inflight data cache refill tasks.
     #[serde(default = "default::cache_refill::concurrency")]
     pub concurrency: usize,
+
+    /// Block count that a data cache refill request fetches.
+    #[serde(default = "default::cache_refill::unit")]
+    pub unit: usize,
+
+    /// Data cache refill unit admission ratio.
+    ///
+    /// Only unit whose blocks are admitted above the ratio will be refilled.
+    #[serde(default = "default::cache_refill::threshold")]
+    pub threshold: f64,
+
+    /// Recent filter layer count.
+    #[serde(default = "default::cache_refill::recent_filter_layers")]
+    pub recent_filter_layers: usize,
+
+    /// Recent filter layer rotate interval.
+    #[serde(default = "default::cache_refill::recent_filter_rotate_interval_ms")]
+    pub recent_filter_rotate_interval_ms: usize,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -626,14 +658,20 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::lfu_tiny_lru_capacity_ratio")]
     pub lfu_tiny_lru_capacity_ratio: f64,
 
-    #[serde(default = "default::file_cache::rated_random_rate_mb")]
-    pub rated_random_rate_mb: usize,
+    #[serde(default = "default::file_cache::insert_rate_limit_mb")]
+    pub insert_rate_limit_mb: usize,
 
     #[serde(default = "default::file_cache::flush_rate_limit_mb")]
     pub flush_rate_limit_mb: usize,
 
     #[serde(default = "default::file_cache::reclaim_rate_limit_mb")]
     pub reclaim_rate_limit_mb: usize,
+
+    #[serde(default = "default::file_cache::allocation_bits")]
+    pub allocation_bits: usize,
+
+    #[serde(default = "default::file_cache::allocation_timeout_ms")]
+    pub allocation_timeout_ms: usize,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -662,18 +700,29 @@ impl AsyncStackTraceOption {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
-pub struct AutoDumpHeapProfileConfig {
-    #[serde(default = "default::auto_dump_heap_profile::dir")]
-    pub dir: String,
-    #[serde(default = "default::auto_dump_heap_profile::threshold")]
-    pub threshold: f32,
+#[derive(Debug, Default, Clone, Copy, ValueEnum)]
+pub enum CompactorMode {
+    #[default]
+    #[clap(alias = "dedicated")]
+    Dedicated,
+
+    #[clap(alias = "shared")]
+    Shared,
 }
 
-impl AutoDumpHeapProfileConfig {
-    pub fn enabled(&self) -> bool {
-        !self.dir.is_empty()
-    }
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
+pub struct HeapProfilingConfig {
+    /// Enable to auto dump heap profile when memory usage is high
+    #[serde(default = "default::heap_profiling::enable_auto")]
+    pub enable_auto: bool,
+
+    /// The proportion (number between 0 and 1) of memory usage to trigger heap profile dump
+    #[serde(default = "default::heap_profiling::threshold_auto")]
+    pub threshold_auto: f32,
+
+    /// The directory to dump heap profile. If empty, the prefix in `MALLOC_CONF` will be used
+    #[serde(default = "default::heap_profiling::dir")]
+    pub dir: String,
 }
 
 serde_with::with_prefix!(streaming_prefix "stream_");
@@ -721,6 +770,10 @@ pub struct StreamingDeveloperConfig {
     /// the channel.
     #[serde(default = "default::developer::stream_dml_channel_initial_permits")]
     pub dml_channel_initial_permits: usize,
+
+    /// The max heap size of dirty groups of `HashAggExecutor`.
+    #[serde(default = "default::developer::stream_hash_agg_max_dirty_groups_heap_size")]
+    pub hash_agg_max_dirty_groups_heap_size: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -741,9 +794,9 @@ pub struct BatchDeveloperConfig {
     #[serde(default = "default::developer::batch_chunk_size")]
     pub chunk_size: usize,
 }
-
-/// The section `[system]` in `risingwave.toml`. This section is only for testing purpose and should
-/// not be documented.
+/// The section `[system]` in `risingwave.toml`. All these fields are used to initialize the system
+/// parameters persisted in Meta store. Most fields are for testing purpose only and should not be
+/// documented.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct SystemConfig {
     /// The interval of periodic barrier.
@@ -784,9 +837,6 @@ pub struct SystemConfig {
     #[serde(default = "default::system::backup_storage_directory")]
     pub backup_storage_directory: Option<String>,
 
-    #[serde(default = "default::system::telemetry_enabled")]
-    pub telemetry_enabled: Option<bool>,
-
     /// Max number of concurrent creating streaming jobs.
     #[serde(default = "default::system::max_concurrent_creating_streaming_jobs")]
     pub max_concurrent_creating_streaming_jobs: Option<u32>,
@@ -797,6 +847,7 @@ pub struct SystemConfig {
 }
 
 impl SystemConfig {
+    #![allow(deprecated)]
     pub fn into_init_system_params(self) -> SystemParams {
         SystemParams {
             barrier_interval_ms: self.barrier_interval_ms,
@@ -809,9 +860,9 @@ impl SystemConfig {
             data_directory: self.data_directory,
             backup_storage_url: self.backup_storage_url,
             backup_storage_directory: self.backup_storage_directory,
-            telemetry_enabled: self.telemetry_enabled,
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
             pause_on_next_bootstrap: self.pause_on_next_bootstrap,
+            telemetry_enabled: None, // deprecated
         }
     }
 }
@@ -914,7 +965,7 @@ pub mod default {
     }
 
     pub mod server {
-        use crate::config::AutoDumpHeapProfileConfig;
+        use crate::config::MetricLevel;
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
@@ -924,22 +975,16 @@ pub mod default {
             16
         }
 
-        pub fn metrics_level() -> u32 {
-            0
+        pub fn metrics_level() -> MetricLevel {
+            MetricLevel::Info
         }
 
         pub fn telemetry_enabled() -> bool {
             true
         }
-
-        pub fn auto_dump_heap_profile() -> AutoDumpHeapProfileConfig {
-            Default::default()
-        }
     }
 
     pub mod storage {
-        use crate::config::StorageMetricLevel;
-
         pub fn share_buffers_sync_parallelism() -> u32 {
             1
         }
@@ -1045,8 +1090,8 @@ pub mod default {
             512 * 1024 * 1024 // 512m
         }
 
-        pub fn storage_metric_level() -> StorageMetricLevel {
-            StorageMetricLevel::Info
+        pub fn enable_fast_compaction() -> bool {
+            true
         }
     }
 
@@ -1114,7 +1159,7 @@ pub mod default {
             0.01
         }
 
-        pub fn rated_random_rate_mb() -> usize {
+        pub fn insert_rate_limit_mb() -> usize {
             0
         }
 
@@ -1124,6 +1169,14 @@ pub mod default {
 
         pub fn reclaim_rate_limit_mb() -> usize {
             0
+        }
+
+        pub fn allocation_bits() -> usize {
+            0
+        }
+
+        pub fn allocation_timeout_ms() -> usize {
+            10
         }
     }
 
@@ -1137,17 +1190,37 @@ pub mod default {
         }
 
         pub fn concurrency() -> usize {
-            100
+            10
+        }
+
+        pub fn unit() -> usize {
+            64
+        }
+
+        pub fn threshold() -> f64 {
+            0.5
+        }
+
+        pub fn recent_filter_layers() -> usize {
+            6
+        }
+
+        pub fn recent_filter_rotate_interval_ms() -> usize {
+            10000
         }
     }
 
-    pub mod auto_dump_heap_profile {
-        pub fn dir() -> String {
-            "".to_string()
+    pub mod heap_profiling {
+        pub fn enable_auto() -> bool {
+            true
         }
 
-        pub fn threshold() -> f32 {
+        pub fn threshold_auto() -> f32 {
             0.9
+        }
+
+        pub fn dir() -> String {
+            "./".to_string()
         }
     }
 
@@ -1192,6 +1265,10 @@ pub mod default {
         pub fn stream_dml_channel_initial_permits() -> usize {
             32768
         }
+
+        pub fn stream_hash_agg_max_dirty_groups_heap_size() -> usize {
+            64 << 20 // 64MB
+        }
     }
 
     pub mod system {
@@ -1215,11 +1292,12 @@ pub mod default {
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
         const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
-        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 1000;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
+        const DEFAULT_EMERGENCY_PICKER: bool = true;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1264,6 +1342,10 @@ pub mod default {
         }
         pub fn tombstone_reclaim_ratio() -> u32 {
             DEFAULT_TOMBSTONE_RATIO_PERCENT
+        }
+
+        pub fn enable_emergency_picker() -> bool {
+            DEFAULT_EMERGENCY_PICKER
         }
     }
 
@@ -1390,6 +1472,8 @@ pub struct CompactionConfig {
     pub level0_max_compact_file_number: u64,
     #[serde(default = "default::compaction_config::tombstone_reclaim_ratio")]
     pub tombstone_reclaim_ratio: u32,
+    #[serde(default = "default::compaction_config::enable_emergency_picker")]
+    pub enable_emergency_picker: bool,
 }
 
 #[cfg(test)]

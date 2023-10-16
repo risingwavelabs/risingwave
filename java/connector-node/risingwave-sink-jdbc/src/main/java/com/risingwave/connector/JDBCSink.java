@@ -18,13 +18,10 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
 import com.risingwave.connector.jdbc.JdbcDialect;
-import com.risingwave.connector.jdbc.JdbcDialectFactory;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
 import java.sql.*;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,13 +32,16 @@ public class JDBCSink extends SinkWriterBase {
     private final JDBCSinkConfig config;
     private final Connection conn;
     private final List<String> pkColumnNames;
+
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
+    public static final String JDBC_DATA_TYPE_KEY = "DATA_TYPE";
 
     private PreparedStatement insertPreparedStmt;
     private PreparedStatement upsertPreparedStmt;
     private PreparedStatement deletePreparedStmt;
 
     private boolean updateFlag = false;
+
     private static final Logger LOG = LoggerFactory.getLogger(JDBCSink.class);
 
     public JDBCSink(JDBCSinkConfig config, TableSchema tableSchema) {
@@ -49,19 +49,40 @@ public class JDBCSink extends SinkWriterBase {
 
         var jdbcUrl = config.getJdbcUrl().toLowerCase();
         var factory = JdbcUtils.getDialectFactory(jdbcUrl);
-        this.jdbcDialect =
-                factory.map(JdbcDialectFactory::create)
-                        .orElseThrow(
-                                () ->
-                                        Status.INVALID_ARGUMENT
-                                                .withDescription("Unsupported jdbc url: " + jdbcUrl)
-                                                .asRuntimeException());
         this.config = config;
         try {
             this.conn = DriverManager.getConnection(config.getJdbcUrl());
-            this.conn.setAutoCommit(false);
             this.pkColumnNames =
                     getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
+            // column name -> java.sql.Types
+            Map<String, Integer> columnTypeMapping =
+                    getColumnTypeMapping(conn, config.getTableName(), config.getSchemaName());
+
+            // create an array that each slot corresponding to each column in TableSchema
+            var columnSqlTypes = new int[tableSchema.getNumColumns()];
+            for (int columnIdx = 0; columnIdx < tableSchema.getNumColumns(); columnIdx++) {
+                var columnName = tableSchema.getColumnNames()[columnIdx];
+                columnSqlTypes[columnIdx] = columnTypeMapping.get(columnName);
+            }
+            LOG.info("columnSqlTypes: {}", Arrays.toString(columnSqlTypes));
+
+            if (factory.isPresent()) {
+                this.jdbcDialect = factory.get().create(columnSqlTypes);
+            } else {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription("Unsupported jdbc url: " + jdbcUrl)
+                        .asRuntimeException();
+            }
+
+            // disable auto commit can improve performance
+            this.conn.setAutoCommit(false);
+            // explicitly set isolation level to RC
+            this.conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+
+            LOG.info(
+                    "JDBC connection: autoCommit = {}, trxn = {}",
+                    conn.getAutoCommit(),
+                    conn.getTransactionIsolation());
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -106,6 +127,28 @@ public class JDBCSink extends SinkWriterBase {
         }
     }
 
+    private static Map<String, Integer> getColumnTypeMapping(
+            Connection conn, String tableName, String schemaName) {
+        Map<String, Integer> columnTypeMap = new HashMap<>();
+        try {
+            ResultSet columnResultSet =
+                    conn.getMetaData().getColumns(null, schemaName, tableName, null);
+
+            while (columnResultSet.next()) {
+                columnTypeMap.put(
+                        columnResultSet.getString(JDBC_COLUMN_NAME_KEY),
+                        columnResultSet.getInt(JDBC_DATA_TYPE_KEY));
+            }
+        } catch (SQLException e) {
+            throw Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
+        }
+        LOG.info("detected column type mapping {}", columnTypeMap);
+        return columnTypeMap;
+    }
+
     private static List<String> getPkColumnNames(
             Connection conn, String tableName, String schemaName) {
         List<String> pkColumnNames = new ArrayList<>();
@@ -133,6 +176,7 @@ public class JDBCSink extends SinkWriterBase {
         try {
             var preparedStmt = insertPreparedStmt;
             jdbcDialect.bindInsertIntoStatement(preparedStmt, conn, getTableSchema(), row);
+            preparedStmt.addBatch();
             return preparedStmt;
         } catch (SQLException e) {
             throw io.grpc.Status.INTERNAL
@@ -149,7 +193,7 @@ public class JDBCSink extends SinkWriterBase {
             switch (row.getOp()) {
                 case INSERT:
                     jdbcDialect.bindUpsertStatement(preparedStmt, conn, getTableSchema(), row);
-                    return preparedStmt;
+                    break;
                 case UPDATE_INSERT:
                     if (!updateFlag) {
                         throw Status.FAILED_PRECONDITION
@@ -158,12 +202,14 @@ public class JDBCSink extends SinkWriterBase {
                     }
                     jdbcDialect.bindUpsertStatement(preparedStmt, conn, getTableSchema(), row);
                     updateFlag = false;
-                    return preparedStmt;
+                    break;
                 default:
                     throw Status.FAILED_PRECONDITION
                             .withDescription("unexpected op type: " + row.getOp())
                             .asRuntimeException();
             }
+            preparedStmt.addBatch();
+            return preparedStmt;
         } catch (SQLException e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(
@@ -192,6 +238,7 @@ public class JDBCSink extends SinkWriterBase {
                 Object fromRow = getTableSchema().getFromRow(primaryKey, row);
                 deletePreparedStmt.setObject(placeholderIdx++, fromRow);
             }
+            deletePreparedStmt.addBatch();
             return deletePreparedStmt;
         } catch (SQLException e) {
             throw Status.INTERNAL
@@ -203,48 +250,50 @@ public class JDBCSink extends SinkWriterBase {
 
     @Override
     public void write(Iterator<SinkRow> rows) {
+        PreparedStatement deleteStatement = null;
+        PreparedStatement upsertStatement = null;
+        PreparedStatement insertStatement = null;
+
         while (rows.hasNext()) {
-            try (SinkRow row = rows.next()) {
-                PreparedStatement stmt;
-                if (row.getOp() == Data.Op.UPDATE_DELETE) {
-                    updateFlag = true;
-                    continue;
-                }
-
-                if (config.isUpsertSink()) {
-                    stmt = prepareForUpsert(row);
+            SinkRow row = rows.next();
+            if (row.getOp() == Data.Op.UPDATE_DELETE) {
+                updateFlag = true;
+                continue;
+            }
+            if (config.isUpsertSink()) {
+                if (row.getOp() == Data.Op.DELETE) {
+                    deleteStatement = prepareDeleteStatement(row);
                 } else {
-                    stmt = prepareForAppendOnly(row);
+                    upsertStatement = prepareUpsertStatement(row);
                 }
-
-                try {
-                    LOG.debug("Executing statement: {}", stmt);
-                    stmt.executeUpdate();
-                    stmt.clearParameters();
-                } catch (SQLException e) {
-                    throw Status.INTERNAL
-                            .withDescription(
-                                    String.format(ERROR_REPORT_TEMPLATE, stmt, e.getMessage()))
-                            .asRuntimeException();
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+            } else {
+                insertStatement = prepareInsertStatement(row);
             }
         }
-    }
 
-    private PreparedStatement prepareForUpsert(SinkRow row) {
-        PreparedStatement stmt;
-        if (row.getOp() == Data.Op.DELETE) {
-            stmt = prepareDeleteStatement(row);
-        } else {
-            stmt = prepareUpsertStatement(row);
+        try {
+            // Execute staging statements after all rows are prepared.
+            // We execute DELETE statement before to avoid accidentally deletion.
+            executeStatement(deleteStatement);
+            executeStatement(upsertStatement);
+            executeStatement(insertStatement);
+
+            conn.commit();
+        } catch (SQLException e) {
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
         }
-        return stmt;
     }
 
-    private PreparedStatement prepareForAppendOnly(SinkRow row) {
-        return prepareInsertStatement(row);
+    private void executeStatement(PreparedStatement stmt) throws SQLException {
+        if (stmt == null) {
+            return;
+        }
+        LOG.debug("Executing statement: {}", stmt);
+        stmt.executeBatch();
+        stmt.clearParameters();
     }
 
     @Override
@@ -253,14 +302,6 @@ public class JDBCSink extends SinkWriterBase {
             throw Status.FAILED_PRECONDITION
                     .withDescription(
                             "expected UPDATE_INSERT to complete an UPDATE operation, got `sync`")
-                    .asRuntimeException();
-        }
-        try {
-            conn.commit();
-        } catch (SQLException e) {
-            throw io.grpc.Status.INTERNAL
-                    .withDescription(
-                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
                     .asRuntimeException();
         }
     }

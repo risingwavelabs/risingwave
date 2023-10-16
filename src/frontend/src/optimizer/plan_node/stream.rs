@@ -76,7 +76,7 @@ pub trait StreamPlanNode: GenericPlanNode {
             id: ctx.next_plan_node_id(),
             ctx,
             schema: self.schema(),
-            logical_pk: self.logical_pk().unwrap_or_default(),
+            stream_key: self.stream_key(),
             dist: self.distribution(),
             append_only: self.append_only(),
             emit_on_window_close: self.emit_on_window_close(),
@@ -95,8 +95,8 @@ impl generic::GenericPlanRef for PlanRef {
         &self.0.schema
     }
 
-    fn logical_pk(&self) -> &[usize] {
-        &self.0.logical_pk
+    fn stream_key(&self) -> Option<&[usize]> {
+        self.0.stream_key.as_deref()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -113,8 +113,8 @@ impl generic::GenericPlanRef for PlanBase {
         &self.schema
     }
 
-    fn logical_pk(&self) -> &[usize] {
-        &self.logical_pk
+    fn stream_key(&self) -> Option<&[usize]> {
+        self.stream_key.as_deref()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -266,7 +266,7 @@ impl HashJoin {
 
         // dedup the pk in dist key..
         let mut deduped_input_pk_indices = vec![];
-        for input_pk_idx in input.logical_pk() {
+        for input_pk_idx in input.stream_key().unwrap() {
             if !pk_indices.contains(input_pk_idx)
                 && !deduped_input_pk_indices.contains(input_pk_idx)
             {
@@ -364,6 +364,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(ProjectSet, c
 pub struct Project {
     pub core: generic::Project<PlanRef>,
     watermark_derivations: Vec<(usize, usize)>,
+    merge_chunk: bool,
     nondecreasing_exprs: Vec<usize>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core, input);
@@ -409,7 +410,7 @@ pub struct PlanBase {
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
-    pub logical_pk: Vec<usize>,
+    pub stream_key: Option<Vec<usize>>,
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
     pub dist: Distribution,
@@ -566,7 +567,7 @@ pub fn to_stream_prost_body(
             })
         }
         Node::SimpleAgg(me) => {
-            let result_table = me.core.infer_result_table(base, None, None);
+            let intermediate_state_table = me.core.infer_intermediate_state_table(base, None, None);
             let agg_states = me.core.infer_stream_agg_state(base, None, None);
             let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, None, None);
 
@@ -589,8 +590,8 @@ pub fn to_stream_prost_body(
                     .into_iter()
                     .map(|s| s.into_prost(state))
                     .collect(),
-                result_table: Some(
-                    result_table
+                intermediate_state_table: Some(
+                    intermediate_state_table
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
@@ -607,7 +608,7 @@ pub fn to_stream_prost_body(
                 .infer_internal_table_catalog(
                     input.schema(),
                     input.ctx(),
-                    input.logical_pk(),
+                    input.stream_key().unwrap(),
                     me.vnode_col_idx,
                 )
                 .with_id(state.gen_table_id_wrapped());
@@ -623,9 +624,9 @@ pub fn to_stream_prost_body(
             PbNodeBody::GroupTopN(group_topn_node)
         }
         Node::HashAgg(me) => {
-            let result_table =
+            let intermediate_state_table =
                 me.core
-                    .infer_result_table(base, me.vnode_col_idx, me.window_col_idx);
+                    .infer_intermediate_state_table(base, me.vnode_col_idx, me.window_col_idx);
             let agg_states =
                 me.core
                     .infer_stream_agg_state(base, me.vnode_col_idx, me.window_col_idx);
@@ -647,8 +648,8 @@ pub fn to_stream_prost_body(
                     .into_iter()
                     .map(|s| s.into_prost(state))
                     .collect(),
-                result_table: Some(
-                    result_table
+                intermediate_state_table: Some(
+                    intermediate_state_table
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
@@ -697,7 +698,7 @@ pub fn to_stream_prost_body(
                     .map(|&idx| idx as u32)
                     .collect(),
                 agg_call_states: vec![],
-                result_table: None,
+                intermediate_state_table: None,
                 is_append_only: me.input.0.append_only,
                 distinct_dedup_tables: Default::default(),
             })
@@ -711,14 +712,8 @@ pub fn to_stream_prost_body(
                 table: Some(me.table.to_internal_table_prost()),
             })
         }
-        Node::ProjectSet(me) => {
-            let me = &me.core;
-            let select_list = me
-                .select_list
-                .iter()
-                .map(ExprImpl::to_project_set_select_item_proto)
-                .collect();
-            PbNodeBody::ProjectSet(ProjectSetNode { select_list })
+        Node::ProjectSet(_) => {
+            unreachable!()
         }
         Node::Project(me) => PbNodeBody::Project(ProjectNode {
             select_list: me.core.exprs.iter().map(|x| x.to_expr_proto()).collect(),
@@ -740,6 +735,8 @@ pub fn to_stream_prost_body(
             log_store_type: SinkLogStoreType::InMemoryLogStore as i32,
         }),
         Node::Source(me) => {
+            // TODO(kwannoel): Is branch used, seems to be a duplicate of stream_source?
+            let rate_limit = me.ctx().session_ctx().config().get_streaming_rate_limit();
             let me = &me.core.catalog;
             let source_inner = me.as_ref().map(|me| StreamSource {
                 source_id: me.id,
@@ -753,6 +750,7 @@ pub fn to_stream_prost_body(
                 row_id_index: me.row_id_index.map(|index| index as _),
                 columns: me.columns.iter().map(|c| c.to_protobuf()).collect(),
                 properties: me.properties.clone().into_iter().collect(),
+                rate_limit,
             });
             PbNodeBody::Source(SourceNode { source_inner })
         }
@@ -767,7 +765,9 @@ pub fn to_stream_prost_body(
                     me.infer_internal_table_catalog(
                         input.schema(),
                         input.ctx(),
-                        input.logical_pk(),
+                        input
+                            .stream_key()
+                            .expect("should always have a stream key in the stream plan but not"),
                         None,
                     )
                     .with_id(state.gen_table_id_wrapped())

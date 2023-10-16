@@ -34,11 +34,10 @@ use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, TableFragments};
-use crate::storage::MetaStore;
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
-pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
+pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
 
 /// [`CreateStreamingJobContext`] carries one-time infos for creating a streaming job.
 ///
@@ -159,40 +158,37 @@ pub struct ReplaceTableContext {
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
-pub struct GlobalStreamManager<S: MetaStore> {
-    pub(crate) env: MetaSrvEnv<S>,
+pub struct GlobalStreamManager {
+    pub(crate) env: MetaSrvEnv,
 
     /// Manages definition and status of fragments and actors
-    pub(super) fragment_manager: FragmentManagerRef<S>,
+    pub(super) fragment_manager: FragmentManagerRef,
 
     /// Broadcasts and collect barriers
-    pub(crate) barrier_scheduler: BarrierScheduler<S>,
+    pub(crate) barrier_scheduler: BarrierScheduler,
 
     /// Maintains information of the cluster
-    pub(crate) cluster_manager: ClusterManagerRef<S>,
+    pub(crate) cluster_manager: ClusterManagerRef,
 
     /// Maintains streaming sources from external system like kafka
-    pub(crate) source_manager: SourceManagerRef<S>,
+    pub(crate) source_manager: SourceManagerRef,
 
     /// Creating streaming job info.
     creating_job_info: CreatingStreamingJobInfoRef,
 
-    hummock_manager: HummockManagerRef<S>,
+    hummock_manager: HummockManagerRef,
 
     pub(crate) reschedule_lock: RwLock<()>,
 }
 
-impl<S> GlobalStreamManager<S>
-where
-    S: MetaStore,
-{
+impl GlobalStreamManager {
     pub fn new(
-        env: MetaSrvEnv<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        barrier_scheduler: BarrierScheduler<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        source_manager: SourceManagerRef<S>,
-        hummock_manager: HummockManagerRef<S>,
+        env: MetaSrvEnv,
+        fragment_manager: FragmentManagerRef,
+        barrier_scheduler: BarrierScheduler,
+        cluster_manager: ClusterManagerRef,
+        source_manager: SourceManagerRef,
+        hummock_manager: HummockManagerRef,
     ) -> MetaResult<Self> {
         Ok(Self {
             env,
@@ -487,6 +483,11 @@ where
 
         let dummy_table_id = table_fragments.table_id();
 
+        let init_split_assignment = self
+            .source_manager
+            .pre_allocate_splits(&dummy_table_id)
+            .await?;
+
         if let Err(err) = self
             .barrier_scheduler
             .run_config_change_command_with_pause(Command::ReplaceTable {
@@ -494,6 +495,7 @@ where
                 new_table_fragments: table_fragments,
                 merge_updates,
                 dispatchers,
+                init_split_assignment,
             })
             .await
         {
@@ -612,7 +614,6 @@ mod tests {
     use crate::model::{ActorId, FragmentId};
     use crate::rpc::ddl_controller::DropMode;
     use crate::rpc::metrics::MetaMetrics;
-    use crate::storage::MemStore;
     use crate::stream::SourceManager;
     use crate::MetaOpts;
 
@@ -713,9 +714,9 @@ mod tests {
     }
 
     struct MockServices {
-        global_stream_manager: GlobalStreamManagerRef<MemStore>,
-        catalog_manager: CatalogManagerRef<MemStore>,
-        fragment_manager: FragmentManagerRef<MemStore>,
+        global_stream_manager: GlobalStreamManagerRef,
+        catalog_manager: CatalogManagerRef,
+        fragment_manager: FragmentManagerRef,
         state: Arc<FakeFragmentState>,
         join_handle_shutdown_txs: Vec<(JoinHandle<()>, Sender<()>)>,
     }
@@ -805,7 +806,7 @@ mod tests {
                 .await?,
             );
 
-            let (sink_manager, _) = SinkCoordinatorManager::start_worker(None);
+            let (sink_manager, _) = SinkCoordinatorManager::start_worker();
 
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 scheduled_barriers,
@@ -828,7 +829,7 @@ mod tests {
                 hummock_manager,
             )?;
 
-            let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
+            let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager);
 
             // Wait until the bootstrap recovery is done.
             loop {

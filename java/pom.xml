@@ -1,11 +1,40 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.risingwave.java</groupId>
-    <artifactId>java-parent</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <groupId>com.risingwave</groupId>
+    <artifactId>risingwave-java-root</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>RisingWave Java Root POM</name>
+    <url>https://www.risingwave.com</url>
+    <description>RisingWave is a distributed SQL streaming database.</description>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <name>Runji Wang</name>
+            <email>wangrunji0408@163.com</email>
+            <organization>RisingWave Labs</organization>
+            <organizationUrl>https://www.risingwave.com</organizationUrl>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/risingwavelabs/risingwave.git</connection>
+        <developerConnection>scm:git:https://github.com/risingwavelabs/risingwave.git</developerConnection>
+        <url>https://github.com/risingwavelabs/risingwave</url>
+    </scm>
+
     <modules>
         <module>proto</module>
         <module>udf</module>
@@ -18,6 +47,7 @@
         <module>connector-node/risingwave-sink-iceberg</module>
         <module>connector-node/risingwave-sink-deltalake</module>
         <module>connector-node/risingwave-sink-es-7</module>
+        <module>connector-node/risingwave-sink-cassandra</module>
         <module>connector-node/risingwave-sink-jdbc</module>
         <module>connector-node/risingwave-source-cdc</module>
         <module>connector-node/risingwave-connector-test</module>
@@ -25,16 +55,17 @@
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>
     </modules>
-    <packaging>pom</packaging>
 
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <release.version>1.0.0</release.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <protobuf.version>3.21.1</protobuf.version>
         <grpc.version>1.53.0</grpc.version>
         <gson.version>2.10</gson.version>
-        <module.version>1.0-SNAPSHOT</module.version>
+        <module.version>0.1.0-SNAPSHOT</module.version>
         <spotless.version>2.27.1</spotless.version>
         <log4j.version>2.20.0</log4j.version>
         <commons.cli.version>1.5.0</commons.cli.version>
@@ -45,6 +76,7 @@
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.3.3</hadoop.version>
         <elasticsearch.version>7.17.10</elasticsearch.version>
+        <datastax.version>4.15.0</datastax.version>
     </properties>
 
     <dependencyManagement>
@@ -176,57 +208,62 @@
                 <scope>test</scope>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>proto</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>java-binding</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>common-utils</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>connector-api</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>s3-common</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-source-cdc</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-iceberg</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-connector-service</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-deltalake</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-es-7</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.risingwave.java</groupId>
+                <groupId>com.risingwave</groupId>
+                <artifactId>risingwave-sink-cassandra</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-jdbc</artifactId>
                 <version>${module.version}</version>
             </dependency>
@@ -293,7 +330,7 @@
                             <style>AOSP</style>
                         </googleJavaFormat>
 
-                        <removeUnusedImports/>
+                        <removeUnusedImports />
                     </java>
                 </configuration>
                 <executions>
@@ -333,6 +370,75 @@
                 </configuration>
             </plugin>
 
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>3.3.0</version>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <goals>
+                            <goal>jar-no-fork</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <excludePackageNames>com.risingwave.connector.*</excludePackageNames>
+                </configuration>
+            </plugin>
+
+            <!-- uncomment when deploying -->
+            <!-- <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-gpg-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>sign-artifacts</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>sign</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin> -->
+
+            <plugin>
+                <groupId>org.sonatype.plugins</groupId>
+                <artifactId>nexus-staging-maven-plugin</artifactId>
+                <version>1.6.13</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <serverId>ossrh</serverId>
+                    <nexusUrl>https://s01.oss.sonatype.org/</nexusUrl>
+                    <autoReleaseAfterClose>true</autoReleaseAfterClose>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
+
+    <distributionManagement>
+        <snapshotRepository>
+            <id>ossrh</id>
+            <url>https://s01.oss.sonatype.org/content/repositories/snapshots</url>
+        </snapshotRepository>
+        <repository>
+            <id>ossrh</id>
+            <url>https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+        </repository>
+    </distributionManagement>
 </project>

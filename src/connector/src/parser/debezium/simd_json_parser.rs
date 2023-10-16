@@ -298,7 +298,7 @@ mod tests {
                 SourceColumnDesc::simple("O_DATE", DataType::Date, ColumnId::from(8)),
                 SourceColumnDesc::simple("O_TIME", DataType::Time, ColumnId::from(9)),
                 SourceColumnDesc::simple("O_DATETIME", DataType::Timestamp, ColumnId::from(10)),
-                SourceColumnDesc::simple("O_TIMESTAMP", DataType::Timestamp, ColumnId::from(11)),
+                SourceColumnDesc::simple("O_TIMESTAMP", DataType::Timestamptz, ColumnId::from(11)),
                 SourceColumnDesc::simple("O_JSON", DataType::Jsonb, ColumnId::from(12)),
             ]
         }
@@ -333,9 +333,9 @@ mod tests {
             assert!(row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "1970-01-01T00:00:00".parse().unwrap()
             )))));
-            assert!(row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
-                "1970-01-01T00:00:01".parse().unwrap()
-            )))));
+            assert!(row[11].eq(&Some(ScalarImpl::Timestamptz(
+                "1970-01-01T00:00:01Z".parse().unwrap()
+            ))));
             assert_json_eq(&row[12], "{\"k1\": \"v1\", \"k2\": 11}");
         }
 
@@ -368,9 +368,9 @@ mod tests {
             assert!(row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "1970-01-01T00:00:00".parse().unwrap()
             )))));
-            assert!(row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
-                "1970-01-01T00:00:01".parse().unwrap()
-            )))));
+            assert!(row[11].eq(&Some(ScalarImpl::Timestamptz(
+                "1970-01-01T00:00:01Z".parse().unwrap()
+            ))));
             assert_json_eq(&row[12], "{\"k1\": \"v1\", \"k2\": 11}");
         }
 
@@ -404,9 +404,9 @@ mod tests {
             assert!(row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "5138-11-16T09:46:39".parse().unwrap()
             )))));
-            assert!(row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
-                "2038-01-09T03:14:07".parse().unwrap()
-            )))));
+            assert!(row[11].eq(&Some(ScalarImpl::Timestamptz(
+                "2038-01-09T03:14:07Z".parse().unwrap()
+            ))));
             assert_json_eq(&row[12], "{\"k1\":\"v1_updated\",\"k2\":33}");
         }
 
@@ -441,13 +441,15 @@ mod tests {
             assert!(row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "5138-11-16T09:46:39".parse().unwrap()
             )))));
-            assert!(row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
-                "2038-01-09T03:14:07".parse().unwrap()
-            )))));
+            assert!(row[11].eq(&Some(ScalarImpl::Timestamptz(
+                "2038-01-09T03:14:07Z".parse().unwrap()
+            ))));
             assert_json_eq(&row[12], "{\"k1\": \"v1_updated\", \"k2\": 33}");
         }
 
+        #[cfg(not(madsim))] // Traced test does not work with madsim
         #[tokio::test]
+        #[tracing_test::traced_test]
         async fn test2_debezium_json_parser_overflow() {
             let columns = vec![
                 SourceColumnDesc::simple("O_KEY", DataType::Int64, ColumnId::from(0)),
@@ -460,78 +462,38 @@ mod tests {
             let mut parser = build_parser(columns.clone(), Default::default()).await;
 
             let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
-            // i64 overflow
-            let data0 = br#"{"payload":{"before":null,"after":{"O_KEY":9223372036854775808,"O_BOOL":1,"O_TINY":33,"O_INT":444,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
-            if let Err(e) = parser
-                .parse_inner(None, Some(data0.to_vec()), builder.row_writer())
-                .await
-            {
-                println!("{:?}", e.to_string());
-            } else {
-                panic!("the test case is expected fail");
-            }
-            // bool incorrect value
-            let data1 = br#"{"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":2,"O_TINY":33,"O_INT":444,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
-            if let Err(e) = parser
-                .parse_inner(None, Some(data1.to_vec()), builder.row_writer())
-                .await
-            {
-                println!("{:?}", e.to_string());
-            } else {
-                panic!("the test case is expected failed");
-            }
-            // i16 overflow
-            let data2 = br#"{"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":32768,"O_INT":444,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
-            if let Err(e) = parser
-                .parse_inner(None, Some(data2.to_vec()), builder.row_writer())
-                .await
-            {
-                println!("{:?}", e.to_string());
-            } else {
-                panic!("the test case is expected to fail");
-            }
-            // i32 overflow
-            let data3 = br#"{"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":33,"O_INT":2147483648,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
-            if let Err(e) = parser
-                .parse_inner(None, Some(data3.to_vec()), builder.row_writer())
-                .await
-            {
-                println!("{:?}", e.to_string());
-            } else {
-                panic!("the test case is expected to fail");
-            }
-            // float32 overflow
-            let data4 = br#"{"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":33,"O_INT":444,"O_REAL":3.80282347E38,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
-            if let Err(e) = parser
-                .parse_inner(None, Some(data4.to_vec()), builder.row_writer())
-                .await
-            {
-                println!("{:?}", e.to_string());
-            } else {
-                panic!("the test case is expected to fail");
-            }
-            // float64 will cause debezium simd_json_parser to panic, therefore included in the next
-            // test case below
-        }
 
-        #[tokio::test]
-        #[should_panic]
-        async fn test2_debezium_json_parser_overflow_f64() {
-            let columns = vec![SourceColumnDesc::simple(
-                "O_DOUBLE",
-                DataType::Float64,
-                ColumnId::from(0),
-            )];
-            let mut parser = build_parser(columns.clone(), Default::default()).await;
-            let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
-            let data = br#"{"payload":{"before":null,"after":{"O_DOUBLE":1.797695E308},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678174483000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":563,"row":0,"thread":3,"query":null},"op":"c","ts_ms":1678174483866,"transaction":null}}"#;
-            if let Err(e) = parser
-                .parse_inner(None, Some(data.to_vec()), builder.row_writer())
-                .await
-            {
-                println!("{:?}", e.to_string());
-            } else {
-                panic!("the test case is expected to fail");
+            let normal_values = ["111", "1", "33", "444", "555.0", "666.0"];
+            let overflow_values = [
+                "9223372036854775808",
+                "2",
+                "32768",
+                "2147483648",
+                "3.80282347E38",
+                "1.797695E308",
+            ];
+
+            for i in 0..6 {
+                let mut values = normal_values;
+                values[i] = overflow_values[i];
+                let data = format!(
+                    r#"{{"payload":{{"before":null,"after":{{"O_KEY":{},"O_BOOL":{},"O_TINY":{},"O_INT":{},"O_REAL":{},"O_DOUBLE":{}}},"source":{{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null}},"op":"c","ts_ms":1678158055464,"transaction":null}}}}"#,
+                    values[0], values[1], values[2], values[3], values[4], values[5]
+                ).as_bytes().to_vec();
+
+                let res = parser
+                    .parse_inner(None, Some(data), builder.row_writer())
+                    .await;
+                if i < 5 {
+                    // For other overflow, the parsing succeeds but the type conversion fails
+                    // The errors are ignored and logged.
+                    res.unwrap();
+                    assert!(logs_contain("Expected type"), "{i}");
+                } else {
+                    // For f64 overflow, the parsing fails
+                    let e = res.unwrap_err();
+                    assert!(e.to_string().contains("InvalidNumber"), "{i}: {e}");
+                }
             }
         }
     }

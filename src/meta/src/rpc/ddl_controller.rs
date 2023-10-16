@@ -23,7 +23,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
 use risingwave_pb::catalog::{
-    connection, Connection, Database, Function, Schema, Source, Table, View,
+    connection, Connection, CreateType, Database, Function, Schema, Source, Table, View,
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -37,10 +37,10 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
     IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
     SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId,
+    IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::rpc::cloud_provider::AwsEc2Client;
-use crate::storage::MetaStore;
 use crate::stream::{
     validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
     CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef,
@@ -93,7 +93,7 @@ pub enum DdlCommand {
     DropFunction(FunctionId),
     CreateView(View),
     DropView(ViewId, DropMode),
-    CreateStreamingJob(StreamingJob, StreamFragmentGraphProto),
+    CreateStreamingJob(StreamingJob, StreamFragmentGraphProto, CreateType),
     DropStreamingJob(StreamingJobId, DropMode),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
@@ -103,32 +103,28 @@ pub enum DdlCommand {
 }
 
 #[derive(Clone)]
-pub struct DdlController<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct DdlController {
+    env: MetaSrvEnv,
 
-    catalog_manager: CatalogManagerRef<S>,
-    stream_manager: GlobalStreamManagerRef<S>,
-    source_manager: SourceManagerRef<S>,
-    cluster_manager: ClusterManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
-    barrier_manager: BarrierManagerRef<S>,
+    catalog_manager: CatalogManagerRef,
+    stream_manager: GlobalStreamManagerRef,
+    source_manager: SourceManagerRef,
+    cluster_manager: ClusterManagerRef,
+    fragment_manager: FragmentManagerRef,
+    barrier_manager: BarrierManagerRef,
 
     aws_client: Arc<Option<AwsEc2Client>>,
     // The semaphore is used to limit the number of concurrent streaming job creation.
-    creating_streaming_job_permits: Arc<CreatingStreamingJobPermit<S>>,
+    creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
 }
 
 #[derive(Clone)]
-pub struct CreatingStreamingJobPermit<S: MetaStore> {
+pub struct CreatingStreamingJobPermit {
     semaphore: Arc<Semaphore>,
-    _phantom: std::marker::PhantomData<S>,
 }
 
-impl<S> CreatingStreamingJobPermit<S>
-where
-    S: MetaStore,
-{
-    async fn new(env: &MetaSrvEnv<S>) -> Self {
+impl CreatingStreamingJobPermit {
+    async fn new(env: &MetaSrvEnv) -> Self {
         let mut permits = env
             .system_params_manager()
             .get_params()
@@ -177,25 +173,19 @@ where
             }
         });
 
-        Self {
-            semaphore,
-            _phantom: std::marker::PhantomData,
-        }
+        Self { semaphore }
     }
 }
 
-impl<S> DdlController<S>
-where
-    S: MetaStore,
-{
+impl DdlController {
     pub(crate) async fn new(
-        env: MetaSrvEnv<S>,
-        catalog_manager: CatalogManagerRef<S>,
-        stream_manager: GlobalStreamManagerRef<S>,
-        source_manager: SourceManagerRef<S>,
-        cluster_manager: ClusterManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        env: MetaSrvEnv,
+        catalog_manager: CatalogManagerRef,
+        stream_manager: GlobalStreamManagerRef,
+        source_manager: SourceManagerRef,
+        cluster_manager: ClusterManagerRef,
+        fragment_manager: FragmentManagerRef,
+        barrier_manager: BarrierManagerRef,
         aws_client: Arc<Option<AwsEc2Client>>,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
@@ -246,8 +236,9 @@ where
                 DdlCommand::DropView(view_id, drop_mode) => {
                     ctrl.drop_view(view_id, drop_mode).await
                 }
-                DdlCommand::CreateStreamingJob(stream_job, fragment_graph) => {
-                    ctrl.create_streaming_job(stream_job, fragment_graph).await
+                DdlCommand::CreateStreamingJob(stream_job, fragment_graph, create_type) => {
+                    ctrl.create_streaming_job(stream_job, fragment_graph, create_type)
+                        .await
                 }
                 DdlCommand::DropStreamingJob(job_id, drop_mode) => {
                     ctrl.drop_streaming_job(job_id, drop_mode).await
@@ -332,18 +323,23 @@ where
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         // 1. Drop source in catalog.
-        let version = self
+        let (version, streaming_job_ids) = self
             .catalog_manager
             .drop_relation(
                 RelationIdEnum::Source(source_id),
                 self.fragment_manager.clone(),
                 drop_mode,
             )
-            .await?
-            .0;
+            .await?;
+
         // 2. Unregister source connector worker.
         self.source_manager
             .unregister_sources(vec![source_id])
+            .await;
+
+        // 3. Drop streaming jobs if cascade
+        self.stream_manager
+            .drop_streaming_jobs(streaming_job_ids)
             .await;
 
         Ok(version)
@@ -415,6 +411,7 @@ where
         &self,
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
+        create_type: CreateType,
     ) -> MetaResult<NotificationVersion> {
         let _permit = self
             .creating_streaming_job_permits
@@ -440,30 +437,74 @@ where
 
             internal_tables = ctx.internal_tables();
 
-            match &stream_job {
-                StreamingJob::Table(Some(source), _) => {
+            match stream_job {
+                StreamingJob::Table(Some(ref source), _) => {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
                 }
-                StreamingJob::Sink(sink) => {
+                StreamingJob::Sink(ref sink) => {
                     // Validate the sink on the connector node.
-                    validate_sink(sink, self.env.connector_client()).await?;
+                    validate_sink(sink).await?;
                 }
                 _ => {}
             }
-
-            self.stream_manager
-                .create_streaming_job(table_fragments, ctx)
-                .await?;
+            (ctx, table_fragments)
         };
 
-        match result {
-            Ok(_) => self.finish_stream_job(stream_job, internal_tables).await,
-            Err(err) => {
+        let (ctx, table_fragments) = match result {
+            Ok(r) => r,
+            Err(e) => {
                 self.cancel_stream_job(&stream_job, internal_tables).await;
-                Err(err)
+                return Err(e);
+            }
+        };
+
+        match create_type {
+            CreateType::Foreground | CreateType::Unspecified => {
+                self.create_streaming_job_inner(stream_job, table_fragments, ctx, internal_tables)
+                    .await
+            }
+            CreateType::Background => {
+                let ctrl = self.clone();
+                let definition = stream_job.definition();
+                let fut = async move {
+                    let result = ctrl
+                        .create_streaming_job_inner(
+                            stream_job,
+                            table_fragments,
+                            ctx,
+                            internal_tables,
+                        )
+                        .await;
+                    match result {
+                        Err(e) => tracing::error!(definition, error = ?e, "stream_job_error"),
+                        Ok(_) => {
+                            tracing::info!(definition, "stream_job_ok")
+                        }
+                    }
+                };
+                tokio::spawn(fut);
+                Ok(IGNORED_NOTIFICATION_VERSION)
             }
         }
+    }
+
+    async fn create_streaming_job_inner(
+        &self,
+        stream_job: StreamingJob,
+        table_fragments: TableFragments,
+        ctx: CreateStreamingJobContext,
+        internal_tables: Vec<Table>,
+    ) -> MetaResult<NotificationVersion> {
+        let result = self
+            .stream_manager
+            .create_streaming_job(table_fragments, ctx)
+            .await;
+        if let Err(e) = result {
+            self.cancel_stream_job(&stream_job, internal_tables).await;
+            return Err(e);
+        };
+        self.finish_stream_job(stream_job, internal_tables).await
     }
 
     async fn drop_streaming_job(
@@ -758,7 +799,7 @@ where
         &self,
         source_id: Option<SourceId>,
         table_id: TableId,
-        fragment_manager: FragmentManagerRef<S>,
+        fragment_manager: FragmentManagerRef,
         drop_mode: DropMode,
     ) -> MetaResult<(
         NotificationVersion,
@@ -847,7 +888,7 @@ where
 
         // 3. Mark current relation as "updating".
         self.catalog_manager
-            .start_replace_table_procedure(stream_job.table().unwrap())
+            .start_replace_table_procedure(stream_job)
             .await?;
 
         Ok(fragment_graph)
@@ -958,22 +999,18 @@ where
         stream_job: &StreamingJob,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
-        let StreamingJob::Table(None, table) = stream_job else {
+        let StreamingJob::Table(source, table) = stream_job else {
             unreachable!("unexpected job: {stream_job:?}")
         };
 
         self.catalog_manager
-            .finish_replace_table_procedure(table, table_col_index_mapping)
+            .finish_replace_table_procedure(source, table, table_col_index_mapping)
             .await
     }
 
     async fn cancel_replace_table(&self, stream_job: &StreamingJob) -> MetaResult<()> {
-        let StreamingJob::Table(None, table) = stream_job else {
-            unreachable!("unexpected job: {stream_job:?}")
-        };
-
         self.catalog_manager
-            .cancel_replace_table_procedure(table)
+            .cancel_replace_table_procedure(stream_job)
             .await
     }
 

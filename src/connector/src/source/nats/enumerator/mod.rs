@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow;
 use async_trait::async_trait;
 
-use super::source::NatsSplit;
+use super::source::{NatsOffset, NatsSplit};
 use super::NatsProperties;
-use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
+use crate::source::{SourceEnumeratorContextRef, SplitEnumerator, SplitId};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct NatsSplitEnumerator {
     subject: String,
-    split_num: i32,
+    split_id: SplitId,
 }
 
 #[async_trait]
@@ -36,7 +38,7 @@ impl SplitEnumerator for NatsSplitEnumerator {
     ) -> anyhow::Result<NatsSplitEnumerator> {
         Ok(Self {
             subject: properties.common.subject,
-            split_num: 0,
+            split_id: Arc::from("0"),
         })
     }
 
@@ -44,7 +46,8 @@ impl SplitEnumerator for NatsSplitEnumerator {
         // TODO: to simplify the logic, return 1 split for first version
         let nats_split = NatsSplit {
             subject: self.subject.clone(),
-            split_num: 1,
+            split_id: Arc::from("0"), // be the same as `from_nats_jetstream_message`
+            start_sequence: NatsOffset::None,
         };
 
         Ok(vec![nats_split])

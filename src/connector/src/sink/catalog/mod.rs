@@ -14,15 +14,21 @@
 
 pub mod desc;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{PbSink, PbSinkType};
+use risingwave_pb::catalog::{PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus};
+
+use super::{
+    SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT,
+};
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct SinkId {
@@ -43,6 +49,12 @@ impl SinkId {
 
     pub fn sink_id(&self) -> u32 {
         self.sink_id
+    }
+}
+
+impl std::fmt::Display for SinkId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.sink_id)
     }
 }
 
@@ -96,6 +108,128 @@ impl SinkType {
     }
 }
 
+/// May replace [`SinkType`].
+///
+/// TODO: consolidate with [`crate::source::SourceStruct`] and [`crate::parser::SpecificParserConfig`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SinkFormatDesc {
+    pub format: SinkFormat,
+    pub encode: SinkEncode,
+    pub options: BTreeMap<String, String>,
+}
+
+/// TODO: consolidate with [`crate::source::SourceFormat`] and [`crate::parser::ProtocolProperties`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SinkFormat {
+    AppendOnly,
+    Upsert,
+    Debezium,
+}
+
+/// TODO: consolidate with [`crate::source::SourceEncode`] and [`crate::parser::EncodingProperties`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SinkEncode {
+    Json,
+    Protobuf,
+    Avro,
+}
+
+impl SinkFormatDesc {
+    pub fn from_legacy_type(connector: &str, r#type: &str) -> Result<Option<Self>, SinkError> {
+        use crate::sink::kafka::KafkaSink;
+        use crate::sink::kinesis::KinesisSink;
+        use crate::sink::pulsar::PulsarSink;
+        use crate::sink::Sink as _;
+
+        let format = match r#type {
+            SINK_TYPE_APPEND_ONLY => SinkFormat::AppendOnly,
+            SINK_TYPE_UPSERT => SinkFormat::Upsert,
+            SINK_TYPE_DEBEZIUM => SinkFormat::Debezium,
+            _ => {
+                return Err(SinkError::Config(anyhow!(
+                    "sink type unsupported: {}",
+                    r#type
+                )))
+            }
+        };
+        let encode = match connector {
+            KafkaSink::SINK_NAME | KinesisSink::SINK_NAME | PulsarSink::SINK_NAME => {
+                SinkEncode::Json
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(Self {
+            format,
+            encode,
+            options: Default::default(),
+        }))
+    }
+
+    pub fn to_proto(&self) -> PbSinkFormatDesc {
+        use risingwave_pb::plan_common::{EncodeType as E, FormatType as F};
+
+        let format = match self.format {
+            SinkFormat::AppendOnly => F::Plain,
+            SinkFormat::Upsert => F::Upsert,
+            SinkFormat::Debezium => F::Debezium,
+        };
+        let encode = match self.encode {
+            SinkEncode::Json => E::Json,
+            SinkEncode::Protobuf => E::Protobuf,
+            SinkEncode::Avro => E::Avro,
+        };
+        let options = self
+            .options
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        PbSinkFormatDesc {
+            format: format.into(),
+            encode: encode.into(),
+            options,
+        }
+    }
+}
+
+impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
+    type Error = SinkError;
+
+    fn try_from(value: PbSinkFormatDesc) -> Result<Self, Self::Error> {
+        use risingwave_pb::plan_common::{EncodeType as E, FormatType as F};
+
+        let format = match value.format() {
+            F::Plain => SinkFormat::AppendOnly,
+            F::Upsert => SinkFormat::Upsert,
+            F::Debezium => SinkFormat::Debezium,
+            f @ (F::Unspecified | F::Native | F::DebeziumMongo | F::Maxwell | F::Canal) => {
+                return Err(SinkError::Config(anyhow!(
+                    "sink format unsupported: {}",
+                    f.as_str_name()
+                )))
+            }
+        };
+        let encode = match value.encode() {
+            E::Json => SinkEncode::Json,
+            E::Protobuf => SinkEncode::Protobuf,
+            E::Avro => SinkEncode::Avro,
+            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes) => {
+                return Err(SinkError::Config(anyhow!(
+                    "sink encode unsupported: {}",
+                    e.as_str_name()
+                )))
+            }
+        };
+        let options = value.options.into_iter().collect();
+
+        Ok(Self {
+            format,
+            encode,
+            options,
+        })
+    }
+}
+
 /// the catalog of the sink. There are two kind of schema here. The full schema is all columns
 /// stored in the `column` which is the sink executor/fragment's output schema. The visible
 /// schema contains the columns whose `is_hidden` is false, which is the columns sink out to the
@@ -144,6 +278,9 @@ pub struct SinkCatalog {
     // options in `properties`.
     pub sink_type: SinkType,
 
+    // The format and encode of the sink.
+    pub format_desc: Option<SinkFormatDesc>,
+
     /// Sink may use a privatelink connection to connect to the downstream system.
     pub connection_id: Option<ConnectionId>,
 
@@ -186,11 +323,13 @@ impl SinkCatalog {
             owner: self.owner.into(),
             properties: self.properties.clone(),
             sink_type: self.sink_type.to_proto() as i32,
+            format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             connection_id: self.connection_id.map(|id| id.into()),
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
+            stream_job_status: PbStreamJobStatus::Creating.into(),
         }
     }
 
@@ -232,6 +371,17 @@ impl SinkCatalog {
 impl From<PbSink> for SinkCatalog {
     fn from(pb: PbSink) -> Self {
         let sink_type = pb.get_sink_type().unwrap();
+        let format_desc = match pb.format_desc {
+            Some(f) => f.try_into().ok(),
+            None => {
+                let connector = pb.properties.get(CONNECTOR_TYPE_KEY);
+                let r#type = pb.properties.get(SINK_TYPE_OPTION);
+                match (connector, r#type) {
+                    (Some(c), Some(t)) => SinkFormatDesc::from_legacy_type(c, t).ok().flatten(),
+                    _ => None,
+                }
+            }
+        };
         SinkCatalog {
             id: pb.id.into(),
             name: pb.name,
@@ -262,6 +412,7 @@ impl From<PbSink> for SinkCatalog {
                 .map(TableId::from)
                 .collect_vec(),
             sink_type: SinkType::from_proto(sink_type),
+            format_desc,
             connection_id: pb.connection_id.map(ConnectionId),
             created_at_epoch: pb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: pb.initialized_at_epoch.map(Epoch::from),

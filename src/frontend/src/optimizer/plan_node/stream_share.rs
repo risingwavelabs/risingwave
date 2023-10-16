@@ -20,6 +20,7 @@ use super::utils::Distill;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamExchange, StreamNode};
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::Explain;
 
 /// `StreamShare` will be translated into an `ExchangeNode` based on its distribution finally.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -96,7 +97,13 @@ impl StreamShare {
                     identity: self.distill_to_string(),
                     node_body: Some(node_body),
                     operator_id: self.id().0 as _,
-                    stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
+                    stream_key: self
+                        .stream_key()
+                        .unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
+                       PlanRef::from(self.clone()).explain_to_string()))
+                        .iter()
+                        .map(|x| *x as u32)
+                        .collect(),
                     fields: self.schema().to_prost(),
                     append_only: self.append_only(),
                 };

@@ -244,19 +244,7 @@ impl LogicalMultiJoin {
                 .collect_vec()
         };
 
-        let pk_indices = {
-            let mut pk_indices = vec![];
-            for (i, input_pk) in inputs.iter().map(|input| input.logical_pk()).enumerate() {
-                for input_pk_idx in input_pk {
-                    pk_indices.push(inner_i2o_mappings[i].map(*input_pk_idx));
-                }
-            }
-            pk_indices
-                .into_iter()
-                .map(|col_idx| inner2output.try_map(col_idx))
-                .collect::<Option<Vec<_>>>()
-                .unwrap_or_default()
-        };
+        let pk_indices = Self::derive_stream_key(&inputs, &inner_i2o_mappings, &inner2output);
         let functional_dependency = {
             let mut fd_set = FunctionalDependencySet::new(tot_col_num);
             let mut column_cnt: usize = 0;
@@ -303,6 +291,25 @@ impl LogicalMultiJoin {
         }
     }
 
+    fn derive_stream_key(
+        inputs: &[PlanRef],
+        inner_i2o_mappings: &[ColIndexMapping],
+        inner2output: &ColIndexMapping,
+    ) -> Option<Vec<usize>> {
+        // TODO(st1page): add JOIN key
+        let mut pk_indices = vec![];
+        for (i, input) in inputs.iter().enumerate() {
+            let input_stream_key = input.stream_key()?;
+            for input_pk_idx in input_stream_key {
+                pk_indices.push(inner_i2o_mappings[i].map(*input_pk_idx));
+            }
+        }
+        pk_indices
+            .into_iter()
+            .map(|col_idx| inner2output.try_map(col_idx))
+            .collect::<Option<Vec<_>>>()
+    }
+
     /// Get a reference to the logical join's on.
     pub fn on(&self) -> &Condition {
         &self.on
@@ -317,7 +324,7 @@ impl LogicalMultiJoin {
 impl PlanTreeNode for LogicalMultiJoin {
     fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
         let mut vec = smallvec::SmallVec::new();
-        vec.extend(self.inputs.clone().into_iter());
+        vec.extend(self.inputs.clone());
         vec
     }
 

@@ -9,10 +9,11 @@ repository = { workspace = true }
 
 [dependencies]
 enum-as-inner = "0.6"
-pbjson = "0.5"
-prost = "0.11"
+pbjson = "0.6"
+prost = { workspace = true }
 prost-helpers = { path = "helpers" }
 serde = { version = "1", features = ["derive"] }
+strum = "0.25"
 tonic = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -29,3 +30,6 @@ ignored = ["workspace-hack"]
 
 [package.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack"]
+
+[lints]
+workspace = true

@@ -30,6 +30,7 @@ use tracing::{error, info, trace, warn};
 
 use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
+use crate::filter_key_extractor::FilterKeyExtractorManager;
 use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::refiller::CacheRefillerEvent;
@@ -132,7 +133,8 @@ pub struct HummockEventHandler {
 async fn flush_imms(
     payload: UploadTaskPayload,
     task_info: UploadTaskInfo,
-    compactor_context: Arc<crate::hummock::compactor::CompactorContext>,
+    compactor_context: CompactorContext,
+    filter_key_extractor_manager: FilterKeyExtractorManager,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     for epoch in &task_info.epochs {
@@ -148,6 +150,7 @@ async fn flush_imms(
         sstable_object_id_manager,
         payload,
         task_info.compaction_group_index,
+        filter_key_extractor_manager,
     )
     .verbose_instrument_await("shared_buffer_compact")
     .await
@@ -158,7 +161,8 @@ impl HummockEventHandler {
         hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
         pinned_version: PinnedVersion,
-        compactor_context: Arc<CompactorContext>,
+        compactor_context: CompactorContext,
+        filter_key_extractor_manager: FilterKeyExtractorManager,
         sstable_object_id_manager: Arc<SstableObjectIdManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         cache_refill_config: CacheRefillConfig,
@@ -184,6 +188,7 @@ impl HummockEventHandler {
                     payload,
                     task_info,
                     upload_compactor_context.clone(),
+                    filter_key_extractor_manager.clone(),
                     cloned_sstable_object_id_manager.clone(),
                 ))
             }),
@@ -373,7 +378,7 @@ impl HummockEventHandler {
         );
         self.uploader.clear();
 
-        for (epoch, result_sender) in self.pending_sync_requests.drain_filter(|_, _| true) {
+        for (epoch, result_sender) in self.pending_sync_requests.extract_if(|_, _| true) {
             send_sync_result(
                 result_sender,
                 Err(HummockError::other(format!(
@@ -511,7 +516,7 @@ impl HummockEventHandler {
             UploaderEvent::ImmMerged(merge_output) => {
                 // update read version for corresponding table shards
                 let read_guard = self.read_version_mapping.read();
-                read_guard.get(&merge_output.table_id).map_or((), |shards| {
+                if let Some(shards) = read_guard.get(&merge_output.table_id) {
                     shards.get(&merge_output.instance_id).map_or_else(
                         || {
                             warn!(
@@ -525,7 +530,7 @@ impl HummockEventHandler {
                             ));
                         },
                     )
-                });
+                }
             }
         }
     }

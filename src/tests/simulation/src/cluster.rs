@@ -121,7 +121,7 @@ impl Configuration {
         let config_path = {
             let mut file =
                 tempfile::NamedTempFile::new().expect("failed to create temp config file");
-            file.write_all(include_bytes!("../../../../src/config/backfill.toml"))
+            file.write_all(include_bytes!("backfill.toml"))
                 .expect("failed to write config file");
             file.into_temp_path()
         };
@@ -654,6 +654,12 @@ impl Session {
         let (tx, rx) = oneshot::channel();
         self.query_tx.send((sql.into(), tx)).await?;
         rx.await?
+    }
+
+    /// Run `FLUSH` on the session.
+    pub async fn flush(&mut self) -> Result<()> {
+        self.run("FLUSH").await?;
+        Ok(())
     }
 }
 

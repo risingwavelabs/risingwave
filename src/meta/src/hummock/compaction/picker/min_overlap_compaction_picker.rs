@@ -20,10 +20,9 @@ use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, Level, LevelType, SstableInfo};
 
-use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
+use super::{CompactionInput, CompactionPicker, LocalPickerStatistic, MAX_COMPACT_LEVEL_COUNT};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::level_handler::LevelHandler;
-pub const MAX_LEVEL_COUNT: usize = 42;
 
 pub struct MinOverlappingPicker {
     level: usize,
@@ -130,6 +129,9 @@ impl CompactionPicker for MinOverlappingPicker {
             return None;
         }
         Some(CompactionInput {
+            select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+            target_input_size: target_input_ssts.iter().map(|sst| sst.file_size).sum(),
+            total_file_count: (select_input_ssts.len() + target_input_ssts.len()) as u64,
             input_levels: vec![
                 InputLevel {
                     level_idx: self.level as u32,
@@ -143,7 +145,7 @@ impl CompactionPicker for MinOverlappingPicker {
                 },
             ],
             target_level: self.target_level,
-            target_sub_level_id: 0,
+            ..Default::default()
         })
     }
 }
@@ -195,6 +197,7 @@ impl NonOverlapSubLevelPicker {
         ret.sstable_infos[0].extend(vec![sst.clone()]);
         let mut overlap_info = self.overlap_strategy.create_overlap_info();
         let mut select_sst_id_set = BTreeSet::default();
+        #[allow(clippy::single_range_in_vec_init)]
         let mut overlap_len_and_begins = vec![(sst_index..(sst_index + 1))];
         for sst in &ret.sstable_infos[0] {
             overlap_info.update(sst);
@@ -203,6 +206,13 @@ impl NonOverlapSubLevelPicker {
 
         for (target_index, target_level) in levels.iter().enumerate().skip(1) {
             if target_level.level_type() != LevelType::Nonoverlapping {
+                break;
+            }
+
+            // more than 1 sub_level
+            if ret.total_file_count > 1 && ret.total_file_size >= self.max_compaction_bytes
+                || ret.total_file_count >= self.max_file_count as usize
+            {
                 break;
             }
 
@@ -285,21 +295,12 @@ impl NonOverlapSubLevelPicker {
                     .map(|(_, files)| files.len())
                     .sum::<usize>();
 
-            // more than 1 sub_level
-            if ret.total_file_count > 1
-                && (ret.total_file_size + (add_files_size + current_level_size)
-                    >= self.max_compaction_bytes
-                    || ret.total_file_count + add_files_count >= self.max_file_count as usize)
-            {
-                break;
-            }
-
             if ret
                 .sstable_infos
                 .iter()
                 .filter(|ssts| !ssts.is_empty())
                 .count()
-                > MAX_LEVEL_COUNT
+                > MAX_COMPACT_LEVEL_COUNT
             {
                 break;
             }
@@ -376,10 +377,10 @@ pub mod tests {
     pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
 
     use super::*;
-    use crate::hummock::compaction::level_selector::tests::{
+    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
+    use crate::hummock::compaction::selector::tests::{
         generate_l0_nonoverlapping_sublevels, generate_table,
     };
-    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
 
     #[test]
     fn test_compact_l1() {

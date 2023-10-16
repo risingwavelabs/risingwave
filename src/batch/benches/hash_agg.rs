@@ -21,13 +21,13 @@ use risingwave_batch::task::ShutdownToken;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
-use risingwave_common::{enable_jemalloc_on_unix, hash};
-use risingwave_expr::agg::{AggCall, AggKind};
+use risingwave_common::{enable_jemalloc, hash};
+use risingwave_expr::aggregate::{AggCall, AggKind};
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-enable_jemalloc_on_unix!();
+enable_jemalloc!();
 
 fn create_agg_call(
     input_schema: &Schema,
@@ -142,7 +142,7 @@ fn bench_hash_agg(c: &mut Criterion) {
                                 chunk_num,
                             )
                         },
-                        |e| execute_executor(e),
+                        execute_executor,
                         BatchSize::SmallInput,
                     );
                 },

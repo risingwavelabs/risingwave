@@ -1,0 +1,26 @@
+disallowed-methods = [
+    { path = "std::iter::Iterator::zip", reason = "Please use `zip_eq_fast` if it's available. Otherwise use `zip_eq_debug`" },
+    { path = "itertools::Itertools::zip_eq", reason = "Please use `zip_eq_fast` if it's available. Otherwise use `zip_eq_debug`" },
+    { path = "futures::stream::select_all", reason = "Please use `risingwave_common::util::select_all` instead." },
+    { path = "risingwave_common::array::JsonbVal::from_serde", reason = "Please add dedicated methods as part of `JsonbRef`/`JsonbVal`, rather than take inner `serde_json::Value` out, process, and put back." },
+    { path = "std::panic::catch_unwind", reason = "Please use `risingwave_common::util::panic::rw_catch_unwind` instead." },
+    { path = "futures::FutureExt::catch_unwind", reason = "Please use `risingwave_common::util::panic::FutureCatchUnwindExt::rw_catch_unwind` instead." },
+]
+disallowed-macros = [
+    { path = "lazy_static::lazy_static", reason = "Please use `std::sync::LazyLock` instead." },
+]
+doc-valid-idents = [
+    "RisingWave",
+    "MinIO",
+    "ProtoBuf",
+    "BloomFilter",
+    "gRPC",
+    "PostgreSQL",
+    "MySQL",
+    "TopN",
+    "VNode"
+]
+avoid-breaking-exported-api = false
+upper-case-acronyms-aggressive = true
+too-many-arguments-threshold = 10
+ignore-interior-mutability = ["risingwave_hummock_sdk::key::TableKey"]

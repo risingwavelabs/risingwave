@@ -15,7 +15,7 @@
 mod join_entry_state;
 
 use std::alloc::Global;
-use std::ops::{Deref, DerefMut};
+use std::ops::{Bound, Deref, DerefMut};
 use std::sync::Arc;
 
 use futures::future::try_join;
@@ -40,7 +40,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::{ActorId, AtomicU64Ref};
+use crate::task::{ActorId, AtomicU64Ref, FragmentId};
 
 type DegreeType = u64;
 
@@ -131,7 +131,7 @@ impl EstimateSize for HashValueWrapper {
 }
 
 impl HashValueWrapper {
-    const MESSAGE: &str = "the state should always be `Some`";
+    const MESSAGE: &'static str = "the state should always be `Some`";
 
     /// Take the value out of the wrapper. Panic if the value is `None`.
     pub fn take(&mut self) -> HashValueType {
@@ -161,6 +161,7 @@ pub struct JoinHashMapMetrics {
     metrics: Arc<StreamingMetrics>,
     /// Basic information
     actor_id: String,
+    fragment_id: String,
     join_table_id: String,
     degree_table_id: String,
     side: &'static str,
@@ -175,6 +176,7 @@ impl JoinHashMapMetrics {
     pub fn new(
         metrics: Arc<StreamingMetrics>,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         side: &'static str,
         join_table_id: u32,
         degree_table_id: u32,
@@ -182,6 +184,7 @@ impl JoinHashMapMetrics {
         Self {
             metrics,
             actor_id: actor_id.to_string(),
+            fragment_id: fragment_id.to_string(),
             join_table_id: join_table_id.to_string(),
             degree_table_id: degree_table_id.to_string(),
             side,
@@ -193,23 +196,25 @@ impl JoinHashMapMetrics {
 
     pub fn flush(&mut self) {
         self.metrics
+            .join_lookup_total_count
+            .with_label_values(&[
+                (self.side),
+                &self.join_table_id,
+                &self.degree_table_id,
+                &self.actor_id,
+                &self.fragment_id,
+            ])
+            .inc_by(self.total_lookup_count as u64);
+        self.metrics
             .join_lookup_miss_count
             .with_label_values(&[
                 (self.side),
                 &self.join_table_id,
                 &self.degree_table_id,
                 &self.actor_id,
+                &self.fragment_id,
             ])
             .inc_by(self.lookup_miss_count as u64);
-        self.metrics
-            .join_total_lookup_count
-            .with_label_values(&[
-                (self.side),
-                &self.join_table_id,
-                &self.degree_table_id,
-                &self.actor_id,
-            ])
-            .inc_by(self.total_lookup_count as u64);
         self.metrics
             .join_insert_cache_miss_count
             .with_label_values(&[
@@ -217,6 +222,7 @@ impl JoinHashMapMetrics {
                 &self.join_table_id,
                 &self.degree_table_id,
                 &self.actor_id,
+                &self.fragment_id,
             ])
             .inc_by(self.insert_cache_miss_count as u64);
         self.total_lookup_count = 0;
@@ -284,6 +290,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         pk_contained_in_jk: bool,
         metrics: Arc<StreamingMetrics>,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         side: &'static str,
     ) -> Self {
         let alloc = StatsAlloc::new(Global).shared();
@@ -335,6 +342,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             metrics: JoinHashMapMetrics::new(
                 metrics,
                 actor_id,
+                fragment_id,
                 side,
                 join_table_id,
                 degree_table_id,
@@ -402,14 +410,18 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
-            let table_iter_fut = self
-                .state
-                .table
-                .iter_row_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter());
-            let degree_table_iter_fut = self
-                .degree_state
-                .table
-                .iter_row_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter());
+            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                &(Bound::Unbounded, Bound::Unbounded);
+            let table_iter_fut = self.state.table.iter_with_prefix(
+                &key,
+                sub_range,
+                PrefetchOptions::new_for_exhaust_iter(),
+            );
+            let degree_table_iter_fut = self.degree_state.table.iter_with_prefix(
+                &key,
+                sub_range,
+                PrefetchOptions::new_for_exhaust_iter(),
+            );
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
@@ -437,10 +449,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 );
             }
         } else {
+            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                &(Bound::Unbounded, Bound::Unbounded);
             let table_iter = self
                 .state
                 .table
-                .iter_row_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter())
+                .iter_with_prefix(&key, sub_range, PrefetchOptions::new_for_exhaust_iter())
                 .await?;
 
             #[for_await]

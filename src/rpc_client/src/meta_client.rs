@@ -53,6 +53,7 @@ use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
+use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::*;
 use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
@@ -429,11 +430,13 @@ impl MetaClient {
 
     pub async fn replace_table(
         &self,
+        source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
     ) -> Result<CatalogVersion> {
         let request = ReplaceTablePlanRequest {
+            source,
             table: Some(table),
             fragment_graph: Some(graph),
             table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
@@ -661,7 +664,7 @@ impl MetaClient {
                         extra_info.push(info);
                     }
                 }
-                tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
+                tracing::debug!(target: "events::meta::client_heartbeat", "heartbeat");
                 match tokio::time::timeout(
                     // TODO: decide better min_interval for timeout
                     min_interval * 3,
@@ -735,16 +738,16 @@ impl MetaClient {
         Ok(resp.states)
     }
 
-    pub async fn pause(&self) -> Result<()> {
+    pub async fn pause(&self) -> Result<PauseResponse> {
         let request = PauseRequest {};
-        let _resp = self.inner.pause(request).await?;
-        Ok(())
+        let resp = self.inner.pause(request).await?;
+        Ok(resp)
     }
 
-    pub async fn resume(&self) -> Result<()> {
+    pub async fn resume(&self) -> Result<ResumeResponse> {
         let request = ResumeRequest {};
-        let _resp = self.inner.resume(request).await?;
-        Ok(())
+        let resp = self.inner.resume(request).await?;
+        Ok(resp)
     }
 
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
@@ -933,10 +936,10 @@ impl MetaClient {
         Ok(resp.job_id)
     }
 
-    pub async fn get_backup_job_status(&self, job_id: u64) -> Result<BackupJobStatus> {
+    pub async fn get_backup_job_status(&self, job_id: u64) -> Result<(BackupJobStatus, String)> {
         let req = GetBackupJobStatusRequest { job_id };
         let resp = self.inner.get_backup_job_status(req).await?;
-        Ok(resp.job_status())
+        Ok((resp.job_status(), resp.message))
     }
 
     pub async fn delete_meta_snapshot(&self, snapshot_ids: &[u64]) -> Result<()> {
@@ -1040,6 +1043,24 @@ impl MetaClient {
             resp.task_assignment,
             resp.task_progress,
         ))
+    }
+
+    pub async fn list_branched_object(&self) -> Result<Vec<BranchedObject>> {
+        let req = ListBranchedObjectRequest {};
+        let resp = self.inner.list_branched_object(req).await?;
+        Ok(resp.branched_objects)
+    }
+
+    pub async fn list_active_write_limit(&self) -> Result<HashMap<u64, WriteLimit>> {
+        let req = ListActiveWriteLimitRequest {};
+        let resp = self.inner.list_active_write_limit(req).await?;
+        Ok(resp.write_limits)
+    }
+
+    pub async fn list_hummock_meta_config(&self) -> Result<HashMap<String, String>> {
+        let req = ListHummockMetaConfigRequest {};
+        let resp = self.inner.list_hummock_meta_config(req).await?;
+        Ok(resp.configs)
     }
 
     pub async fn delete_worker_node(&self, worker: HostAddress) -> Result<()> {
@@ -1267,7 +1288,8 @@ impl GrpcMetaClientCore {
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let meta_member_client = MetaMemberClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
-        let ddl_client = DdlServiceClient::new(channel.clone());
+        let ddl_client =
+            DdlServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let hummock_client =
             HummockManagerServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let notification_client =
@@ -1369,7 +1391,7 @@ impl MetaMemberManagement {
             Either::Right(member_group) => {
                 let mut fetched_members = None;
 
-                for (addr, client) in member_group.members.iter_mut() {
+                for (addr, client) in &mut member_group.members {
                     let client: Result<MetaMemberClient> = try {
                         match client {
                             Some(cached_client) => cached_client.to_owned(),
@@ -1458,14 +1480,14 @@ impl GrpcMetaClient {
     // Max retry times for connecting to meta server.
     const INIT_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
-    async fn start_meta_member_monitor(
+    fn start_meta_member_monitor(
         &self,
         init_leader_addr: String,
         members: Either<MetaMemberClient, MetaMemberGroup>,
         force_refresh_receiver: Receiver<Sender<Result<()>>>,
         meta_config: MetaConfig,
     ) -> Result<()> {
-        let core_ref = self.core.clone();
+        let core_ref: Arc<RwLock<GrpcMetaClientCore>> = self.core.clone();
         let current_leader = init_leader_addr;
 
         let enable_period_tick = matches!(members, Either::Right(_));
@@ -1559,9 +1581,7 @@ impl GrpcMetaClient {
             }
         };
 
-        client
-            .start_meta_member_monitor(addr, members, force_refresh_receiver, config)
-            .await?;
+        client.start_meta_member_monitor(addr, members, force_refresh_receiver, config)?;
 
         client.force_refresh_leader().await?;
 
@@ -1647,6 +1667,8 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
+            ,{ stream_client, pause, PauseRequest, PauseResponse }
+            ,{ stream_client, resume, ResumeRequest, ResumeResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }
@@ -1707,13 +1729,14 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
             ,{ hummock_client, subscribe_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeCompactionEventRequest>, Streaming<SubscribeCompactionEventResponse> }
+            ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
+            ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }
+            ,{ hummock_client, list_hummock_meta_config, ListHummockMetaConfigRequest, ListHummockMetaConfigResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
-            ,{ scale_client, pause, PauseRequest, PauseResponse }
-            ,{ scale_client, resume, ResumeRequest, ResumeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
             ,{ scale_client, get_reschedule_plan, GetReschedulePlanRequest, GetReschedulePlanResponse }

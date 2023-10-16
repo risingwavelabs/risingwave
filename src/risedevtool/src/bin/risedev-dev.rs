@@ -25,10 +25,10 @@ use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     generate_risedev_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
-    ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
-    FrontendService, GrafanaService, KafkaService, MetaNodeService, MinioService, OpendalConfig,
-    PrometheusService, PubsubService, RedisService, ServiceConfig, Task, TempoService,
-    ZooKeeperService, RISEDEV_SESSION_NAME,
+    ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService,
+    GrafanaService, KafkaService, MetaNodeService, MinioService, OpendalConfig, PrometheusService,
+    PubsubService, RedisService, ServiceConfig, Task, TempoService, ZooKeeperService,
+    RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -114,7 +114,6 @@ fn task_main(
             ServiceConfig::AwsS3(_) => None,
             ServiceConfig::OpenDal(_) => None,
             ServiceConfig::RedPanda(_) => None,
-            ServiceConfig::ConnectorNode(c) => Some((c.port, c.id.clone())),
         };
 
         if let Some(x) = listen_info {
@@ -339,17 +338,6 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("redis {}:{}", c.address, c.port));
             }
-            ServiceConfig::ConnectorNode(c) => {
-                let mut ctx =
-                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = ConnectorNodeService::new(c.clone())?;
-                service.execute(&mut ctx)?;
-                let mut task =
-                    risedev::ConfigureGrpcNodeTask::new(c.address.clone(), c.port, false)?;
-                task.execute(&mut ctx)?;
-                ctx.pb
-                    .set_message(format!("connector grpc://{}:{}", c.address, c.port));
-            }
         }
 
         let service_id = service.id().to_string();
@@ -458,7 +446,7 @@ fn main() -> Result<()> {
                 err.root_cause().to_string().trim(),
             );
             println!(
-                "* Use `{}` to enable new compoenents, if they are missing.",
+                "* Use `{}` to enable new components, if they are missing.",
                 style("./risedev configure").blue().bold(),
             );
             println!(

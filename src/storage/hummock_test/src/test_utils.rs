@@ -18,14 +18,15 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
 };
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
-use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::catalog::{PbTable, Table};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::version_update_payload;
@@ -49,9 +50,19 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::mock_notification_client::get_notification_client_for_test;
 
+pub fn gen_key_from_bytes(vnode: VirtualNode, payload: &[u8]) -> TableKey<Bytes> {
+    TableKey(Bytes::from(
+        [vnode.to_be_bytes().as_slice(), payload].concat(),
+    ))
+}
+
+pub fn gen_key_from_str(vnode: VirtualNode, payload: &str) -> TableKey<Bytes> {
+    gen_key_from_bytes(vnode, payload.as_bytes())
+}
+
 pub async fn prepare_first_valid_version(
-    env: MetaSrvEnv<MemStore>,
-    hummock_manager_ref: HummockManagerRef<MemStore>,
+    env: MetaSrvEnv,
+    hummock_manager_ref: HummockManagerRef,
     worker_node: WorkerNode,
 ) -> (
     PinnedVersion,
@@ -92,7 +103,7 @@ pub async fn prepare_first_valid_version(
 pub trait TestIngestBatch: LocalStateStore {
     async fn ingest_batch(
         &mut self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
+        kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize>;
@@ -102,7 +113,7 @@ pub trait TestIngestBatch: LocalStateStore {
 impl<S: LocalStateStore> TestIngestBatch for S {
     async fn ingest_batch(
         &mut self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
+        kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
@@ -181,9 +192,9 @@ pub fn update_filter_key_extractor_for_table_ids(
     }
 }
 
-pub async fn register_tables_with_id_for_test<S: MetaStore>(
+pub async fn register_tables_with_id_for_test(
     filter_key_extractor_manager: &FilterKeyExtractorManager,
-    hummock_manager_ref: &HummockManagerRef<S>,
+    hummock_manager_ref: &HummockManagerRef,
     table_ids: &[u32],
 ) {
     update_filter_key_extractor_for_table_ids(filter_key_extractor_manager, table_ids);
@@ -212,9 +223,9 @@ pub fn update_filter_key_extractor_for_tables(
         )
     }
 }
-pub async fn register_tables_with_catalog_for_test<S: MetaStore>(
+pub async fn register_tables_with_catalog_for_test(
     filter_key_extractor_manager: &FilterKeyExtractorManager,
-    hummock_manager_ref: &HummockManagerRef<S>,
+    hummock_manager_ref: &HummockManagerRef,
     tables: &[Table],
 ) {
     update_filter_key_extractor_for_tables(filter_key_extractor_manager, tables);
@@ -229,7 +240,7 @@ pub async fn register_tables_with_catalog_for_test<S: MetaStore>(
 
 pub struct HummockTestEnv {
     pub storage: HummockStorage,
-    pub manager: HummockManagerRef<MemStore>,
+    pub manager: HummockManagerRef,
     pub meta_client: Arc<MockHummockMetaClient>,
 }
 

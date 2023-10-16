@@ -1395,21 +1395,21 @@
         sq_1.col_2;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [max(max(lineitem.l_commitdate))] }
-      └─BatchHashAgg { group_key: [lineitem.l_commitdate], aggs: [max(max(lineitem.l_commitdate))] }
-        └─BatchExchange { order: [], dist: HashShard(lineitem.l_commitdate) }
-          └─BatchHashAgg { group_key: [lineitem.l_commitdate], aggs: [max(lineitem.l_commitdate)] }
-            └─BatchHashAgg { group_key: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], aggs: [] }
-              └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], distribution: UpstreamHashShard(lineitem.l_orderkey) }
+    └─BatchProject { exprs: [max(max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))))] }
+      └─BatchHashAgg { group_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], aggs: [max(max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))))] }
+        └─BatchExchange { order: [], dist: HashShard(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))) }
+          └─BatchHashAgg { group_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], aggs: [max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)))] }
+            └─BatchSortAgg { group_key: [lineitem.l_orderkey], aggs: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))] }
+              └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_commitdate], distribution: UpstreamHashShard(lineitem.l_orderkey) }
   stream_plan: |-
-    StreamMaterialize { columns: [col_0, lineitem.l_commitdate(hidden)], stream_key: [lineitem.l_commitdate], pk_columns: [lineitem.l_commitdate], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [max(max(lineitem.l_commitdate)), lineitem.l_commitdate] }
-      └─StreamHashAgg { group_key: [lineitem.l_commitdate], aggs: [max(max(lineitem.l_commitdate)), count] }
-        └─StreamExchange { dist: HashShard(lineitem.l_commitdate) }
-          └─StreamHashAgg { group_key: [lineitem.l_commitdate, $expr1], aggs: [max(lineitem.l_commitdate), count] }
-            └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct, Vnode(lineitem.l_orderkey) as $expr1] }
-              └─StreamHashAgg { group_key: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], aggs: [count] }
-                └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
+    StreamMaterialize { columns: [col_0, first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))(hidden)], stream_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], pk_columns: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [max(max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)))), first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))] }
+      └─StreamHashAgg { group_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], aggs: [max(max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)))), count] }
+        └─StreamExchange { dist: HashShard(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))) }
+          └─StreamHashAgg { group_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)), $expr1], aggs: [max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))), count] }
+            └─StreamProject { exprs: [lineitem.l_orderkey, first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)), Vnode(lineitem.l_orderkey) as $expr1] }
+              └─StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)), count] }
+                └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_commitdate], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
 - name: two phase agg on hop window input should use two phase agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
@@ -1636,3 +1636,99 @@
         └─BatchHashAgg { group_key: [integers.i], aggs: [] }
           └─BatchExchange { order: [], dist: HashShard(integers.i) }
             └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+- sql: |
+    CREATE TABLE t(id int primary key, a int, b int);
+    SELECT count(*) FROM t group by a, id, b;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [count] }
+      └─BatchSortAgg { group_key: [t.id], aggs: [count] }
+        └─BatchScan { table: t, columns: [t.id], distribution: UpstreamHashShard(t.id) }
+  stream_plan: |-
+    StreamMaterialize { columns: [count, t.id(hidden)], stream_key: [t.id], pk_columns: [t.id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [count, t.id] }
+      └─StreamHashAgg { group_key: [t.id], aggs: [count] }
+        └─StreamTableScan { table: t, columns: [t.id], pk: [t.id], dist: UpstreamHashShard(t.id) }
+- sql: |
+    CREATE TABLE t (a int, b int);
+    SELECT a, sum((sum(b))) OVER (PARTITION BY a ORDER BY a) FROM t GROUP BY a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.a, sum] }
+      └─BatchOverWindow { window_functions: [sum(sum(t.b)) OVER(PARTITION BY t.a ORDER BY t.a ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─BatchSort { order: [t.a ASC, t.a ASC] }
+          └─BatchHashAgg { group_key: [t.a], aggs: [sum(t.b)] }
+            └─BatchExchange { order: [], dist: HashShard(t.a) }
+              └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, sum], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.a, sum] }
+      └─StreamOverWindow { window_functions: [sum(sum(t.b)) OVER(PARTITION BY t.a ORDER BY t.a ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─StreamProject { exprs: [t.a, sum(t.b)] }
+          └─StreamHashAgg { group_key: [t.a], aggs: [sum(t.b), count] }
+            └─StreamExchange { dist: HashShard(t.a) }
+              └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    CREATE TABLE t (a int, b int);
+    SELECT a, row_number() OVER (PARTITION BY a ORDER BY a DESC) FROM t GROUP BY a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.a DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─BatchSort { order: [t.a ASC, t.a DESC] }
+        └─BatchHashAgg { group_key: [t.a], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard(t.a) }
+            └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, row_number], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.a ORDER BY t.a DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─StreamProject { exprs: [t.a] }
+        └─StreamHashAgg { group_key: [t.a], aggs: [count] }
+          └─StreamExchange { dist: HashShard(t.a) }
+            └─StreamTableScan { table: t, columns: [t.a, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    CREATE TABLE t (a int, b int, c int);
+    SELECT a, b, sum(sum(c)) OVER (PARTITION BY a ORDER BY b)
+    FROM t
+    GROUP BY a, b;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.a, t.b, sum] }
+      └─BatchOverWindow { window_functions: [sum(sum(t.c)) OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─BatchExchange { order: [t.a ASC, t.b ASC], dist: HashShard(t.a) }
+          └─BatchSort { order: [t.a ASC, t.b ASC] }
+            └─BatchHashAgg { group_key: [t.a, t.b], aggs: [sum(t.c)] }
+              └─BatchExchange { order: [], dist: HashShard(t.a, t.b) }
+                └─BatchScan { table: t, columns: [t.a, t.b, t.c], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, sum], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.a, t.b, sum] }
+      └─StreamOverWindow { window_functions: [sum(sum(t.c)) OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─StreamExchange { dist: HashShard(t.a) }
+          └─StreamProject { exprs: [t.a, t.b, sum(t.c)] }
+            └─StreamHashAgg { group_key: [t.a, t.b], aggs: [sum(t.c), count] }
+              └─StreamExchange { dist: HashShard(t.a, t.b) }
+                └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    CREATE TABLE t (a int, b int, c int, d int, e int);
+    SELECT a, b, sum(sum(c)) OVER (PARTITION BY a, avg(d) ORDER BY max(e), b)
+    FROM t
+    GROUP BY a, b;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.a, t.b, sum] }
+      └─BatchOverWindow { window_functions: [sum(sum(t.c)) OVER(PARTITION BY t.a, $expr1 ORDER BY max(t.e) ASC, t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─BatchExchange { order: [t.a ASC, $expr1 ASC, max(t.e) ASC, t.b ASC], dist: HashShard(t.a, $expr1) }
+          └─BatchSort { order: [t.a ASC, $expr1 ASC, max(t.e) ASC, t.b ASC] }
+            └─BatchProject { exprs: [t.a, t.b, sum(t.c), max(t.e), (sum(t.d)::Decimal / count(t.d)::Decimal) as $expr1] }
+              └─BatchHashAgg { group_key: [t.a, t.b], aggs: [sum(t.c), sum(t.d), count(t.d), max(t.e)] }
+                └─BatchExchange { order: [], dist: HashShard(t.a, t.b) }
+                  └─BatchScan { table: t, columns: [t.a, t.b, t.c, t.d, t.e], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, sum, $expr1(hidden)], stream_key: [a, b, $expr1], pk_columns: [a, b, $expr1], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.a, t.b, sum, $expr1] }
+      └─StreamOverWindow { window_functions: [sum(sum(t.c)) OVER(PARTITION BY t.a, $expr1 ORDER BY max(t.e) ASC, t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─StreamExchange { dist: HashShard(t.a, $expr1) }
+          └─StreamProject { exprs: [t.a, t.b, sum(t.c), max(t.e), (sum(t.d)::Decimal / count(t.d)::Decimal) as $expr1] }
+            └─StreamHashAgg { group_key: [t.a, t.b], aggs: [sum(t.c), sum(t.d), count(t.d), max(t.e), count] }
+              └─StreamExchange { dist: HashShard(t.a, t.b) }
+                └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t.d, t.e, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

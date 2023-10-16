@@ -75,7 +75,7 @@ pub(super) fn shrink_partition_cache(
     cache_policy: CachePolicy,
     recently_accessed_range: RangeInclusive<StateKey>,
 ) {
-    tracing::debug!(
+    tracing::trace!(
         this_partition_key=?this_partition_key,
         cache_policy=?cache_policy,
         recently_accessed_range=?recently_accessed_range,
@@ -199,7 +199,7 @@ pub(super) fn shrink_partition_cache(
         }
     };
 
-    tracing::debug!(
+    tracing::trace!(
         this_partition_key=?this_partition_key,
         retain_range=?(&start..=&end),
         "retain range in the range cache"
@@ -431,16 +431,16 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
             if left_reached_sentinel {
                 // TODO(rc): should count cache miss for this, and also the below
-                tracing::debug!(partition=?self.this_partition_key, "partition cache left extension triggered");
+                tracing::trace!(partition=?self.this_partition_key, "partition cache left extension triggered");
                 let left_most = self.cache_real_first_key().unwrap_or(delta_first).clone();
                 self.extend_cache_leftward_by_n(table, &left_most).await?;
             }
             if right_reached_sentinel {
-                tracing::debug!(partition=?self.this_partition_key, "partition cache right extension triggered");
+                tracing::trace!(partition=?self.this_partition_key, "partition cache right extension triggered");
                 let right_most = self.cache_real_last_key().unwrap_or(delta_last).clone();
                 self.extend_cache_rightward_by_n(table, &right_most).await?;
             }
-            tracing::debug!(partition=?self.this_partition_key, "partition cache extended");
+            tracing::trace!(partition=?self.this_partition_key, "partition cache extended");
         }
     }
 
@@ -453,12 +453,14 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             return Ok(());
         }
 
-        tracing::debug!(partition=?self.this_partition_key, "loading the whole partition into cache");
+        tracing::trace!(partition=?self.this_partition_key, "loading the whole partition into cache");
 
-        let mut new_cache = new_empty_partition_cache();
+        let mut new_cache = PartitionCache::new(); // shouldn't use `new_empty_partition_cache` here because we don't want sentinels
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let table_iter = table
-            .iter_row_with_pk_prefix(
+            .iter_with_prefix(
                 self.this_partition_key,
+                sub_range,
                 PrefetchOptions::new_for_exhaust_iter(),
             )
             .await?;
@@ -530,7 +532,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 Bound::Included(self.state_key_to_table_pk(range.start())?),
                 Bound::Excluded(self.state_key_to_table_pk(cache_real_first_key)?),
             );
-            tracing::debug!(
+            tracing::trace!(
                 partition=?self.this_partition_key,
                 table_pk_range=?table_pk_range,
                 "loading the left half of given range"
@@ -546,7 +548,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 Bound::Excluded(self.state_key_to_table_pk(cache_real_last_key)?),
                 Bound::Included(self.state_key_to_table_pk(range.end())?),
             );
-            tracing::debug!(
+            tracing::trace!(
                 partition=?self.this_partition_key,
                 table_pk_range=?table_pk_range,
                 "loading the right half of given range"
@@ -571,9 +573,9 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     ) -> StreamExecutorResult<()> {
         let streams = stream::iter(table.vnode_bitmap().iter_vnodes())
             .map(|vnode| {
-                table.iter_row_with_pk_range(
-                    &table_pk_range,
+                table.iter_with_vnode(
                     vnode,
+                    &table_pk_range,
                     PrefetchOptions::new_for_exhaust_iter(),
                 )
             })
@@ -651,11 +653,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             );
             let streams: Vec<_> =
                 futures::future::try_join_all(table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                    table.iter_row_with_pk_range(
-                        &pk_range,
-                        vnode,
-                        PrefetchOptions::new_for_exhaust_iter(),
-                    )
+                    table.iter_with_vnode(vnode, &pk_range, PrefetchOptions::new_for_exhaust_iter())
                 }))
                 .await?
                 .into_iter()
@@ -749,7 +747,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             );
             let streams: Vec<_> =
                 futures::future::try_join_all(table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                    table.iter_row_with_pk_range(&pk_range, vnode, PrefetchOptions::default())
+                    table.iter_with_vnode(vnode, &pk_range, PrefetchOptions::default())
                 }))
                 .await?
                 .into_iter()
@@ -986,7 +984,7 @@ mod find_affected_ranges_tests {
 
     use itertools::Itertools;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_expr::agg::{AggArgs, AggKind};
+    use risingwave_expr::aggregate::{AggArgs, AggKind};
     use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
     use super::*;
@@ -1083,7 +1081,7 @@ mod find_affected_ranges_tests {
     ) {
         result
             .into_iter()
-            .zip_eq(expected.into_iter())
+            .zip_eq(expected)
             .for_each(|(result, expected)| {
                 assert_eq!(
                     result.0.as_normal_expect().pk.0,

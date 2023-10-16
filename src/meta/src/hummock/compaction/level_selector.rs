@@ -26,12 +26,13 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{compact_task, CompactionConfig, LevelType};
 
 use super::picker::{
+    CompactionTaskValidator, EmergencyCompactionPicker, IntraCompactionPicker,
     SpaceReclaimCompactionPicker, SpaceReclaimPickerState, TtlPickerState,
     TtlReclaimCompactionPicker,
 };
 use super::{
-    create_compaction_task, LevelCompactionPicker, ManualCompactionOption, ManualCompactionPicker,
-    TierCompactionPicker,
+    create_compaction_task, CompactionSelector, LevelCompactionPicker, ManualCompactionOption,
+    ManualCompactionPicker, TierCompactionPicker,
 };
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::{
@@ -40,26 +41,24 @@ use crate::hummock::compaction::picker::{
 use crate::hummock::compaction::{create_overlap_strategy, CompactionTask, LocalSelectorStatistic};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
-use crate::rpc::metrics::MetaMetrics;
 
 pub const SCORE_BASE: u64 = 100;
 
-pub trait LevelSelector: Sync + Send {
-    fn pick_compaction(
-        &mut self,
-        task_id: HummockCompactionTaskId,
-        group: &CompactionGroup,
-        levels: &Levels,
-        level_handlers: &mut [LevelHandler],
-        selector_stats: &mut LocalSelectorStatistic,
-        table_id_to_options: HashMap<u32, TableOption>,
-    ) -> Option<CompactionTask>;
+#[derive(Debug, Default, Clone)]
+pub enum PickerType {
+    Tier,
+    Intra,
+    ToBase,
+    #[default]
+    BottomLevel,
+}
 
-    fn report_statistic_metrics(&self, _metrics: &MetaMetrics) {}
-
-    fn name(&self) -> &'static str;
-
-    fn task_type(&self) -> compact_task::TaskType;
+#[derive(Default, Debug)]
+pub struct PickerInfo {
+    score: u64,
+    select_level: usize,
+    target_level: usize,
+    picker_type: PickerType,
 }
 
 #[derive(Default, Debug)]
@@ -71,7 +70,7 @@ pub struct SelectContext {
     // size of the files in  `base_level` reaches its capacity, we will place data in a higher
     // level, which equals to `base_level -= 1;`.
     pub base_level: usize,
-    pub score_levels: Vec<(u64, usize, usize)>,
+    pub score_levels: Vec<PickerInfo>,
 }
 
 pub struct DynamicLevelSelectorCore {
@@ -92,28 +91,34 @@ impl DynamicLevelSelectorCore {
 
     fn create_compaction_picker(
         &self,
-        select_level: usize,
-        target_level: usize,
+        picker_info: &PickerInfo,
         overlap_strategy: Arc<dyn OverlapStrategy>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
     ) -> Box<dyn CompactionPicker> {
-        if select_level == 0 {
-            if target_level == 0 {
-                Box::new(TierCompactionPicker::new(self.config.clone()))
-            } else {
-                Box::new(LevelCompactionPicker::new(
-                    target_level,
-                    self.config.clone(),
+        match picker_info.picker_type {
+            PickerType::Tier => Box::new(TierCompactionPicker::new_with_validator(
+                self.config.clone(),
+                compaction_task_validator,
+            )),
+            PickerType::ToBase => Box::new(LevelCompactionPicker::new_with_validator(
+                picker_info.target_level,
+                self.config.clone(),
+                compaction_task_validator,
+            )),
+            PickerType::Intra => Box::new(IntraCompactionPicker::new_with_validator(
+                self.config.clone(),
+                compaction_task_validator,
+            )),
+            PickerType::BottomLevel => {
+                assert_eq!(picker_info.select_level + 1, picker_info.target_level);
+                Box::new(MinOverlappingPicker::new(
+                    picker_info.select_level,
+                    picker_info.target_level,
+                    self.config.max_bytes_for_level_base,
+                    self.config.split_by_state_table,
+                    overlap_strategy,
                 ))
             }
-        } else {
-            assert_eq!(select_level + 1, target_level);
-            Box::new(MinOverlappingPicker::new(
-                select_level,
-                target_level,
-                self.config.max_bytes_for_level_base,
-                self.config.split_by_state_table,
-                overlap_strategy,
-            ))
         }
     }
 
@@ -212,8 +217,12 @@ impl DynamicLevelSelectorCore {
                     std::cmp::min(idle_file_count, overlapping_file_count) as u64 * SCORE_BASE
                         / self.config.level0_tier_compact_file_number;
                 // Reduce the level num of l0 overlapping sub_level
-                ctx.score_levels
-                    .push((std::cmp::max(l0_overlapping_score, SCORE_BASE + 1), 0, 0));
+                ctx.score_levels.push(PickerInfo {
+                    score: std::cmp::max(l0_overlapping_score, SCORE_BASE + 1),
+                    select_level: 0,
+                    target_level: 0,
+                    picker_type: PickerType::Tier,
+                })
             }
 
             // The read query at the non-overlapping level only selects ssts that match the query
@@ -249,8 +258,24 @@ impl DynamicLevelSelectorCore {
             };
 
             // Reduce the level num of l0 non-overlapping sub_level
-            ctx.score_levels
-                .push((non_overlapping_score, 0, ctx.base_level));
+            ctx.score_levels.push({
+                PickerInfo {
+                    score: non_overlapping_score,
+                    select_level: 0,
+                    target_level: ctx.base_level,
+                    picker_type: PickerType::ToBase,
+                }
+            });
+
+            // FIXME: more accurate score calculation algorithm will be introduced (#11903)
+            ctx.score_levels.push({
+                PickerInfo {
+                    score: non_overlapping_score,
+                    select_level: 0,
+                    target_level: 0,
+                    picker_type: PickerType::Intra,
+                }
+            });
         }
 
         // The bottommost level can not be input level.
@@ -270,16 +295,23 @@ impl DynamicLevelSelectorCore {
             if total_size == 0 {
                 continue;
             }
-            ctx.score_levels.push((
-                total_size * SCORE_BASE / ctx.level_max_bytes[level_idx],
-                level_idx,
-                level_idx + 1,
-            ));
+
+            ctx.score_levels.push({
+                PickerInfo {
+                    score: total_size * SCORE_BASE / ctx.level_max_bytes[level_idx],
+                    select_level: level_idx,
+                    target_level: level_idx + 1,
+                    picker_type: PickerType::BottomLevel,
+                }
+            });
         }
 
         // sort reverse to pick the largest one.
-        ctx.score_levels
-            .sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.2.cmp(&b.2)));
+        ctx.score_levels.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then_with(|| a.target_level.cmp(&b.target_level))
+        });
         ctx
     }
 
@@ -359,7 +391,7 @@ impl DynamicLevelSelectorCore {
     }
 }
 
-impl LevelSelector for DynamicLevelSelector {
+impl CompactionSelector for DynamicLevelSelector {
     fn pick_compaction(
         &mut self,
         task_id: HummockCompactionTaskId,
@@ -374,15 +406,20 @@ impl LevelSelector for DynamicLevelSelector {
         let overlap_strategy =
             create_overlap_strategy(compaction_group.compaction_config.compaction_mode());
         let ctx = dynamic_level_core.get_priority_levels(levels, level_handlers);
-        for (score, select_level, target_level) in ctx.score_levels {
-            if score <= SCORE_BASE {
+        // TODO: Determine which rule to enable by write limit
+        let compaction_task_validator = Arc::new(CompactionTaskValidator::new(
+            compaction_group.compaction_config.clone(),
+        ));
+        for picker_info in &ctx.score_levels {
+            if picker_info.score <= SCORE_BASE {
                 return None;
             }
             let mut picker = dynamic_level_core.create_compaction_picker(
-                select_level,
-                target_level,
+                picker_info,
                 overlap_strategy.clone(),
+                compaction_task_validator.clone(),
             );
+
             let mut stats = LocalPickerStatistic::default();
             if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
                 ret.add_pending_task(task_id, level_handlers);
@@ -393,9 +430,11 @@ impl LevelSelector for DynamicLevelSelector {
                     self.task_type(),
                 ));
             }
-            selector_stats
-                .skip_picker
-                .push((select_level, target_level, stats));
+            selector_stats.skip_picker.push((
+                picker_info.select_level,
+                picker_info.target_level,
+                stats,
+            ));
         }
         None
     }
@@ -407,162 +446,6 @@ impl LevelSelector for DynamicLevelSelector {
     fn task_type(&self) -> compact_task::TaskType {
         compact_task::TaskType::Dynamic
     }
-}
-
-pub struct ManualCompactionSelector {
-    option: ManualCompactionOption,
-}
-
-impl ManualCompactionSelector {
-    pub fn new(option: ManualCompactionOption) -> Self {
-        Self { option }
-    }
-}
-
-impl LevelSelector for ManualCompactionSelector {
-    fn pick_compaction(
-        &mut self,
-        task_id: HummockCompactionTaskId,
-        group: &CompactionGroup,
-        levels: &Levels,
-        level_handlers: &mut [LevelHandler],
-        _selector_stats: &mut LocalSelectorStatistic,
-        _table_id_to_options: HashMap<u32, TableOption>,
-    ) -> Option<CompactionTask> {
-        let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
-        let overlap_strategy = create_overlap_strategy(group.compaction_config.compaction_mode());
-        let ctx = dynamic_level_core.calculate_level_base_size(levels);
-        let (mut picker, base_level) = {
-            let target_level = if self.option.level == 0 {
-                ctx.base_level
-            } else if self.option.level == group.compaction_config.max_level as usize {
-                self.option.level
-            } else {
-                self.option.level + 1
-            };
-            if self.option.level > 0 && self.option.level < ctx.base_level {
-                return None;
-            }
-            (
-                ManualCompactionPicker::new(overlap_strategy, self.option.clone(), target_level),
-                ctx.base_level,
-            )
-        };
-
-        let compaction_input =
-            picker.pick_compaction(levels, level_handlers, &mut LocalPickerStatistic::default())?;
-        compaction_input.add_pending_task(task_id, level_handlers);
-
-        Some(create_compaction_task(
-            group.compaction_config.as_ref(),
-            compaction_input,
-            base_level,
-            self.task_type(),
-        ))
-    }
-
-    fn name(&self) -> &'static str {
-        "ManualCompactionSelector"
-    }
-
-    fn task_type(&self) -> compact_task::TaskType {
-        compact_task::TaskType::Manual
-    }
-}
-
-#[derive(Default)]
-pub struct SpaceReclaimCompactionSelector {
-    state: HashMap<u64, SpaceReclaimPickerState>,
-}
-
-impl LevelSelector for SpaceReclaimCompactionSelector {
-    fn pick_compaction(
-        &mut self,
-        task_id: HummockCompactionTaskId,
-        group: &CompactionGroup,
-        levels: &Levels,
-        level_handlers: &mut [LevelHandler],
-        _selector_stats: &mut LocalSelectorStatistic,
-        _table_id_to_options: HashMap<u32, TableOption>,
-    ) -> Option<CompactionTask> {
-        let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
-        let mut picker = SpaceReclaimCompactionPicker::new(
-            group.compaction_config.max_space_reclaim_bytes,
-            levels.member_table_ids.iter().cloned().collect(),
-        );
-        let ctx = dynamic_level_core.calculate_level_base_size(levels);
-        let state = self
-            .state
-            .entry(group.group_id)
-            .or_insert_with(SpaceReclaimPickerState::default);
-
-        let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
-        compaction_input.add_pending_task(task_id, level_handlers);
-
-        Some(create_compaction_task(
-            dynamic_level_core.get_config(),
-            compaction_input,
-            ctx.base_level,
-            self.task_type(),
-        ))
-    }
-
-    fn name(&self) -> &'static str {
-        "SpaceReclaimCompaction"
-    }
-
-    fn task_type(&self) -> compact_task::TaskType {
-        compact_task::TaskType::SpaceReclaim
-    }
-}
-
-#[derive(Default)]
-pub struct TtlCompactionSelector {
-    state: HashMap<u64, TtlPickerState>,
-}
-
-impl LevelSelector for TtlCompactionSelector {
-    fn pick_compaction(
-        &mut self,
-        task_id: HummockCompactionTaskId,
-        group: &CompactionGroup,
-        levels: &Levels,
-        level_handlers: &mut [LevelHandler],
-        _selector_stats: &mut LocalSelectorStatistic,
-        table_id_to_options: HashMap<u32, TableOption>,
-    ) -> Option<CompactionTask> {
-        let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
-        let ctx = dynamic_level_core.calculate_level_base_size(levels);
-        let picker = TtlReclaimCompactionPicker::new(
-            group.compaction_config.max_space_reclaim_bytes,
-            table_id_to_options,
-        );
-        let state = self
-            .state
-            .entry(group.group_id)
-            .or_insert_with(TtlPickerState::default);
-        let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
-        compaction_input.add_pending_task(task_id, level_handlers);
-
-        Some(create_compaction_task(
-            group.compaction_config.as_ref(),
-            compaction_input,
-            ctx.base_level,
-            self.task_type(),
-        ))
-    }
-
-    fn name(&self) -> &'static str {
-        "TtlCompaction"
-    }
-
-    fn task_type(&self) -> compact_task::TaskType {
-        compact_task::TaskType::Ttl
-    }
-}
-
-pub fn default_level_selector() -> Box<dyn LevelSelector> {
-    Box::<DynamicLevelSelector>::default()
 }
 
 #[cfg(test)]
@@ -577,235 +460,6 @@ pub mod tests {
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
-
-    pub fn push_table_level0_overlapping(levels: &mut Levels, sst: SstableInfo) {
-        levels.l0.as_mut().unwrap().total_file_size += sst.file_size;
-        levels.l0.as_mut().unwrap().sub_levels.push(Level {
-            level_idx: 0,
-            level_type: LevelType::Overlapping as i32,
-            total_file_size: sst.file_size,
-            uncompressed_file_size: sst.uncompressed_file_size,
-            sub_level_id: sst.get_sst_id(),
-            table_infos: vec![sst],
-        });
-    }
-
-    pub fn push_table_level0_nonoverlapping(levels: &mut Levels, sst: SstableInfo) {
-        push_table_level0_overlapping(levels, sst);
-        levels
-            .l0
-            .as_mut()
-            .unwrap()
-            .sub_levels
-            .last_mut()
-            .unwrap()
-            .level_type = LevelType::Nonoverlapping as i32;
-    }
-
-    pub fn push_tables_level0_nonoverlapping(levels: &mut Levels, table_infos: Vec<SstableInfo>) {
-        let total_file_size = table_infos.iter().map(|table| table.file_size).sum::<u64>();
-        let uncompressed_file_size = table_infos
-            .iter()
-            .map(|table| table.uncompressed_file_size)
-            .sum();
-        let sub_level_id = table_infos[0].get_sst_id();
-        levels.l0.as_mut().unwrap().total_file_size += total_file_size;
-        levels.l0.as_mut().unwrap().sub_levels.push(Level {
-            level_idx: 0,
-            level_type: LevelType::Nonoverlapping as i32,
-            total_file_size,
-            sub_level_id,
-            table_infos,
-            uncompressed_file_size,
-        });
-    }
-
-    pub fn generate_table(
-        id: u64,
-        table_prefix: u64,
-        left: usize,
-        right: usize,
-        epoch: u64,
-    ) -> SstableInfo {
-        SstableInfo {
-            object_id: id,
-            sst_id: id,
-            key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(table_prefix, left, epoch),
-                right: iterator_test_key_of_epoch(table_prefix, right, epoch),
-                right_exclusive: false,
-            }),
-            file_size: (right - left + 1) as u64,
-            table_ids: vec![table_prefix as u32],
-            uncompressed_file_size: (right - left + 1) as u64,
-            total_key_count: (right - left + 1) as u64,
-            ..Default::default()
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn generate_table_with_ids_and_epochs(
-        id: u64,
-        table_prefix: u64,
-        left: usize,
-        right: usize,
-        epoch: u64,
-        table_ids: Vec<u32>,
-        min_epoch: u64,
-        max_epoch: u64,
-    ) -> SstableInfo {
-        SstableInfo {
-            object_id: id,
-            sst_id: id,
-            key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(table_prefix, left, epoch),
-                right: iterator_test_key_of_epoch(table_prefix, right, epoch),
-                right_exclusive: false,
-            }),
-            file_size: (right - left + 1) as u64,
-            table_ids,
-            uncompressed_file_size: (right - left + 1) as u64,
-            min_epoch,
-            max_epoch,
-            ..Default::default()
-        }
-    }
-
-    pub fn generate_tables(
-        ids: Range<u64>,
-        keys: Range<usize>,
-        epoch: u64,
-        file_size: u64,
-    ) -> Vec<SstableInfo> {
-        let step = (keys.end - keys.start) / (ids.end - ids.start) as usize;
-        let mut start = keys.start;
-        let mut tables = vec![];
-        for id in ids {
-            let mut table = generate_table(id, 1, start, start + step - 1, epoch);
-            table.file_size = file_size;
-            tables.push(table);
-            start += step;
-        }
-        tables
-    }
-
-    pub fn generate_level(level_idx: u32, table_infos: Vec<SstableInfo>) -> Level {
-        let total_file_size = table_infos.iter().map(|sst| sst.file_size).sum();
-        let uncompressed_file_size = table_infos
-            .iter()
-            .map(|sst| sst.uncompressed_file_size)
-            .sum();
-        Level {
-            level_idx,
-            level_type: LevelType::Nonoverlapping as i32,
-            table_infos,
-            total_file_size,
-            sub_level_id: 0,
-            uncompressed_file_size,
-        }
-    }
-
-    /// Returns a `OverlappingLevel`, with each `table_infos`'s element placed in a nonoverlapping
-    /// sub-level.
-    pub fn generate_l0_nonoverlapping_sublevels(table_infos: Vec<SstableInfo>) -> OverlappingLevel {
-        let total_file_size = table_infos.iter().map(|table| table.file_size).sum::<u64>();
-        let uncompressed_file_size = table_infos
-            .iter()
-            .map(|table| table.uncompressed_file_size)
-            .sum::<u64>();
-        OverlappingLevel {
-            sub_levels: table_infos
-                .into_iter()
-                .enumerate()
-                .map(|(idx, table)| Level {
-                    level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
-                    total_file_size: table.file_size,
-                    uncompressed_file_size: table.uncompressed_file_size,
-                    sub_level_id: idx as u64,
-                    table_infos: vec![table],
-                })
-                .collect_vec(),
-            total_file_size,
-            uncompressed_file_size,
-        }
-    }
-
-    pub fn generate_l0_nonoverlapping_multi_sublevels(
-        table_infos: Vec<Vec<SstableInfo>>,
-    ) -> OverlappingLevel {
-        let mut l0 = OverlappingLevel {
-            sub_levels: table_infos
-                .into_iter()
-                .enumerate()
-                .map(|(idx, table)| Level {
-                    level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
-                    total_file_size: table.iter().map(|table| table.file_size).sum::<u64>(),
-                    uncompressed_file_size: table
-                        .iter()
-                        .map(|sst| sst.uncompressed_file_size)
-                        .sum::<u64>(),
-                    sub_level_id: idx as u64,
-                    table_infos: table,
-                })
-                .collect_vec(),
-            total_file_size: 0,
-            uncompressed_file_size: 0,
-        };
-
-        l0.total_file_size = l0.sub_levels.iter().map(|l| l.total_file_size).sum::<u64>();
-        l0.uncompressed_file_size = l0
-            .sub_levels
-            .iter()
-            .map(|l| l.uncompressed_file_size)
-            .sum::<u64>();
-        l0
-    }
-
-    /// Returns a `OverlappingLevel`, with each `table_infos`'s element placed in a overlapping
-    /// sub-level.
-    pub fn generate_l0_overlapping_sublevels(
-        table_infos: Vec<Vec<SstableInfo>>,
-    ) -> OverlappingLevel {
-        let mut l0 = OverlappingLevel {
-            sub_levels: table_infos
-                .into_iter()
-                .enumerate()
-                .map(|(idx, table)| Level {
-                    level_idx: 0,
-                    level_type: LevelType::Overlapping as i32,
-                    total_file_size: table.iter().map(|table| table.file_size).sum::<u64>(),
-                    sub_level_id: idx as u64,
-                    table_infos: table.clone(),
-                    uncompressed_file_size: table
-                        .iter()
-                        .map(|sst| sst.uncompressed_file_size)
-                        .sum::<u64>(),
-                })
-                .collect_vec(),
-            total_file_size: 0,
-            uncompressed_file_size: 0,
-        };
-        l0.total_file_size = l0.sub_levels.iter().map(|l| l.total_file_size).sum::<u64>();
-        l0.uncompressed_file_size = l0
-            .sub_levels
-            .iter()
-            .map(|l| l.uncompressed_file_size)
-            .sum::<u64>();
-        l0
-    }
-
-    pub(crate) fn assert_compaction_task(
-        compact_task: &CompactionTask,
-        level_handlers: &[LevelHandler],
-    ) {
-        for i in &compact_task.input.input_levels {
-            for t in &i.table_infos {
-                assert!(level_handlers[i.level_idx as usize].is_pending_compact(&t.sst_id));
-            }
-        }
-    }
 
     #[test]
     fn test_dynamic_level() {

@@ -24,7 +24,7 @@ use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::overlap_strategy::{
     OverlapInfo, OverlapStrategy, RangeOverlapInfo,
 };
-use crate::hummock::compaction::ManualCompactionOption;
+use crate::hummock::compaction::selector::ManualCompactionOption;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct ManualCompactionPicker {
@@ -101,6 +101,7 @@ impl ManualCompactionPicker {
             input_levels,
             target_level: 0,
             target_sub_level_id: sub_level_id,
+            ..Default::default()
         })
     }
 
@@ -170,6 +171,7 @@ impl ManualCompactionPicker {
             input_levels,
             target_level: self.target_level,
             target_sub_level_id: 0,
+            ..Default::default()
         })
     }
 
@@ -301,6 +303,9 @@ impl CompactionPicker for ManualCompactionPicker {
         }
 
         Some(CompactionInput {
+            select_input_size: select_input_ssts.iter().map(|sst| sst.file_size).sum(),
+            target_input_size: target_input_ssts.iter().map(|sst| sst.file_size).sum(),
+            total_file_count: (select_input_ssts.len() + target_input_ssts.len()) as u64,
             input_levels: vec![
                 InputLevel {
                     level_idx: level as u32,
@@ -314,7 +319,7 @@ impl CompactionPicker for ManualCompactionPicker {
                 },
             ],
             target_level,
-            target_sub_level_id: 0,
+            ..Default::default()
         })
     }
 }
@@ -328,12 +333,12 @@ pub mod tests {
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::compaction::level_selector::tests::{
+    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
+    use crate::hummock::compaction::selector::tests::{
         assert_compaction_task, generate_l0_nonoverlapping_sublevels,
         generate_l0_overlapping_sublevels, generate_level, generate_table,
     };
-    use crate::hummock::compaction::level_selector::{LevelSelector, ManualCompactionSelector};
-    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
+    use crate::hummock::compaction::selector::{CompactionSelector, ManualCompactionSelector};
     use crate::hummock::compaction::LocalSelectorStatistic;
     use crate::hummock::model::CompactionGroup;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;

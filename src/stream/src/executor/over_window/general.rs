@@ -15,12 +15,13 @@
 use std::collections::{btree_map, BTreeMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::RangeInclusive;
+use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{RowRef, StreamChunk};
+use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Field;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
@@ -41,6 +42,7 @@ use super::over_partition::{
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::StreamChunkBuilder;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::over_window::delta_btree_map::PositionType;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::{
@@ -73,6 +75,7 @@ struct ExecutorInner<S: StateStore> {
 
     state_table: StateTable<S>,
     watermark_epoch: AtomicU64Ref,
+    metrics: Arc<StreamingMetrics>,
 
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
@@ -84,7 +87,14 @@ struct ExecutionVars<S: StateStore> {
     cached_partitions: ManagedLruCache<OwnedRow, PartitionCache>,
     /// partition key => recently accessed range.
     recently_accessed_ranges: BTreeMap<DefaultOrdered<OwnedRow>, RangeInclusive<StateKey>>,
+    stats: ExecutionStats,
     _phantom: PhantomData<S>,
+}
+
+#[derive(Default)]
+struct ExecutionStats {
+    cache_miss: u64,
+    cache_lookup: u64,
 }
 
 impl<S: StateStore> Executor for OverWindowExecutor<S> {
@@ -146,6 +156,7 @@ pub struct OverWindowExecutorArgs<S: StateStore> {
 
     pub state_table: StateTable<S>,
     pub watermark_epoch: AtomicU64Ref,
+    pub metrics: Arc<StreamingMetrics>,
 
     pub chunk_size: usize,
     pub cache_policy: CachePolicy,
@@ -196,6 +207,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 input_schema_len: input_info.schema.len(),
                 state_table: args.state_table,
                 watermark_epoch: args.watermark_epoch,
+                metrics: args.metrics,
                 chunk_size: args.chunk_size,
                 cache_policy,
             },
@@ -213,26 +225,25 @@ impl<S: StateStore> OverWindowExecutor<S> {
         chunk: &'a StreamChunk,
     ) -> impl Iterator<Item = Record<RowRef<'a>>> {
         let mut changes_merged = BTreeMap::new();
-        for record in chunk.records() {
-            match record {
-                Record::Insert { new_row } => {
-                    let pk = DefaultOrdered(this.get_input_pk(new_row));
+        for (op, row) in chunk.rows() {
+            let pk = DefaultOrdered(this.get_input_pk(row));
+            match op {
+                Op::Insert | Op::UpdateInsert => {
                     if let Some(prev_change) = changes_merged.get_mut(&pk) {
                         match prev_change {
                             Record::Delete { old_row } => {
                                 *prev_change = Record::Update {
                                     old_row: *old_row,
-                                    new_row,
+                                    new_row: row,
                                 };
                             }
                             _ => panic!("inconsistent changes in input chunk"),
                         }
                     } else {
-                        changes_merged.insert(pk, record);
+                        changes_merged.insert(pk, Record::Insert { new_row: row });
                     }
                 }
-                Record::Delete { old_row } => {
-                    let pk = DefaultOrdered(this.get_input_pk(old_row));
+                Op::Delete | Op::UpdateDelete => {
                     if let Some(prev_change) = changes_merged.get_mut(&pk) {
                         match prev_change {
                             Record::Insert { .. } => {
@@ -249,29 +260,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                             _ => panic!("inconsistent changes in input chunk"),
                         }
                     } else {
-                        changes_merged.insert(pk, record);
-                    }
-                }
-                Record::Update { old_row, new_row } => {
-                    let pk = DefaultOrdered(this.get_input_pk(old_row));
-                    if let Some(prev_change) = changes_merged.get_mut(&pk) {
-                        match prev_change {
-                            Record::Insert { .. } => {
-                                *prev_change = Record::Insert { new_row };
-                            }
-                            Record::Update {
-                                old_row: real_old_row,
-                                ..
-                            } => {
-                                *prev_change = Record::Update {
-                                    old_row: *real_old_row,
-                                    new_row,
-                                };
-                            }
-                            _ => panic!("inconsistent changes in input chunk"),
-                        }
-                    } else {
-                        changes_merged.insert(pk, record);
+                        changes_merged.insert(pk, Record::Delete { old_row: row });
                     }
                 }
             }
@@ -295,7 +284,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             match record {
                 Record::Insert { new_row } => {
                     let part_key = this.get_partition_key(new_row).into();
-                    let part_delta = deltas.entry(part_key).or_insert(PartitionDelta::new());
+                    let part_delta = deltas.entry(part_key).or_default();
                     part_delta.insert(
                         this.row_to_cache_key(new_row)?,
                         Change::Insert(new_row.into_owned_row()),
@@ -303,7 +292,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 }
                 Record::Delete { old_row } => {
                     let part_key = this.get_partition_key(old_row).into();
-                    let part_delta = deltas.entry(part_key).or_insert(PartitionDelta::new());
+                    let part_delta = deltas.entry(part_key).or_default();
                     part_delta.insert(this.row_to_cache_key(old_row)?, Change::Delete);
                 }
                 Record::Update { old_row, new_row } => {
@@ -313,15 +302,13 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     let new_state_key = this.row_to_cache_key(new_row)?;
                     if old_part_key == new_part_key && old_state_key == new_state_key {
                         // not a key-change update
-                        let part_delta =
-                            deltas.entry(old_part_key).or_insert(PartitionDelta::new());
+                        let part_delta = deltas.entry(old_part_key).or_default();
                         part_delta.insert(old_state_key, Change::Insert(new_row.into_owned_row()));
                     } else if old_part_key == new_part_key {
                         // order-change update, split into delete + insert, will be merged after
                         // building changes
                         key_change_updated_pks.insert(this.get_input_pk(old_row));
-                        let part_delta =
-                            deltas.entry(old_part_key).or_insert(PartitionDelta::new());
+                        let part_delta = deltas.entry(old_part_key).or_default();
                         part_delta.insert(old_state_key, Change::Delete);
                         part_delta.insert(new_state_key, Change::Insert(new_row.into_owned_row()));
                     } else {
@@ -329,11 +316,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
                         // NOTE(rc): Since we append partition key to logical pk, we can't merge the
                         // delete + insert back to update later.
                         // TODO: IMO this behavior is problematic. Deep discussion is needed.
-                        let old_part_delta =
-                            deltas.entry(old_part_key).or_insert(PartitionDelta::new());
+                        let old_part_delta = deltas.entry(old_part_key).or_default();
                         old_part_delta.insert(old_state_key, Change::Delete);
-                        let new_part_delta =
-                            deltas.entry(new_part_key).or_insert(PartitionDelta::new());
+                        let new_part_delta = deltas.entry(new_part_key).or_default();
                         new_part_delta
                             .insert(new_state_key, Change::Insert(new_row.into_owned_row()));
                     }
@@ -348,7 +333,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
         // Build final changes partition by partition.
         for (part_key, delta) in deltas {
+            vars.stats.cache_lookup += 1;
             if !vars.cached_partitions.contains(&part_key.0) {
+                vars.stats.cache_miss += 1;
                 vars.cached_partitions
                     .put(part_key.0.clone(), new_empty_partition_cache());
             }
@@ -593,6 +580,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let mut vars = ExecutionVars {
             cached_partitions: new_unbounded(this.watermark_epoch.clone(), metrics_info),
             recently_accessed_ranges: Default::default(),
+            stats: Default::default(),
             _phantom: PhantomData::<S>,
         };
 
@@ -621,6 +609,24 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 Message::Barrier(barrier) => {
                     this.state_table.commit(barrier.epoch).await?;
                     vars.cached_partitions.evict();
+
+                    {
+                        // update metrics
+                        let actor_id_str = this.actor_ctx.id.to_string();
+                        let table_id_str = this.state_table.table_id().to_string();
+                        this.metrics
+                            .over_window_cached_entry_count
+                            .with_label_values(&[&table_id_str, &actor_id_str])
+                            .set(vars.cached_partitions.len() as _);
+                        this.metrics
+                            .over_window_cache_lookup_count
+                            .with_label_values(&[&table_id_str, &actor_id_str])
+                            .inc_by(std::mem::take(&mut vars.stats.cache_lookup));
+                        this.metrics
+                            .over_window_cache_miss_count
+                            .with_label_values(&[&table_id_str, &actor_id_str])
+                            .inc_by(std::mem::take(&mut vars.stats.cache_miss));
+                    }
 
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
                         let (_, cache_may_stale) =

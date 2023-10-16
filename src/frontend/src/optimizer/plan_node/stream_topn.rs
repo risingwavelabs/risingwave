@@ -30,7 +30,7 @@ pub struct StreamTopN {
 }
 
 impl StreamTopN {
-    fn new_inner(logical: generic::TopN<PlanRef>, stream_key: Option<Vec<usize>>) -> Self {
+    fn new_inner(logical: generic::TopN<PlanRef>, stream_key: Option<Option<Vec<usize>>>) -> Self {
         assert!(logical.group_key.is_empty());
         assert!(logical.limit_attr.limit() > 0);
         let input = &logical.input;
@@ -43,7 +43,7 @@ impl StreamTopN {
         let mut base =
             PlanBase::new_stream_with_logical(&logical, dist, false, false, watermark_columns);
         if let Some(stream_key) = stream_key {
-            base.logical_pk = stream_key;
+            base.stream_key = stream_key;
         }
         StreamTopN { base, logical }
     }
@@ -52,7 +52,10 @@ impl StreamTopN {
         Self::new_inner(logical, None)
     }
 
-    pub fn with_stream_key(logical: generic::TopN<PlanRef>, stream_key: Vec<usize>) -> Self {
+    pub fn with_stream_key(
+        logical: generic::TopN<PlanRef>,
+        stream_key: Option<Vec<usize>>,
+    ) -> Self {
         Self::new_inner(logical, Some(stream_key))
     }
 
@@ -86,7 +89,7 @@ impl PlanTreeNodeUnary for StreamTopN {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut logical = self.logical.clone();
         logical.input = input;
-        Self::new_inner(logical, Some(self.logical_pk().to_vec()))
+        Self::new_inner(logical, Some(self.stream_key().map(|v| v.to_vec())))
     }
 }
 
@@ -106,7 +109,7 @@ impl StreamNode for StreamTopN {
                     .infer_internal_table_catalog(
                         input.schema(),
                         input.ctx(),
-                        input.logical_pk(),
+                        input.expect_stream_key(),
                         None,
                     )
                     .with_id(state.gen_table_id_wrapped())

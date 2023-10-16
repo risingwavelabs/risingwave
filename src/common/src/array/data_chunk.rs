@@ -12,17 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+use std::fmt::Display;
 use std::hash::BuildHasher;
 use std::sync::Arc;
 use std::{fmt, usize};
 
 use bytes::Bytes;
+use either::Either;
 use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use risingwave_pb::data::PbDataChunk;
 
-use super::{Array, ArrayImpl, ArrayRef, ArrayResult, StructArray, Vis};
+use super::{Array, ArrayImpl, ArrayRef, ArrayResult, StructArray};
 use crate::array::data_chunk_iter::RowRef;
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
@@ -61,22 +64,25 @@ use crate::util::value_encoding::{
 #[must_use]
 pub struct DataChunk {
     columns: Arc<[ArrayRef]>,
-    vis2: Vis,
+    visibility: Bitmap,
 }
 
 impl DataChunk {
-    /// Create a `DataChunk` with `columns` and visibility. The visibility can either be a `Bitmap`
-    /// or a simple cardinality number.
-    pub fn new<V: Into<Vis>>(columns: Vec<ArrayRef>, vis: V) -> Self {
-        let vis: Vis = vis.into();
-        let capacity = vis.len();
+    pub(crate) const PRETTY_TABLE_PRESET: &'static str = "||--+-++|    ++++++";
+
+    /// Create a `DataChunk` with `columns` and visibility.
+    ///
+    /// The visibility can either be a `Bitmap` or a simple cardinality number.
+    pub fn new(columns: Vec<ArrayRef>, visibility: impl Into<Bitmap>) -> Self {
+        let visibility = visibility.into();
+        let capacity = visibility.len();
         for column in &columns {
             assert_eq!(capacity, column.len());
         }
 
         DataChunk {
             columns: columns.into(),
-            vis2: vis,
+            visibility,
         }
     }
 
@@ -84,7 +90,7 @@ impl DataChunk {
     pub fn new_dummy(cardinality: usize) -> Self {
         DataChunk {
             columns: Arc::new([]),
-            vis2: Vis::Compact(cardinality),
+            visibility: Bitmap::ones(cardinality),
         }
     }
 
@@ -110,28 +116,22 @@ impl DataChunk {
 
     /// Return the next visible row index on or after `row_idx`.
     pub fn next_visible_row_idx(&self, row_idx: usize) -> Option<usize> {
-        match &self.vis2 {
-            Vis::Bitmap(vis) => vis.next_set_bit(row_idx),
-            Vis::Compact(cardinality) => {
-                if row_idx < *cardinality {
-                    Some(row_idx)
-                } else {
-                    None
-                }
-            }
+        self.visibility.next_set_bit(row_idx)
+    }
+
+    pub fn into_parts(self) -> (Vec<ArrayRef>, Bitmap) {
+        (self.columns.to_vec(), self.visibility)
+    }
+
+    pub fn into_parts_v2(self) -> (Arc<[ArrayRef]>, Bitmap) {
+        (self.columns, self.visibility)
+    }
+
+    pub fn from_parts(columns: Arc<[ArrayRef]>, visibilities: Bitmap) -> Self {
+        Self {
+            columns,
+            visibility: visibilities,
         }
-    }
-
-    pub fn into_parts(self) -> (Vec<ArrayRef>, Vis) {
-        (self.columns.to_vec(), self.vis2)
-    }
-
-    pub fn into_parts_v2(self) -> (Arc<[ArrayRef]>, Vis) {
-        (self.columns, self.vis2)
-    }
-
-    pub fn from_parts(columns: Arc<[ArrayRef]>, vis2: Vis) -> Self {
-        Self { columns, vis2 }
     }
 
     pub fn dimension(&self) -> usize {
@@ -140,53 +140,42 @@ impl DataChunk {
 
     /// `cardinality` returns the number of visible tuples
     pub fn cardinality(&self) -> usize {
-        match &self.vis2 {
-            Vis::Bitmap(b) => b.count_ones(),
-            Vis::Compact(len) => *len,
-        }
+        self.visibility.count_ones()
     }
 
     /// `capacity` returns physical length of any chunk column
     pub fn capacity(&self) -> usize {
-        self.vis2.len()
-    }
-
-    pub fn vis(&self) -> &Vis {
-        &self.vis2
+        self.visibility.len()
     }
 
     pub fn selectivity(&self) -> f64 {
-        match &self.vis2 {
-            Vis::Bitmap(b) => {
-                if b.is_empty() {
-                    0.0
-                } else {
-                    b.count_ones() as f64 / b.len() as f64
-                }
-            }
-            Vis::Compact(_) => 1.0,
+        if self.visibility.is_empty() {
+            0.0
+        } else if self.visibility.all() {
+            1.0
+        } else {
+            self.visibility.count_ones() as f64 / self.visibility.len() as f64
         }
     }
 
-    pub fn with_visibility(&self, visibility: impl Into<Vis>) -> Self {
+    pub fn with_visibility(&self, visibility: impl Into<Bitmap>) -> Self {
         DataChunk {
             columns: self.columns.clone(),
-            vis2: visibility.into(),
+            visibility: visibility.into(),
         }
     }
 
-    pub fn visibility(&self) -> Option<&Bitmap> {
-        self.vis2.as_visibility()
-    }
-
-    pub fn set_vis(&mut self, vis: Vis) {
-        assert_eq!(vis.len(), self.capacity());
-        self.vis2 = vis;
+    pub fn visibility(&self) -> &Bitmap {
+        &self.visibility
     }
 
     pub fn set_visibility(&mut self, visibility: Bitmap) {
         assert_eq!(visibility.len(), self.capacity());
-        self.vis2 = Vis::Bitmap(visibility);
+        self.visibility = visibility;
+    }
+
+    pub fn is_compacted(&self) -> bool {
+        self.visibility.all()
     }
 
     pub fn column_at(&self, idx: usize) -> &ArrayRef {
@@ -209,22 +198,19 @@ impl DataChunk {
     /// Panics if `idx > columns.len()`.
     pub fn split_column_at(&self, idx: usize) -> (Self, Self) {
         let (left, right) = self.columns.split_at(idx);
-        let left = DataChunk::new(left.to_vec(), self.vis2.clone());
-        let right = DataChunk::new(right.to_vec(), self.vis2.clone());
+        let left = DataChunk::new(left.to_vec(), self.visibility.clone());
+        let right = DataChunk::new(right.to_vec(), self.visibility.clone());
         (left, right)
     }
 
     pub fn to_protobuf(&self) -> PbDataChunk {
-        assert!(
-            matches!(self.vis2, Vis::Compact(_)),
-            "must be compacted before transfer"
-        );
+        assert!(self.visibility.all(), "must be compacted before transfer");
         let mut proto = PbDataChunk {
             cardinality: self.cardinality() as u32,
             columns: Default::default(),
         };
         let column_ref = &mut proto.columns;
-        for array in self.columns.iter() {
+        for array in &*self.columns {
             column_ref.push(array.to_protobuf());
         }
         proto
@@ -244,21 +230,38 @@ impl DataChunk {
     /// The main benefit is that the data chunk is smaller, taking up less memory.
     /// We can also save the cost of iterating over many hidden rows.
     pub fn compact(self) -> Self {
-        match &self.vis2 {
-            Vis::Compact(_) => self,
-            Vis::Bitmap(visibility) => {
-                let cardinality = visibility.count_ones();
-                let columns = self
-                    .columns
-                    .iter()
-                    .map(|col| {
-                        let array = col;
-                        array.compact(visibility, cardinality).into()
-                    })
-                    .collect::<Vec<_>>();
-                Self::new(columns, cardinality)
-            }
+        if self.visibility.all() {
+            return self;
         }
+        let cardinality = self.visibility.count_ones();
+        let columns = self
+            .columns
+            .iter()
+            .map(|col| {
+                let array = col;
+                array.compact(&self.visibility, cardinality).into()
+            })
+            .collect::<Vec<_>>();
+        Self::new(columns, Bitmap::ones(cardinality))
+    }
+
+    /// Convert the chunk to compact format.
+    ///
+    /// If the chunk is not compacted, return a new compacted chunk, otherwise return a reference to self.
+    pub fn compact_cow(&self) -> Cow<'_, Self> {
+        if self.visibility.all() {
+            return Cow::Borrowed(self);
+        }
+        let cardinality = self.visibility.count_ones();
+        let columns = self
+            .columns
+            .iter()
+            .map(|col| {
+                let array = col;
+                array.compact(&self.visibility, cardinality).into()
+            })
+            .collect::<Vec<_>>();
+        Cow::Owned(Self::new(columns, Bitmap::ones(cardinality)))
     }
 
     pub fn from_protobuf(proto: &PbDataChunk) -> ArrayResult<Self> {
@@ -367,7 +370,7 @@ impl DataChunk {
             let array = self.column_at(*column_idx);
             array.hash_vec(&mut states[..]);
         }
-        finalize_hashers(&mut states[..])
+        finalize_hashers(&states[..])
             .into_iter()
             .map(|hash_code| hash_code.into())
             .collect_vec()
@@ -380,7 +383,7 @@ impl DataChunk {
     /// * bool - whether this tuple is visible
     pub fn row_at(&self, pos: usize) -> (RowRef<'_>, bool) {
         let row = self.row_at_unchecked_vis(pos);
-        let vis = self.vis2.is_set(pos);
+        let vis = self.visibility.is_set(pos);
         (row, vis)
     }
 
@@ -392,24 +395,31 @@ impl DataChunk {
         RowRef::new(self, pos)
     }
 
-    /// `to_pretty_string` returns a table-like text representation of the `DataChunk`.
-    pub fn to_pretty_string(&self) -> String {
+    /// Returns a table-like text representation of the `DataChunk`.
+    pub fn to_pretty(&self) -> impl Display {
         use comfy_table::Table;
+
+        if self.cardinality() == 0 {
+            return Either::Left("(empty)");
+        }
+
         let mut table = Table::new();
-        table.load_preset("||--+-++|    ++++++\n");
+        table.load_preset(Self::PRETTY_TABLE_PRESET);
+
         for row in self.rows() {
             let cells: Vec<_> = row
                 .iter()
                 .map(|v| {
                     match v {
-                        None => "".to_owned(), // null
+                        None => "".to_owned(), // NULL
                         Some(scalar) => scalar.to_text(),
                     }
                 })
                 .collect();
             table.add_row(cells);
         }
-        table.to_string()
+
+        Either::Right(table)
     }
 
     /// Keep the specified columns and set the rest elements to null.
@@ -436,7 +446,7 @@ impl DataChunk {
             .collect();
         DataChunk {
             columns,
-            vis2: self.vis2.clone(),
+            visibility: self.visibility.clone(),
         }
     }
 
@@ -448,16 +458,16 @@ impl DataChunk {
     pub fn project(&self, indices: &[usize]) -> Self {
         Self {
             columns: indices.iter().map(|i| self.columns[*i].clone()).collect(),
-            vis2: self.vis2.clone(),
+            visibility: self.visibility.clone(),
         }
     }
 
     /// Reorder columns and set visibility.
-    pub fn project_with_vis(&self, indices: &[usize], vis: Vis) -> Self {
-        assert_eq!(vis.len(), self.capacity());
+    pub fn project_with_vis(&self, indices: &[usize], visibility: Bitmap) -> Self {
+        assert_eq!(visibility.len(), self.capacity());
         Self {
             columns: indices.iter().map(|i| self.columns[*i].clone()).collect(),
-            vis2: vis,
+            visibility,
         }
     }
 
@@ -491,7 +501,7 @@ impl DataChunk {
     fn partition_sizes(&self) -> (usize, Vec<&ArrayRef>) {
         let mut col_variable: Vec<&ArrayRef> = vec![];
         let mut row_len_fixed: usize = 0;
-        for c in self.columns.iter() {
+        for c in &*self.columns {
             if let Some(field_len) = try_get_exact_serialize_datum_size(c) {
                 row_len_fixed += field_len;
             } else {
@@ -528,59 +538,54 @@ impl DataChunk {
     // Note(bugen): should we exclude the invisible rows in the output so that the caller won't need
     // to handle visibility again?
     pub fn serialize(&self) -> Vec<Bytes> {
-        let buffers = match &self.vis2 {
-            Vis::Bitmap(vis) => {
-                let rows_num = vis.len();
-                let mut buffers: Vec<Vec<u8>> = vec![];
-                let (row_len_fixed, col_variable) = self.partition_sizes();
+        let buffers = if !self.visibility.all() {
+            let rows_num = self.visibility.len();
+            let mut buffers: Vec<Vec<u8>> = vec![];
+            let (row_len_fixed, col_variable) = self.partition_sizes();
 
-                // First initialize buffer with the right size to avoid re-allocations
-                for i in 0..rows_num {
+            // First initialize buffer with the right size to avoid re-allocations
+            for i in 0..rows_num {
+                // SAFETY(value_at_unchecked): the idx is always in bound.
+                unsafe {
+                    if self.visibility.is_set_unchecked(i) {
+                        buffers.push(Self::init_buffer(row_len_fixed, &col_variable, i));
+                    } else {
+                        buffers.push(vec![]);
+                    }
+                }
+            }
+
+            // Then do the actual serialization
+            for c in &*self.columns {
+                assert_eq!(c.len(), rows_num);
+                for (i, buffer) in buffers.iter_mut().enumerate() {
                     // SAFETY(value_at_unchecked): the idx is always in bound.
                     unsafe {
-                        if vis.is_set_unchecked(i) {
-                            buffers.push(Self::init_buffer(row_len_fixed, &col_variable, i));
-                        } else {
-                            buffers.push(vec![]);
-                        }
-                    }
-                }
-
-                // Then do the actual serialization
-                for c in self.columns.iter() {
-                    let c = c;
-                    assert_eq!(c.len(), rows_num);
-                    for (i, buffer) in buffers.iter_mut().enumerate() {
-                        // SAFETY(value_at_unchecked): the idx is always in bound.
-                        unsafe {
-                            if vis.is_set_unchecked(i) {
-                                serialize_datum_into(c.value_at_unchecked(i), buffer);
-                            }
-                        }
-                    }
-                }
-                buffers
-            }
-            Vis::Compact(rows_num) => {
-                let mut buffers: Vec<Vec<u8>> = vec![];
-                let (row_len_fixed, col_variable) = self.partition_sizes();
-                for i in 0..*rows_num {
-                    unsafe {
-                        buffers.push(Self::init_buffer(row_len_fixed, &col_variable, i));
-                    }
-                }
-                for c in self.columns.iter() {
-                    let c = c;
-                    assert_eq!(c.len(), *rows_num);
-                    for (i, buffer) in buffers.iter_mut().enumerate() {
-                        // SAFETY(value_at_unchecked): the idx is always in bound.
-                        unsafe {
+                        if self.visibility.is_set_unchecked(i) {
                             serialize_datum_into(c.value_at_unchecked(i), buffer);
                         }
                     }
                 }
-                buffers
             }
+            buffers
+        } else {
+            let mut buffers: Vec<Vec<u8>> = vec![];
+            let (row_len_fixed, col_variable) = self.partition_sizes();
+            for i in 0..self.visibility.len() {
+                unsafe {
+                    buffers.push(Self::init_buffer(row_len_fixed, &col_variable, i));
+                }
+            }
+            for c in &*self.columns {
+                assert_eq!(c.len(), self.visibility.len());
+                for (i, buffer) in buffers.iter_mut().enumerate() {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe {
+                        serialize_datum_into(c.value_at_unchecked(i), buffer);
+                    }
+                }
+            }
+            buffers
         };
 
         buffers.into_iter().map(|item| item.into()).collect_vec()
@@ -626,7 +631,7 @@ impl fmt::Debug for DataChunk {
             "DataChunk {{ cardinality = {}, capacity = {}, data = \n{} }}",
             self.cardinality(),
             self.capacity(),
-            self.to_pretty_string()
+            self.to_pretty()
         )
     }
 }
@@ -635,7 +640,7 @@ impl<'a> From<&'a StructArray> for DataChunk {
     fn from(array: &'a StructArray) -> Self {
         Self {
             columns: array.fields().cloned().collect(),
-            vis2: Vis::Compact(array.len()),
+            visibility: Bitmap::ones(array.len()),
         }
     }
 }
@@ -646,7 +651,7 @@ impl EstimateSize for DataChunk {
             .iter()
             .map(|a| a.estimated_heap_size())
             .sum::<usize>()
-            + self.vis2.estimated_heap_size()
+            + self.visibility.estimated_heap_size()
     }
 }
 
@@ -770,6 +775,7 @@ impl DataChunkTestExt for DataChunk {
                     "." => None,
                     "t" => Some(true.into()),
                     "f" => Some(false.into()),
+                    "(empty)" => Some("".into()),
                     _ => Some(ScalarImpl::from_text(val_str.as_bytes(), ty).unwrap()),
                 };
                 builder.append(datum);
@@ -785,11 +791,7 @@ impl DataChunkTestExt for DataChunk {
             .into_iter()
             .map(|builder| builder.finish().into())
             .collect();
-        let vis = if visibility.iter().all(|b| *b) {
-            Vis::Compact(visibility.len())
-        } else {
-            Vis::Bitmap(Bitmap::from_iter(visibility))
-        };
+        let vis = Bitmap::from_iter(visibility);
         let chunk = DataChunk::new(columns, vis);
         chunk.assert_valid();
         chunk
@@ -819,16 +821,16 @@ impl DataChunkTestExt for DataChunk {
                 builder.finish().into()
             })
             .collect();
-        let chunk = DataChunk::new(new_cols, Vis::Bitmap(new_vis.finish()));
+        let chunk = DataChunk::new(new_cols, new_vis.finish());
         chunk.assert_valid();
         chunk
     }
 
     fn assert_valid(&self) {
         let cols = self.columns();
-        let vis = &self.vis2;
+        let vis = &self.visibility;
         let n = vis.len();
-        for col in cols.iter() {
+        for col in cols {
             assert_eq!(col.len(), n);
         }
     }
@@ -1007,7 +1009,7 @@ mod tests {
             4,
         );
         assert_eq!(
-            chunk.to_pretty_string(),
+            chunk.to_pretty().to_string(),
             "\
 +---+---+
 | 1 | 6 |

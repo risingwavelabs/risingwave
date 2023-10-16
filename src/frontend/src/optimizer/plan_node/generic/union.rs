@@ -33,14 +33,20 @@ pub struct Union<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
     fn schema(&self) -> Schema {
-        self.inputs[0].schema().clone()
+        let mut schema = self.inputs[0].schema().clone();
+        if let Some(source_col) = self.source_col {
+            schema.fields[source_col].name = "$src".to_string();
+            schema
+        } else {
+            schema
+        }
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         // Union all its inputs pks + source_col if exists
         let mut pk_indices = vec![];
         for input in &self.inputs {
-            for pk in input.logical_pk() {
+            for pk in input.stream_key()? {
                 if !pk_indices.contains(pk) {
                     pk_indices.push(*pk);
                 }

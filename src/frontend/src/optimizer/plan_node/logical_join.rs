@@ -184,7 +184,7 @@ impl LogicalJoin {
         self.core.is_full_out()
     }
 
-    pub fn output_indices_is_trivial(&self) -> bool {
+    pub fn output_indices_are_trivial(&self) -> bool {
         self.output_indices() == &(0..self.internal_column_num()).collect_vec()
     }
 
@@ -226,7 +226,7 @@ impl LogicalJoin {
             Condition {
                 conjunctions: others
                     .conjunctions
-                    .drain_filter(|expr| expr.count_nows() == 0)
+                    .extract_if(|expr| expr.count_nows() == 0)
                     .collect(),
             }
         } else {
@@ -655,8 +655,8 @@ impl ExprRewritable for LogicalJoin {
 ///    then we proceed. Else abort.
 /// 2. Then, we collect `InputRef`s in the conjunction.
 /// 3. If they are all columns in the given side of join eq condition, then we proceed. Else abort.
-/// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with
-///    the equivalent in the other side.
+/// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with the equivalent in
+///    the other side.
 ///
 /// # Arguments
 ///
@@ -1395,14 +1395,14 @@ impl ToStream for LogicalJoin {
 
         // Add missing pk indices to the logical join
         let mut left_to_add = left
-            .logical_pk()
+            .expect_stream_key()
             .iter()
             .cloned()
             .filter(|i| l2o.try_map(*i).is_none())
             .collect_vec();
 
         let mut right_to_add = right
-            .logical_pk()
+            .expect_stream_key()
             .iter()
             .filter(|&&i| r2o.try_map(i).is_none())
             .map(|&i| i + left_len)
@@ -1464,13 +1464,13 @@ impl ToStream for LogicalJoin {
                 .composite(&join_with_pk.core.i2o_col_mapping());
             let left_right_stream_keys = join_with_pk
                 .left()
-                .logical_pk()
+                .expect_stream_key()
                 .iter()
                 .map(|i| l2o.map(*i))
                 .chain(
                     join_with_pk
                         .right()
-                        .logical_pk()
+                        .expect_stream_key()
                         .iter()
                         .map(|i| r2o.map(*i)),
                 )

@@ -20,7 +20,7 @@ use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_CATAL
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 use risingwave_sqlparser::ast::{
     BinaryOperator, DataType as AstDataType, Distinct, Expr, Ident, Join, JoinConstraint,
     JoinOperator, ObjectName, Select, SelectItem, TableFactor, TableWithJoins,
@@ -852,6 +852,7 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         }
         AstDataType::Interval => "interval".to_string(),
         AstDataType::Regclass => "regclass".to_string(),
+        AstDataType::Regproc => "regproc".to_string(),
         AstDataType::Text => "text".to_string(),
         AstDataType::Bytea => "bytea".to_string(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),

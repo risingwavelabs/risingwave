@@ -118,6 +118,18 @@ impl<S: StateStore> SortBuffer<S> {
         self.cache.insert(key, new_row.into_owned_row());
     }
 
+    /// Update a row in the buffer without giving the old value.
+    pub fn update_without_old_value(
+        &mut self,
+        new_row: impl Row,
+        buffer_table: &mut StateTable<S>,
+    ) {
+        buffer_table.update_without_old_value(&new_row);
+        let key = row_to_cache_key(self.sort_column_index, &new_row, buffer_table);
+        self.cache.delete(&key);
+        self.cache.insert(key, new_row.into_owned_row());
+    }
+
     /// Apply a change to the buffer, insert/delete/update.
     pub fn apply_change(&mut self, change: Record<impl Row>, buffer_table: &mut StateTable<S>) {
         match change {
@@ -141,19 +153,19 @@ impl<S: StateStore> SortBuffer<S> {
         watermark: ScalarImpl,
         buffer_table: &'a mut StateTable<S>,
     ) {
-        let mut last_timestamp = None;
+        let mut last_table_pk = None;
         loop {
             if !self.cache.is_synced() {
                 // Refill the cache, then consume from the cache, to ensure strong row ordering
                 // and prefetch for the next watermark.
-                self.refill_cache(last_timestamp.take(), buffer_table)
+                self.refill_cache(last_table_pk.take(), buffer_table)
                     .await?;
             }
 
             #[for_await]
             for res in self.consume_from_cache(watermark.as_scalar_ref_impl()) {
-                let ((timestamp_val, _), row) = res?;
-                last_timestamp = Some(timestamp_val.into_inner());
+                let row = res?;
+                last_table_pk = Some((&row).project(buffer_table.pk_indices()).into_owned_row());
                 yield row;
             }
 
@@ -169,7 +181,7 @@ impl<S: StateStore> SortBuffer<S> {
         buffer_table.update_watermark(watermark, true);
     }
 
-    #[try_stream(ok = (CacheKey, OwnedRow), error = StreamExecutorError)]
+    #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
     async fn consume_from_cache<'a>(&'a mut self, watermark: ScalarRefImpl<'a>) {
         while self.cache.is_synced() {
             let Some(key) = self.cache.first_key_value().map(|(k, _)| k.clone()) else {
@@ -177,7 +189,7 @@ impl<S: StateStore> SortBuffer<S> {
             };
             if key.0.as_scalar_ref_impl().default_cmp(&watermark).is_lt() {
                 let row = self.cache.delete(&key).unwrap();
-                yield (key, row);
+                yield row;
             } else {
                 break;
             }
@@ -187,27 +199,24 @@ impl<S: StateStore> SortBuffer<S> {
     /// Clear the cache and refill it with the current content of the buffer table.
     pub async fn refill_cache(
         &mut self,
-        last_timestamp: Option<ScalarImpl>,
+        last_table_pk: Option<OwnedRow>,
         buffer_table: &StateTable<S>,
     ) -> StreamExecutorResult<()> {
         let mut filler = self.cache.begin_syncing();
 
         let pk_range = (
-            last_timestamp
-                .as_ref()
-                .map(|v| Bound::Excluded([Some(v.as_scalar_ref_impl())]))
+            last_table_pk
+                .map(Bound::Excluded)
                 .unwrap_or(Bound::Unbounded),
             Bound::<row::Empty>::Unbounded,
         );
 
         let streams: Vec<_> =
             futures::future::try_join_all(buffer_table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                buffer_table.iter_row_with_pk_range(
-                    &pk_range,
+                buffer_table.iter_with_vnode(
                     vnode,
-                    PrefetchOptions {
-                        exhaust_iter: filler.capacity().is_none(),
-                    },
+                    &pk_range,
+                    PrefetchOptions::new_with_exhaust_iter(filler.capacity().is_none()),
                 )
             }))
             .await?

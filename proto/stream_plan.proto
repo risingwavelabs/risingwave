@@ -150,6 +150,23 @@ message StreamSource {
   map<string, string> properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
+  // Streaming rate limit
+  optional uint32 rate_limit = 9;
+}
+
+// copy contents from StreamSource to prevent compatibility issues in the future
+message StreamFsFetch {
+  uint32 source_id = 1;
+  catalog.Table state_table = 2;
+  optional uint32 row_id_index = 3;
+  repeated plan_common.ColumnCatalog columns = 4;
+  reserved "pk_column_ids";
+  reserved 5;
+  map<string, string> properties = 6;
+  catalog.StreamSourceInfo info = 7;
+  string source_name = 8;
+  // Streaming rate limit
+  optional uint32 rate_limit = 9;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves
@@ -162,6 +179,10 @@ message SourceNode {
   StreamSource source_inner = 1;
 }
 
+message StreamFsFetchNode {
+  StreamFsFetch node_inner = 1;
+}
+
 message SinkDesc {
   reserved 4;
   reserved "columns";
@@ -172,12 +193,13 @@ message SinkDesc {
   repeated uint32 downstream_pk = 6;
   repeated uint32 distribution_key = 7;
   map<string, string> properties = 8;
-  catalog.SinkType sink_type = 9;
+  catalog.SinkType sink_type = 9; // to be deprecated
   repeated plan_common.ColumnCatalog column_catalogs = 10;
   string db_name = 11;
   // If the sink is from table or mv, this is name of the table/mv. Otherwise
   // it is the name of the sink itself.
   string sink_from_name = 12;
+  catalog.SinkFormatDesc format_desc = 13;
 }
 
 enum SinkLogStoreType {
@@ -251,7 +273,7 @@ message SimpleAggNode {
   // Only used for stateless simple agg.
   repeated uint32 distribution_key = 2;
   repeated AggCallState agg_call_states = 3;
-  catalog.Table result_table = 4;
+  catalog.Table intermediate_state_table = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
@@ -263,7 +285,7 @@ message HashAggNode {
   repeated uint32 group_key = 1;
   repeated expr.AggCall agg_calls = 2;
   repeated AggCallState agg_call_states = 3;
-  catalog.Table result_table = 4;
+  catalog.Table intermediate_state_table = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
@@ -459,6 +481,9 @@ message ChainNode {
 
   // The rate limit for the chain node.
   optional uint32 rate_limit = 8;
+
+  // Snapshot read every N barriers
+  uint32 snapshot_read_barrier_interval = 9 [deprecated = true];
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -540,6 +565,12 @@ message ExpandNode {
 
 message ProjectSetNode {
   repeated expr.ProjectSetSelectItem select_list = 1;
+  // this two field is expressing a list of usize pair, which means when project receives a
+  // watermark with `watermark_input_cols[i]` column index, it should derive a new watermark
+  // with `watermark_output_cols[i]`th expression
+  repeated uint32 watermark_input_cols = 2;
+  repeated uint32 watermark_expr_indices = 3;
+  repeated uint32 nondecreasing_exprs = 4;
 }
 
 // Sorts inputs and outputs ordered data based on watermark.
@@ -647,6 +678,7 @@ message StreamNode {
     NoOpNode no_op = 135;
     EowcOverWindowNode eowc_over_window = 136;
     OverWindowNode over_window = 137;
+    StreamFsFetchNode stream_fs_fetch = 138;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

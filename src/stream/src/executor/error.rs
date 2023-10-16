@@ -25,7 +25,6 @@ use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
 
 use super::Barrier;
-use crate::common::log_store::LogStoreError;
 
 /// A specialized Result type for streaming executors.
 pub type StreamExecutorResult<T> = std::result::Result<T, StreamExecutorError>;
@@ -53,9 +52,6 @@ enum ErrorKind {
         #[source]
         StorageError,
     ),
-
-    #[error("Log store error: {0}")]
-    LogStoreError(#[source] LogStoreError),
 
     #[error("Chunk operation error: {0}")]
     ArrayError(#[source] ArrayError),
@@ -124,7 +120,9 @@ impl std::fmt::Debug for StreamExecutorError {
 
         write!(f, "{}", self.inner.kind)?;
         writeln!(f)?;
-        if let Some(backtrace) = (&self.inner.kind as &dyn Error).request_ref::<Backtrace>() {
+        if let Some(backtrace) =
+            std::error::request_ref::<Backtrace>(&self.inner.kind as &dyn Error)
+        {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(
@@ -149,13 +147,6 @@ impl From<ErrorKind> for StreamExecutorError {
 impl From<StorageError> for StreamExecutorError {
     fn from(s: StorageError) -> Self {
         ErrorKind::Storage(s).into()
-    }
-}
-
-/// Log store error
-impl From<LogStoreError> for StreamExecutorError {
-    fn from(e: LogStoreError) -> Self {
-        ErrorKind::LogStoreError(e).into()
     }
 }
 

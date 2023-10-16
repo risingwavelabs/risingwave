@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
+
 use anyhow::anyhow;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
+use crate::source::cdc::CdcSourceTypeTrait;
 use crate::source::external::DebeziumOffset;
 use crate::source::{SplitId, SplitMetaData};
 
@@ -119,13 +122,17 @@ impl PostgresCdcSplit {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
-pub struct DebeziumCdcSplit {
+pub struct DebeziumCdcSplit<T: CdcSourceTypeTrait> {
     pub mysql_split: Option<MySqlCdcSplit>,
     pub pg_split: Option<PostgresCdcSplit>,
+
+    #[serde(skip)]
+    pub _phantom: PhantomData<T>,
 }
 
-impl SplitMetaData for DebeziumCdcSplit {
+impl<T: CdcSourceTypeTrait> SplitMetaData for DebeziumCdcSplit<T> {
     fn id(&self) -> SplitId {
+        // TODO: may check T to get the specific cdc type
         assert!(self.mysql_split.is_some() || self.pg_split.is_some());
         if let Some(split) = &self.mysql_split {
             return format!("{}", split.inner.split_id).into();
@@ -143,13 +150,25 @@ impl SplitMetaData for DebeziumCdcSplit {
     fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
         serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
     }
+
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        // TODO: may check T to get the specific cdc type
+        assert!(self.mysql_split.is_some() || self.pg_split.is_some());
+        if let Some(split) = &mut self.mysql_split {
+            split.update_with_offset(start_offset)?
+        } else if let Some(split) = &mut self.pg_split {
+            split.update_with_offset(start_offset)?
+        }
+        Ok(())
+    }
 }
 
-impl DebeziumCdcSplit {
+impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
     pub fn new(mysql_split: Option<MySqlCdcSplit>, pg_split: Option<PostgresCdcSplit>) -> Self {
         Self {
             mysql_split,
             pg_split,
+            _phantom: PhantomData,
         }
     }
 
@@ -188,15 +207,5 @@ impl DebeziumCdcSplit {
             return &split.server_addr;
         }
         unreachable!("invalid debezium split")
-    }
-
-    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
-        assert!(self.mysql_split.is_some() || self.pg_split.is_some());
-        if let Some(split) = &mut self.mysql_split {
-            split.update_with_offset(start_offset)?
-        } else if let Some(split) = &mut self.pg_split {
-            split.update_with_offset(start_offset)?
-        }
-        Ok(())
     }
 }

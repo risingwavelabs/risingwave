@@ -13,33 +13,26 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use aws_sdk_kinesis::error::DisplayErrorContext;
 use aws_sdk_kinesis::operation::put_record::PutRecordOutput;
 use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::Client as KinesisClient;
-use futures_async_stream::for_await;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_rpc_client::ConnectorClient;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
+use super::catalog::SinkFormatDesc;
 use super::SinkParam;
 use crate::common::KinesisCommon;
-use crate::sink::utils::{
-    gen_append_only_message_stream, gen_debezium_message_stream, gen_upsert_message_stream,
-    AppendOnlyAdapterOpts, DebeziumAdapterOpts, UpsertAdapterOpts,
-};
-use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriter, SinkWriterParam,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
-};
+use crate::dispatch_sink_formatter_impl;
+use crate::sink::formatter::SinkFormatterImpl;
+use crate::sink::writer::{FormattedSink, LogSinkerOf, SinkWriter, SinkWriterExt};
+use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriterParam};
 
 pub const KINESIS_SINK: &str = "kinesis";
 
@@ -48,35 +41,42 @@ pub struct KinesisSink {
     pub config: KinesisSinkConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
-    is_append_only: bool,
+    format_desc: SinkFormatDesc,
     db_name: String,
     sink_from_name: String,
 }
 
-impl KinesisSink {
-    pub fn new(config: KinesisSinkConfig, param: SinkParam) -> Self {
-        Self {
+impl TryFrom<SinkParam> for KinesisSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
+        let schema = param.schema();
+        let config = KinesisSinkConfig::from_hashmap(param.properties)?;
+        Ok(Self {
             config,
-            schema: param.schema(),
-            pk_indices: param.pk_indices,
-            is_append_only: param.sink_type.is_append_only(),
+            schema,
+            pk_indices: param.downstream_pk,
+            format_desc: param
+                .format_desc
+                .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,
-        }
+        })
     }
 }
 
-#[async_trait::async_trait]
 impl Sink for KinesisSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type Writer = KinesisSinkWriter;
+    type LogSinker = LogSinkerOf<KinesisSinkWriter>;
 
-    async fn validate(&self, _client: Option<ConnectorClient>) -> Result<()> {
-        // For upsert Kafka sink, the primary key must be defined.
-        if !self.is_append_only && self.pk_indices.is_empty() {
+    const SINK_NAME: &'static str = KINESIS_SINK;
+
+    async fn validate(&self) -> Result<()> {
+        // Kinesis requires partition key. There is no builtin support for round-robin as in kafka/pulsar.
+        // https://docs.aws.amazon.com/kinesis/latest/APIReference/API_PutRecord.html#Streams-PutRecord-request-PartitionKey
+        if self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "primary key not defined for {} kafka sink (please define in `primary_key` field)",
-                self.config.r#type
+                "kinesis sink requires partition key (please define in `primary_key` field)",
             )));
         }
 
@@ -94,16 +94,17 @@ impl Sink for KinesisSink {
         Ok(())
     }
 
-    async fn new_writer(&self, _writer_env: SinkWriterParam) -> Result<Self::Writer> {
-        KinesisSinkWriter::new(
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        Ok(KinesisSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
-            self.is_append_only,
+            &self.format_desc,
             self.db_name.clone(),
             self.sink_from_name.clone(),
         )
-        .await
+        .await?
+        .into_log_sinker(writer_param.sink_metrics))
     }
 }
 
@@ -112,8 +113,6 @@ impl Sink for KinesisSink {
 pub struct KinesisSinkConfig {
     #[serde(flatten)]
     pub common: KinesisCommon,
-
-    pub r#type: String, // accept "append-only", "debezium", or "upsert"
 }
 
 impl KinesisSinkConfig {
@@ -121,31 +120,19 @@ impl KinesisSinkConfig {
         let config =
             serde_json::from_value::<KinesisSinkConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
-        if config.r#type != SINK_TYPE_APPEND_ONLY
-            && config.r#type != SINK_TYPE_DEBEZIUM
-            && config.r#type != SINK_TYPE_UPSERT
-        {
-            return Err(SinkError::Config(anyhow!(
-                "`{}` must be {}, {}, or {}",
-                SINK_TYPE_OPTION,
-                SINK_TYPE_APPEND_ONLY,
-                SINK_TYPE_DEBEZIUM,
-                SINK_TYPE_UPSERT
-            )));
-        }
         Ok(config)
     }
 }
 
-#[derive(Debug)]
 pub struct KinesisSinkWriter {
     pub config: KinesisSinkConfig,
-    schema: Schema,
-    pk_indices: Vec<usize>,
+    formatter: SinkFormatterImpl,
+    payload_writer: KinesisSinkPayloadWriter,
+}
+
+struct KinesisSinkPayloadWriter {
     client: KinesisClient,
-    is_append_only: bool,
-    db_name: String,
-    sink_from_name: String,
+    config: KinesisSinkConfig,
 }
 
 impl KinesisSinkWriter {
@@ -153,27 +140,27 @@ impl KinesisSinkWriter {
         config: KinesisSinkConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
-        is_append_only: bool,
+        format_desc: &SinkFormatDesc,
         db_name: String,
         sink_from_name: String,
     ) -> Result<Self> {
+        let formatter =
+            SinkFormatterImpl::new(format_desc, schema, pk_indices, db_name, sink_from_name)?;
         let client = config
             .common
             .build_client()
             .await
             .map_err(SinkError::Kinesis)?;
         Ok(Self {
-            config,
-            schema,
-            pk_indices,
-            client,
-            is_append_only,
-            db_name,
-            sink_from_name,
+            config: config.clone(),
+            formatter,
+            payload_writer: KinesisSinkPayloadWriter { client, config },
         })
     }
-
-    async fn put_record(&self, key: &str, payload: Blob) -> Result<PutRecordOutput> {
+}
+impl KinesisSinkPayloadWriter {
+    async fn put_record(&self, key: &str, payload: Vec<u8>) -> Result<PutRecordOutput> {
+        let payload = Blob::new(payload);
         // todo: switch to put_records() for batching
         Retry::spawn(
             ExponentialBackoff::from_millis(100).map(jitter).take(3),
@@ -201,67 +188,28 @@ impl KinesisSinkWriter {
             ))
         })
     }
+}
 
-    async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
-        let upsert_stream = gen_upsert_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            UpsertAdapterOpts::default(),
-        );
+impl FormattedSink for KinesisSinkPayloadWriter {
+    type K = String;
+    type V = Vec<u8>;
 
-        crate::impl_load_stream_write_record!(upsert_stream, self.put_record);
-        Ok(())
-    }
-
-    async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
-        let append_only_stream = gen_append_only_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            AppendOnlyAdapterOpts::default(),
-        );
-
-        crate::impl_load_stream_write_record!(append_only_stream, self.put_record);
-        Ok(())
-    }
-
-    async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
-        let dbz_stream = gen_debezium_message_stream(
-            &self.schema,
-            &self.pk_indices,
-            chunk,
-            ts_ms,
-            DebeziumAdapterOpts::default(),
-            &self.db_name,
-            &self.sink_from_name,
-        );
-
-        crate::impl_load_stream_write_record!(dbz_stream, self.put_record);
-
-        Ok(())
+    async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
+        self.put_record(
+            &k.ok_or_else(|| SinkError::Kinesis(anyhow!("no key provided")))?,
+            v.unwrap_or_default(),
+        )
+        .await
+        .map(|_| ())
     }
 }
 
 #[async_trait::async_trait]
 impl SinkWriter for KinesisSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.is_append_only {
-            self.append_only(chunk).await
-        } else if self.config.r#type == SINK_TYPE_DEBEZIUM {
-            self.debezium_update(
-                chunk,
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64,
-            )
-            .await
-        } else if self.config.r#type == SINK_TYPE_UPSERT {
-            self.upsert(chunk).await
-        } else {
-            unreachable!()
-        }
+        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+            self.payload_writer.write_chunk(chunk, formatter).await
+        })
     }
 
     async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
@@ -272,32 +220,4 @@ impl SinkWriter for KinesisSinkWriter {
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
         Ok(())
     }
-
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Bitmap) -> Result<()> {
-        Ok(())
-    }
-}
-
-#[macro_export]
-macro_rules! impl_load_stream_write_record {
-    ($stream:ident, $op_fn:stmt) => {
-        #[for_await]
-        for msg in $stream {
-            let (event_key_object, event_object) = msg?;
-            let key_str = event_key_object.unwrap().to_string();
-            $op_fn(
-                &key_str,
-                Blob::new(if let Some(value) = event_object {
-                    value.to_string().into_bytes()
-                } else {
-                    vec![]
-                }),
-            )
-            .await?;
-        }
-    };
 }

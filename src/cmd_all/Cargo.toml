@@ -29,6 +29,7 @@ risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
 risingwave_compute = { workspace = true }
 risingwave_ctl = { workspace = true }
+risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_meta = { workspace = true }
 risingwave_rt = { workspace = true }
@@ -36,6 +37,9 @@ shell-words = "1.1.0"
 strum = "0.25"
 strum_macros = "0.25"
 tempfile = "3"
+tikv-jemallocator = { workspace = true, features = [
+    "unprefixed_malloc_on_supported_platforms",
+] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -53,14 +57,18 @@ workspace-hack = { path = "../workspace-hack" }
 expect-test = "1"
 
 [build-dependencies]
-vergen = { version = "8", default-features = false, features = ["build", "git", "gitcl"] }
+vergen = { version = "8", default-features = false, features = [
+    "build",
+    "git",
+    "gitcl",
+] }
 
 [target.'cfg(enable_task_local_alloc)'.dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
-[target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { git = "https://github.com/yuhao-su/jemallocator.git", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"], rev = "a0911601bb7bb263ca55c7ea161ef308fdc623f8" }
-
 [[bin]]
 name = "risingwave"
 path = "src/bin/risingwave.rs"
+
+[lints]
+workspace = true

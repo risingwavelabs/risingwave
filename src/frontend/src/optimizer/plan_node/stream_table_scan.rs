@@ -32,7 +32,7 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::TableCatalog;
+use crate::{Explain, TableCatalog};
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -118,17 +118,35 @@ impl StreamTableScan {
 
     /// Build catalog for backfill state
     ///
-    /// Schema
-    /// ------
-    /// | vnode | pk | `backfill_finished` |
+    /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
     ///
-    /// key: | vnode |
-    /// value: | pk | `backfill_finished`
+    /// key:    | vnode |
+    /// value:  | pk ... | `backfill_finished` | `row_count` |
     ///
     /// When we update the backfill progress,
     /// we update it for all vnodes.
-    /// "pk" here might be confusing. It refers to the
-    /// upstream pk which we use to track the backfill progress.
+    ///
+    /// `pk` refers to the upstream pk which we use to track the backfill progress.
+    ///
+    /// `vnode` is the corresponding vnode of the upstream's distribution key.
+    ///         It should also match the vnode of the backfill executor.
+    ///
+    /// `backfill_finished` is a boolean which just indicates if backfill is done.
+    ///
+    /// `row_count` is a count of rows which indicates the # of rows per executor.
+    ///             We used to track this in memory.
+    ///             But for backfill persistence we have to also persist it.
+    ///
+    /// FIXME(kwannoel):
+    /// - Across all vnodes, the values are the same.
+    /// - e.g. | vnode | pk ...  | `backfill_finished` | `row_count` |
+    ///        | 1002 | Int64(1) | t                   | 10          |
+    ///        | 1003 | Int64(1) | t                   | 10          |
+    ///        | 1003 | Int64(1) | t                   | 10          |
+    /// Eventually we should track progress per vnode, to support scaling with both mview and
+    /// the corresponding `no_shuffle_backfill`.
+    /// However this is not high priority, since we are working on supporting arrangement backfill,
+    /// which already has this capability.
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
@@ -143,7 +161,7 @@ impl StreamTableScan {
         catalog_builder.add_order_column(0, OrderType::ascending());
 
         // pk columns
-        for col_order in self.logical.primary_key().iter() {
+        for col_order in self.logical.primary_key() {
             let col = &upstream_schema[col_order.column_index];
             catalog_builder.add_column(&Field::from(col));
         }
@@ -152,6 +170,12 @@ impl StreamTableScan {
         catalog_builder.add_column(&Field::with_name(
             DataType::Boolean,
             format!("{}_backfill_finished", self.table_name()),
+        ));
+
+        // `row_count` column
+        catalog_builder.add_column(&Field::with_name(
+            DataType::Int64,
+            format!("{}_row_count", self.table_name()),
         ));
 
         // Reuse the state store pk (vnode) as the vnode as well.
@@ -178,7 +202,7 @@ impl Distill for StreamTableScan {
 
         if verbose {
             let pk = IndicesDisplay {
-                indices: self.logical_pk(),
+                indices: self.stream_key().unwrap_or_default(),
                 schema: &self.base.schema,
             };
             vec.push(("pk", pk.distill()));
@@ -203,7 +227,17 @@ impl StreamTableScan {
     pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
         use risingwave_pb::stream_plan::*;
 
-        let stream_key = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
+        let stream_key = self
+            .stream_key()
+            .unwrap_or_else(|| {
+                panic!(
+                    "should always have a stream key in the stream plan but not, sub plan: {}",
+                    PlanRef::from(self.clone()).explain_to_string()
+                )
+            })
+            .iter()
+            .map(|x| *x as u32)
+            .collect_vec();
 
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.chain_type {
@@ -291,6 +325,7 @@ impl StreamTableScan {
                     .session_ctx()
                     .config()
                     .get_streaming_rate_limit(),
+                ..Default::default()
             })),
             stream_key,
             operator_id: self.base.id.0 as u64,

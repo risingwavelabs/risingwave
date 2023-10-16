@@ -140,13 +140,13 @@
     create table t2 (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
     select * from t1 Union all select * from t2;
   stream_plan: |-
-    StreamMaterialize { columns: [ts, v1, v2, t1._row_id(hidden), null:Serial(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, null:Serial, 0:Int32], pk_columns: [t1._row_id, null:Serial, 0:Int32], pk_conflict: NoCheck, watermark_columns: [ts] }
+    StreamMaterialize { columns: [ts, v1, v2, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck, watermark_columns: [ts] }
     └─StreamUnion { all: true, output_watermarks: [t1.ts] }
-      ├─StreamExchange { dist: HashShard(t1._row_id, null:Serial, 0:Int32) }
-      │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, null:Serial, 0:Int32], output_watermarks: [t1.ts] }
+      ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+      │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, 0:Int32], output_watermarks: [t1.ts] }
       │   └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard(null:Serial, t2._row_id, 1:Int32) }
-        └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, null:Serial, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
+      └─StreamExchange { dist: HashShard(t2._row_id, 1:Int32) }
+        └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
           └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: union
   sql: |
@@ -159,11 +159,11 @@
       └─StreamExchange { dist: HashShard(t1.ts, t1.v1, t1.v2) }
         └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2], output_watermarks: [t1.ts] }
           └─StreamUnion { all: true, output_watermarks: [t1.ts] }
-            ├─StreamExchange { dist: HashShard(t1._row_id, null:Serial, 0:Int32) }
-            │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, null:Serial, 0:Int32], output_watermarks: [t1.ts] }
+            ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+            │ └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, 0:Int32], output_watermarks: [t1.ts] }
             │   └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-            └─StreamExchange { dist: HashShard(null:Serial, t2._row_id, 1:Int32) }
-              └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, null:Serial, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
+            └─StreamExchange { dist: HashShard(t2._row_id, 1:Int32) }
+              └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
                 └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: tumble
   sql: |
@@ -210,3 +210,12 @@
     └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [window_start, t._row_id], output_watermarks: [window_start] }
       └─StreamFilter { predicate: IsNotNull(t.ts) }
         └─StreamTableScan { table: t, columns: [t.ts, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: unnest
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    explain create materialized view mv as select t.ts, unnest(Array[1,2,3]) from t emit on window close;
+  explain_output: |
+    StreamMaterialize { columns: [projected_row_id(hidden), ts, unnest, t._row_id(hidden)], stream_key: [t._row_id, projected_row_id], pk_columns: [t._row_id, projected_row_id], pk_conflict: NoCheck, watermark_columns: [ts] }
+    └─StreamEowcSort { sort_column: t.ts }
+      └─StreamProjectSet { select_list: [$0, Unnest(ARRAY[1, 2, 3]:List(Int32)), $1] }
+        └─StreamTableScan { table: t, columns: [ts, _row_id] }

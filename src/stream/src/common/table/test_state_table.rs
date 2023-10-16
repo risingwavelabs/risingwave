@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound::{self, *};
+
 use futures::{pin_mut, StreamExt};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
@@ -213,7 +215,7 @@ async fn test_state_table_iter_with_prefix() {
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
 
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -280,8 +282,9 @@ async fn test_state_table_iter_with_prefix() {
     ]));
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
     let iter = state_table
-        .iter_row_with_pk_prefix(&pk_prefix, Default::default())
+        .iter_with_prefix(&pk_prefix, sub_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -341,7 +344,7 @@ async fn test_state_table_iter_with_pk_range() {
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
 
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32), // This is the range prefix key
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -412,7 +415,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::Included(OwnedRow::new(vec![Some(4_i32.into())])),
     );
     let iter = state_table
-        .iter_row_with_pk_range(&pk_range, DEFAULT_VNODE, Default::default())
+        .iter_with_vnode(DEFAULT_VNODE, &pk_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -437,7 +440,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::<row::Empty>::Unbounded,
     );
     let iter = state_table
-        .iter_row_with_pk_range(&pk_range, DEFAULT_VNODE, Default::default())
+        .iter_with_vnode(DEFAULT_VNODE, &pk_range, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -516,7 +519,7 @@ async fn test_state_table_iter_with_value_indices() {
     let test_env = prepare_hummock_test_env().await;
 
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -574,9 +577,12 @@ async fn test_state_table_iter_with_value_indices() {
         Some(99_i32.into()),
         Some(999_i32.into()),
     ]));
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     {
-        let iter = state_table.iter_row(Default::default()).await.unwrap();
+        let iter = state_table
+            .iter_with_prefix(row::empty(), sub_range, Default::default())
+            .await
+            .unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -631,7 +637,10 @@ async fn test_state_table_iter_with_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter_row(Default::default()).await.unwrap();
+    let iter = state_table
+        .iter_with_prefix(row::empty(), sub_range, Default::default())
+        .await
+        .unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -677,7 +686,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     let test_env = prepare_hummock_test_env().await;
 
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -735,9 +744,12 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         Some(99_i32.into()),
         Some(999_i32.into()),
     ]));
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     {
-        let iter = state_table.iter_row(Default::default()).await.unwrap();
+        let iter = state_table
+            .iter_with_prefix(row::empty(), sub_range, Default::default())
+            .await
+            .unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -813,7 +825,10 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter_row(Default::default()).await.unwrap();
+    let iter = state_table
+        .iter_with_prefix(row::empty(), sub_range, Default::default())
+        .await
+        .unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -998,9 +1013,13 @@ async fn test_state_table_write_chunk() {
     );
 
     state_table.write_chunk(chunk);
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .iter_with_prefix(
+            row::empty(),
+            sub_range,
+            PrefetchOptions::new_for_exhaust_iter(),
+        )
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1108,16 +1127,17 @@ async fn test_state_table_write_chunk_visibility() {
         &data_types,
     );
     let (ops, columns, _) = chunk.into_inner();
-    let chunk = StreamChunk::new(
-        ops,
-        columns,
-        Some(Bitmap::from_iter([true, true, true, false])),
-    );
+    let chunk =
+        StreamChunk::with_visibility(ops, columns, Bitmap::from_iter([true, true, true, false]));
 
     state_table.write_chunk(chunk);
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .iter_with_prefix(
+            row::empty(),
+            sub_range,
+            PrefetchOptions::new_for_exhaust_iter(),
+        )
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1227,9 +1247,13 @@ async fn test_state_table_write_chunk_value_indices() {
     );
 
     state_table.write_chunk(chunk);
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .iter_with_prefix(
+            row::empty(),
+            sub_range,
+            PrefetchOptions::new_for_exhaust_iter(),
+        )
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1278,7 +1302,7 @@ async fn test_state_table_may_exist() {
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
 
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
         ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -1509,9 +1533,13 @@ async fn test_state_table_watermark_cache_ignore_null() {
     let chunk = StreamChunk::from_rows(&rows, &data_types);
 
     state_table.write_chunk(chunk);
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let inserted_rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .iter_with_prefix(
+            row::empty(),
+            sub_range,
+            PrefetchOptions::new_for_exhaust_iter(),
+        )
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1796,9 +1824,13 @@ async fn test_state_table_watermark_cache_refill() {
     for row in &rows {
         state_table.insert(row);
     }
-
+    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let inserted_rows: Vec<_> = state_table
-        .iter_row(PrefetchOptions::new_for_exhaust_iter())
+        .iter_with_prefix(
+            row::empty(),
+            sub_range,
+            PrefetchOptions::new_for_exhaust_iter(),
+        )
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1832,6 +1864,186 @@ async fn test_state_table_watermark_cache_refill() {
             .to_scalar_value()
             .as_scalar_ref_impl()
     )
+}
+
+#[tokio::test]
+async fn test_state_table_iter_prefix_and_sub_range() {
+    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let test_env = prepare_hummock_test_env().await;
+
+    let order_types = vec![OrderType::ascending(), OrderType::ascending()];
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+    let pk_index = vec![0_usize, 1_usize];
+    let read_prefix_len_hint = 0;
+    let table = gen_prost_table(
+        TEST_TABLE_ID,
+        column_descs,
+        order_types,
+        pk_index,
+        read_prefix_len_hint,
+    );
+
+    test_env.register_table(table.clone()).await;
+    let mut state_table =
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
+            .await;
+    let mut epoch = EpochPair::new_test_epoch(1);
+    state_table.init_epoch(epoch);
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(111_i32.into()),
+    ]));
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(22_i32.into()),
+        Some(222_i32.into()),
+    ]));
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(33_i32.into()),
+        Some(333_i32.into()),
+    ]));
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(4_i32.into()),
+        Some(44_i32.into()),
+        Some(444_i32.into()),
+    ]));
+
+    epoch.inc();
+    state_table.commit(epoch).await.unwrap();
+
+    let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
+
+    let sub_range1 = (
+        std::ops::Bound::Included(OwnedRow::new(vec![Some(11_i32.into())])),
+        std::ops::Bound::Excluded(OwnedRow::new(vec![Some(33_i32.into())])),
+    );
+
+    let iter = state_table
+        .iter_with_prefix(pk_prefix, &sub_range1, Default::default())
+        .await
+        .unwrap();
+
+    pin_mut!(iter);
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    assert_eq!(
+        &OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    assert_eq!(
+        &OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await;
+    assert!(res.is_none());
+
+    let sub_range2: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+        std::ops::Bound::Excluded(OwnedRow::new(vec![Some(11_i32.into())])),
+        std::ops::Bound::Unbounded,
+    );
+
+    let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
+    let iter = state_table
+        .iter_with_prefix(pk_prefix, &sub_range2, Default::default())
+        .await
+        .unwrap();
+
+    pin_mut!(iter);
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    assert_eq!(
+        &OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    assert_eq!(
+        &OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(33_i32.into()),
+            Some(333_i32.into()),
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await;
+    assert!(res.is_none());
+
+    let sub_range3: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+        std::ops::Bound::Unbounded,
+        std::ops::Bound::Included(OwnedRow::new(vec![Some(33_i32.into())])),
+    );
+
+    let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
+    let iter = state_table
+        .iter_with_prefix(pk_prefix, &sub_range3, Default::default())
+        .await
+        .unwrap();
+
+    pin_mut!(iter);
+    let res = iter.next().await.unwrap().unwrap();
+
+    assert_eq!(
+        &OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    assert_eq!(
+        &OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    assert_eq!(
+        &OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(33_i32.into()),
+            Some(333_i32.into()),
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await;
+    assert!(res.is_none());
 }
 
 #[tokio::test]

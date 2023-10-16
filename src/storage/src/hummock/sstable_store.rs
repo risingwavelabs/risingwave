@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::clone::Clone;
+use std::future::Future;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
@@ -26,7 +26,7 @@ use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
-    BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadataIter, ObjectStoreRef,
+    MonitoredStreamingReader, ObjectError, ObjectMetadataIter, ObjectStoreRef,
     ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::SstableInfo;
@@ -39,6 +39,7 @@ use super::{
     Block, BlockCache, BlockMeta, BlockResponse, FileCache, RecentFilter, Sstable,
     SstableBlockIndex, SstableMeta, SstableWriter,
 };
+use crate::hummock::file_cache::preclude::*;
 use crate::hummock::multi_builder::UploadJoinHandle;
 use crate::hummock::{
     BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache, MemoryLimiter,
@@ -105,7 +106,7 @@ impl LruCacheEventListener for BlockCacheEventListener {
             sst_id: key.0,
             block_idx: key.1,
         };
-        self.data_file_cache.insert_without_wait(key, value);
+        self.data_file_cache.insert_async(key, value);
     }
 }
 
@@ -116,7 +117,7 @@ impl LruCacheEventListener for MetaCacheEventListener {
     type T = Box<Sstable>;
 
     fn on_release(&self, key: Self::K, value: Self::T) {
-        self.0.insert_without_wait(key, value);
+        self.0.insert_async(key, value);
     }
 }
 
@@ -129,7 +130,7 @@ pub struct SstableStore {
     data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
     meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
 
-    data_file_cache_refill_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
+    recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
 }
 
 impl SstableStore {
@@ -141,6 +142,7 @@ impl SstableStore {
         high_priority_ratio: usize,
         data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
         meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
+        recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
     ) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
@@ -152,11 +154,6 @@ impl SstableStore {
             data_file_cache: data_file_cache.clone(),
         });
         let meta_cache_listener = Arc::new(MetaCacheEventListener(meta_file_cache.clone()));
-        let data_file_cache_refill_filter = if data_file_cache.is_filter_enabled() {
-            Some(Arc::new(RecentFilter::new(6, Duration::from_secs(10))))
-        } else {
-            None
-        };
 
         Self {
             path,
@@ -177,7 +174,7 @@ impl SstableStore {
             data_file_cache,
             meta_file_cache,
 
-            data_file_cache_refill_filter,
+            recent_filter,
         }
     }
 
@@ -198,7 +195,7 @@ impl SstableStore {
             data_file_cache: FileCache::none(),
             meta_file_cache: FileCache::none(),
 
-            data_file_cache_refill_filter: None,
+            recent_filter: None,
         }
     }
 
@@ -208,7 +205,9 @@ impl SstableStore {
             .delete(self.get_sst_data_path(object_id).as_str())
             .await?;
         self.meta_cache.erase(object_id, &object_id);
-        self.meta_file_cache.remove_without_wait(&object_id);
+        self.meta_file_cache
+            .remove(&object_id)
+            .map_err(HummockError::file_cache)?;
         Ok(())
     }
 
@@ -228,7 +227,9 @@ impl SstableStore {
         // Delete from cache.
         for &object_id in object_id_list {
             self.meta_cache.erase(object_id, &object_id);
-            self.meta_file_cache.remove_without_wait(&object_id);
+            self.meta_file_cache
+                .remove(&object_id)
+                .map_err(HummockError::file_cache)?;
         }
 
         Ok(())
@@ -236,7 +237,9 @@ impl SstableStore {
 
     pub fn delete_cache(&self, object_id: HummockSstableObjectId) {
         self.meta_cache.erase(object_id, &object_id);
-        self.meta_file_cache.remove_without_wait(&object_id);
+        if let Err(e) = self.meta_file_cache.remove(&object_id) {
+            tracing::warn!("meta file cache remove error: {}", e);
+        }
     }
 
     async fn put_sst_data(
@@ -259,7 +262,7 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockResponse> {
         let object_id = sst.id;
-        let (block_loc, uncompressed_capacity) = sst.calculate_block_info(block_index);
+        let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
 
         stats.cache_data_block_total += 1;
         let mut fetch_block = || {
@@ -268,6 +271,7 @@ impl SstableStore {
             let data_path = self.get_sst_data_path(object_id);
             let store = self.store.clone();
             let use_file_cache = !matches!(policy, CachePolicy::Disable);
+            let range = range.clone();
 
             async move {
                 let key = SstableBlockIndex {
@@ -283,7 +287,7 @@ impl SstableStore {
                     return Ok(block);
                 }
 
-                let block_data = store.read(&data_path, Some(block_loc)).await?;
+                let block_data = store.read(&data_path, range).await?;
                 let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
 
                 Ok(block)
@@ -301,7 +305,7 @@ impl SstableStore {
             policy
         };
 
-        if let Some(filter) = self.data_file_cache_refill_filter.as_ref() {
+        if let Some(filter) = self.recent_filter.as_ref() {
             filter.insert(object_id);
         }
 
@@ -314,7 +318,7 @@ impl SstableStore {
             )),
             CachePolicy::FillFileCache => {
                 let block = fetch_block().await?;
-                self.data_file_cache.insert_without_wait(
+                self.data_file_cache.insert_async(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: block_index as u64,
@@ -377,24 +381,25 @@ impl SstableStore {
     #[cfg(any(test, feature = "test"))]
     pub fn clear_block_cache(&self) {
         self.block_cache.clear();
-        self.data_file_cache.clear_without_wait();
+        if let Err(e) = self.data_file_cache.clear() {
+            tracing::warn!("data file cache clear error: {}", e);
+        }
     }
 
     #[cfg(any(test, feature = "test"))]
     pub fn clear_meta_cache(&self) {
         self.meta_cache.clear();
-        self.meta_file_cache.clear_without_wait();
+        if let Err(e) = self.meta_file_cache.clear() {
+            tracing::warn!("meta file cache clear error: {}", e);
+        }
     }
 
-    /// Returns `table_holder`, `local_cache_meta_block_miss` (1 if cache miss) and
-    /// `local_cache_meta_block_unhit` (1 if not cache hit).
-    pub async fn sstable_syncable(
+    /// Returns `table_holder`
+    pub fn sstable(
         &self,
         sst: &SstableInfo,
-        stats: &StoreLocalStatistic,
-    ) -> HummockResult<(TableHolder, u64, u64)> {
-        let mut local_cache_meta_block_miss = 0;
-        let mut local_cache_meta_block_unhit = 0;
+        stats: &mut StoreLocalStatistic,
+    ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
         let object_id = sst.get_object_id();
         let lookup_response = self
             .meta_cache
@@ -406,12 +411,8 @@ impl SstableStore {
                     let meta_file_cache = self.meta_file_cache.clone();
                     let store = self.store.clone();
                     let meta_path = self.get_sst_data_path(object_id);
-                    local_cache_meta_block_miss += 1;
                     let stats_ptr = stats.remote_io_time.clone();
-                    let loc = BlockLocation {
-                        offset: sst.meta_offset as usize,
-                        size: (sst.file_size - sst.meta_offset) as usize,
-                    };
+                    let range = sst.meta_offset as usize..sst.file_size as usize;
                     async move {
                         if let Some(sst) = meta_file_cache
                             .lookup(&object_id)
@@ -424,10 +425,11 @@ impl SstableStore {
 
                         let now = Instant::now();
                         let buf = store
-                            .read(&meta_path, Some(loc))
+                            .read(&meta_path, range)
                             .await
                             .map_err(HummockError::object_io_error)?;
-                        let meta = SstableMeta::decode(&mut &buf[..])?;
+                        let meta = SstableMeta::decode(&buf[..])?;
+
                         let sst = Sstable::new(object_id, meta);
                         let charge = sst.estimate_size();
                         let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
@@ -436,32 +438,14 @@ impl SstableStore {
                     }
                 },
             );
-        if !matches!(lookup_response, LookupResponse::Cached(..)) {
-            local_cache_meta_block_unhit += 1;
+        match &lookup_response {
+            LookupResponse::Miss(_) | LookupResponse::WaitPendingRequest(_) => {
+                stats.cache_meta_block_miss += 1;
+            }
+            _ => (),
         }
-        let result = lookup_response
-            .verbose_instrument_await("meta_cache_lookup")
-            .await;
-        result.map(|table_holder| {
-            (
-                table_holder,
-                local_cache_meta_block_miss,
-                local_cache_meta_block_unhit,
-            )
-        })
-    }
-
-    pub async fn sstable(
-        &self,
-        sst: &SstableInfo,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<TableHolder> {
-        self.sstable_syncable(sst, stats).await.map(
-            |(table_holder, local_cache_meta_block_miss, ..)| {
-                stats.apply_meta_fetch(local_cache_meta_block_miss);
-                table_holder
-            },
-        )
+        stats.cache_meta_block_total += 1;
+        lookup_response.verbose_instrument_await("sstable")
     }
 
     pub async fn list_object_metadata_from_object_store(
@@ -501,7 +485,7 @@ impl SstableStore {
         block_index: u64,
         block: Box<Block>,
     ) {
-        if let Some(filter) = self.data_file_cache_refill_filter.as_ref() {
+        if let Some(filter) = self.recent_filter.as_ref() {
             filter.insert(object_id);
         }
         self.block_cache
@@ -536,53 +520,12 @@ impl SstableStore {
         ))
     }
 
-    pub fn data_file_cache_refill_filter(
-        &self,
-    ) -> Option<&Arc<RecentFilter<HummockSstableObjectId>>> {
-        self.data_file_cache_refill_filter.as_ref()
+    pub fn data_recent_filter(&self) -> Option<&Arc<RecentFilter<HummockSstableObjectId>>> {
+        self.recent_filter.as_ref()
     }
 
     pub fn data_file_cache(&self) -> &FileCache<SstableBlockIndex, Box<Block>> {
         &self.data_file_cache
-    }
-
-    pub async fn may_fill_data_file_cache(
-        &self,
-        sst: &Sstable,
-        block_index: usize,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<bool> {
-        let object_id = sst.id;
-        let (block_loc, uncompressed_capacity) = sst.calculate_block_info(block_index);
-
-        stats.cache_data_block_total += 1;
-        let fetch_block = move || {
-            stats.cache_data_block_miss += 1;
-            let data_path = self.get_sst_data_path(object_id);
-            let store = self.store.clone();
-
-            async move {
-                let data = store.read(&data_path, Some(block_loc)).await?;
-                let block = Block::decode(data, uncompressed_capacity)?;
-                let block = Box::new(block);
-
-                Ok(block)
-            }
-        };
-
-        if let Some(filter) = self.data_file_cache_refill_filter.as_ref() {
-            filter.insert(object_id);
-        }
-
-        let key = SstableBlockIndex {
-            sst_id: object_id,
-            block_idx: block_index as u64,
-        };
-
-        self.data_file_cache
-            .insert_with(key, fetch_block, uncompressed_capacity)
-            .await
-            .map_err(HummockError::file_cache)
     }
 }
 
@@ -734,6 +677,15 @@ impl SstableWriter for BatchUploadWriter {
         Ok(())
     }
 
+    async fn write_block_bytes(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()> {
+        self.buf.extend_from_slice(&block);
+        if let CachePolicy::Fill(_) = self.policy {
+            self.block_info
+                .push(Block::decode(block, meta.uncompressed_size as usize)?);
+        }
+        Ok(())
+    }
+
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
         fail_point!("data_upload_err");
         let join_handle = tokio::spawn(async move {
@@ -754,7 +706,7 @@ impl SstableWriter for BatchUploadWriter {
                 .await?;
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 
-            if let Some(filter) = self.sstable_store.data_file_cache_refill_filter.as_ref() {
+            if let Some(filter) = self.sstable_store.recent_filter.as_ref() {
                 filter.insert(self.object_id);
             }
 
@@ -825,6 +777,18 @@ impl SstableWriter for StreamingUploadWriter {
         }
         self.object_uploader
             .write_bytes(block_data)
+            .await
+            .map_err(HummockError::object_io_error)
+    }
+
+    async fn write_block_bytes(&mut self, block: Bytes, meta: &BlockMeta) -> HummockResult<()> {
+        self.data_len += block.len();
+        if let CachePolicy::Fill(_) = self.policy {
+            let block = Block::decode(block.clone(), meta.uncompressed_size as usize)?;
+            self.blocks.push(block);
+        }
+        self.object_uploader
+            .write_bytes(block)
             .await
             .map_err(HummockError::object_io_error)
     }
@@ -923,7 +887,7 @@ pub struct BlockStream {
     /// not contain the size of blocks which precede the first streamed block. That is, if
     /// streaming starts at block 2 of a given SST, then the list does not contain information
     /// about block 0 and block 1.
-    block_size_vec: Vec<(usize, usize)>,
+    block_metas: Vec<BlockMeta>,
 }
 
 impl BlockStream {
@@ -945,28 +909,22 @@ impl BlockStream {
         // Avoids panicking if `block_index` is too large.
         let block_index = std::cmp::min(block_index, metas.len());
 
-        let mut block_len_vec = Vec::with_capacity(metas.len() - block_index);
-        metas[block_index..].iter().for_each(|b_meta| {
-            block_len_vec.push((b_meta.len as usize, b_meta.uncompressed_size as usize))
-        });
-
         Self {
             byte_stream,
             block_idx: 0,
-            block_size_vec: block_len_vec,
+            block_metas: metas[block_index..].to_vec(),
         }
     }
 
     /// Reads the next block from the stream and returns it. Returns `None` if there are no blocks
     /// left to read.
-    pub async fn next(&mut self) -> HummockResult<Option<Box<Block>>> {
-        if self.block_idx >= self.block_size_vec.len() {
+    pub async fn next(&mut self) -> HummockResult<Option<(Bytes, BlockMeta)>> {
+        if self.block_idx >= self.block_metas.len() {
             return Ok(None);
         }
 
-        let (block_stream_size, block_full_size) =
-            *self.block_size_vec.get(self.block_idx).unwrap();
-        let mut buffer = vec![0; block_stream_size];
+        let block_meta = &self.block_metas[self.block_idx];
+        let mut buffer = vec![0; block_meta.len as usize];
         fail_point!("stream_read_err", |_| Err(HummockError::object_io_error(
             ObjectError::internal("stream read error")
         )));
@@ -977,17 +935,26 @@ impl BlockStream {
             .await
             .map_err(|e| HummockError::object_io_error(ObjectError::internal(e)))?;
 
-        if bytes_read != block_stream_size {
+        if bytes_read != block_meta.len as usize {
             return Err(HummockError::decode_error(ObjectError::internal(format!(
                 "unexpected number of bytes: expected: {} read: {}",
-                block_stream_size, bytes_read
+                block_meta.len, bytes_read
             ))));
         }
 
-        let boxed_block = Box::new(Block::decode(Bytes::from(buffer), block_full_size)?);
         self.block_idx += 1;
 
-        Ok(Some(boxed_block))
+        Ok(Some((Bytes::from(buffer), block_meta.clone())))
+    }
+
+    pub async fn next_block(&mut self) -> HummockResult<Option<Box<Block>>> {
+        match self.next().await? {
+            None => Ok(None),
+            Some((buf, meta)) => Ok(Some(Box::new(Block::decode(
+                buf,
+                meta.uncompressed_size as usize,
+            )?))),
+        }
     }
 }
 

@@ -107,7 +107,7 @@ impl CompactionStatistics {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TaskConfig {
     pub key_range: KeyRange,
     pub cache_policy: CachePolicy,
@@ -158,13 +158,73 @@ pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompact
     multi_filter
 }
 
+const MAX_FILE_COUNT: usize = 32;
+
+fn generate_splits_fast(
+    sstable_infos: &Vec<SstableInfo>,
+    compaction_size: u64,
+    context: CompactorContext,
+) -> HummockResult<Vec<KeyRange_vec>> {
+    let worker_num = context.compaction_executor.worker_num();
+    let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
+
+    let parallelism = (compaction_size + parallel_compact_size - 1) / parallel_compact_size;
+
+    let parallelism = std::cmp::min(
+        worker_num,
+        std::cmp::min(
+            parallelism as usize,
+            context.storage_opts.max_sub_compaction as usize,
+        ),
+    );
+    let mut indexes = vec![];
+    for sst in sstable_infos {
+        let key_range = sst.key_range.as_ref().unwrap();
+        indexes.push(
+            FullKey {
+                user_key: FullKey::decode(&key_range.left).user_key,
+                epoch: HummockEpoch::MAX,
+            }
+            .encode(),
+        );
+        indexes.push(
+            FullKey {
+                user_key: FullKey::decode(&key_range.right).user_key,
+                epoch: HummockEpoch::MAX,
+            }
+            .encode(),
+        );
+    }
+    indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.as_ref(), b.as_ref()));
+    indexes.dedup();
+    if indexes.len() <= parallelism {
+        return Ok(vec![]);
+    }
+    let mut splits = vec![];
+    splits.push(KeyRange_vec::new(vec![], vec![]));
+    let parallel_key_count = indexes.len() / parallelism;
+    let mut last_split_key_count = 0;
+    for key in indexes {
+        if last_split_key_count >= parallel_key_count {
+            splits.last_mut().unwrap().right = key.clone();
+            splits.push(KeyRange_vec::new(key.clone(), vec![]));
+            last_split_key_count = 0;
+        }
+        last_split_key_count += 1;
+    }
+    Ok(splits)
+}
+
 pub async fn generate_splits(
     sstable_infos: &Vec<SstableInfo>,
     compaction_size: u64,
-    context: Arc<CompactorContext>,
+    context: CompactorContext,
 ) -> HummockResult<Vec<KeyRange_vec>> {
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     if compaction_size > parallel_compact_size {
+        if sstable_infos.len() > MAX_FILE_COUNT {
+            return generate_splits_fast(sstable_infos, compaction_size, context);
+        }
         let mut indexes = vec![];
         // preload the meta and get the smallest key to split sub_compaction
         for sstable_info in sstable_infos {
@@ -193,6 +253,7 @@ pub async fn generate_splits(
         indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
         let mut splits = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
+
         let worker_num = context.compaction_executor.worker_num();
 
         let parallelism = std::cmp::min(
@@ -231,7 +292,7 @@ pub async fn generate_splits(
     Ok(vec![])
 }
 
-pub fn estimate_task_output_capacity(context: Arc<CompactorContext>, task: &CompactTask) -> usize {
+pub fn estimate_task_output_capacity(context: CompactorContext, task: &CompactTask) -> usize {
     let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
     let total_input_uncompressed_file_size = task
         .input_ssts

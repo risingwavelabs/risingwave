@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+use std::ops::Bound::Unbounded;
+
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::row;
+use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -79,9 +82,11 @@ impl<S: StateStore> NowExecutor<S> {
             if !initialized {
                 // Handle the first barrier.
                 state_table.init_epoch(barrier.epoch);
-
                 let state_row = {
-                    let data_iter = state_table.iter_row(Default::default()).await?;
+                    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
+                    let data_iter = state_table
+                        .iter_with_prefix(row::empty(), sub_range, Default::default())
+                        .await?;
                     pin_mut!(data_iter);
                     if let Some(keyed_row) = data_iter.next().await {
                         Some(keyed_row?)
@@ -90,6 +95,7 @@ impl<S: StateStore> NowExecutor<S> {
                     }
                 };
                 last_timestamp = state_row.and_then(|row| row[0].clone());
+                paused = barrier.is_pause_on_startup();
                 initialized = true;
             } else if paused {
                 // Assert that no data is updated.
@@ -104,7 +110,7 @@ impl<S: StateStore> NowExecutor<S> {
             // Update paused state.
             if let Some(mutation) = barrier.mutation.as_deref() {
                 match mutation {
-                    Mutation::Pause | Mutation::Update { .. } => paused = true,
+                    Mutation::Pause => paused = true,
                     Mutation::Resume => paused = false,
                     _ => {}
                 }

@@ -19,8 +19,9 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::function::window::WindowFuncCall;
-use risingwave_expr::window_function::{create_window_state, StateKey, WindowStates};
+use risingwave_expr::window_function::{
+    create_window_state, StateKey, WindowFuncCall, WindowStates,
+};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -177,7 +178,7 @@ impl SortOverWindowExecutor {
     ) {
         let mut states =
             WindowStates::new(this.calls.iter().map(create_window_state).try_collect()?);
-        for row in rows.iter() {
+        for row in &*rows {
             for (call, state) in this.calls.iter().zip_eq_fast(states.iter_mut()) {
                 // TODO(rc): batch appending
                 state.append(

@@ -85,8 +85,8 @@ async fn run_replay(args: Args) -> Result<()> {
 async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay> {
     let config = load_config(&args.config, NoOverride);
     let storage_memory_config = extract_storage_memory_config(&config);
-    let system = config.system.clone();
-    let system_params_reader = SystemParamsReader::from(system.into_init_system_params());
+    let system_params_reader =
+        SystemParamsReader::from(config.system.clone().into_init_system_params());
 
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
@@ -111,6 +111,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
             storage_opts.high_priority_ratio,
             FileCache::none(),
             FileCache::none(),
+            None,
         ))
     };
 

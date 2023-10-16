@@ -15,6 +15,7 @@
 mod over_window;
 mod query_mode;
 mod search_path;
+pub mod sink_decouple;
 mod transaction_isolation_level;
 mod visibility_mode;
 
@@ -30,13 +31,14 @@ pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use tracing::info;
 
 use crate::error::{ErrorCode, RwError};
+use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
 use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 37] = [
+const CONFIG_KEYS: [&str; 38] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -71,9 +73,10 @@ const CONFIG_KEYS: [&str; 37] = [
     "LOCK_TIMEOUT",
     "ROW_SECURITY",
     "STANDARD_CONFORMING_STRINGS",
-    "RW_STREAMING_RATE_LIMIT",
+    "STREAMING_RATE_LIMIT",
     "CDC_BACKFILL",
     "RW_STREAMING_OVER_WINDOW_CACHE_POLICY",
+    "BACKGROUND_DDL",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -112,9 +115,10 @@ const STATEMENT_TIMEOUT: usize = 30;
 const LOCK_TIMEOUT: usize = 31;
 const ROW_SECURITY: usize = 32;
 const STANDARD_CONFORMING_STRINGS: usize = 33;
-const RW_STREAMING_RATE_LIMIT: usize = 34;
+const STREAMING_RATE_LIMIT: usize = 34;
 const CDC_BACKFILL: usize = 35;
 const STREAMING_OVER_WINDOW_CACHE_POLICY: usize = 36;
+const BACKGROUND_DDL: usize = 37;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -331,14 +335,14 @@ type ServerVersionNum = ConfigI32<SERVER_VERSION_NUM, 90_500>;
 type ForceSplitDistinctAgg = ConfigBool<FORCE_SPLIT_DISTINCT_AGG, false>;
 type ClientMinMessages = ConfigString<CLIENT_MIN_MESSAGES>;
 type ClientEncoding = ConfigString<CLIENT_ENCODING>;
-type SinkDecouple = ConfigBool<SINK_DECOUPLE, false>;
 type SynchronizeSeqscans = ConfigBool<SYNCHRONIZE_SEQSCANS, false>;
 type StatementTimeout = ConfigI32<STATEMENT_TIMEOUT, 0>;
 type LockTimeout = ConfigI32<LOCK_TIMEOUT, 0>;
 type RowSecurity = ConfigBool<ROW_SECURITY, true>;
 type StandardConformingStrings = ConfigString<STANDARD_CONFORMING_STRINGS>;
-type StreamingRateLimit = ConfigU64<RW_STREAMING_RATE_LIMIT, 0>;
+type StreamingRateLimit = ConfigU64<STREAMING_RATE_LIMIT, 0>;
 type CdcBackfill = ConfigBool<CDC_BACKFILL, false>;
+type BackgroundDdl = ConfigBool<BACKGROUND_DDL, false>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -486,6 +490,8 @@ pub struct ConfigMap {
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "recent_first_n" or "recent_last_n".
     streaming_over_window_cache_policy: OverWindowCachePolicy,
+
+    background_ddl: BackgroundDdl,
 }
 
 impl ConfigMap {
@@ -603,6 +609,8 @@ impl ConfigMap {
             self.cdc_backfill = val.as_slice().try_into()?
         } else if key.eq_ignore_ascii_case(OverWindowCachePolicy::entry_name()) {
             self.streaming_over_window_cache_policy = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(BackgroundDdl::entry_name()) {
+            self.background_ddl = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -690,6 +698,8 @@ impl ConfigMap {
             Ok(self.cdc_backfill.to_string())
         } else if key.eq_ignore_ascii_case(OverWindowCachePolicy::entry_name()) {
             Ok(self.streaming_over_window_cache_policy.to_string())
+        } else if key.eq_ignore_ascii_case(BackgroundDdl::entry_name()) {
+            Ok(self.background_ddl.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -882,6 +892,11 @@ impl ConfigMap {
                 setting: self.streaming_over_window_cache_policy.to_string(),
                 description: String::from(r#"Cache policy for partition cache in streaming over window. Can be "full", "recent", "recent_first_n" or "recent_last_n"."#),
             },
+            VariableInfo{
+                name: BackgroundDdl::entry_name().to_lowercase(),
+                setting: self.background_ddl.to_string(),
+                description: String::from("Run DDL statements in background"),
+            },
         ]
     }
 
@@ -998,8 +1013,8 @@ impl ConfigMap {
         &self.client_encoding
     }
 
-    pub fn get_sink_decouple(&self) -> bool {
-        self.sink_decouple.0
+    pub fn get_sink_decouple(&self) -> SinkDecouple {
+        self.sink_decouple
     }
 
     pub fn get_standard_conforming_strings(&self) -> &str {
@@ -1019,5 +1034,9 @@ impl ConfigMap {
 
     pub fn get_streaming_over_window_cache_policy(&self) -> OverWindowCachePolicy {
         self.streaming_over_window_cache_policy
+    }
+
+    pub fn get_background_ddl(&self) -> bool {
+        self.background_ddl.0
     }
 }

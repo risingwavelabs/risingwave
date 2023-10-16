@@ -24,20 +24,16 @@ use risingwave_pb::user::{
 use tonic::{Request, Response, Status};
 
 use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv};
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
-pub struct UserServiceImpl<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+pub struct UserServiceImpl {
+    env: MetaSrvEnv,
 
-    catalog_manager: CatalogManagerRef<S>,
+    catalog_manager: CatalogManagerRef,
 }
 
-impl<S> UserServiceImpl<S>
-where
-    S: MetaStore,
-{
-    pub fn new(env: MetaSrvEnv<S>, catalog_manager: CatalogManagerRef<S>) -> Self {
+impl UserServiceImpl {
+    pub fn new(env: MetaSrvEnv, catalog_manager: CatalogManagerRef) -> Self {
         Self {
             env,
             catalog_manager,
@@ -110,7 +106,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S: MetaStore> UserService for UserServiceImpl<S> {
+impl UserService for UserServiceImpl {
     #[cfg_attr(coverage, no_coverage)]
     async fn create_user(
         &self,
@@ -155,7 +151,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         let update_fields = req
             .update_fields
             .iter()
-            .map(|i| UpdateField::from_i32(*i).unwrap())
+            .map(|i| UpdateField::try_from(*i).unwrap())
             .collect_vec();
         let user = req.get_user()?.clone();
         let version = self

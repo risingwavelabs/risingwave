@@ -194,7 +194,7 @@ impl BatchManager {
         pb_task_output_id: &PbTaskOutputId,
     ) -> Result<()> {
         let task_id = TaskOutputId::try_from(pb_task_output_id)?;
-        tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?task_id, "serve exchange RPC");
+        tracing::debug!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?task_id, "serve exchange RPC");
         let mut task_output = self.take_output(pb_task_output_id)?;
         self.runtime.spawn(async move {
             let mut writer = GrpcExchangeWriter::new(tx.clone());
@@ -289,7 +289,7 @@ impl BatchManager {
         let mut max_mem_task_id = None;
         let mut max_mem = usize::MIN;
         let guard = self.tasks.lock();
-        for (t_id, t) in guard.iter() {
+        for (t_id, t) in &*guard {
             // If the task has been stopped, we should not count this.
             if t.is_end() {
                 continue;
@@ -409,6 +409,8 @@ mod tests {
     }
 
     #[tokio::test]
+    // see https://github.com/risingwavelabs/risingwave/issues/11979
+    #[ignore]
     async fn test_task_cancel_for_busy_loop() {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
@@ -437,6 +439,8 @@ mod tests {
     }
 
     #[tokio::test]
+    // see https://github.com/risingwavelabs/risingwave/issues/11979
+    #[ignore]
     async fn test_task_abort_for_busy_loop() {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),

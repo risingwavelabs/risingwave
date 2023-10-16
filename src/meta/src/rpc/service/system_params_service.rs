@@ -19,35 +19,41 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
+use crate::controller::system_param::SystemParamsControllerRef;
 use crate::manager::SystemParamsManagerRef;
-use crate::storage::MetaStore;
 
-pub struct SystemParamsServiceImpl<S>
-where
-    S: MetaStore,
-{
-    system_params_manager: SystemParamsManagerRef<S>,
+pub struct SystemParamsServiceImpl {
+    system_params_manager: SystemParamsManagerRef,
+    system_params_controller: Option<SystemParamsControllerRef>,
 }
 
-impl<S: MetaStore> SystemParamsServiceImpl<S> {
-    pub fn new(system_params_manager: SystemParamsManagerRef<S>) -> Self {
+impl SystemParamsServiceImpl {
+    pub fn new(
+        system_params_manager: SystemParamsManagerRef,
+        system_params_controller: Option<SystemParamsControllerRef>,
+    ) -> Self {
         Self {
             system_params_manager,
+            system_params_controller,
         }
     }
 }
 
 #[async_trait]
-impl<S> SystemParamsService for SystemParamsServiceImpl<S>
-where
-    S: MetaStore,
-{
+impl SystemParamsService for SystemParamsServiceImpl {
     async fn get_system_params(
         &self,
         _request: Request<GetSystemParamsRequest>,
     ) -> Result<Response<GetSystemParamsResponse>, Status> {
-        let params = Some(self.system_params_manager.get_pb_params().await);
-        Ok(Response::new(GetSystemParamsResponse { params }))
+        let params = if let Some(ctl) = &self.system_params_controller {
+            ctl.get_pb_params().await
+        } else {
+            self.system_params_manager.get_pb_params().await
+        };
+
+        Ok(Response::new(GetSystemParamsResponse {
+            params: Some(params),
+        }))
     }
 
     async fn set_system_param(
@@ -55,10 +61,14 @@ where
         request: Request<SetSystemParamRequest>,
     ) -> Result<Response<SetSystemParamResponse>, Status> {
         let req = request.into_inner();
-        let params = self
-            .system_params_manager
-            .set_param(&req.param, req.value)
-            .await?;
+        let params = if let Some(ctl) = &self.system_params_controller {
+            ctl.set_param(&req.param, req.value).await?
+        } else {
+            self.system_params_manager
+                .set_param(&req.param, req.value)
+                .await?
+        };
+
         Ok(Response::new(SetSystemParamResponse {
             params: Some(params),
         }))

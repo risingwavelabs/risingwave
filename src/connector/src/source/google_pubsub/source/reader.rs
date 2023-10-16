@@ -15,25 +15,21 @@
 use anyhow::{anyhow, ensure, Context, Result};
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, TimeZone, Utc};
-use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use google_cloud_pubsub::client::Client;
 use google_cloud_pubsub::subscription::{SeekTo, Subscription};
 use risingwave_common::bail;
-use tonic::Code;
+use tonic_0_9::Code;
 
 use super::TaggedReceivedMessage;
-use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
-use crate::source::google_pubsub::PubsubProperties;
+use crate::source::google_pubsub::{PubsubProperties, PubsubSplit};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
-    SplitMetaData, SplitReader,
+    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
+    SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
 const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
-
-impl_common_split_reader_logic!(PubsubSplitReader, PubsubProperties);
 
 pub struct PubsubSplitReader {
     subscription: Subscription,
@@ -44,8 +40,8 @@ pub struct PubsubSplitReader {
     source_ctx: SourceContextRef,
 }
 
-impl PubsubSplitReader {
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+impl CommonSplitReader for PubsubSplitReader {
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     async fn into_data_stream(self) {
         loop {
             let pull_result = self
@@ -110,10 +106,11 @@ impl PubsubSplitReader {
 #[async_trait]
 impl SplitReader for PubsubSplitReader {
     type Properties = PubsubProperties;
+    type Split = PubsubSplit;
 
     async fn new(
         properties: PubsubProperties,
-        splits: Vec<SplitImpl>,
+        splits: Vec<PubsubSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
@@ -122,12 +119,7 @@ impl SplitReader for PubsubSplitReader {
             splits.len() == 1,
             "the pubsub reader only supports a single split"
         );
-        let split = splits
-            .into_iter()
-            .next()
-            .unwrap()
-            .into_google_pubsub()
-            .unwrap();
+        let split = splits.into_iter().next().unwrap();
 
         // Set environment variables consumed by `google_cloud_pubsub`
         properties.initialize_env();
@@ -172,6 +164,8 @@ impl SplitReader for PubsubSplitReader {
     }
 
     fn into_stream(self) -> BoxSourceWithStateStream {
-        self.into_chunk_stream()
+        let parser_config = self.parser_config.clone();
+        let source_context = self.source_ctx.clone();
+        into_chunk_stream(self, parser_config, source_context)
     }
 }

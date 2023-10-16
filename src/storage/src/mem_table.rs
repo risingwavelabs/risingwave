@@ -23,10 +23,11 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
-use risingwave_hummock_sdk::key::{FullKey, TableKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use thiserror::Error;
 
 use crate::error::{StorageError, StorageResult};
+use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{
     cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
     do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
@@ -34,6 +35,10 @@ use crate::hummock::utils::{
 use crate::row_serde::value_serde::ValueRowSerde;
 use crate::storage_value::StorageValue;
 use crate::store::*;
+
+pub type ImmutableMemtable = SharedBufferBatch;
+
+pub type ImmId = SharedBufferBatchId;
 
 #[derive(Clone, Debug, EstimateSize)]
 pub enum KeyOp {
@@ -46,7 +51,7 @@ pub enum KeyOp {
 /// `MemTable` is a buffer for modify operations without encoding
 #[derive(Clone)]
 pub struct MemTable {
-    pub(crate) buffer: BTreeMap<Bytes, KeyOp>,
+    pub(crate) buffer: BTreeMap<TableKey<Bytes>, KeyOp>,
     pub(crate) is_consistent_op: bool,
     pub(crate) kv_size: KvSize,
 }
@@ -54,7 +59,11 @@ pub struct MemTable {
 #[derive(Error, Debug)]
 pub enum MemTableError {
     #[error("Inconsistent operation")]
-    InconsistentOperation { key: Bytes, prev: KeyOp, new: KeyOp },
+    InconsistentOperation {
+        key: TableKey<Bytes>,
+        prev: KeyOp,
+        new: KeyOp,
+    },
 }
 
 type Result<T> = std::result::Result<T, Box<MemTableError>>;
@@ -77,13 +86,8 @@ impl MemTable {
         !self.buffer.is_empty()
     }
 
-    /// read methods
-    pub fn get_key_op(&self, pk: &[u8]) -> Option<&KeyOp> {
-        self.buffer.get(pk)
-    }
-
     /// write methods
-    pub fn insert(&mut self, pk: Bytes, value: Bytes) -> Result<()> {
+    pub fn insert(&mut self, pk: TableKey<Bytes>, value: Bytes) -> Result<()> {
         if !self.is_consistent_op {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
             let insert_value = KeyOp::Insert(value);
@@ -125,7 +129,7 @@ impl MemTable {
         }
     }
 
-    pub fn delete(&mut self, pk: Bytes, old_value: Bytes) -> Result<()> {
+    pub fn delete(&mut self, pk: TableKey<Bytes>, old_value: Bytes) -> Result<()> {
         let key_len = std::mem::size_of::<Bytes>() + pk.len();
         if !self.is_consistent_op {
             let delete_value = KeyOp::Delete(old_value);
@@ -185,7 +189,12 @@ impl MemTable {
         }
     }
 
-    pub fn update(&mut self, pk: Bytes, old_value: Bytes, new_value: Bytes) -> Result<()> {
+    pub fn update(
+        &mut self,
+        pk: TableKey<Bytes>,
+        old_value: Bytes,
+        new_value: Bytes,
+    ) -> Result<()> {
         if !self.is_consistent_op {
             let key_len = std::mem::size_of::<Bytes>() + pk.len();
 
@@ -245,13 +254,16 @@ impl MemTable {
         }
     }
 
-    pub fn into_parts(self) -> BTreeMap<Bytes, KeyOp> {
+    pub fn into_parts(self) -> BTreeMap<TableKey<Bytes>, KeyOp> {
         self.buffer
     }
 
-    pub fn iter<'a, R>(&'a self, key_range: R) -> impl Iterator<Item = (&'a Bytes, &'a KeyOp)>
+    pub fn iter<'a, R>(
+        &'a self,
+        key_range: R,
+    ) -> impl Iterator<Item = (&'a TableKey<Bytes>, &'a KeyOp)>
     where
-        R: RangeBounds<Bytes> + 'a,
+        R: RangeBounds<TableKey<Bytes>> + 'a,
     {
         self.buffer.range(key_range)
     }
@@ -291,7 +303,7 @@ impl KeyOp {
 
 #[try_stream(ok = StateStoreIterItem, error = StorageError)]
 pub(crate) async fn merge_stream<'a>(
-    mem_table_iter: impl Iterator<Item = (&'a Bytes, &'a KeyOp)> + 'a,
+    mem_table_iter: impl Iterator<Item = (&'a TableKey<Bytes>, &'a KeyOp)> + 'a,
     inner_stream: impl StateStoreReadIterStream,
     table_id: TableId,
     epoch: u64,
@@ -314,17 +326,14 @@ pub(crate) async fn merge_stream<'a>(
                 let (key, key_op) = mem_table_iter.next().unwrap();
                 match key_op {
                     KeyOp::Insert(value) | KeyOp::Update((_, value)) => {
-                        yield (
-                            FullKey::new(table_id, TableKey(key.clone()), epoch),
-                            value.clone(),
-                        )
+                        yield (FullKey::new(table_id, key.clone(), epoch), value.clone())
                     }
                     _ => {}
                 }
             }
             (Some(Ok((inner_key, _))), Some((mem_table_key, _))) => {
                 debug_assert_eq!(inner_key.user_key.table_id, table_id);
-                match inner_key.user_key.table_key.0.cmp(mem_table_key) {
+                match inner_key.user_key.table_key.cmp(mem_table_key) {
                     Ordering::Less => {
                         // yield data from storage
                         let (key, value) = inner_stream.next().await.unwrap()?;
@@ -354,10 +363,7 @@ pub(crate) async fn merge_stream<'a>(
 
                         match key_op {
                             KeyOp::Insert(value) => {
-                                yield (
-                                    FullKey::new(table_id, TableKey(key.clone()), epoch),
-                                    value.clone(),
-                                );
+                                yield (FullKey::new(table_id, key.clone(), epoch), value.clone());
                             }
                             KeyOp::Delete(_) => {}
                             KeyOp::Update(_) => unreachable!(
@@ -409,13 +415,17 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     #[allow(clippy::unused_async)]
     async fn may_exist(
         &self,
-        _key_range: IterKeyRange,
+        _key_range: TableKeyRange,
         _read_options: ReadOptions,
     ) -> StorageResult<bool> {
         Ok(true)
     }
 
-    async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
+    async fn get(
+        &self,
+        key: TableKey<Bytes>,
+        read_options: ReadOptions,
+    ) -> StorageResult<Option<Bytes>> {
         match self.mem_table.buffer.get(&key) {
             None => self.inner.get(key, self.epoch(), read_options).await,
             Some(op) => match op {
@@ -428,7 +438,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     #[allow(clippy::manual_async_fn)]
     fn iter(
         &self,
-        key_range: IterKeyRange,
+        key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
         async move {
@@ -436,8 +446,6 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 .inner
                 .iter(key_range.clone(), self.epoch(), read_options)
                 .await?;
-            let (l, r) = key_range;
-            let key_range = (l.map(Bytes::from), r.map(Bytes::from));
             Ok(merge_stream(
                 self.mem_table.iter(key_range),
                 stream,
@@ -447,7 +455,12 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         }
     }
 
-    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
+    fn insert(
+        &mut self,
+        key: TableKey<Bytes>,
+        new_val: Bytes,
+        old_val: Option<Bytes>,
+    ) -> StorageResult<()> {
         match old_val {
             None => self.mem_table.insert(key, new_val)?,
             Some(old_val) => self.mem_table.update(key, old_val, new_val)?,
@@ -455,7 +468,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         Ok(())
     }
 
-    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+    fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
         Ok(self.mem_table.delete(key, old_val)?)
     }
 
@@ -539,12 +552,14 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         self.mem_table.is_dirty()
     }
 
-    fn init(&mut self, epoch: u64) {
+    #[allow(clippy::unused_async)]
+    async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
         assert!(
-            self.epoch.replace(epoch).is_none(),
+            self.epoch.replace(options.epoch.curr).is_none(),
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
+        Ok(())
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {
@@ -583,6 +598,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use risingwave_hummock_sdk::key::TableKey;
 
     use crate::mem_table::{KeyOp, MemTable};
 
@@ -591,7 +607,9 @@ mod tests {
         let mut mem_table = MemTable::new(true);
         assert_eq!(mem_table.kv_size.size(), 0);
 
-        mem_table.insert("key1".into(), "value1".into()).unwrap();
+        mem_table
+            .insert(TableKey("key1".into()), "value1".into())
+            .unwrap();
         assert_eq!(
             mem_table.kv_size.size(),
             std::mem::size_of::<Bytes>()
@@ -603,7 +621,9 @@ mod tests {
         // delete
         mem_table.drain();
         assert_eq!(mem_table.kv_size.size(), 0);
-        mem_table.delete("key2".into(), "value2".into()).unwrap();
+        mem_table
+            .delete(TableKey("key2".into()), "value2".into())
+            .unwrap();
         assert_eq!(
             mem_table.kv_size.size(),
             std::mem::size_of::<Bytes>()
@@ -611,7 +631,9 @@ mod tests {
                 + std::mem::size_of::<KeyOp>()
                 + Bytes::from("value2").len()
         );
-        mem_table.insert("key2".into(), "value22".into()).unwrap();
+        mem_table
+            .insert(TableKey("key2".into()), "value22".into())
+            .unwrap();
         assert_eq!(
             mem_table.kv_size.size(),
             std::mem::size_of::<Bytes>()
@@ -621,7 +643,9 @@ mod tests {
                 + Bytes::from("value2").len()
         );
 
-        mem_table.delete("key2".into(), "value22".into()).unwrap();
+        mem_table
+            .delete(TableKey("key2".into()), "value22".into())
+            .unwrap();
 
         assert_eq!(
             mem_table.kv_size.size(),
@@ -634,7 +658,9 @@ mod tests {
         // update
         mem_table.drain();
         assert_eq!(mem_table.kv_size.size(), 0);
-        mem_table.insert("key3".into(), "value3".into()).unwrap();
+        mem_table
+            .insert(TableKey("key3".into()), "value3".into())
+            .unwrap();
         assert_eq!(
             mem_table.kv_size.size(),
             std::mem::size_of::<Bytes>()
@@ -645,7 +671,7 @@ mod tests {
 
         // update-> insert
         mem_table
-            .update("key3".into(), "value3".into(), "value333".into())
+            .update(TableKey("key3".into()), "value3".into(), "value333".into())
             .unwrap();
         assert_eq!(
             mem_table.kv_size.size(),
@@ -657,7 +683,7 @@ mod tests {
 
         mem_table.drain();
         mem_table
-            .update("key4".into(), "value4".into(), "value44".into())
+            .update(TableKey("key4".into()), "value4".into(), "value44".into())
             .unwrap();
 
         assert_eq!(
@@ -669,7 +695,11 @@ mod tests {
                 + Bytes::from("value44").len()
         );
         mem_table
-            .update("key4".into(), "value44".into(), "value4444".into())
+            .update(
+                TableKey("key4".into()),
+                "value44".into(),
+                "value4444".into(),
+            )
             .unwrap();
 
         assert_eq!(
@@ -687,7 +717,10 @@ mod tests {
         let mut mem_table = MemTable::new(false);
         assert_eq!(mem_table.kv_size.size(), 0);
 
-        mem_table.insert("key1".into(), "value1".into()).unwrap();
+        mem_table
+            .insert(TableKey("key1".into()), "value1".into())
+            .unwrap();
+
         assert_eq!(
             mem_table.kv_size.size(),
             std::mem::size_of::<Bytes>()
@@ -696,7 +729,9 @@ mod tests {
                 + Bytes::from("value1").len()
         );
 
-        mem_table.insert("key1".into(), "value111".into()).unwrap();
+        mem_table
+            .insert(TableKey("key1".into()), "value111".into())
+            .unwrap();
         assert_eq!(
             mem_table.kv_size.size(),
             std::mem::size_of::<Bytes>()
@@ -707,7 +742,7 @@ mod tests {
         mem_table.drain();
 
         mem_table
-            .update("key4".into(), "value4".into(), "value44".into())
+            .update(TableKey("key4".into()), "value4".into(), "value44".into())
             .unwrap();
 
         assert_eq!(
@@ -719,7 +754,11 @@ mod tests {
                 + Bytes::from("value44").len()
         );
         mem_table
-            .update("key4".into(), "value44".into(), "value4444".into())
+            .update(
+                TableKey("key4".into()),
+                "value44".into(),
+                "value4444".into(),
+            )
             .unwrap();
 
         assert_eq!(

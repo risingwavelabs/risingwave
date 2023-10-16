@@ -90,75 +90,89 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
         Schema { fields }
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        let _left_len = self.left.schema().len();
-        let _right_len = self.right.schema().len();
-        let left_pk = self.left.logical_pk();
-        let right_pk = self.right.logical_pk();
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        let left_len = self.left.schema().len();
+        let right_len = self.right.schema().len();
+        let eq_predicate = EqJoinPredicate::create(left_len, right_len, self.on.clone());
+
+        let left_pk = self.left.stream_key()?;
+        let right_pk = self.right.stream_key()?;
         let l2i = self.l2i_col_mapping();
         let r2i = self.r2i_col_mapping();
         let full_out_col_num = self.internal_column_num();
         let i2o = ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
 
-        let pk_indices = left_pk
+        let mut pk_indices = left_pk
             .iter()
             .map(|index| l2i.try_map(*index))
             .chain(right_pk.iter().map(|index| r2i.try_map(*index)))
             .flatten()
             .map(|index| i2o.try_map(index))
-            .collect::<Option<Vec<_>>>();
+            .collect::<Option<Vec<_>>>()?;
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
-        pk_indices.and_then(|mut pk_indices| {
-            let left_len = self.left.schema().len();
-            let right_len = self.right.schema().len();
-            let eq_predicate = EqJoinPredicate::create(left_len, right_len, self.on.clone());
+        let l2i = self.l2i_col_mapping();
+        let r2i = self.r2i_col_mapping();
+        let full_out_col_num = self.internal_column_num();
+        let i2o = ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
 
-            let l2i = self.l2i_col_mapping();
-            let r2i = self.r2i_col_mapping();
-            let full_out_col_num = self.internal_column_num();
-            let i2o =
-                ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
+        let either_or_both = self.add_which_join_key_to_pk();
 
-            let either_or_both = self.add_which_join_key_to_pk();
-
-            for (lk, rk) in eq_predicate.eq_indexes() {
-                match either_or_both {
-                    EitherOrBoth::Left(_) => {
-                        if let Some(lk) = l2i.try_map(lk) {
-                            let out_k = i2o.try_map(lk)?;
-                            if !pk_indices.contains(&out_k) {
-                                pk_indices.push(out_k);
-                            }
+        for (lk, rk) in eq_predicate.eq_indexes() {
+            match either_or_both {
+                EitherOrBoth::Left(_) => {
+                    // Remove right-side join-key column it from pk_indices.
+                    // This may happen when right-side join-key is included in right-side PK.
+                    // e.g. select a, b where a.bid = b.id
+                    // Here the pk_indices should be [a.id, a.bid] instead of [a.id, b.id, a.bid],
+                    // because b.id = a.bid, so either of them would be enough.
+                    if let Some(rk) = r2i.try_map(rk) {
+                        if let Some(out_k) = i2o.try_map(rk) {
+                            pk_indices.retain(|&x| x != out_k);
                         }
                     }
-                    EitherOrBoth::Right(_) => {
-                        if let Some(rk) = r2i.try_map(rk) {
-                            let out_k = i2o.try_map(rk)?;
-                            if !pk_indices.contains(&out_k) {
-                                pk_indices.push(out_k);
-                            }
+                    // Add left-side join-key column in pk_indices
+                    if let Some(lk) = l2i.try_map(lk) {
+                        let out_k = i2o.try_map(lk)?;
+                        if !pk_indices.contains(&out_k) {
+                            pk_indices.push(out_k);
                         }
                     }
-                    EitherOrBoth::Both(_, _) => {
-                        if let Some(lk) = l2i.try_map(lk) {
-                            let out_k = i2o.try_map(lk)?;
-                            if !pk_indices.contains(&out_k) {
-                                pk_indices.push(out_k);
-                            }
-                        }
-                        if let Some(rk) = r2i.try_map(rk) {
-                            let out_k = i2o.try_map(rk)?;
-                            if !pk_indices.contains(&out_k) {
-                                pk_indices.push(out_k);
-                            }
+                }
+                EitherOrBoth::Right(_) => {
+                    // Remove left-side join-key column it from pk_indices
+                    // See the example above
+                    if let Some(lk) = l2i.try_map(lk) {
+                        if let Some(out_k) = i2o.try_map(lk) {
+                            pk_indices.retain(|&x| x != out_k);
                         }
                     }
-                };
-            }
-            Some(pk_indices)
-        })
+                    // Add right-side join-key column in pk_indices
+                    if let Some(rk) = r2i.try_map(rk) {
+                        let out_k = i2o.try_map(rk)?;
+                        if !pk_indices.contains(&out_k) {
+                            pk_indices.push(out_k);
+                        }
+                    }
+                }
+                EitherOrBoth::Both(_, _) => {
+                    if let Some(lk) = l2i.try_map(lk) {
+                        let out_k = i2o.try_map(lk)?;
+                        if !pk_indices.contains(&out_k) {
+                            pk_indices.push(out_k);
+                        }
+                    }
+                    if let Some(rk) = r2i.try_map(rk) {
+                        let out_k = i2o.try_map(rk)?;
+                        if !pk_indices.contains(&out_k) {
+                            pk_indices.push(out_k);
+                        }
+                    }
+                }
+            };
+        }
+        Some(pk_indices)
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -202,11 +216,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
                 get_new_left_fd_set(left_fd_set)
                     .into_dependencies()
                     .into_iter()
-                    .chain(
-                        get_new_right_fd_set(right_fd_set)
-                            .into_dependencies()
-                            .into_iter(),
-                    )
+                    .chain(get_new_right_fd_set(right_fd_set).into_dependencies())
                     .for_each(|fd| fd_set.add_functional_dependency(fd));
                 fd_set
             }
@@ -407,7 +417,7 @@ pub fn push_down_into_join(
         // Do not push now on to the on, it will be pulled up into a filter instead.
         let on = Condition {
             conjunctions: conjunctions
-                .drain_filter(|expr| expr.count_nows() == 0)
+                .extract_if(|expr| expr.count_nows() == 0)
                 .collect(),
         };
         predicate.conjunctions = conjunctions;

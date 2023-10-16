@@ -26,7 +26,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(s.v)] }
         └── StreamSimpleAgg { aggs: [max(s.v), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── Chain { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
@@ -49,9 +49,9 @@
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished, s_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -83,7 +83,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum(s.v)] }
         └── StreamSimpleAgg { aggs: [sum(s.v), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── Chain { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
@@ -99,9 +99,9 @@
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished, s_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -133,7 +133,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [count(s.v)] }
         └── StreamSimpleAgg { aggs: [count(s.v), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── Chain { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], dist: Single }
@@ -149,9 +149,9 @@
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished, s_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -185,7 +185,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.v ASC))] }
         └── StreamSimpleAgg { aggs: [string_agg(s.s, ',':Varchar order_by(s.v ASC)), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamProject { exprs: [s.s, ',':Varchar, s.v, s.t._row_id] }
@@ -209,9 +209,9 @@
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished, s_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -247,14 +247,14 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(max(t.v))] }
         └── StreamSimpleAgg { aggs: [max(max(t.v)), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamHashAgg { group_key: [$expr1], aggs: [max(t.v), count] }
-    ├── result table: 3
+    ├── intermediate state table: 3
     ├── state tables: [ 2 ]
     ├── distinct tables: []
     └── StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
@@ -294,9 +294,9 @@
     └── vnode column idx: 0
 
     Table 4
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -326,7 +326,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(max(ao.v))] }
         └── StreamSimpleAgg [append_only] { aggs: [max(max(ao.v)), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -346,9 +346,9 @@
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ vnode, _row_id, ao_backfill_finished ]
+    ├── columns: [ vnode, _row_id, ao_backfill_finished, ao_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -383,7 +383,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum(sum(t.v))] }
         └── StreamSimpleAgg { aggs: [sum(sum(t.v)), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -403,9 +403,9 @@
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -435,7 +435,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum(sum(ao.v))] }
         └── StreamSimpleAgg [append_only] { aggs: [sum(sum(ao.v)), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -455,9 +455,9 @@
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ vnode, _row_id, ao_backfill_finished ]
+    ├── columns: [ vnode, _row_id, ao_backfill_finished, ao_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -492,7 +492,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum0(count(t.v))] }
         └── StreamSimpleAgg { aggs: [sum0(count(t.v)), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -512,9 +512,9 @@
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -544,7 +544,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum0(count(ao.v))] }
         └── StreamSimpleAgg [append_only] { aggs: [sum0(count(ao.v)), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -564,9 +564,9 @@
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ vnode, _row_id, ao_backfill_finished ]
+    ├── columns: [ vnode, _row_id, ao_backfill_finished, ao_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -601,7 +601,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
         └── StreamSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC)), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -628,9 +628,9 @@
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -660,7 +660,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC))] }
         └── StreamSimpleAgg [append_only] { aggs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -687,9 +687,9 @@
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, _row_id, ao_backfill_finished ]
+    ├── columns: [ vnode, _row_id, ao_backfill_finished, ao_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -725,14 +725,14 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(max(t.v)), sum0(count(t.v))] }
         └── StreamSimpleAgg { aggs: [max(max(t.v)), sum0(count(t.v)), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Single from 1
 
     Fragment 1
     StreamHashAgg { group_key: [$expr1], aggs: [max(t.v), count(t.v), count] }
-    ├── result table: 3
+    ├── intermediate state table: 3
     ├── state tables: [ 2 ]
     ├── distinct tables: []
     └── StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
@@ -772,9 +772,9 @@
     └── vnode column idx: 0
 
     Table 4
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -804,7 +804,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(max(ao.v)), sum0(count(ao.v))] }
         └── StreamSimpleAgg [append_only] { aggs: [max(max(ao.v)), sum0(count(ao.v)), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -824,9 +824,9 @@
     └── read pk prefix len hint: 0
 
     Table 1
-    ├── columns: [ vnode, _row_id, ao_backfill_finished ]
+    ├── columns: [ vnode, _row_id, ao_backfill_finished, ao_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -861,7 +861,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
         └── StreamSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC)), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -888,9 +888,9 @@
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -920,7 +920,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC))] }
         └── StreamSimpleAgg [append_only] { aggs: [count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -947,9 +947,9 @@
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, _row_id, ao_backfill_finished ]
+    ├── columns: [ vnode, _row_id, ao_backfill_finished, ao_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -984,7 +984,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
         └── StreamSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC)), count] }
-            ├── result table: 2
+            ├── intermediate state table: 2
             ├── state tables: [ 0, 1 ]
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -1018,9 +1018,9 @@
     └── read pk prefix len hint: 0
 
     Table 3
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1050,7 +1050,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC))] }
         └── StreamSimpleAgg [append_only] { aggs: [max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Single from 1
@@ -1077,9 +1077,9 @@
     └── read pk prefix len hint: 0
 
     Table 2
-    ├── columns: [ vnode, _row_id, ao_backfill_finished ]
+    ├── columns: [ vnode, _row_id, ao_backfill_finished, ao_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1114,7 +1114,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(t.v), t.k] }
         └── StreamHashAgg { group_key: [t.k], aggs: [max(t.v), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -1140,9 +1140,9 @@
     └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1175,7 +1175,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(tk.v), tk.k] }
         └── StreamHashAgg { group_key: [tk.k], aggs: [max(tk.v), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], dist: UpstreamHashShard(tk.k) }
@@ -1198,9 +1198,9 @@
     └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, k, t__row_id, tk_backfill_finished ]
+    ├── columns: [ vnode, k, t__row_id, tk_backfill_finished, tk_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1235,7 +1235,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(s.v), s.k] }
         └── StreamHashAgg { group_key: [s.k], aggs: [max(s.v), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -1261,9 +1261,9 @@
     └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished, s_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1292,7 +1292,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [max(ao.v), ao.k] }
         └── StreamHashAgg [append_only] { group_key: [ao.k], aggs: [max(ao.v), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -1311,9 +1311,9 @@
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ vnode, _row_id, ao_backfill_finished ]
+    ├── columns: [ vnode, _row_id, ao_backfill_finished, ao_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1348,7 +1348,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum(t.v), t.k] }
         └── StreamHashAgg { group_key: [t.k], aggs: [sum(t.v), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -1367,9 +1367,9 @@
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1402,7 +1402,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum(tk.v), tk.k] }
         └── StreamHashAgg { group_key: [tk.k], aggs: [sum(tk.v), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], dist: UpstreamHashShard(tk.k) }
@@ -1418,9 +1418,9 @@
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ vnode, k, t__row_id, tk_backfill_finished ]
+    ├── columns: [ vnode, k, t__row_id, tk_backfill_finished, tk_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1455,7 +1455,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum(s.v), s.k] }
         └── StreamHashAgg { group_key: [s.k], aggs: [sum(s.v), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -1474,9 +1474,9 @@
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished, s_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1505,7 +1505,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum(ao.v), ao.k] }
         └── StreamHashAgg [append_only] { group_key: [ao.k], aggs: [sum(ao.v), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -1524,9 +1524,9 @@
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ vnode, _row_id, ao_backfill_finished ]
+    ├── columns: [ vnode, _row_id, ao_backfill_finished, ao_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1561,7 +1561,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [count(t.v), t.k] }
         └── StreamHashAgg { group_key: [t.k], aggs: [count(t.v), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -1580,9 +1580,9 @@
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1615,7 +1615,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [count(tk.v), tk.k] }
         └── StreamHashAgg { group_key: [tk.k], aggs: [count(tk.v), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── Chain { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], dist: UpstreamHashShard(tk.k) }
@@ -1631,9 +1631,9 @@
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ vnode, k, t__row_id, tk_backfill_finished ]
+    ├── columns: [ vnode, k, t__row_id, tk_backfill_finished, tk_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1668,7 +1668,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [count(s.v), s.k] }
         └── StreamHashAgg { group_key: [s.k], aggs: [count(s.v), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -1687,9 +1687,9 @@
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished, s_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1718,7 +1718,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [count(ao.v), ao.k] }
         └── StreamHashAgg [append_only] { group_key: [ao.k], aggs: [count(ao.v), count] }
-            ├── result table: 0
+            ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -1737,9 +1737,9 @@
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ vnode, _row_id, ao_backfill_finished ]
+    ├── columns: [ vnode, _row_id, ao_backfill_finished, ao_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1776,7 +1776,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [string_agg(t.s, ',':Varchar order_by(t.o ASC)), t.k] }
         └── StreamHashAgg { group_key: [t.k], aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC)), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -1803,9 +1803,9 @@
     └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1840,7 +1840,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC)), tk.k] }
         └── StreamHashAgg { group_key: [tk.k], aggs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC)), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamProject { exprs: [tk.k, tk.s, ',':Varchar, tk.o, tk.t._row_id] }
@@ -1864,9 +1864,9 @@
     └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, k, t__row_id, tk_backfill_finished ]
+    ├── columns: [ vnode, k, t__row_id, tk_backfill_finished, tk_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1903,7 +1903,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.o ASC)), s.k] }
         └── StreamHashAgg { group_key: [s.k], aggs: [string_agg(s.s, ',':Varchar order_by(s.o ASC)), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -1930,9 +1930,9 @@
     └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
+    ├── columns: [ vnode, o, t__row_id, s_backfill_finished, s_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1962,7 +1962,7 @@
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), ao.k] }
         └── StreamHashAgg [append_only] { group_key: [ao.k], aggs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC)), count] }
-            ├── result table: 1
+            ├── intermediate state table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── StreamExchange Hash([0]) from 1
@@ -1989,9 +1989,9 @@
     └── read pk prefix len hint: 1
 
     Table 2
-    ├── columns: [ vnode, _row_id, ao_backfill_finished ]
+    ├── columns: [ vnode, _row_id, ao_backfill_finished, ao_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0

@@ -16,10 +16,8 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use risingwave_rpc_client::HummockMetaClient;
 
 use super::task_progress::TaskProgressManagerRef;
-use crate::filter_key_extractor::FilterKeyExtractorManager;
 use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::MemoryLimiter;
@@ -32,9 +30,6 @@ pub struct CompactorContext {
     /// Storage options.
     pub storage_opts: Arc<StorageOpts>,
 
-    /// The meta client.
-    pub hummock_meta_client: Arc<dyn HummockMetaClient>,
-
     /// Sstable store that manages the sstables.
     pub sstable_store: SstableStoreRef,
 
@@ -45,8 +40,6 @@ pub struct CompactorContext {
     pub is_share_buffer_compact: bool,
 
     pub compaction_executor: Arc<CompactionExecutor>,
-
-    pub filter_key_extractor_manager: FilterKeyExtractorManager,
 
     pub memory_limiter: Arc<MemoryLimiter>,
 
@@ -61,9 +54,7 @@ impl CompactorContext {
     pub fn new_local_compact_context(
         storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
         compactor_metrics: Arc<CompactorMetrics>,
-        filter_key_extractor_manager: FilterKeyExtractorManager,
     ) -> Self {
         let compaction_executor = if storage_opts.share_buffer_compaction_worker_threads_number == 0
         {
@@ -77,12 +68,10 @@ impl CompactorContext {
         // not limit memory for local compact
         Self {
             storage_opts,
-            hummock_meta_client,
             sstable_store,
             compactor_metrics,
             is_share_buffer_compact: true,
             compaction_executor,
-            filter_key_extractor_manager,
             memory_limiter: MemoryLimiter::unlimit(),
             task_progress_manager: Default::default(),
             await_tree_reg: None,

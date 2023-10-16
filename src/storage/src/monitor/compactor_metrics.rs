@@ -26,6 +26,7 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 #[derive(Debug, Clone)]
 pub struct CompactorMetrics {
     pub compaction_upload_sst_counts: GenericCounter<AtomicU64>,
+    pub compact_fast_runner_bytes: GenericCounter<AtomicU64>,
     pub compact_write_bytes: GenericCounterVec<AtomicU64>,
     pub compact_read_current_level: GenericCounterVec<AtomicU64>,
     pub compact_read_next_level: GenericCounterVec<AtomicU64>,
@@ -46,7 +47,6 @@ pub struct CompactorMetrics {
     pub iter_scan_key_counts: GenericCounterVec<AtomicU64>,
     pub write_build_l0_bytes: GenericCounter<AtomicU64>,
     pub sstable_distinct_epoch_count: Histogram,
-    pub preload_io_count: GenericCounter<AtomicU64>,
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
 }
@@ -212,7 +212,12 @@ impl CompactorMetrics {
             "Total size of compaction files size that have been written to object store from shared buffer",
             registry
         ).unwrap();
-
+        let compact_fast_runner_bytes = register_int_counter_with_registry!(
+            "compactor_fast_compact_bytes",
+            "Total size of compaction files size of fast compactor runner",
+            registry
+        )
+        .unwrap();
         let opts = histogram_opts!(
             "compactor_sstable_distinct_epoch_count",
             "Total number gotten from sstable_distinct_epoch_count, for observing sstable_distinct_epoch_count",
@@ -221,12 +226,6 @@ impl CompactorMetrics {
 
         let sstable_distinct_epoch_count =
             register_histogram_with_registry!(opts, registry).unwrap();
-        let preload_io_count = register_int_counter_with_registry!(
-            "sstable_preload_io_count",
-            "Total number of preload io count",
-            registry
-        )
-        .unwrap();
 
         let opts = histogram_opts!(
             "compactor_compaction_event_consumed_latency",
@@ -246,6 +245,7 @@ impl CompactorMetrics {
 
         Self {
             compaction_upload_sst_counts,
+            compact_fast_runner_bytes,
             compact_write_bytes,
             compact_read_current_level,
             compact_read_next_level,
@@ -266,7 +266,6 @@ impl CompactorMetrics {
             iter_scan_key_counts,
             write_build_l0_bytes,
             sstable_distinct_epoch_count,
-            preload_io_count,
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
         }

@@ -3,11 +3,11 @@ on:
   pull_request:
     branches:
       - main
-    types: ["closed"]
+    types: ["closed", "labeled"]
 
 jobs:
-  release_pull_request_1_1:
-    if: "contains(github.event.pull_request.labels.*.name, 'need-cherry-pick-v1.1')  &&  github.event.pull_request.merged == true"
+  release_pull_request_1_3:
+    if: "contains(github.event.pull_request.labels.*.name, 'need-cherry-pick-v1.3')  &&  github.event.pull_request.merged == true"
     runs-on: ubuntu-latest
     name: release_pull_request
     steps:
@@ -16,9 +16,9 @@ jobs:
       - name: Create PR to branch
         uses: risingwavelabs/github-action-cherry-pick@master
         with:
-          pr_branch: 'v1.1-rc'
+          pr_branch: 'v1.3-rc'
           pr_labels: 'cherry-pick'
-          pr_body: ${{ format('Cherry picking \#{0} onto branch v1.1-rc', github.event.number) }}
+          pr_body: ${{ format('Cherry picking \#{0} onto branch v1.3-rc', github.event.number) }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

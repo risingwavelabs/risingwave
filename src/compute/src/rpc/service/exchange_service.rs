@@ -42,8 +42,8 @@ pub struct ExchangeServiceImpl {
     metrics: Arc<ExchangeServiceMetrics>,
 }
 
-type BatchDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
-type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
+pub type BatchDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+pub type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
 
 #[async_trait::async_trait]
 impl ExchangeService for ExchangeServiceImpl {
@@ -138,7 +138,7 @@ impl ExchangeServiceImpl {
         up_down_actor_ids: (u32, u32),
         up_down_fragment_ids: (u32, u32),
     ) {
-        tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
+        tracing::debug!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
         let up_actor_id = up_down_actor_ids.0.to_string();
         let up_fragment_id = up_down_fragment_ids.0.to_string();
         let down_fragment_id = up_down_fragment_ids.1.to_string();

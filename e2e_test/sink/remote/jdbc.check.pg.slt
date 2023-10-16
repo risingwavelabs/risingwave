@@ -33,3 +33,14 @@ select * from t_append_only order by v1, v2;
 1 aaa
 1 bbb
 2 ccc
+
+query I
+select * from biz.t2 order by "aBc";
+----
+1
+2
+
+query IT
+select * from t1_uuid;
+----
+221 74605c5a-a7bb-4b3b-8742-2a12e9709dea hello world

@@ -13,12 +13,13 @@
 // limitations under the License.
 
 #![feature(let_chains)]
-#![feature(hash_drain_filter)]
+#![feature(hash_extract_if)]
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
 use crate::cmd_impl::hummock::{
@@ -220,6 +221,10 @@ enum HummockCommands {
         level0_max_compact_file_number: Option<u64>,
         #[clap(long)]
         level0_overlapping_sub_level_compact_level_count: Option<u32>,
+        #[clap(long)]
+        enable_emergency_picker: Option<bool>,
+        #[clap(long)]
+        tombstone_reclaim_ratio: Option<u32>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -239,6 +244,8 @@ enum HummockCommands {
         #[clap(short, long = "verbose", default_value_t = false)]
         verbose: bool,
     },
+    /// Validate the current HummockVersion.
+    ValidateVersion,
 }
 
 #[derive(Subcommand)]
@@ -261,9 +268,8 @@ enum TableCommands {
     List,
 }
 
-#[derive(clap::Args, Debug)]
-#[clap(group(clap::ArgGroup::new("workers_group").required(true).multiple(true).args(&["include_workers", "exclude_workers", "target_parallelism"])))]
-pub struct ScaleResizeCommands {
+#[derive(clap::Args, Debug, Clone)]
+pub struct ScaleHorizonCommands {
     /// The worker that needs to be excluded during scheduling, worker_id and worker_host are both
     /// supported
     #[clap(
@@ -288,15 +294,12 @@ pub struct ScaleResizeCommands {
     #[clap(long)]
     target_parallelism: Option<u32>,
 
-    /// The target parallelism per worker, conflicts with `target_parallelism`, requires
-    /// `include_workers` to be set.
-    #[clap(
-        long,
-        requires = "include_workers",
-        conflicts_with = "target_parallelism"
-    )]
-    target_parallelism_per_worker: Option<u32>,
+    #[command(flatten)]
+    common: ScaleCommon,
+}
 
+#[derive(clap::Args, Debug, Clone)]
+pub struct ScaleCommon {
     /// Will generate a plan supported by the `reschedule` command and save it to the provided path
     /// by the `--output`.
     #[clap(long, default_value_t = false)]
@@ -312,16 +315,42 @@ pub struct ScaleResizeCommands {
 
     /// Specify the fragment ids that need to be scheduled.
     /// empty by default, which means all fragments will be scheduled
-    #[clap(long)]
+    #[clap(long, value_delimiter = ',')]
     fragments: Option<Vec<u32>>,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ScaleVerticalCommands {
+    #[command(flatten)]
+    common: ScaleCommon,
+
+    /// The worker that needs to be scheduled, worker_id and worker_host are both
+    /// supported
+    #[clap(
+        long,
+        required = true,
+        value_delimiter = ',',
+        value_name = "all or worker_id or worker_host, ..."
+    )]
+    workers: Option<Vec<String>>,
+
+    /// The target parallelism per worker, requires `workers` to be set.
+    #[clap(long, required = true)]
+    target_parallelism_per_worker: Option<u32>,
 }
 
 #[derive(Subcommand, Debug)]
 enum ScaleCommands {
-    /// The resize command scales the cluster by specifying the workers to be included and
-    /// excluded.
-    Resize(ScaleResizeCommands),
-    /// mark a compute node as unschedulable
+    /// Scale the compute nodes horizontally, alias of `horizon`
+    Resize(ScaleHorizonCommands),
+
+    /// Scale the compute nodes horizontally
+    Horizon(ScaleHorizonCommands),
+
+    /// Scale the compute nodes vertically
+    Vertical(ScaleVerticalCommands),
+
+    /// Mark a compute node as unschedulable
     #[clap(verbatim_doc_comment)]
     Cordon {
         /// Workers that need to be cordoned, both id and host are supported.
@@ -393,6 +422,11 @@ enum MetaCommands {
     },
     /// backup meta by taking a meta snapshot
     BackupMeta,
+    /// restore meta by recovering from a meta snapshot
+    RestoreMeta {
+        #[command(flatten)]
+        opts: RestoreOpts,
+    },
     /// delete meta snapshots
     DeleteMetaSnapshots { snapshot_ids: Vec<u64> },
 
@@ -443,7 +477,7 @@ pub enum ProfileCommands {
     Heap {
         /// The output directory of the dumped file
         #[clap(long = "dir")]
-        dir: String,
+        dir: Option<String>,
     },
 }
 
@@ -526,6 +560,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             max_space_reclaim_bytes,
             level0_max_compact_file_number,
             level0_overlapping_sub_level_compact_level_count,
+            enable_emergency_picker,
+            tombstone_reclaim_ratio,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -544,6 +580,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     max_space_reclaim_bytes,
                     level0_max_compact_file_number,
                     level0_overlapping_sub_level_compact_level_count,
+                    enable_emergency_picker,
+                    tombstone_reclaim_ratio,
                 ),
             )
             .await?
@@ -566,6 +604,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Hummock(HummockCommands::ListCompactionStatus { verbose }) => {
             cmd_impl::hummock::list_compaction_status(context, verbose).await?;
+        }
+        Commands::Hummock(HummockCommands::ValidateVersion) => {
+            cmd_impl::hummock::validate_version(context).await?;
         }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?
@@ -592,6 +633,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
+        Commands::Meta(MetaCommands::RestoreMeta { opts }) => {
+            risingwave_meta::backup_restore::restore(opts).await?
+        }
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
         }
@@ -616,8 +660,12 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Profile(ProfileCommands::Heap { dir }) => {
             cmd_impl::profile::heap_profile(context, dir).await?
         }
-        Commands::Scale(ScaleCommands::Resize(resize)) => {
-            cmd_impl::scale::resize(context, resize).await?
+        Commands::Scale(ScaleCommands::Horizon(resize))
+        | Commands::Scale(ScaleCommands::Resize(resize)) => {
+            cmd_impl::scale::resize(context, resize.into()).await?
+        }
+        Commands::Scale(ScaleCommands::Vertical(resize)) => {
+            cmd_impl::scale::resize(context, resize.into()).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)

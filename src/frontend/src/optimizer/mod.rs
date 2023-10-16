@@ -42,6 +42,7 @@ use risingwave_common::catalog::{ColumnCatalog, ColumnId, ConflictBehavior, Fiel
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_connector::sink::catalog::SinkFormatDesc;
 use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
@@ -438,7 +439,8 @@ impl PlanRoot {
             append_only,
             columns
                 .iter()
-                .filter_map(|c| (!c.is_generated()).then(|| c.column_desc.clone()))
+                .filter(|&c| (!c.is_generated()))
+                .map(|c| c.column_desc.clone())
                 .collect(),
         )
         .into();
@@ -447,6 +449,7 @@ impl PlanRoot {
         let exprs = LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
         if let Some(exprs) = exprs {
             let logical_project = generic::Project::new(exprs, stream_plan);
+            // The project node merges a chunk if it has an ungenerated row id as stream key.
             stream_plan = StreamProject::new(logical_project).into();
         }
 
@@ -555,6 +558,7 @@ impl PlanRoot {
         emit_on_window_close: bool,
         db_name: String,
         sink_from_table_name: String,
+        format_desc: Option<SinkFormatDesc>,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
@@ -569,6 +573,7 @@ impl PlanRoot {
             self.out_names.clone(),
             definition,
             properties,
+            format_desc,
         )
     }
 

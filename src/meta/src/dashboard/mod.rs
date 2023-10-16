@@ -17,13 +17,14 @@ mod proxy;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use axum::body::Body;
+use axum::body::{boxed, Body};
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, get_service};
 use axum::Router;
 use hyper::Request;
@@ -35,43 +36,53 @@ use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
 
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
-use crate::storage::MetaStore;
+use crate::storage::MetaStoreRef;
 
 #[derive(Clone)]
-pub struct DashboardService<S: MetaStore> {
+pub struct DashboardService {
     pub dashboard_addr: SocketAddr,
     pub prometheus_endpoint: Option<String>,
     pub prometheus_client: Option<prometheus_http_query::Client>,
-    pub cluster_manager: ClusterManagerRef<S>,
-    pub fragment_manager: FragmentManagerRef<S>,
+    pub cluster_manager: ClusterManagerRef,
+    pub fragment_manager: FragmentManagerRef,
     pub compute_clients: ComputeClientPool,
-
-    // TODO: replace with catalog manager.
-    pub meta_store: Arc<S>,
+    pub ui_path: Option<String>,
+    pub meta_store: MetaStoreRef,
 }
 
-pub type Service<S> = Arc<DashboardService<S>>;
+pub type Service = Arc<DashboardService>;
 
 pub(super) mod handlers {
     use anyhow::Context;
     use axum::Json;
     use itertools::Itertools;
+    use risingwave_common::bail;
+    use risingwave_common::heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table};
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
-    use risingwave_pb::monitor_service::StackTraceResponse;
+    use risingwave_pb::monitor_service::{
+        HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
+    };
     use serde_json::json;
 
     use super::*;
     use crate::manager::WorkerId;
     use crate::model::TableFragments;
+    use crate::storage::MetaStoreRef;
 
     pub struct DashboardError(anyhow::Error);
     pub type Result<T> = std::result::Result<T, DashboardError>;
 
     pub fn err(err: impl Into<anyhow::Error>) -> DashboardError {
         DashboardError(err.into())
+    }
+
+    impl From<anyhow::Error> for DashboardError {
+        fn from(value: anyhow::Error) -> Self {
+            DashboardError(value)
+        }
     }
 
     impl IntoResponse for DashboardError {
@@ -86,16 +97,16 @@ pub(super) mod handlers {
         }
     }
 
-    pub async fn list_clusters<S: MetaStore>(
+    pub async fn list_clusters(
         Path(ty): Path<i32>,
-        Extension(srv): Extension<Service<S>>,
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<WorkerNode>>> {
         use risingwave_pb::common::WorkerType;
         let mut result = srv
             .cluster_manager
             .list_worker_node(
-                WorkerType::from_i32(ty)
-                    .ok_or_else(|| anyhow!("invalid worker type"))
+                WorkerType::try_from(ty)
+                    .map_err(|_| anyhow!("invalid worker type"))
                     .map_err(err)?,
                 None,
             )
@@ -104,8 +115,8 @@ pub(super) mod handlers {
         Ok(result.into())
     }
 
-    async fn list_table_catalogs_inner<S: MetaStore>(
-        meta_store: &S,
+    async fn list_table_catalogs_inner(
+        meta_store: &MetaStoreRef,
         table_type: TableType,
     ) -> Result<Json<Vec<Table>>> {
         use crate::model::MetadataModel;
@@ -120,50 +131,42 @@ pub(super) mod handlers {
         Ok(Json(results))
     }
 
-    pub async fn list_materialized_views<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
+    pub async fn list_materialized_views(
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&*srv.meta_store, TableType::MaterializedView).await
+        list_table_catalogs_inner(&srv.meta_store, TableType::MaterializedView).await
     }
 
-    pub async fn list_tables<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&*srv.meta_store, TableType::Table).await
+    pub async fn list_tables(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
+        list_table_catalogs_inner(&srv.meta_store, TableType::Table).await
     }
 
-    pub async fn list_indexes<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&*srv.meta_store, TableType::Index).await
+    pub async fn list_indexes(Extension(srv): Extension<Service>) -> Result<Json<Vec<Table>>> {
+        list_table_catalogs_inner(&srv.meta_store, TableType::Index).await
     }
 
-    pub async fn list_internal_tables<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
+    pub async fn list_internal_tables(
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<Table>>> {
-        list_table_catalogs_inner(&*srv.meta_store, TableType::Internal).await
+        list_table_catalogs_inner(&srv.meta_store, TableType::Internal).await
     }
 
-    pub async fn list_sources<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<Source>>> {
+    pub async fn list_sources(Extension(srv): Extension<Service>) -> Result<Json<Vec<Source>>> {
         use crate::model::MetadataModel;
 
-        let sources = Source::list(&*srv.meta_store).await.map_err(err)?;
+        let sources = Source::list(&srv.meta_store).await.map_err(err)?;
         Ok(Json(sources))
     }
 
-    pub async fn list_sinks<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<Sink>>> {
+    pub async fn list_sinks(Extension(srv): Extension<Service>) -> Result<Json<Vec<Sink>>> {
         use crate::model::MetadataModel;
 
-        let sinks = Sink::list(&*srv.meta_store).await.map_err(err)?;
+        let sinks = Sink::list(&srv.meta_store).await.map_err(err)?;
         Ok(Json(sinks))
     }
 
-    pub async fn list_actors<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
+    pub async fn list_actors(
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<ActorLocation>>> {
         let mut node_actors = srv.fragment_manager.all_node_actors(true).await;
         let nodes = srv
@@ -181,12 +184,12 @@ pub(super) mod handlers {
         Ok(Json(actors))
     }
 
-    pub async fn list_fragments<S: MetaStore>(
-        Extension(srv): Extension<Service<S>>,
+    pub async fn list_fragments(
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<PbTableFragments>>> {
         use crate::model::MetadataModel;
 
-        let table_fragments = TableFragments::list(&*srv.meta_store)
+        let table_fragments = TableFragments::list(&srv.meta_store)
             .await
             .map_err(err)?
             .into_iter()
@@ -195,9 +198,9 @@ pub(super) mod handlers {
         Ok(Json(table_fragments))
     }
 
-    pub async fn dump_await_tree<S: MetaStore>(
+    pub async fn dump_await_tree(
         Path(worker_id): Path<WorkerId>,
-        Extension(srv): Extension<Service<S>>,
+        Extension(srv): Extension<Service>,
     ) -> Result<Json<StackTraceResponse>> {
         let worker_node = srv
             .cluster_manager
@@ -213,14 +216,93 @@ pub(super) mod handlers {
 
         Ok(result.into())
     }
+
+    pub async fn heap_profile(
+        Path(worker_id): Path<WorkerId>,
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<HeapProfilingResponse>> {
+        let worker_node = srv
+            .cluster_manager
+            .get_worker_by_id(worker_id)
+            .await
+            .context("worker node not found")
+            .map_err(err)?
+            .worker_node;
+
+        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+
+        let result = client.heap_profile("".to_string()).await.map_err(err)?;
+
+        Ok(result.into())
+    }
+
+    pub async fn list_heap_profile(
+        Path(worker_id): Path<WorkerId>,
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<ListHeapProfilingResponse>> {
+        let worker_node = srv
+            .cluster_manager
+            .get_worker_by_id(worker_id)
+            .await
+            .context("worker node not found")
+            .map_err(err)?
+            .worker_node;
+
+        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+
+        let result = client.list_heap_profile().await.map_err(err)?;
+        Ok(result.into())
+    }
+
+    pub async fn analyze_heap(
+        Path((worker_id, file_path)): Path<(WorkerId, String)>,
+        Extension(srv): Extension<Service>,
+    ) -> Result<Response> {
+        if srv.ui_path.is_none() {
+            bail!("Should provide ui_path");
+        }
+
+        let file_path =
+            String::from_utf8(base64_url::decode(&file_path).map_err(err)?).map_err(err)?;
+
+        let file_name = FilePath::new(&file_path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        let collapsed_file_name = format!("{}.{}", file_name, COLLAPSED_SUFFIX);
+
+        let worker_node = srv
+            .cluster_manager
+            .get_worker_by_id(worker_id)
+            .await
+            .context("worker node not found")
+            .map_err(err)?
+            .worker_node;
+
+        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+
+        let collapsed_bin = client
+            .analyze_heap(file_path.clone())
+            .await
+            .map_err(err)?
+            .result;
+        let collapsed_str = String::from_utf8_lossy(&collapsed_bin).to_string();
+
+        let response = Response::builder()
+            .header("Content-Type", "application/octet-stream")
+            .header("Content-Disposition", collapsed_file_name)
+            .body(boxed(collapsed_str));
+
+        response.map_err(err)
+    }
 }
 
-impl<S> DashboardService<S>
-where
-    S: MetaStore,
-{
-    pub async fn serve(self, ui_path: Option<String>) -> Result<()> {
+impl DashboardService {
+    pub async fn serve(self) -> Result<()> {
         use handlers::*;
+        let ui_path = self.ui_path.clone();
         let srv = Arc::new(self);
 
         let cors_layer = CorsLayer::new()
@@ -228,24 +310,27 @@ where
             .allow_methods(vec![Method::GET]);
 
         let api_router = Router::new()
-            .route("/clusters/:ty", get(list_clusters::<S>))
-            .route("/actors", get(list_actors::<S>))
-            .route("/fragments2", get(list_fragments::<S>))
-            .route("/materialized_views", get(list_materialized_views::<S>))
-            .route("/tables", get(list_tables::<S>))
-            .route("/indexes", get(list_indexes::<S>))
-            .route("/internal_tables", get(list_internal_tables::<S>))
-            .route("/sources", get(list_sources::<S>))
-            .route("/sinks", get(list_sinks::<S>))
-            .route(
-                "/metrics/cluster",
-                get(prometheus::list_prometheus_cluster::<S>),
-            )
+            .route("/clusters/:ty", get(list_clusters))
+            .route("/actors", get(list_actors))
+            .route("/fragments2", get(list_fragments))
+            .route("/materialized_views", get(list_materialized_views))
+            .route("/tables", get(list_tables))
+            .route("/indexes", get(list_indexes))
+            .route("/internal_tables", get(list_internal_tables))
+            .route("/sources", get(list_sources))
+            .route("/sinks", get(list_sinks))
+            .route("/metrics/cluster", get(prometheus::list_prometheus_cluster))
             .route(
                 "/metrics/actor/back_pressures",
-                get(prometheus::list_prometheus_actor_back_pressure::<S>),
+                get(prometheus::list_prometheus_actor_back_pressure),
             )
-            .route("/monitor/await_tree/:worker_id", get(dump_await_tree::<S>))
+            .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
+            .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))
+            .route(
+                "/monitor/list_heap_profile/:worker_id",
+                get(list_heap_profile),
+            )
+            .route("/monitor/analyze/:worker_id/*path", get(analyze_heap))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))

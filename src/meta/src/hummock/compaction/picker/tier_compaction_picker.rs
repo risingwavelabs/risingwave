@@ -14,22 +14,38 @@
 
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::can_concat;
-use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
-use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
-use crate::hummock::compaction::picker::min_overlap_compaction_picker::MAX_LEVEL_COUNT;
+use super::{
+    CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
+    ValidationRuleType,
+};
+use crate::hummock::compaction::picker::MAX_COMPACT_LEVEL_COUNT;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
     config: Arc<CompactionConfig>,
+    compaction_task_validator: Arc<CompactionTaskValidator>,
 }
 
 impl TierCompactionPicker {
+    #[cfg(test)]
     pub fn new(config: Arc<CompactionConfig>) -> TierCompactionPicker {
-        TierCompactionPicker { config }
+        TierCompactionPicker {
+            compaction_task_validator: Arc::new(CompactionTaskValidator::new(config.clone())),
+            config,
+        }
+    }
+
+    pub fn new_with_validator(
+        config: Arc<CompactionConfig>,
+        compaction_task_validator: Arc<CompactionTaskValidator>,
+    ) -> TierCompactionPicker {
+        TierCompactionPicker {
+            config,
+            compaction_task_validator,
+        }
     }
 
     fn pick_overlapping_level(
@@ -51,26 +67,11 @@ impl TierCompactionPicker {
                 continue;
             }
 
-            let mut input_level = InputLevel {
+            let input_level = InputLevel {
                 level_idx: 0,
                 level_type: level.level_type,
                 table_infos: level.table_infos.clone(),
             };
-            // Since the level is overlapping, we can change the order of origin sstable infos in
-            // task.
-            input_level.table_infos.sort_by(|sst1, sst2| {
-                let a = sst1.key_range.as_ref().unwrap();
-                let b = sst2.key_range.as_ref().unwrap();
-                a.compare(b)
-            });
-
-            if can_concat(&input_level.table_infos) {
-                return Some(CompactionInput {
-                    input_levels: vec![input_level],
-                    target_level: 0,
-                    target_sub_level_id: level.sub_level_id,
-                });
-            }
 
             let mut select_level_inputs = vec![input_level];
 
@@ -87,29 +88,15 @@ impl TierCompactionPicker {
             // Limit sstable file count to avoid using too much memory.
             let overlapping_max_compact_file_numer = std::cmp::min(
                 self.config.level0_max_compact_file_number,
-                MAX_LEVEL_COUNT as u64,
+                MAX_COMPACT_LEVEL_COUNT as u64,
             );
-            let mut waiting_enough_files = {
-                if compaction_bytes > max_compaction_bytes {
-                    false
-                } else {
-                    compact_file_count <= overlapping_max_compact_file_numer
-                }
-            };
 
             for other in &l0.sub_levels[idx + 1..] {
                 if compaction_bytes > max_compaction_bytes {
-                    waiting_enough_files = false;
                     break;
                 }
 
                 if compact_file_count > overlapping_max_compact_file_numer {
-                    waiting_enough_files = false;
-                    break;
-                }
-
-                if other.level_type() != LevelType::Overlapping {
-                    waiting_enough_files = false;
                     break;
                 }
 
@@ -126,24 +113,26 @@ impl TierCompactionPicker {
                 });
             }
 
-            // If waiting_enough_files is not satisfied, we will raise the priority of the number of
-            // levels to ensure that we can merge as many sub_levels as possible
-            let tier_sub_level_compact_level_count =
-                self.config.level0_overlapping_sub_level_compact_level_count as usize;
-            if select_level_inputs.len() < tier_sub_level_compact_level_count
-                && waiting_enough_files
-            {
-                stats.skip_by_count_limit += 1;
-                continue;
-            }
-
             select_level_inputs.reverse();
 
-            return Some(CompactionInput {
+            let result = CompactionInput {
                 input_levels: select_level_inputs,
                 target_level: 0,
                 target_sub_level_id: level.sub_level_id,
-            });
+                select_input_size: compaction_bytes,
+                target_input_size: 0,
+                total_file_count: compact_file_count,
+            };
+
+            if !self.compaction_task_validator.valid_compact_task(
+                &result,
+                ValidationRuleType::Tier,
+                stats,
+            ) {
+                continue;
+            }
+
+            return Some(result);
         }
         None
     }
@@ -169,17 +158,16 @@ impl CompactionPicker for TierCompactionPicker {
 pub mod tests {
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::can_concat;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::new_sub_level;
     use risingwave_pb::hummock::hummock_version::Levels;
     use risingwave_pb::hummock::{LevelType, OverlappingLevel};
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::compaction::level_selector::tests::{
-        generate_l0_overlapping_sublevels, generate_table, push_table_level0_overlapping,
-    };
     use crate::hummock::compaction::picker::{
         CompactionPicker, LocalPickerStatistic, TierCompactionPicker,
+    };
+    use crate::hummock::compaction::selector::tests::{
+        generate_l0_overlapping_sublevels, generate_table, push_table_level0_overlapping,
     };
     use crate::hummock::level_handler::LevelHandler;
 
@@ -268,11 +256,8 @@ pub mod tests {
         // sub-level 0 is excluded because it's nonoverlapping and violating
         // sub_level_max_compaction_bytes.
         let mut picker = TierCompactionPicker::new(config);
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        assert_eq!(ret.input_levels.len(), 1);
-        assert!(can_concat(&ret.input_levels[0].table_infos));
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none())
     }
 
     #[test]

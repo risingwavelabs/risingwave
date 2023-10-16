@@ -8,6 +8,12 @@ import "common.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
+enum BloomFilterType {
+  BLOOM_FILTER_UNSPECIFIED = 0;
+  SSTABLE = 1;
+  BLOCKED = 2;
+}
+
 message SstableInfo {
   uint64 object_id = 1;
   uint64 sst_id = 2;
@@ -21,6 +27,7 @@ message SstableInfo {
   uint64 max_epoch = 10;
   uint64 uncompressed_file_size = 11;
   uint64 range_tombstone_count = 12;
+  BloomFilterType bloom_filter_kind = 13;
 }
 
 enum LevelType {
@@ -295,6 +302,7 @@ message CompactTask {
     SHARED_BUFFER = 4;
     TTL = 5;
     TOMBSTONE = 6;
+    EMERGENCY = 7;
   }
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
@@ -374,11 +382,6 @@ message CompactTaskProgress {
   uint64 num_pending_write_io = 6;
 }
 
-// The measurement of the workload on a compactor to determine whether it is idle.
-message CompactorWorkload {
-  uint32 cpu = 1;
-}
-
 message SubscribeCompactionEventRequest {
   // Register provides the context_id of the corresponding Compactor.
   message Register {
@@ -392,8 +395,13 @@ message SubscribeCompactionEventRequest {
 
   // ReportTask provides the compact task to report to the meta.
   message ReportTask {
-    CompactTask compact_task = 2;
+    reserved 2;
+    reserved "compact_task";
     map<uint32, TableStats> table_stats_change = 3;
+
+    uint64 task_id = 4;
+    CompactTask.TaskStatus task_status = 5;
+    repeated SstableInfo sorted_output_ssts = 6;
   }
 
   // HeartBeat provides the progress status of all tasks on the Compactor.
@@ -434,6 +442,26 @@ message SubscribeCompactionEventResponse {
   }
 
   uint64 create_at = 7;
+}
+
+message ReportCompactionTaskRequest {
+  // ReportTask provides the compact task to report to the meta.
+  message ReportTask {
+    CompactTask compact_task = 2;
+    map<uint32, TableStats> table_stats_change = 3;
+  }
+  // HeartBeat provides the progress status of all tasks on the Compactor.
+  message HeartBeat {
+    repeated CompactTaskProgress progress = 2;
+  }
+  oneof event {
+    ReportTask report_task = 1;
+    HeartBeat heart_beat = 2;
+  }
+}
+
+message ReportCompactionTaskResponse {
+  common.Status status = 1;
 }
 
 message ValidationTask {
@@ -583,6 +611,8 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 level0_overlapping_sub_level_compact_level_count = 12;
       uint64 max_space_reclaim_bytes = 13;
       uint64 level0_max_compact_file_number = 14;
+      bool enable_emergency_picker = 15;
+      uint32 tombstone_reclaim_ratio = 16;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -632,6 +662,25 @@ message RiseCtlListCompactionStatusResponse {
   repeated CompactTaskProgress task_progress = 3;
 }
 
+message ListBranchedObjectRequest {}
+
+message ListBranchedObjectResponse {
+  repeated BranchedObject branched_objects = 1;
+}
+
+message ListActiveWriteLimitRequest {}
+
+message ListActiveWriteLimitResponse {
+  // < compaction group id, write limit info >
+  map<uint64, WriteLimits.WriteLimit> write_limits = 1;
+}
+
+message ListHummockMetaConfigRequest {}
+
+message ListHummockMetaConfigResponse {
+  map<string, string> configs = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -662,6 +711,10 @@ service HummockManagerService {
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
   rpc RiseCtlListCompactionStatus(RiseCtlListCompactionStatusRequest) returns (RiseCtlListCompactionStatusResponse);
   rpc SubscribeCompactionEvent(stream SubscribeCompactionEventRequest) returns (stream SubscribeCompactionEventResponse);
+  rpc ReportCompactionTask(ReportCompactionTaskRequest) returns (ReportCompactionTaskResponse);
+  rpc ListBranchedObject(ListBranchedObjectRequest) returns (ListBranchedObjectResponse);
+  rpc ListActiveWriteLimit(ListActiveWriteLimitRequest) returns (ListActiveWriteLimitResponse);
+  rpc ListHummockMetaConfig(ListHummockMetaConfigRequest) returns (ListHummockMetaConfigResponse);
 }
 
 message CompactionConfig {
@@ -692,6 +745,7 @@ message CompactionConfig {
   // for tier compaction pick overlapping level
   uint32 level0_overlapping_sub_level_compact_level_count = 18;
   uint32 tombstone_reclaim_ratio = 19;
+  bool enable_emergency_picker = 20;
 }
 
 message TableStats {
@@ -712,4 +766,11 @@ message WriteLimits {
   }
   // < compaction group id, write limit info >
   map<uint64, WriteLimit> write_limits = 1;
+}
+
+message BranchedObject {
+  uint64 object_id = 1;
+  uint64 sst_id = 2;
+  // Compaction group id the SST belongs to.
+  uint64 compaction_group_id = 3;
 }
