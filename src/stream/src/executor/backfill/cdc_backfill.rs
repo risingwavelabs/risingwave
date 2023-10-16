@@ -349,6 +349,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     break;
                                 }
                                 Message::Chunk(chunk) => {
+                                    // skip empty upstream chunk
+                                    if chunk.cardinality() == 0 {
+                                        continue;
+                                    }
+
                                     let chunk_binlog_offset = get_cdc_chunk_last_offset(
                                         upstream_table_reader.inner().table_reader(),
                                         &chunk,
