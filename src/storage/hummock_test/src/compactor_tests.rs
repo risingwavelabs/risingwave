@@ -1446,7 +1446,6 @@ pub(crate) mod tests {
             .run(
                 compaction_filter,
                 multi_filter_key_extractor,
-                deg,
                 Arc::new(TaskProgress::default()),
             )
             .await

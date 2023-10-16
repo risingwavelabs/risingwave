@@ -871,9 +871,7 @@ mod tests {
     use super::*;
     use crate::hummock::compactor::StateCleanUpCompactionFilter;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable_impl, gen_test_sstable_with_range_tombstone,
-    };
+    use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_impl};
     use crate::hummock::{create_monotonic_events, DeleteRangeTombstone, Xor16FilterBuilder};
 
     #[tokio::test]
@@ -904,7 +902,6 @@ mod tests {
         )
         .await;
         sstable_info_1.table_ids = vec![1];
-
 
         let mut sstable_info_2 = gen_test_sstable_impl::<Bytes, Xor16FilterBuilder>(
             default_builder_opt_for_test(),

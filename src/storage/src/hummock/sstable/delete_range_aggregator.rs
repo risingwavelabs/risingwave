@@ -309,6 +309,8 @@ pub fn get_min_delete_range_epoch_from_sstable(
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Bound;
+
     use bytes::Bytes;
     use risingwave_common::catalog::TableId;
 
