@@ -14,13 +14,14 @@
 
 use core::mem;
 use std::collections::HashMap;
-
 use std::sync::Arc;
+
+use anyhow::anyhow;
 use async_trait::async_trait;
-use gcp_bigquery_client::Client;
 use gcp_bigquery_client::model::query_request::QueryRequest;
 use gcp_bigquery_client::model::table_data_insert_all_request::TableDataInsertAllRequest;
 use gcp_bigquery_client::model::table_data_insert_all_request_rows::TableDataInsertAllRequestRows;
+use gcp_bigquery_client::Client;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -28,16 +29,15 @@ use risingwave_common::types::DataType;
 use serde_derive::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
-use anyhow::{anyhow};
-use crate::sink::writer::SinkWriterExt;
 
+use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use super::writer::LogSinkerOf;
+use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
 use crate::common::BigQueryCommon;
+use crate::sink::writer::SinkWriterExt;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriter, SinkWriterParam,
 };
-
-use super::encoder::{RowEncoder, JsonEncoder, TimestampHandlingMode};
-use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_UPSERT, SINK_TYPE_OPTION, writer::LogSinkerOf};
 
 pub const BIGQUERY_SINK: &str = "bigquery";
 #[serde_as]
@@ -90,8 +90,10 @@ impl BigQuerySink {
 }
 
 impl BigQuerySink {
-    fn check_column_name_and_type(&self, big_query_columns_desc: HashMap<String,String>) -> Result<()> {
-
+    fn check_column_name_and_type(
+        &self,
+        big_query_columns_desc: HashMap<String, String>,
+    ) -> Result<()> {
         let rw_fields_name = self.schema.fields();
         if rw_fields_name.len().ne(&big_query_columns_desc.len()) {
             return Err(SinkError::BigQuery("The length of the RisingWave column must be equal to the length of the bigquery column".to_string()));
@@ -105,7 +107,7 @@ impl BigQuerySink {
                 ))
             })?;
             let data_type_string = Self::get_string_and_check_support_from_datatype(&i.data_type)?;
-            if data_type_string.ne(value){
+            if data_type_string.ne(value) {
                 return Err(SinkError::BigQuery(format!(
                     "Column type don't match, column name is {:?}. bigquery type is {:?} risingwave type is {:?} ",i.name,value,data_type_string
                 )));
@@ -114,37 +116,44 @@ impl BigQuerySink {
         Ok(())
     }
 
-    fn get_string_and_check_support_from_datatype(rw_data_type: &DataType) -> Result<String>{
+    fn get_string_and_check_support_from_datatype(rw_data_type: &DataType) -> Result<String> {
         match rw_data_type {
             DataType::Boolean => Ok("BOOL".to_owned()),
             DataType::Int16 => Ok("INT64".to_owned()),
             DataType::Int32 => Ok("INT64".to_owned()),
             DataType::Int64 => Ok("INT64".to_owned()),
-            DataType::Float32 => return Err(SinkError::BigQuery("bigquery can not support real".to_string())),
+            DataType::Float32 => Err(SinkError::BigQuery(
+                "Bigquery cannot support real".to_string(),
+            )),
             DataType::Float64 => Ok("FLOAT64".to_owned()),
             DataType::Decimal => Ok("NUMERIC".to_owned()),
             DataType::Date => Ok("DATE".to_owned()),
             DataType::Varchar => Ok("STRING".to_owned()),
-            DataType::Time => return Err(SinkError::BigQuery("bigquery can not support Time".to_string())),
+            DataType::Time => Err(SinkError::BigQuery(
+                "Bigquery cannot support Time".to_string(),
+            )),
             DataType::Timestamp => Ok("DATATIME".to_owned()),
             DataType::Timestamptz => Ok("TIMESTAMP".to_owned()),
             DataType::Interval => Ok("INTERVAL".to_owned()),
             DataType::Struct(structs) => {
                 let mut elements_vec = vec![];
-                for (name,datatype) in structs.iter() {
-                    let element_string = Self::get_string_and_check_support_from_datatype(datatype)?;
-                    elements_vec.push(format!("{} {}",name,element_string));
+                for (name, datatype) in structs.iter() {
+                    let element_string =
+                        Self::get_string_and_check_support_from_datatype(datatype)?;
+                    elements_vec.push(format!("{} {}", name, element_string));
                 }
-                Ok(format!("STRUCT<{}>",elements_vec.join(", ")))
-            },
+                Ok(format!("STRUCT<{}>", elements_vec.join(", ")))
+            }
             DataType::List(l) => {
                 let element_string = Self::get_string_and_check_support_from_datatype(l.as_ref())?;
-                Ok(format!("ARRAY<{}>",element_string))
-            },
+                Ok(format!("ARRAY<{}>", element_string))
+            }
             DataType::Bytea => Ok("BYTES".to_owned()),
             DataType::Jsonb => Ok("JSON".to_owned()),
             DataType::Serial => Ok("INT64".to_owned()),
-            DataType::Int256 => return Err(SinkError::BigQuery("bigquery can not support Int256".to_string())),
+            DataType::Int256 => Err(SinkError::BigQuery(
+                "Bigquery cannot support Int256".to_string(),
+            )),
         }
     }
 }
@@ -167,7 +176,15 @@ impl Sink for BigQuerySink {
     }
 
     async fn validate(&self) -> Result<()> {
-        let client = Client::from_service_account_key_file(&self.config.common.file_path).await.map_err(|e| SinkError::BigQuery(e.to_string()))?;
+        if !self.is_append_only {
+            return Err(SinkError::Config(anyhow!(
+                "BigQuery sink don't support upsert"
+            )));
+        }
+
+        let client = Client::from_service_account_key_file(&self.config.common.file_path)
+            .await
+            .map_err(|e| SinkError::BigQuery(e.to_string()))?;
         let mut rs = client
         .job()
         .query(
@@ -180,8 +197,14 @@ impl Sink for BigQuerySink {
         .await.map_err(|e| SinkError::BigQuery(e.to_string()))?;
         let mut big_query_schema = HashMap::default();
         while rs.next_row() {
-            big_query_schema.insert(rs.get_string_by_name("column_name").map_err(|e| SinkError::BigQuery(e.to_string()))?.ok_or_else(|| SinkError::BigQuery("Cannot find column_name".to_owned()))?, 
-            rs.get_string_by_name("data_type").map_err(|e| SinkError::BigQuery(e.to_string()))?.ok_or_else(|| SinkError::BigQuery("Cannot find column_name".to_owned()))?);
+            big_query_schema.insert(
+                rs.get_string_by_name("column_name")
+                    .map_err(|e| SinkError::BigQuery(e.to_string()))?
+                    .ok_or_else(|| SinkError::BigQuery("Cannot find column_name".to_owned()))?,
+                rs.get_string_by_name("data_type")
+                    .map_err(|e| SinkError::BigQuery(e.to_string()))?
+                    .ok_or_else(|| SinkError::BigQuery("Cannot find column_name".to_owned()))?,
+            );
         }
 
         self.check_column_name_and_type(big_query_schema)?;
@@ -229,8 +252,10 @@ impl BigQuerySinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let client = Client::from_service_account_key_file(&config.common.file_path).await.map_err(|e| SinkError::BigQuery(e.to_string())).unwrap();
-        // client.tabledata().insert_all(project_id, dataset_id, table_id, insert_request)
+        let client = Client::from_service_account_key_file(&config.common.file_path)
+            .await
+            .map_err(|e| SinkError::BigQuery(e.to_string()))
+            .unwrap();
         Ok(Self {
             config,
             schema: schema.clone(),
@@ -238,8 +263,11 @@ impl BigQuerySinkWriter {
             client,
             is_append_only,
             insert_request: TableDataInsertAllRequest::new(),
-            row_encoder: JsonEncoder::new(schema, None,
-                TimestampHandlingMode::String),
+            row_encoder: JsonEncoder::new_with_big_query(
+                schema,
+                None,
+                TimestampHandlingMode::String,
+            ),
         })
     }
 
@@ -249,24 +277,34 @@ impl BigQuerySinkWriter {
             if op != Op::Insert {
                 continue;
             }
-            insert_vec.push(TableDataInsertAllRequestRows{
+            insert_vec.push(TableDataInsertAllRequestRows {
                 insert_id: None,
                 json: Value::Object(self.row_encoder.encode(row)?),
             })
         }
-        self.insert_request.add_rows(insert_vec).map_err(|e| SinkError::BigQuery(e.to_string()))?;
+        self.insert_request
+            .add_rows(insert_vec)
+            .map_err(|e| SinkError::BigQuery(e.to_string()))?;
         if self.insert_request.len().ge(&1000) {
             self.insert_data().await?;
         }
         Ok(())
     }
 
-    async fn insert_data(&mut self) -> Result<()>{
-        println!("insert_request is {:?}",self.insert_request);
-        if self.insert_request.len() > 0{
-            let insert_request = mem::replace(&mut self.insert_request, TableDataInsertAllRequest::new());
-            self.client.tabledata().insert_all(&self.config.common.project, &self.config.common.dataset, &self.config.common.table, insert_request).await
-            .map_err(|e| SinkError::BigQuery(e.to_string()))?;
+    async fn insert_data(&mut self) -> Result<()> {
+        if !self.insert_request.is_empty() {
+            let insert_request =
+                mem::replace(&mut self.insert_request, TableDataInsertAllRequest::new());
+            self.client
+                .tabledata()
+                .insert_all(
+                    &self.config.common.project,
+                    &self.config.common.dataset,
+                    &self.config.common.table,
+                    insert_request,
+                )
+                .await
+                .map_err(|e| SinkError::BigQuery(e.to_string()))?;
         }
         Ok(())
     }
@@ -275,8 +313,13 @@ impl BigQuerySinkWriter {
 #[async_trait]
 impl SinkWriter for BigQuerySinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        self.append_only(chunk).await?;
-        Ok(())
+        if self.is_append_only {
+            self.append_only(chunk).await
+        } else {
+            Err(SinkError::BigQuery(
+                "BigQuery sink don't support upsert".to_string(),
+            ))
+        }
     }
 
     async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
@@ -298,7 +341,6 @@ impl SinkWriter for BigQuerySinkWriter {
 
 #[cfg(test)]
 mod test {
-    use gcp_bigquery_client::model::{query_request::QueryRequest, table_data_insert_all_request::TableDataInsertAllRequest, table_data_insert_all_request_rows::TableDataInsertAllRequestRows};
     use risingwave_common::types::{DataType, StructType};
 
     use crate::sink::big_query::BigQuerySink;
@@ -308,51 +350,17 @@ mod test {
         let big_query_type_string = "ARRAY<STRUCT<v1 ARRAY<INT64>, v2 STRUCT<v1 INT64, v2 INT64>>>";
         let rw_datatype = DataType::List(Box::new(DataType::Struct(StructType::new(vec![
             ("v1".to_owned(), DataType::List(Box::new(DataType::Int64))),
-            ("v2".to_owned(), DataType::Struct(StructType::new(vec![
-                ("v1".to_owned(), DataType::Int64),
-                ("v2".to_owned(), DataType::Int64),
-            ]))),
+            (
+                "v2".to_owned(),
+                DataType::Struct(StructType::new(vec![
+                    ("v1".to_owned(), DataType::Int64),
+                    ("v2".to_owned(), DataType::Int64),
+                ])),
+            ),
         ]))));
-        assert_eq!(BigQuerySink::get_string_and_check_support_from_datatype(&rw_datatype).unwrap(),big_query_type_string);
+        assert_eq!(
+            BigQuerySink::get_string_and_check_support_from_datatype(&rw_datatype).unwrap(),
+            big_query_type_string
+        );
     }
-
-    #[tokio::test]
-    async fn test_big_query() {
-        let gcp_sa_key = "/home/xxhx/singuarity/risingwave/winter-dynamics-383822-3948f1edc321.json";
-        // Init BigQuery client
-        let client = gcp_bigquery_client::Client::from_service_account_key_file(gcp_sa_key).await.unwrap();
-        // Query SELECT column_name, data_type FROM `winter-dynamics-383822.test_bigquery_sink.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = 't1'"
-        let mut rs = client
-        .job()
-        .query(
-            "winter-dynamics-383822",
-            QueryRequest::new(format!(
-                "SELECT column_name, data_type FROM `winter-dynamics-383822.test_bigquery_sink.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = 't1'",
-            )),
-        )
-        .await.unwrap();
-        while rs.next_row() {
-            println!("Number of rows inserted: {} {}", rs.get_string_by_name("column_name").unwrap().unwrap(),rs.get_string_by_name("data_type").unwrap().unwrap());
-        }
-    }
-
-    // #[tokio::test]
-    // async fn test_insert() {
-    //     let gcp_sa_key = "/home/xxhx/singuarity/risingwave/winter-dynamics-383822-3948f1edc321.json";
-    //     // Init BigQuery client
-    //     let client = gcp_bigquery_client::Client::from_service_account_key_file(gcp_sa_key).await.unwrap();
-    //     // Query SELECT column_name, data_type FROM `winter-dynamics-383822.test_bigquery_sink.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = 't1'"
-    //     let mut insert_request = TableDataInsertAllRequest::new();
-        
-    //     let a = vec![TableDataInsertAllRequestRows{
-    //         insert_id: None,
-    //         json: serde_json::json!({"v1":2,"v2":2}),
-    //     }];
-    //     insert_request.add_rows(a).unwrap();
-        
-    //     client
-    //     .tabledata()
-    //     .insert_all("winter-dynamics-383822", "test_bigquery_sink", "t1", insert_request)
-    //     .await.unwrap();
-    // }
 }

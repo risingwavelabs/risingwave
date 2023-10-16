@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod big_query;
 pub mod blackhole;
 pub mod boxed;
 pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
 pub mod doris;
-pub mod big_query;
 pub mod doris_connector;
 pub mod encoder;
 pub mod formatter;
