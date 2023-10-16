@@ -527,6 +527,6 @@ steps:
 
   - label: "enable ci/skip-ci only in draft PRs"
     if: build.pull_request.labels includes "ci/skip-ci && !build.pull_request.draft
-    command: |
-      echo "ci/skip-ci is only usable for draft Pull Requests" 
-      exit 1
+    commands:
+      - echo "ci/skip-ci is only usable for draft Pull Requests"
+      - exit 1
