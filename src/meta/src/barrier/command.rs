@@ -677,12 +677,28 @@ impl CommandContext {
                 if let Err(e) = self.hummock_manager.unregister_table_ids(&table_ids).await {
                     tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", &table_ids, e);
                 }
-                self.catalog_manager
+                if let Err(e) = self
+                    .catalog_manager
                     .cancel_create_table_procedure(
                         table_fragments.table_id().table_id,
                         table_fragments.internal_table_ids(),
                     )
-                    .await?;
+                    .await
+                {
+                    let table_id = table_fragments.table_id().table_id;
+                    tracing::warn!(
+                        table_id,
+                        reason=?e,
+                        "cancel_create_table_procedure failed for CancelStreamingJob",
+                    );
+                    // If failed, check that table is not in meta store.
+                    // If any table is, just panic, let meta do bootstrap recovery.
+                    // Otherwise our persisted state is dirty.
+                    let mut table_ids = table_fragments.internal_table_ids();
+                    table_ids.push(table_id);
+                    self.catalog_manager.assert_tables_deleted(table_ids).await;
+                }
+
                 self.fragment_manager
                     .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
                         table_fragments.table_id(),

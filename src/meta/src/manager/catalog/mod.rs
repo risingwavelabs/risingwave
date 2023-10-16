@@ -746,6 +746,14 @@ impl CatalogManager {
         }
     }
 
+    pub async fn assert_tables_deleted(&self, table_ids: Vec<TableId>) {
+        let core = self.core.lock().await;
+        let tables = &core.database.tables;
+        for id in table_ids {
+            assert_eq!(tables.get(&id), None,)
+        }
+    }
+
     /// We clean the following tables:
     /// 1. Those which belonged to incomplete Foreground jobs.
     /// 2. Those which did not persist their table fragments, we can't recover these.

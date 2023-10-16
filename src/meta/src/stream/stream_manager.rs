@@ -228,7 +228,6 @@ impl GlobalStreamManager {
         ctx: CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let table_id = table_fragments.table_id();
-        let create_type = ctx.create_type;
         let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
         let execution = StreamingJobExecution::new(table_id, sender.clone());
         self.creating_job_info.add_job(execution).await;
