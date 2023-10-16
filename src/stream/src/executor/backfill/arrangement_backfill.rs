@@ -34,8 +34,8 @@ use risingwave_storage::StateStore;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::backfill::utils::{
     compute_bounds, construct_initial_finished_state, get_progress_per_vnode, iter_chunks,
-    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, persist_state_per_vnode,
-    update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
+    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, owned_row_iter,
+    persist_state_per_vnode, update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -580,13 +580,13 @@ where
                 .await?;
 
             // TODO: Is there some way to avoid double-pin here?
-            let vnode_row_iter = Box::pin(vnode_row_iter);
+            let vnode_row_iter = Box::pin(owned_row_iter(vnode_row_iter));
 
             let vnode_chunk_iter =
                 iter_chunks(vnode_row_iter, builder).map_ok(move |chunk| (vnode, chunk));
             // TODO: Is there some way to avoid double-pin
 
-            // NOTE(kwannoel): We iterate serially instead.
+            // FIXME(kwannoel): Should we iterate serially? Or in parallel?
             #[for_await]
             for chunk in vnode_chunk_iter {
                 yield Some(chunk?);
