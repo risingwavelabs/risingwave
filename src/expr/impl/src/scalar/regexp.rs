@@ -454,6 +454,7 @@ fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue>
     let n = text.len();
     let mut start = 0;
     let mut list: Vec<Option<ScalarImpl>> = Vec::new();
+    let mut empty_flag = false;
 
     loop {
         if start >= n {
@@ -475,6 +476,8 @@ fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue>
 
         if begin == end {
             // Empty match (i.e., `\s*`)
+            empty_flag = true;
+
             if begin == text.len() {
                 // We do not need to push extra stuff to the result list
                 start = begin;
@@ -485,14 +488,19 @@ fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue>
             continue;
         }
 
+        if start == begin {
+            // The before match is possibly empty
+            if !empty_flag {
+                // We'll push an empty string to conform with postgres
+                // If there does not exists a empty match before
+                list.push(Some("".to_string().into()));
+            }
+            start = end;
+            continue;
+        }
+
         if begin != 0 {
             // Normal case
-            if start == begin {
-                // The before match is possibly empty
-                // We don't push nothing, just move `start` forward
-                start = end;
-                continue;
-            }
             list.push(Some(text[start..begin].into()));
         }
 
