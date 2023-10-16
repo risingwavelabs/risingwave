@@ -508,6 +508,7 @@ steps:
     timeout_in_minutes: 30
     retry: *auto-retry
 
+  # FIXME(kwannoel): Let the github PR labeller label it, if sqlsmith source files has changes.
   - label: "fuzz test"
     command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
     if: build.pull_request.labels includes "ci/run-fuzz-test"
