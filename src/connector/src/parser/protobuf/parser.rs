@@ -73,7 +73,7 @@ impl ProtobufAccessBuilder {
 #[derive(Debug, Clone)]
 pub struct ProtobufParserConfig {
     confluent_wire_type: bool,
-    message_descriptor: MessageDescriptor,
+    pub(crate) message_descriptor: MessageDescriptor,
 }
 
 impl ProtobufParserConfig {

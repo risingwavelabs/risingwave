@@ -47,6 +47,7 @@ pub mod error;
 mod macros;
 
 pub mod parser;
+pub mod schema;
 pub mod sink;
 pub mod source;
 

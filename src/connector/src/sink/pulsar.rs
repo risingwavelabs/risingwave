@@ -211,7 +211,8 @@ impl PulsarSinkWriter {
         sink_from_name: String,
     ) -> Result<Self> {
         let formatter =
-            SinkFormatterImpl::new(format_desc, schema, downstream_pk, db_name, sink_from_name)?;
+            SinkFormatterImpl::new(format_desc, schema, downstream_pk, db_name, sink_from_name)
+                .await?;
         let pulsar = config.common.build_client().await?;
         let producer = build_pulsar_producer(&pulsar, &config).await?;
         Ok(Self {
