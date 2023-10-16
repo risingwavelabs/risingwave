@@ -49,7 +49,7 @@ use crate::store::*;
 use crate::StateStoreIter;
 
 const AVALIABLE_EPOCH_GAP: u64 = 256;
-const MEM_TABLE_SPILL_THRESHOLD: usize = 8 * 1024 * 1024;
+const MEM_TABLE_SPILL_THRESHOLD: usize = 64 * 1024 * 1024;
 pub struct LocalHummockStorage {
     mem_table: MemTable,
 
