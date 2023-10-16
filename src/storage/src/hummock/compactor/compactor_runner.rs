@@ -152,17 +152,20 @@ impl CompactorRunner {
         let mut local_stats = StoreLocalStatistic::default();
 
         for table_info in sstable_infos {
-            let table = sstable_store.sstable(table_info, &mut local_stats).await?;
-            let mut range_tombstone_list = table.value().meta.monotonic_tombstone_events.clone();
-            range_tombstone_list.iter_mut().for_each(|tombstone| {
-                if filter.should_delete(FullKey::from_user_key(
-                    tombstone.event_key.left_user_key.as_ref(),
-                    tombstone.new_epoch,
-                )) {
-                    tombstone.new_epoch = HummockEpoch::MAX;
-                }
-            });
-            builder.add_delete_events(range_tombstone_list);
+            if table_info.range_tombstone_count > 0 {
+                let table = sstable_store.sstable(table_info, &mut local_stats).await?;
+                let mut range_tombstone_list =
+                    table.value().meta.monotonic_tombstone_events.clone();
+                range_tombstone_list.iter_mut().for_each(|tombstone| {
+                    if filter.should_delete(FullKey::from_user_key(
+                        tombstone.event_key.left_user_key.as_ref(),
+                        tombstone.new_epoch,
+                    )) {
+                        tombstone.new_epoch = HummockEpoch::MAX;
+                    }
+                });
+                builder.add_delete_events(range_tombstone_list);
+            }
         }
 
         let aggregator = builder.build_for_compaction();
@@ -702,9 +705,9 @@ where
         progress_key_num += 1;
 
         if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
-                task_progress.inc_progress_key(progress_key_num);
-                progress_key_num = 0;
-            }
+            task_progress.inc_progress_key(progress_key_num);
+            progress_key_num = 0;
+        }
 
         let mut iter_key = iter.key();
         compaction_statistics.iter_total_key_counts += 1;
@@ -750,7 +753,13 @@ where
                     .await?;
             }
             del_iter.next();
+            progress_key_num += 1;
+            if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+                task_progress.inc_progress_key(progress_key_num);
+                progress_key_num = 0;
+            }
         }
+
         let earliest_range_delete_which_can_see_iter_key = del_iter.earliest_delete_since(epoch);
 
         // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
@@ -851,13 +860,18 @@ where
                 })
                 .await?;
             del_iter.next();
+            progress_key_num += 1;
+            if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+                task_progress.inc_progress_key(progress_key_num);
+                progress_key_num = 0;
+            }
         }
     }
 
     if let Some(task_progress) = task_progress.as_ref() && progress_key_num > 0 {
-            // Avoid losing the progress_key_num in the last Interval
-            task_progress.inc_progress_key(progress_key_num);
-        }
+        // Avoid losing the progress_key_num in the last Interval
+        task_progress.inc_progress_key(progress_key_num);
+    }
 
     if let Some(last_table_id) = last_table_id.take() {
         table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
@@ -880,10 +894,8 @@ mod tests {
     use super::*;
     use crate::hummock::compactor::StateCleanUpCompactionFilter;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable_with_range_tombstone,
-    };
-    use crate::hummock::{create_monotonic_events, DeleteRangeTombstone};
+    use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_impl};
+    use crate::hummock::{create_monotonic_events, DeleteRangeTombstone, Xor16FilterBuilder};
 
     #[tokio::test]
     async fn test_delete_range_aggregator_with_filter() {
@@ -903,26 +915,26 @@ mod tests {
                 1,
             ),
         ];
-        let mut sstable_info_1 = gen_test_sstable_with_range_tombstone(
+        let mut sstable_info_1 = gen_test_sstable_impl::<Bytes, Xor16FilterBuilder>(
             default_builder_opt_for_test(),
             1,
             kv_pairs.clone().into_iter(),
             range_tombstones.clone(),
             sstable_store.clone(),
+            CachePolicy::NotFill,
         )
-        .await
-        .get_sstable_info();
+        .await;
         sstable_info_1.table_ids = vec![1];
 
-        let mut sstable_info_2 = gen_test_sstable_with_range_tombstone(
+        let mut sstable_info_2 = gen_test_sstable_impl::<Bytes, Xor16FilterBuilder>(
             default_builder_opt_for_test(),
             2,
             kv_pairs.into_iter(),
             range_tombstones.clone(),
             sstable_store.clone(),
+            CachePolicy::NotFill,
         )
-        .await
-        .get_sstable_info();
+        .await;
         sstable_info_2.table_ids = vec![2];
 
         let compact_task = CompactTask {

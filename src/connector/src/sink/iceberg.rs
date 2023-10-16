@@ -34,7 +34,6 @@ use risingwave_common::error::anyhow_error;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_rpc_client::ConnectorClient;
 use serde::de;
 use serde_derive::Deserialize;
 use url::Url;
@@ -363,10 +362,7 @@ impl Sink for IcebergSink {
         .into_log_sinker(writer_param.sink_metrics))
     }
 
-    async fn new_coordinator(
-        &self,
-        _connector_client: Option<ConnectorClient>,
-    ) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         let table = self.create_table().await?;
         let partition_type = table.current_partition_type()?;
 
@@ -548,6 +544,7 @@ impl UpsertWriter {
     }
 
     fn partition_ops(ops: &[Op]) -> Vec<(usize, usize)> {
+        assert!(!ops.is_empty());
         let mut res = vec![];
         let mut start = 0;
         let mut prev_op = ops[0];
@@ -564,6 +561,9 @@ impl UpsertWriter {
 
     pub async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
         let (chunk, ops) = chunk.compact().into_parts();
+        if ops.len() == 0 {
+            return Ok(());
+        }
         let chunk = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         let ranges = Self::partition_ops(&ops);
