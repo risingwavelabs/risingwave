@@ -150,7 +150,7 @@
     create table t(a int, b int);
     with cte as (select count(*) from t) select * from cte union all select * from cte;
   stream_plan: |-
-    StreamMaterialize { columns: [count, 0:Int32(hidden)], stream_key: [0:Int32], pk_columns: [0:Int32], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [count, $src(hidden)], stream_key: [$src], pk_columns: [$src], pk_conflict: NoCheck }
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(0:Int32) }
       │ └─StreamProject { exprs: [sum0(count), 0:Int32] }
@@ -173,7 +173,7 @@
     create table t(a int, b int);
     with cte as (select count(*) from t) select * from cte union all select * from cte;
   stream_plan: |-
-    StreamMaterialize { columns: [count, 0:Int32(hidden)], stream_key: [0:Int32], pk_columns: [0:Int32], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [count, $src(hidden)], stream_key: [$src], pk_columns: [$src], pk_conflict: NoCheck }
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(0:Int32) }
       │ └─StreamProject { exprs: [sum0(count), 0:Int32] }

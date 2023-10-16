@@ -308,11 +308,7 @@ pub mod agg_kinds {
     #[macro_export]
     macro_rules! unimplemented_in_stream {
         () => {
-            AggKind::JsonbAgg
-                | AggKind::JsonbObjectAgg
-                | AggKind::PercentileCont
-                | AggKind::PercentileDisc
-                | AggKind::Mode
+            AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
         };
     }
     pub use unimplemented_in_stream;
