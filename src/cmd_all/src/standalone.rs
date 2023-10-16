@@ -14,10 +14,14 @@
 
 use anyhow::Result;
 use clap::Parser;
+use risingwave_compactor::CompactorOpts;
+use risingwave_compute::ComputeNodeOpts;
+use risingwave_frontend::FrontendOpts;
+use risingwave_meta::MetaNodeOpts;
 use shell_words::split;
 use tokio::signal;
 
-use crate::common::{osstrs, RisingWaveService};
+use crate::common::osstrs;
 
 #[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
 pub struct StandaloneOpts {
@@ -46,25 +50,41 @@ pub struct StandaloneOpts {
     /// If present, it will override prometheus listener address for
     /// Frontend, Compute and Compactor nodes
     prometheus_listener_addr: Option<String>,
-
-    #[clap(long, env = "STATE_STORE_URL")]
-    /// State store URL
-    state_store_url: Option<String>,
 }
 
 #[derive(Debug)]
 pub struct ParsedStandaloneOpts {
-    pub meta_opts: Option<Vec<String>>,
-    pub compute_opts: Option<Vec<String>>,
-    pub frontend_opts: Option<Vec<String>>,
-    pub compactor_opts: Option<Vec<String>>,
+    pub meta_opts: Option<MetaNodeOpts>,
+    pub compute_opts: Option<ComputeNodeOpts>,
+    pub frontend_opts: Option<FrontendOpts>,
+    pub compactor_opts: Option<CompactorOpts>,
 }
 
 fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
-    let meta_opts = opts.meta_opts.as_ref().map(|s| split(s).unwrap());
-    let compute_opts = opts.compute_opts.as_ref().map(|s| split(s).unwrap());
-    let frontend_opts = opts.frontend_opts.as_ref().map(|s| split(s).unwrap());
-    let compactor_opts = opts.compactor_opts.as_ref().map(|s| split(s).unwrap());
+    let meta_opts = opts.meta_opts.as_ref().map(|s| {
+        let mut s = split(s).unwrap();
+        s.insert(0, "meta-node".into());
+        s
+    });
+    let meta_opts = meta_opts.map(|o| MetaNodeOpts::parse_from(osstrs(o)));
+    let compute_opts = opts.compute_opts.as_ref().map(|s| {
+        let mut s = split(s).unwrap();
+        s.insert(0, "compute-node".into());
+        s
+    });
+    let compute_opts = compute_opts.map(|o| ComputeNodeOpts::parse_from(osstrs(o)));
+    let frontend_opts = opts.frontend_opts.as_ref().map(|s| {
+        let mut s = split(s).unwrap();
+        s.insert(0, "frontend-node".into());
+        s
+    });
+    let frontend_opts = frontend_opts.map(|o| FrontendOpts::parse_from(osstrs(o)));
+    let compactor_opts = opts.compactor_opts.as_ref().map(|s| {
+        let mut s = split(s).unwrap();
+        s.insert(0, "compactor-node".into());
+        s
+    });
+    let compactor_opts = compactor_opts.map(|o| CompactorOpts::parse_from(osstrs(o)));
     ParsedStandaloneOpts {
         meta_opts,
         compute_opts,
@@ -73,72 +93,37 @@ fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
     }
 }
 
-fn get_services(opts: &StandaloneOpts) -> Vec<RisingWaveService> {
+pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
+    tracing::info!("launching Risingwave in standalone mode");
+
     let ParsedStandaloneOpts {
         meta_opts,
         compute_opts,
         frontend_opts,
         compactor_opts,
-    } = parse_opt_args(opts);
-    let mut services = vec![];
-    if let Some(meta_opts) = meta_opts {
-        services.push(RisingWaveService::Meta(osstrs(meta_opts)));
-    }
-    if let Some(compute_opts) = compute_opts {
-        services.push(RisingWaveService::Compute(osstrs(compute_opts)));
-    }
-    if let Some(frontend_opts) = frontend_opts {
-        services.push(RisingWaveService::Frontend(osstrs(frontend_opts)));
-    }
-    if let Some(compactor_opts) = compactor_opts {
-        services.push(RisingWaveService::Compactor(osstrs(compactor_opts)));
-    }
-    services
-}
+    } = parse_opt_args(&opts);
 
-pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
-    tracing::info!("launching Risingwave in standalone mode");
-
-    let services = get_services(&opts);
-
-    for service in services {
-        match service {
-            RisingWaveService::Meta(mut opts) => {
-                opts.insert(0, "meta-node".into());
-                tracing::info!("starting meta-node thread with cli args: {:?}", opts);
-                let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
-                let _meta_handle = tokio::spawn(async move {
-                    risingwave_meta::start(opts).await;
-                    tracing::warn!("meta is stopped, shutdown all nodes");
-                });
-                // wait for the service to be ready
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-            RisingWaveService::Compute(mut opts) => {
-                opts.insert(0, "compute-node".into());
-                tracing::info!("starting compute-node thread with cli args: {:?}", opts);
-                let opts = risingwave_compute::ComputeNodeOpts::parse_from(opts);
-                let _compute_handle =
-                    tokio::spawn(async move { risingwave_compute::start(opts).await });
-            }
-            RisingWaveService::Frontend(mut opts) => {
-                opts.insert(0, "frontend-node".into());
-                tracing::info!("starting frontend-node thread with cli args: {:?}", opts);
-                let opts = risingwave_frontend::FrontendOpts::parse_from(opts);
-                let _frontend_handle =
-                    tokio::spawn(async move { risingwave_frontend::start(opts).await });
-            }
-            RisingWaveService::Compactor(mut opts) => {
-                opts.insert(0, "compactor-node".into());
-                tracing::info!("starting compactor-node thread with cli args: {:?}", opts);
-                let opts = risingwave_compactor::CompactorOpts::parse_from(opts);
-                let _compactor_handle =
-                    tokio::spawn(async move { risingwave_compactor::start(opts).await });
-            }
-            RisingWaveService::ConnectorNode(_) => {
-                panic!("Connector node unsupported in Risingwave standalone mode.");
-            }
-        }
+    if let Some(opts) = meta_opts {
+        tracing::info!("starting meta-node thread with cli args: {:?}", opts);
+        let _meta_handle = tokio::spawn(async move {
+            risingwave_meta::start(opts).await;
+            tracing::warn!("meta is stopped, shutdown all nodes");
+        });
+        // wait for the service to be ready
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    if let Some(opts) = compute_opts {
+        tracing::info!("starting compute-node thread with cli args: {:?}", opts);
+        let _compute_handle = tokio::spawn(async move { risingwave_compute::start(opts).await });
+    }
+    if let Some(opts) = frontend_opts {
+        tracing::info!("starting frontend-node thread with cli args: {:?}", opts);
+        let _frontend_handle = tokio::spawn(async move { risingwave_frontend::start(opts).await });
+    }
+    if let Some(opts) = compactor_opts {
+        tracing::info!("starting compactor-node thread with cli args: {:?}", opts);
+        let _compactor_handle =
+            tokio::spawn(async move { risingwave_compactor::start(opts).await });
     }
 
     // wait for log messages to be flushed
