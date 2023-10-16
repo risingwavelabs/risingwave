@@ -14,8 +14,10 @@
 
 use std::collections::HashSet;
 use std::ops::{Bound, Deref};
+use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::hash::VirtualNode;
@@ -53,6 +55,21 @@ impl<S: StateStore> SourceStateTableHandler<S> {
 
         Self {
             state_store: StateTable::from_table_catalog(table_catalog, store, None).await,
+        }
+    }
+
+    pub async fn from_table_catalog_with_vnodes(
+        table_catalog: &PbTable,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+    ) -> Self {
+        // The state of source should not be cleaned up by retention_seconds
+        assert!(!table_catalog
+            .properties
+            .contains_key(&String::from(PROPERTIES_RETENTION_SECOND_KEY)));
+
+        Self {
+            state_store: StateTable::from_table_catalog(table_catalog, store, vnodes).await,
         }
     }
 
@@ -159,7 +176,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
-    async fn delete(&mut self, key: SplitId) -> StreamExecutorResult<()> {
+    pub async fn delete(&mut self, key: SplitId) -> StreamExecutorResult<()> {
         if let Some(prev_row) = self.get(key).await? {
             self.state_store.delete(prev_row);
         }

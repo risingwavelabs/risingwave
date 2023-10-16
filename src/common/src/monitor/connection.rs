@@ -226,7 +226,7 @@ where
     }
 
     fn call(&mut self, uri: Uri) -> Self::Future {
-        let endpoint = format!("{:?}:{:?}", uri.host(), uri.port());
+        let endpoint = format!("{:?}", uri.host());
         let monitor = self.monitor.clone();
         self.inner
             .call(uri)
@@ -259,7 +259,7 @@ where
                 result.map(|conn| {
                     let remote_addr = conn.connect_info().remote_addr();
                     let endpoint = remote_addr
-                        .map(|remote_addr| format!("{}:{}", remote_addr.ip(), remote_addr.port()))
+                        .map(|remote_addr| format!("{}", remote_addr.ip()))
                         .unwrap_or("unknown".to_string());
                     MonitoredConnection::new(conn, monitor.new_connection_monitor(endpoint))
                 })
