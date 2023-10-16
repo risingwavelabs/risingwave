@@ -824,13 +824,6 @@ impl Binder {
                                 }
                             }
                         }
-                        Expr::Value(value) => {
-                            return Err(ErrorCode::InvalidInputSyntax(format!(
-                                "ORDER BY expression cannot be non-integer constant: {}",
-                                value
-                            ))
-                            .into())
-                        }
                         expr => {
                             self.bind_expr(expr)?
                         }
