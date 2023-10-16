@@ -26,7 +26,7 @@ use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
-use super::catalog::{SinkFormat, SinkFormatDesc};
+use super::catalog::SinkFormatDesc;
 use super::SinkParam;
 use crate::common::KinesisCommon;
 use crate::dispatch_sink_formatter_impl;
@@ -72,11 +72,11 @@ impl Sink for KinesisSink {
     const SINK_NAME: &'static str = KINESIS_SINK;
 
     async fn validate(&self) -> Result<()> {
-        // For upsert Kafka sink, the primary key must be defined.
-        if self.format_desc.format != SinkFormat::AppendOnly && self.pk_indices.is_empty() {
+        // Kinesis requires partition key. There is no builtin support for round-robin as in kafka/pulsar.
+        // https://docs.aws.amazon.com/kinesis/latest/APIReference/API_PutRecord.html#Streams-PutRecord-request-PartitionKey
+        if self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "primary key not defined for {:?} kafka sink (please define in `primary_key` field)",
-                self.format_desc.format
+                "kinesis sink requires partition key (please define in `primary_key` field)",
             )));
         }
 
@@ -195,9 +195,12 @@ impl FormattedSink for KinesisSinkPayloadWriter {
     type V = Vec<u8>;
 
     async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
-        self.put_record(&k.unwrap(), v.unwrap_or_default())
-            .await
-            .map(|_| ())
+        self.put_record(
+            &k.ok_or_else(|| SinkError::Kinesis(anyhow!("no key provided")))?,
+            v.unwrap_or_default(),
+        )
+        .await
+        .map(|_| ())
     }
 }
 
