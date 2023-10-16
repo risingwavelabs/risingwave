@@ -228,7 +228,7 @@ impl ToStream for LogicalUnion {
             // In order to ensure all inputs have the same schema for new union, we construct new
             // schema like that: [original_schema + merged_stream_key + source_col]
             // where merged_stream_key is merged by the types of each input stream key.
-            // If all inputs have the same stream key column types, we have a small merged_stream_key. Otherwise, we will have a large merged_steam_key.
+            // If all inputs have the same stream key column types, we have a small merged_stream_key. Otherwise, we will have a large merged_stream_key.
 
             let (merged_stream_key_types, types_offset) = {
                 let mut max_types_counter = BTreeMap::default();

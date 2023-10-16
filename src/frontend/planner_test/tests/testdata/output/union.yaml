@@ -10,7 +10,7 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, 0:Int32], pk_columns: [t1._row_id, 0:Int32], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck }
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
       │ └─StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, 0:Int32] }
@@ -20,7 +20,7 @@
           └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, 0:Int32], pk_columns: [t1._row_id, 0:Int32], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamUnion { all: true }
         ├── StreamExchange Hash([3, 4]) from 1
@@ -55,7 +55,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ a, b, c, t1._row_id, 0:Int32 ]
+    ├── columns: [ a, b, c, t1._row_id, $src ]
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 3, 4 ]
@@ -330,7 +330,7 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchScan { table: t5, columns: [t5.a, t5.b, t5.c], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, 0:Int32], pk_columns: [t1._row_id, 0:Int32], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck }
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
       │ └─StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, 0:Int32] }
@@ -349,7 +349,7 @@
           └─StreamTableScan { table: t5, columns: [t5.a, t5.b, t5.c, t5._row_id], pk: [t5._row_id], dist: UpstreamHashShard(t5._row_id) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, 0:Int32], pk_columns: [t1._row_id, 0:Int32], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamUnion { all: true }
         ├── StreamExchange Hash([3, 4]) from 1
@@ -429,7 +429,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ a, b, c, t1._row_id, 0:Int32 ]
+    ├── columns: [ a, b, c, t1._row_id, $src ]
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 3, 4 ]
