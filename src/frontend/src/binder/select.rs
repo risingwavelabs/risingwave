@@ -772,9 +772,9 @@ impl Binder {
     /// Note that for `DISTINCT ON`, each expression is interpreted in the same way as `ORDER BY`
     /// expression, which means it will be bound in the following order:
     ///
-    /// * as an output-column name
+    /// * as an output-column name (can use aliases)
     /// * as an index (from 1) of an output column
-    /// * as an arbitrary expression
+    /// * as an arbitrary expression (cannot use aliases)
     ///
     /// See also the `bind_order_by_expr_in_query` method.
     ///
