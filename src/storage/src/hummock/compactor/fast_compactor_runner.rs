@@ -321,6 +321,7 @@ impl CompactorRunner {
             filter_key_extractor,
             sstable_writer_factory: factory,
             _phantom: PhantomData,
+            enable_vnode_bitmap: false,
         };
         let sst_builder = CapacitySplitTableBuilder::new(
             builder_factory,

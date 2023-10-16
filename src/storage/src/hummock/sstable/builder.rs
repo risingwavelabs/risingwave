@@ -17,6 +17,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
+use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
@@ -135,6 +137,9 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
 
     epoch_set: BTreeSet<u64>,
     memory_limiter: Option<Arc<MemoryLimiter>>,
+
+    vnode_bitmap_builder: Option<BitmapBuilder>,
+    last_vnode: usize,
 }
 
 impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
@@ -146,6 +151,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
             options,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
             None,
+            false,
         )
     }
 }
@@ -158,7 +164,14 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         options: SstableBuilderOptions,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         memory_limiter: Option<Arc<MemoryLimiter>>,
+        enable_vnode_bitmap: bool,
     ) -> Self {
+        let vnode_bitmap_builder = if enable_vnode_bitmap {
+            Some(BitmapBuilder::zeroed(VirtualNode::COUNT))
+        } else {
+            None
+        };
+
         Self {
             options: options.clone(),
             writer,
@@ -182,6 +195,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             range_tombstone_size: 0,
             epoch_set: BTreeSet::default(),
             memory_limiter,
+            vnode_bitmap_builder,
+            last_vnode: 0,
         }
     }
 
@@ -340,6 +355,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
 
         let table_id = full_key.user_key.table_id.table_id();
+        let vnode_id = full_key.user_key.get_vnode_id();
+
+        if let Some(vnode_bitmap_builder) = self.vnode_bitmap_builder.as_mut() && vnode_id != self.last_vnode {
+            vnode_bitmap_builder.set(vnode_id, true);
+            self.last_vnode = vnode_id;
+        }
+
         let mut extract_key = user_key(&self.raw_key);
         extract_key = self.filter_key_extractor.extract(extract_key);
         // add bloom_filter check
@@ -537,6 +559,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         };
 
+        let vnode_bitmap = if let Some(vnode_bitmap_builder) = self.vnode_bitmap_builder {
+            Some(vnode_bitmap_builder.finish().to_protobuf())
+        } else {
+            None
+        };
         let sst_info = SstableInfo {
             object_id: self.sstable_id,
             sst_id: self.sstable_id,
@@ -555,6 +582,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             min_epoch: cmp::min(min_epoch, tombstone_min_epoch),
             max_epoch: cmp::max(max_epoch, tombstone_max_epoch),
             range_tombstone_count: meta.monotonic_tombstone_events.len() as u64,
+            vnode_bitmap,
         };
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",
@@ -813,6 +841,7 @@ pub(super) mod tests {
             opts,
             Arc::new(FilterKeyExtractorImpl::Multi(filter)),
             None,
+            false,
         );
 
         let key_count: usize = 10000;

@@ -28,6 +28,7 @@ message SstableInfo {
   uint64 uncompressed_file_size = 11;
   uint64 range_tombstone_count = 12;
   BloomFilterType bloom_filter_kind = 13;
+  common.Buffer vnode_bitmap = 14;
 }
 
 enum LevelType {

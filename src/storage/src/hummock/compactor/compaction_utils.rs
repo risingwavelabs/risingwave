@@ -48,6 +48,8 @@ pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
     pub remote_rpc_cost: Arc<AtomicU64>,
     pub filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     pub sstable_writer_factory: W,
+    pub enable_vnode_bitmap: bool,
+
     pub _phantom: PhantomData<F>,
 }
 
@@ -80,6 +82,7 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
             self.options.clone(),
             self.filter_key_extractor.clone(),
             Some(self.limiter.clone()),
+            self.enable_vnode_bitmap,
         );
         Ok(builder)
     }
