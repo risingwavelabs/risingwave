@@ -310,8 +310,6 @@ pub mod agg_kinds {
         () => {
             AggKind::BitAnd
                 | AggKind::BitOr
-                | AggKind::JsonbAgg
-                | AggKind::JsonbObjectAgg
                 | AggKind::PercentileCont
                 | AggKind::PercentileDisc
                 | AggKind::Mode
