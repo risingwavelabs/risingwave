@@ -39,7 +39,7 @@ values(round(42.4382));
 statement ok
 create table t3 (v1 int, v2 int, v3 int);
 
-query TT
+query TTT
 describe t3;
 ----
 v1 integer false
@@ -49,7 +49,7 @@ _row_id serial true
 primary key _row_id NULL
 distribution key _row_id NULL
 
-query TT
+query TTT
 show columns from t3;
 ----
 v1 integer false
