@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut};
 use foyer::common::code::{Key, Value};
 use foyer::intrusive::eviction::lfu::LfuConfig;
 use foyer::storage::admission::rated_ticket::RatedTicketAdmissionPolicy;
@@ -338,12 +338,12 @@ impl Key for SstableBlockIndex {
         8 + 8 // sst_id (8B) + block_idx (8B)
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
+    fn write(&self, mut buf: impl BufMut) {
         buf.put_u64(self.sst_id);
         buf.put_u64(self.block_idx);
     }
 
-    fn read(mut buf: &[u8]) -> Self {
+    fn read(mut buf: impl Buf) -> Self {
         let sst_id = buf.get_u64();
         let block_idx = buf.get_u64();
         Self { sst_id, block_idx }
@@ -355,12 +355,12 @@ impl Value for Box<Block> {
         self.raw_data().len()
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
+    fn write(&self, mut buf: impl BufMut) {
         buf.put_slice(self.raw_data())
     }
 
-    fn read(buf: &[u8]) -> Self {
-        let data = Bytes::copy_from_slice(buf);
+    fn read(mut buf: impl Buf) -> Self {
+        let data = buf.copy_to_bytes(buf.remaining());
         let block = Block::decode_from_raw(data);
         Box::new(block)
     }
@@ -371,17 +371,19 @@ impl Value for Box<Sstable> {
         8 + self.meta.encoded_size() // id (8B) + meta size
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
-        buf.put_u64(self.id);
+    fn write(&self, mut buf: impl BufMut) {
         // TODO(MrCroxx): avoid buffer copy
+        buf.put_u64(self.id);
         let mut buffer = vec![];
         self.meta.encode_to(&mut buffer);
         buf.put_slice(&buffer[..])
     }
 
-    fn read(mut buf: &[u8]) -> Self {
+    fn read(mut buf: impl Buf) -> Self {
+        // TODO(MrCroxx): avoid buffer copy
         let id = buf.get_u64();
-        let meta = SstableMeta::decode(buf).unwrap();
+        let buf = buf.copy_to_bytes(buf.remaining());
+        let meta = SstableMeta::decode(&buf).unwrap();
         Box::new(Sstable::new(id, meta))
     }
 }
