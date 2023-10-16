@@ -112,7 +112,8 @@ test_snapshot_and_upstream_read() {
 
   run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
 
-  kill_cluster
+  cargo make kill
+  cargo make wait-processes-exit
 }
 
 # Test background ddl recovery
