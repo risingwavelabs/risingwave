@@ -920,8 +920,6 @@ impl CatalogManager {
         }
         commit_meta!(self, tables)?;
 
-        let tables = &mut database_core.tables;
-        assert!(tables.get(&table.id).is_none());
         Ok(())
     }
 
