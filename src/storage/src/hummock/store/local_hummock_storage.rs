@@ -48,7 +48,7 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::StateStoreIter;
 
-const AVALIABLE_EPOCH_GAP: u64 = 256;
+const AVAILABLE: u64 = 256;
 const MEM_TABLE_SPILL_THRESHOLD: usize = 64 * 1024 * 1024;
 
 /// `LocalHummockStorage` is a handle for a state table shard to access data from and write data to
@@ -339,7 +339,7 @@ impl LocalStateStore for LocalHummockStorage {
                 self.table_id.table_id()
             );
 
-            if self.spill_offset < AVALIABLE_EPOCH_GAP {
+            if self.spill_offset < AVAILABLE {
                 self.spill_offset += 1;
                 let gap_epoch = self.epoch() + self.spill_offset;
 
