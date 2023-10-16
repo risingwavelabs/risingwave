@@ -22,20 +22,34 @@ use crate::common::{osstrs, RisingWaveService};
 #[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
 pub struct StandaloneOpts {
     /// Compute node options
+    /// If missing, compute node won't start
     #[clap(short, long, env = "STANDALONE_COMPUTE_OPTS")]
     compute_opts: Option<String>,
 
     #[clap(short, long, env = "STANDALONE_META_OPTS")]
     /// Meta node options
+    /// If missing, meta node won't start
     meta_opts: Option<String>,
 
     #[clap(short, long, env = "STANDALONE_FRONTEND_OPTS")]
     /// Frontend node options
+    /// If missing, frontend node won't start
     frontend_opts: Option<String>,
 
     #[clap(long, env = "STANDALONE_COMPACTOR_OPTS")]
-    /// Frontend node options
+    /// Compactor node options
+    /// If missing compactor node won't start
     compactor_opts: Option<String>,
+
+    #[clap(long, env = "PROMETHEUS_LISTENER_ADDR")]
+    /// Prometheus listener address
+    /// If present, it will override prometheus listener address for
+    /// Frontend, Compute and Compactor nodes
+    prometheus_listener_addr: Option<String>,
+
+    #[clap(long, env = "STATE_STORE_URL")]
+    /// State store URL
+    state_store_url: Option<String>,
 }
 
 #[derive(Debug)]
@@ -169,6 +183,8 @@ mod test {
             meta_opts: Some("--data-dir \"some path with spaces\" --port 8001".into()),
             frontend_opts: Some("--some-option".into()),
             compactor_opts: None,
+            state_store_url: None,
+            prometheus_listener_addr: None,
         };
         assert_eq!(actual, opts);
 
