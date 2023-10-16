@@ -27,29 +27,35 @@ use crate::common::osstrs;
 pub struct StandaloneOpts {
     /// Compute node options
     /// If missing, compute node won't start
-    #[clap(short, long, env = "STANDALONE_COMPUTE_OPTS")]
+    #[clap(short, long, env = "RW_STANDALONE_COMPUTE_OPTS")]
     compute_opts: Option<String>,
 
-    #[clap(short, long, env = "STANDALONE_META_OPTS")]
+    #[clap(short, long, env = "RW_STANDALONE_META_OPTS")]
     /// Meta node options
     /// If missing, meta node won't start
     meta_opts: Option<String>,
 
-    #[clap(short, long, env = "STANDALONE_FRONTEND_OPTS")]
+    #[clap(short, long, env = "RW_STANDALONE_FRONTEND_OPTS")]
     /// Frontend node options
     /// If missing, frontend node won't start
     frontend_opts: Option<String>,
 
-    #[clap(long, env = "STANDALONE_COMPACTOR_OPTS")]
+    #[clap(long, env = "RW_STANDALONE_COMPACTOR_OPTS")]
     /// Compactor node options
     /// If missing compactor node won't start
     compactor_opts: Option<String>,
 
-    #[clap(long, env = "PROMETHEUS_LISTENER_ADDR")]
+    #[clap(long, env = "RW_STANDALONE_PROMETHEUS_LISTENER_ADDR")]
     /// Prometheus listener address
     /// If present, it will override prometheus listener address for
     /// Frontend, Compute and Compactor nodes
     prometheus_listener_addr: Option<String>,
+
+    #[clap(long, env = "RW_STANDALONE_CONFIG_PATH")]
+    /// Path to the config file
+    /// If present, it will override config path for
+    /// Frontend, Compute and Compactor nodes
+    config_path: Option<String>,
 }
 
 #[derive(Debug)]
@@ -66,25 +72,46 @@ fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
         s.insert(0, "meta-node".into());
         s
     });
-    let meta_opts = meta_opts.map(|o| MetaNodeOpts::parse_from(osstrs(o)));
+    let mut meta_opts = meta_opts.map(|o| MetaNodeOpts::parse_from(osstrs(o)));
+
     let compute_opts = opts.compute_opts.as_ref().map(|s| {
         let mut s = split(s).unwrap();
         s.insert(0, "compute-node".into());
         s
     });
-    let compute_opts = compute_opts.map(|o| ComputeNodeOpts::parse_from(osstrs(o)));
+    let mut compute_opts = compute_opts.map(|o| ComputeNodeOpts::parse_from(osstrs(o)));
+
     let frontend_opts = opts.frontend_opts.as_ref().map(|s| {
         let mut s = split(s).unwrap();
         s.insert(0, "frontend-node".into());
         s
     });
-    let frontend_opts = frontend_opts.map(|o| FrontendOpts::parse_from(osstrs(o)));
+    let mut frontend_opts = frontend_opts.map(|o| FrontendOpts::parse_from(osstrs(o)));
+
     let compactor_opts = opts.compactor_opts.as_ref().map(|s| {
         let mut s = split(s).unwrap();
         s.insert(0, "compactor-node".into());
         s
     });
-    let compactor_opts = compactor_opts.map(|o| CompactorOpts::parse_from(osstrs(o)));
+    let mut compactor_opts = compactor_opts.map(|o| CompactorOpts::parse_from(osstrs(o)));
+
+    if let Some(config_path) = opts.config_path.as_ref() {
+        meta_opts.as_mut().map(|o| o.config_path = config_path.clone());
+        compute_opts.as_mut().map(|o| o.config_path = config_path.clone());
+        frontend_opts.as_mut().map(|o| o.config_path = config_path.clone());
+        compactor_opts.as_mut().map(|o| o.config_path = config_path.clone());
+    }
+    if let Some(prometheus_listener_addr) = opts.prometheus_listener_addr.as_ref() {
+        compute_opts
+            .as_mut()
+            .map(|o| o.prometheus_listener_addr = prometheus_listener_addr.clone());
+        frontend_opts
+            .as_mut()
+            .map(|o| o.prometheus_listener_addr = prometheus_listener_addr.clone());
+        compactor_opts
+            .as_mut()
+            .map(|o| o.prometheus_listener_addr = prometheus_listener_addr.clone());
+    }
     ParsedStandaloneOpts {
         meta_opts,
         compute_opts,
@@ -105,6 +132,7 @@ pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
 
     if let Some(opts) = meta_opts {
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
+
         let _meta_handle = tokio::spawn(async move {
             risingwave_meta::start(opts).await;
             tracing::warn!("meta is stopped, shutdown all nodes");
@@ -158,18 +186,20 @@ mod test {
     fn test_parse_opt_args() {
         // Test parsing into standalone-level opts.
         let raw_opts = "
---compute-opts=--listen-address 127.0.0.1 --port 8000
---meta-opts=--data-dir \"some path with spaces\" --port 8001
---frontend-opts=--some-option
+--compute-opts=--listen-addr 127.0.0.1:8000
+--meta-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001
+--frontend-opts=--config-path=src/config/original.toml
+--prometheus-listener-addr=127.0.0.1:1234
+--config-path=src/config/test.toml
 ";
         let actual = StandaloneOpts::parse_from(raw_opts.lines());
         let opts = StandaloneOpts {
-            compute_opts: Some("--listen-address 127.0.0.1 --port 8000".into()),
-            meta_opts: Some("--data-dir \"some path with spaces\" --port 8001".into()),
-            frontend_opts: Some("--some-option".into()),
+            compute_opts: Some("--listen-addr 127.0.0.1:8000".into()),
+            meta_opts: Some("--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001".into()),
+            frontend_opts: Some("--config-path=src/config/original.toml".into()),
             compactor_opts: None,
-            state_store_url: None,
-            prometheus_listener_addr: None,
+            prometheus_listener_addr: Some("127.0.0.1:1234".into()),
+            config_path: Some("src/config/test.toml".into()),
         };
         assert_eq!(actual, opts);
 
@@ -180,25 +210,77 @@ mod test {
             expect![[r#"
                 ParsedStandaloneOpts {
                     meta_opts: Some(
-                        [
-                            "--data-dir",
-                            "some path with spaces",
-                            "--port",
-                            "8001",
-                        ],
+                        MetaNodeOpts {
+                            vpc_id: None,
+                            security_group_id: None,
+                            listen_addr: "127.0.0.1:8001",
+                            advertise_addr: "127.0.0.1:9999",
+                            dashboard_host: None,
+                            prometheus_host: None,
+                            etcd_endpoints: "",
+                            etcd_auth: false,
+                            etcd_username: "",
+                            etcd_password: "",
+                            sql_endpoint: None,
+                            dashboard_ui_path: None,
+                            prometheus_endpoint: None,
+                            connector_rpc_endpoint: None,
+                            privatelink_endpoint_default_tags: None,
+                            config_path: "src/config/test.toml",
+                            backend: None,
+                            barrier_interval_ms: None,
+                            sstable_size_mb: None,
+                            block_size_kb: None,
+                            bloom_false_positive: None,
+                            state_store: None,
+                            data_directory: Some(
+                                "some path with spaces",
+                            ),
+                            do_not_config_object_storage_lifecycle: None,
+                            backup_storage_url: None,
+                            backup_storage_directory: None,
+                            object_store_streaming_read_timeout_ms: None,
+                            object_store_streaming_upload_timeout_ms: None,
+                            object_store_upload_timeout_ms: None,
+                            object_store_read_timeout_ms: None,
+                            heap_profiling_dir: None,
+                        },
                     ),
                     compute_opts: Some(
-                        [
-                            "--listen-address",
-                            "127.0.0.1",
-                            "--port",
-                            "8000",
-                        ],
+                        ComputeNodeOpts {
+                            listen_addr: "127.0.0.1:8000",
+                            advertise_addr: None,
+                            prometheus_listener_addr: "127.0.0.1:1234",
+                            meta_address: "http://127.0.0.1:5690",
+                            connector_rpc_endpoint: None,
+                            connector_rpc_sink_payload_format: None,
+                            config_path: "src/config/test.toml",
+                            total_memory_bytes: 34359738368,
+                            parallelism: 10,
+                            role: Both,
+                            metrics_level: None,
+                            data_file_cache_dir: None,
+                            meta_file_cache_dir: None,
+                            async_stack_trace: None,
+                            heap_profiling_dir: None,
+                            object_store_streaming_read_timeout_ms: None,
+                            object_store_streaming_upload_timeout_ms: None,
+                            object_store_upload_timeout_ms: None,
+                            object_store_read_timeout_ms: None,
+                        },
                     ),
                     frontend_opts: Some(
-                        [
-                            "--some-option",
-                        ],
+                        FrontendOpts {
+                            listen_addr: "127.0.0.1:4566",
+                            advertise_addr: None,
+                            port: None,
+                            meta_addr: "http://127.0.0.1:5690",
+                            prometheus_listener_addr: "127.0.0.1:1234",
+                            health_check_listener_addr: "127.0.0.1:6786",
+                            config_path: "src/config/test.toml",
+                            metrics_level: None,
+                            enable_barrier_read: None,
+                        },
                     ),
                     compactor_opts: None,
                 }"#]],
