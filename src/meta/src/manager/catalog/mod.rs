@@ -892,11 +892,27 @@ impl CatalogManager {
         Ok(version)
     }
 
-    async fn cancel_create_table_procedure_inner(
+    /// Used to cleanup states in stream manager.
+    /// It is required because failure may not necessarily happen in barrier,
+    /// e.g. when cordon nodes.
+    /// and we still need some way to cleanup the state.
+    pub async fn cancel_create_table_procedure(
         &self,
-        table: Table,
+        table_id: TableId,
         internal_table_ids: Vec<TableId>,
     ) -> MetaResult<()> {
+        let table = {
+            let core = &mut self.core.lock().await;
+            let database_core = &mut core.database;
+            let tables = &mut database_core.tables;
+            let Some(table) = tables.get(&table_id).cloned() else {
+                bail!(
+                    "table_id {} missing when attempting to cancel job",
+                    table_id
+                )
+            };
+            table
+        };
         tracing::trace!("cleanup tables for {}", table.id);
         let core = &mut self.core.lock().await;
         {
@@ -921,51 +937,6 @@ impl CatalogManager {
         commit_meta!(self, tables)?;
 
         Ok(())
-    }
-
-    /// Used to cleanup states in stream manager.
-    /// It is required because failure may not necessarily happen in barrier,
-    /// e.g. when cordon nodes.
-    /// and we still need some way to cleanup the state.
-    pub async fn cancel_create_table_procedure_with_internal_table_ids(
-        &self,
-        table: Table,
-        internal_table_ids: Vec<TableId>,
-    ) -> MetaResult<()> {
-        let table = {
-            let core = &mut self.core.lock().await;
-            let database_core = &mut core.database;
-            let tables = &mut database_core.tables;
-            let Some(table) = tables.get(&table.id).cloned() else {
-                bail!(
-                    "table_id {} missing when attempting to cancel job",
-                    table.id
-                )
-            };
-            table
-        };
-        self.cancel_create_table_procedure_inner(table, internal_table_ids)
-            .await
-    }
-
-    /// Used by CANCEL JOBS
-    pub async fn cancel_create_table_procedure_with_table_fragments(
-        &self,
-        table_id: TableId,
-        fragment: &TableFragments,
-    ) -> MetaResult<()> {
-        let table = {
-            let core = &mut self.core.lock().await;
-            let database_core = &mut core.database;
-            let tables = &mut database_core.tables;
-            let Some(table) = tables.get(&table_id).cloned() else {
-                tracing::warn!("Table ID: {table_id} missing when attempting to cancel job");
-                return Ok(());
-            };
-            table
-        };
-        self.cancel_create_table_procedure_inner(table, fragment.internal_table_ids())
-            .await
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.

@@ -678,9 +678,9 @@ impl CommandContext {
                     tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", &table_ids, e);
                 }
                 self.catalog_manager
-                    .cancel_create_table_procedure_with_table_fragments(
+                    .cancel_create_table_procedure(
                         table_fragments.table_id().table_id,
-                        table_fragments,
+                        table_fragments.internal_table_ids(),
                     )
                     .await?;
                 self.fragment_manager

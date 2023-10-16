@@ -744,10 +744,7 @@ impl DdlController {
                 // barrier manager will do the cleanup.
                 let result = self
                     .catalog_manager
-                    .cancel_create_table_procedure_with_internal_table_ids(
-                        table.clone(),
-                        creating_internal_table_ids.clone(),
-                    )
+                    .cancel_create_table_procedure(table.id, creating_internal_table_ids.clone())
                     .await;
                 creating_internal_table_ids.push(table.id);
                 if let Err(e) = result {
@@ -767,8 +764,8 @@ impl DdlController {
                 } else {
                     let result = self
                         .catalog_manager
-                        .cancel_create_table_procedure_with_internal_table_ids(
-                            table.clone(),
+                        .cancel_create_table_procedure(
+                            table.id,
                             creating_internal_table_ids.clone(),
                         )
                         .await;
