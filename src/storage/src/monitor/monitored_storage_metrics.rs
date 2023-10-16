@@ -19,20 +19,23 @@ use prometheus::{
     register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram, Registry,
 };
 use risingwave_common::config::MetricLevel;
-use risingwave_common::metrics::{RelabeledCounterVec, RelabeledHistogramVec};
+use risingwave_common::metrics::{
+    RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledHistogramVec,
+};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::register_guarded_histogram_vec_with_registry;
 
 /// [`MonitoredStorageMetrics`] stores the performance and IO metrics of Storage.
 #[derive(Debug, Clone)]
 pub struct MonitoredStorageMetrics {
-    pub get_duration: RelabeledHistogramVec,
+    pub get_duration: RelabeledGuardedHistogramVec<1>,
     pub get_key_size: RelabeledHistogramVec,
     pub get_value_size: RelabeledHistogramVec,
 
     pub iter_size: RelabeledHistogramVec,
     pub iter_item: RelabeledHistogramVec,
-    pub iter_init_duration: RelabeledHistogramVec,
-    pub iter_scan_duration: RelabeledHistogramVec,
+    pub iter_init_duration: RelabeledGuardedHistogramVec<1>,
+    pub iter_scan_duration: RelabeledGuardedHistogramVec<1>,
     pub may_exist_duration: RelabeledHistogramVec,
 
     pub iter_in_process_counts: RelabeledCounterVec,
@@ -93,10 +96,13 @@ impl MonitoredStorageMetrics {
             "Total latency of get that have been issued to state store",
             buckets.clone(),
         );
-        let get_duration =
-            register_histogram_vec_with_registry!(get_duration_opts, &["table_id"], registry)
-                .unwrap();
-        let get_duration = RelabeledHistogramVec::with_metric_level(
+        let get_duration = register_guarded_histogram_vec_with_registry!(
+            get_duration_opts,
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+        let get_duration = RelabeledGuardedHistogramVec::with_metric_level(
             MetricLevel::Critical,
             get_duration,
             metric_level,
@@ -128,8 +134,8 @@ impl MonitoredStorageMetrics {
             buckets.clone(),
         );
         let iter_init_duration =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let iter_init_duration = RelabeledHistogramVec::with_metric_level(
+            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let iter_init_duration = RelabeledGuardedHistogramVec::with_metric_level(
             MetricLevel::Critical,
             iter_init_duration,
             metric_level,
@@ -141,8 +147,8 @@ impl MonitoredStorageMetrics {
             buckets.clone(),
         );
         let iter_scan_duration =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let iter_scan_duration = RelabeledHistogramVec::with_metric_level(
+            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let iter_scan_duration = RelabeledGuardedHistogramVec::with_metric_level(
             MetricLevel::Critical,
             iter_scan_duration,
             metric_level,

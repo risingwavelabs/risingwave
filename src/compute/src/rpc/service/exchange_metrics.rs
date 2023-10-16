@@ -16,12 +16,14 @@ use std::sync::LazyLock;
 
 use prometheus::core::{AtomicU64, GenericCounterVec};
 use prometheus::{register_int_counter_vec_with_registry, Registry};
+use risingwave_common::metrics::LabelGuardedIntCounterVec;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::register_guarded_int_counter_vec_with_registry;
 
 #[derive(Clone)]
 pub struct ExchangeServiceMetrics {
     pub stream_fragment_exchange_bytes: GenericCounterVec<AtomicU64>,
-    pub actor_sampled_serialize_duration_ns: GenericCounterVec<AtomicU64>,
+    pub actor_sampled_serialize_duration_ns: LabelGuardedIntCounterVec<1>,
 }
 
 pub static GLOBAL_EXCHANGE_SERVICE_METRICS: LazyLock<ExchangeServiceMetrics> =
@@ -37,7 +39,7 @@ impl ExchangeServiceMetrics {
         )
         .unwrap();
 
-        let actor_sampled_serialize_duration_ns = register_int_counter_vec_with_registry!(
+        let actor_sampled_serialize_duration_ns = register_guarded_int_counter_vec_with_registry!(
             "actor_sampled_serialize_duration_ns",
             "Duration (ns) of sampled chunk serialization",
             &["actor_id"],

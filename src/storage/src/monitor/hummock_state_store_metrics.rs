@@ -21,8 +21,14 @@ use prometheus::{
     Opts, Registry,
 };
 use risingwave_common::config::MetricLevel;
-use risingwave_common::metrics::{RelabeledCounterVec, RelabeledHistogramVec};
+use risingwave_common::metrics::{
+    RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
+    RelabeledHistogramVec,
+};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::{
+    register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+};
 use tracing::warn;
 
 /// [`HummockStateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
@@ -35,17 +41,17 @@ pub struct HummockStateStoreMetrics {
     pub bloom_filter_true_negative_counts: RelabeledCounterVec,
     pub bloom_filter_check_counts: RelabeledCounterVec,
     pub iter_merge_sstable_counts: RelabeledHistogramVec,
-    pub sst_store_block_request_counts: RelabeledCounterVec,
-    pub iter_scan_key_counts: RelabeledCounterVec,
+    pub sst_store_block_request_counts: RelabeledGuardedIntCounterVec<2>,
+    pub iter_scan_key_counts: RelabeledGuardedIntCounterVec<2>,
     pub get_shared_buffer_hit_counts: RelabeledCounterVec,
     pub remote_read_time: RelabeledHistogramVec,
-    pub iter_fetch_meta_duration: RelabeledHistogramVec,
+    pub iter_fetch_meta_duration: RelabeledGuardedHistogramVec<1>,
     pub iter_fetch_meta_cache_unhits: IntGauge,
     pub iter_slow_fetch_meta_cache_unhits: IntGauge,
 
-    pub read_req_bloom_filter_positive_counts: RelabeledCounterVec,
-    pub read_req_positive_but_non_exist_counts: RelabeledCounterVec,
-    pub read_req_check_bloom_filter_counts: RelabeledCounterVec,
+    pub read_req_bloom_filter_positive_counts: RelabeledGuardedIntCounterVec<2>,
+    pub read_req_positive_but_non_exist_counts: RelabeledGuardedIntCounterVec<2>,
+    pub read_req_check_bloom_filter_counts: RelabeledGuardedIntCounterVec<2>,
 
     pub write_batch_tuple_counts: RelabeledCounterVec,
     pub write_batch_duration: RelabeledHistogramVec,
@@ -122,27 +128,27 @@ impl HummockStateStoreMetrics {
         );
 
         // ----- sst store -----
-        let sst_store_block_request_counts = register_int_counter_vec_with_registry!(
+        let sst_store_block_request_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_sst_store_block_request_counts",
             "Total number of sst block requests that have been issued to sst store",
             &["table_id", "type"],
             registry
         )
         .unwrap();
-        let sst_store_block_request_counts = RelabeledCounterVec::with_metric_level(
+        let sst_store_block_request_counts = RelabeledGuardedIntCounterVec::with_metric_level(
             MetricLevel::Critical,
             sst_store_block_request_counts,
             metric_level,
         );
 
-        let iter_scan_key_counts = register_int_counter_vec_with_registry!(
+        let iter_scan_key_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_iter_scan_key_counts",
             "Total number of keys read by iterator",
             &["table_id", "type"],
             registry
         )
         .unwrap();
-        let iter_scan_key_counts = RelabeledCounterVec::with_metric_level(
+        let iter_scan_key_counts = RelabeledGuardedIntCounterVec::with_metric_level(
             MetricLevel::Info,
             iter_scan_key_counts,
             metric_level,
@@ -180,8 +186,8 @@ impl HummockStateStoreMetrics {
             time_buckets.clone(),
         );
         let iter_fetch_meta_duration =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let iter_fetch_meta_duration = RelabeledHistogramVec::with_metric_level(
+            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let iter_fetch_meta_duration = RelabeledGuardedHistogramVec::with_metric_level(
             MetricLevel::Info,
             iter_fetch_meta_duration,
             metric_level,
@@ -302,40 +308,42 @@ impl HummockStateStoreMetrics {
             .register(Box::new(uploader_uploading_task_size.clone()))
             .unwrap();
 
-        let read_req_bloom_filter_positive_counts = register_int_counter_vec_with_registry!(
+        let read_req_bloom_filter_positive_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_read_req_bloom_filter_positive_counts",
             "Total number of read request with at least one SST bloom filter check returns positive",
             &["table_id", "type"],
             registry
         )
         .unwrap();
-        let read_req_bloom_filter_positive_counts = RelabeledCounterVec::with_metric_level(
-            MetricLevel::Info,
-            read_req_bloom_filter_positive_counts,
-            metric_level,
-        );
+        let read_req_bloom_filter_positive_counts =
+            RelabeledGuardedIntCounterVec::with_metric_level(
+                MetricLevel::Info,
+                read_req_bloom_filter_positive_counts,
+                metric_level,
+            );
 
-        let read_req_positive_but_non_exist_counts = register_int_counter_vec_with_registry!(
+        let read_req_positive_but_non_exist_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_read_req_positive_but_non_exist_counts",
             "Total number of read request on non-existent key/prefix with at least one SST bloom filter check returns positive",
             &["table_id", "type"],
             registry
         )
         .unwrap();
-        let read_req_positive_but_non_exist_counts = RelabeledCounterVec::with_metric_level(
-            MetricLevel::Info,
-            read_req_positive_but_non_exist_counts,
-            metric_level,
-        );
+        let read_req_positive_but_non_exist_counts =
+            RelabeledGuardedIntCounterVec::with_metric_level(
+                MetricLevel::Info,
+                read_req_positive_but_non_exist_counts,
+                metric_level,
+            );
 
-        let read_req_check_bloom_filter_counts = register_int_counter_vec_with_registry!(
+        let read_req_check_bloom_filter_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_read_req_check_bloom_filter_counts",
             "Total number of read request that checks bloom filter with a prefix hint",
             &["table_id", "type"],
             registry
         )
         .unwrap();
-        let read_req_check_bloom_filter_counts = RelabeledCounterVec::with_metric_level(
+        let read_req_check_bloom_filter_counts = RelabeledGuardedIntCounterVec::with_metric_level(
             MetricLevel::Info,
             read_req_check_bloom_filter_counts,
             metric_level,
