@@ -40,6 +40,7 @@ use crate::sink::{
 };
 
 pub const BIGQUERY_SINK: &str = "bigquery";
+const BIGQUERY_INSERT_MAX_NUMS: usize = 500;
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct BigQueryConfig {
@@ -95,8 +96,13 @@ impl BigQuerySink {
         big_query_columns_desc: HashMap<String, String>,
     ) -> Result<()> {
         let rw_fields_name = self.schema.fields();
+        if big_query_columns_desc.is_empty() {
+            return Err(SinkError::BigQuery(
+                "Cannot find table in bigquery".to_string(),
+            ));
+        }
         if rw_fields_name.len().ne(&big_query_columns_desc.len()) {
-            return Err(SinkError::BigQuery("The length of the RisingWave column must be equal to the length of the bigquery column".to_string()));
+            return Err(SinkError::BigQuery(format!("The length of the RisingWave column {} must be equal to the length of the bigquery column {}",rw_fields_name.len(),big_query_columns_desc.len())));
         }
 
         for i in rw_fields_name {
@@ -132,7 +138,7 @@ impl BigQuerySink {
             DataType::Time => Err(SinkError::BigQuery(
                 "Bigquery cannot support Time".to_string(),
             )),
-            DataType::Timestamp => Ok("DATATIME".to_owned()),
+            DataType::Timestamp => Ok("DATETIME".to_owned()),
             DataType::Timestamptz => Ok("TIMESTAMP".to_owned()),
             DataType::Interval => Ok("INTERVAL".to_owned()),
             DataType::Struct(structs) => {
@@ -285,7 +291,7 @@ impl BigQuerySinkWriter {
         self.insert_request
             .add_rows(insert_vec)
             .map_err(|e| SinkError::BigQuery(e.to_string()))?;
-        if self.insert_request.len().ge(&1000) {
+        if self.insert_request.len().ge(&BIGQUERY_INSERT_MAX_NUMS) {
             self.insert_data().await?;
         }
         Ok(())
