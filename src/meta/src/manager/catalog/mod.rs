@@ -758,7 +758,7 @@ impl CatalogManager {
     ///    Clean up these hanging tables by the id.
     pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
         let creating_tables: Vec<Table> = self.list_persisted_creating_tables().await;
-        eprintln!(
+        tracing::debug!(
             "creating_tables ids: {:#?}",
             creating_tables.iter().map(|t| t.id).collect_vec()
         );
