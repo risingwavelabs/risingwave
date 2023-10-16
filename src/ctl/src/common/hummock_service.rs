@@ -169,6 +169,7 @@ For `./risedev apply-compose-deploy` users,
             0,
             FileCache::none(),
             FileCache::none(),
+            None,
         )))
     }
 }
