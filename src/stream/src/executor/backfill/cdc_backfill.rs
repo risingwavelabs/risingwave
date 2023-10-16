@@ -48,7 +48,7 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
+pub const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
 
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,

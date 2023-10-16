@@ -84,6 +84,7 @@ impl MySqlCdcSplit {
             }
         }
         self.inner.start_offset = Some(start_offset);
+        // if snapshot_done is already true, it won't be updated
         self.inner.snapshot_done = snapshot_done;
         Ok(())
     }
