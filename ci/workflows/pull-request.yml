@@ -19,7 +19,7 @@ steps:
   - label: "build"
     command: "ci/scripts/build.sh -p ci-dev"
     key: "build"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-build")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-build")
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
@@ -31,7 +31,7 @@ steps:
   - label: "build other components"
     command: "ci/scripts/build-other.sh"
     key: "build-other"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-build-other")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-build-other")
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -48,7 +48,7 @@ steps:
   - label: "build (deterministic simulation)"
     command: "ci/scripts/build-simulation.sh"
     key: "build-simulation"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-build-simulation")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-build-simulation")
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
@@ -60,7 +60,7 @@ steps:
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
     key: "docslt"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-docslt")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-docslt")
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
@@ -71,7 +71,7 @@ steps:
 
   - label: "end-to-end test"
     command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-e2e-test")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-e2e-test")
     depends_on:
       - "build"
       - "build-other"
@@ -87,7 +87,7 @@ steps:
 
   - label: "end-to-end test (parallel)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-e2e-parallel-tests")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-e2e-parallel-tests")
     depends_on:
       - "build"
       - "docslt"
@@ -130,7 +130,7 @@ steps:
 
   - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-e2e-source-tests")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-e2e-source-tests")
     depends_on:
       - "build"
       - "build-other"
@@ -145,7 +145,7 @@ steps:
 
   - label: "end-to-end sink test"
     command: "ci/scripts/e2e-sink-test.sh -p ci-dev"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-e2e-sink-tests")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-e2e-sink-tests")
     depends_on:
       - "build"
       - "build-other"
@@ -256,7 +256,7 @@ steps:
 
   - label: "regress test"
     command: "ci/scripts/regress-test.sh -p ci-dev"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-regress-test")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-regress-test")
     depends_on: "build"
     plugins:
       - docker-compose#v4.9.0:
@@ -272,7 +272,7 @@ steps:
   # This ensures our `main-cron` workflow will be stable.
   - label: "unit test"
     command: "ci/scripts/pr-unit-test.sh"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-unit-test")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-unit-test")
     plugins:
       - ./ci/plugins/swapfile
       - seek-oss/aws-sm#v2.3.1:
@@ -288,7 +288,7 @@ steps:
 
   - label: "check"
     command: "ci/scripts/check.sh"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-check")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-check")
     plugins:
       - gencer/cache#v2.4.10:
           id: cache
@@ -310,7 +310,7 @@ steps:
 
   - label: "unit test (deterministic simulation)"
     command: "ci/scripts/deterministic-unit-test.sh"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-unit-test-deterministic-simulation")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-unit-test-deterministic-simulation")
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
@@ -322,7 +322,7 @@ steps:
 
   - label: "integration test (deterministic simulation)"
     command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation")
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v4.9.0:
@@ -334,7 +334,7 @@ steps:
 
   - label: "end-to-end test (deterministic simulation)"
     command: "TEST_NUM=16 ci/scripts/deterministic-e2e-test.sh"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation")
     depends_on: "build-simulation"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -353,7 +353,7 @@ steps:
 
   - label: "recovery test (deterministic simulation)"
     command: "TEST_NUM=8 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation")
     depends_on: "build-simulation"
     plugins:
       # - seek-oss/aws-sm#v2.3.1:
@@ -373,7 +373,7 @@ steps:
 
   - label: "misc check"
     command: "ci/scripts/misc-check.sh"
-    if: (!build.pull_request.labels includes "ci/enable-pr-opt-in-mode" || build.pull_request.labels includes "ci/run-misc-check")
+    if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-misc-check")
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
@@ -524,3 +524,9 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
     retry: *auto-retry
+
+  - label: "enable ci/skip-ci only in draft PRs"
+    if: build.pull_request.labels includes "ci/skip-ci && !build.pull_request.draft
+    command: |
+      echo "ci/skip-ci is only usable for draft Pull Requests" 
+      exit 1
