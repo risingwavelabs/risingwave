@@ -738,7 +738,7 @@ impl CatalogManager {
         Ok(())
     }
 
-    fn check_table_creating(tables: &BTreeMap<TableId, Table>, table: &Table) {
+    fn assert_table_creating(tables: &BTreeMap<TableId, Table>, table: &Table) {
         if let Some(t) = tables.get(&table.id)
             && let Ok(StreamJobStatus::Creating) = t.get_stream_job_status()
         {} else {
@@ -861,7 +861,7 @@ impl CatalogManager {
         let database_core = &mut core.database;
         let tables = &mut database_core.tables;
         if cfg!(not(test)) {
-            Self::check_table_creating(tables, &table);
+            Self::assert_table_creating(tables, &table);
         }
         let mut tables = BTreeMapTransaction::new(tables);
 
@@ -913,28 +913,37 @@ impl CatalogManager {
             };
             table
         };
+
         tracing::trace!("cleanup tables for {}", table.id);
-        let core = &mut self.core.lock().await;
         {
-            let user_core = &mut core.user;
-            user_core.decrease_ref(table.owner);
+            let core = &mut self.core.lock().await;
+            let database_core = &mut core.database;
+
+            let mut table_ids = vec![table.id];
+            table_ids.extend(internal_table_ids);
+
+            let tables = &mut database_core.tables;
+            let mut tables = BTreeMapTransaction::new(tables);
+            for table_id in table_ids {
+                tables.remove(table_id);
+            }
+            commit_meta!(self, tables)?;
         }
 
-        let database_core = &mut core.database;
+        {
+            let core = &mut self.core.lock().await;
+            {
+                let user_core = &mut core.user;
+                user_core.decrease_ref(table.owner);
+            }
 
-        for &dependent_relation_id in &table.dependent_relations {
-            database_core.decrease_ref_count(dependent_relation_id);
+            {
+                let database_core = &mut core.database;
+                for &dependent_relation_id in &table.dependent_relations {
+                    database_core.decrease_ref_count(dependent_relation_id);
+                }
+            }
         }
-
-        let mut table_ids = vec![table.id];
-        table_ids.extend(internal_table_ids);
-
-        let tables = &mut database_core.tables;
-        let mut tables = BTreeMapTransaction::new(tables);
-        for table_id in table_ids {
-            tables.remove(table_id);
-        }
-        commit_meta!(self, tables)?;
 
         Ok(())
     }
