@@ -260,7 +260,7 @@ impl DynamicLevelSelectorCore {
             // Reduce the level num of l0 non-overlapping sub_level
             ctx.score_levels.push({
                 PickerInfo {
-                    score: non_overlapping_score,
+                    score: non_overlapping_score + 1, // more than Intra
                     select_level: 0,
                     target_level: ctx.base_level,
                     picker_type: PickerType::ToBase,
