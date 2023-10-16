@@ -785,37 +785,37 @@ impl CatalogManager {
                 internal_tables_to_clean.push(table);
                 continue;
             }
+
             // 2. No table fragments
-            if table.table_type != TableType::Internal as i32 {
-                match fragment_manager
-                    .select_table_fragments_by_table_id(&table.id.into())
-                    .await
-                {
-                    Err(e) => {
-                        if e.is_fragment_not_found() {
-                            tracing::debug!("cleaning table_id for no fragments: {:#?}", table.id);
-                            tables_to_clean.push(table);
-                            continue;
-                        } else {
-                            return Err(e);
-                        }
+            assert_ne!(table.table_type, TableType::Internal as i32);
+            match fragment_manager
+                .select_table_fragments_by_table_id(&table.id.into())
+                .await
+            {
+                Err(e) => {
+                    if e.is_fragment_not_found() {
+                        tracing::debug!("cleaning table_id for no fragments: {:#?}", table.id);
+                        tables_to_clean.push(table);
+                        continue;
+                    } else {
+                        return Err(e);
                     }
-                    Ok(fragment) => {
-                        let fragment: TableFragments = fragment;
-                        // 3. For those in initial state (i.e. not running / created),
-                        // we should purge them.
-                        if fragment.state() == State::Initial {
-                            tracing::debug!("cleaning table_id no initial state: {:#?}", table.id);
-                            tables_to_clean.push(table);
-                            continue;
-                        } else {
-                            assert_eq!(table.create_type, CreateType::Background as i32);
-                            // 4. Get all the corresponding internal tables, the rest we can purge.
-                            for id in fragment.internal_table_ids() {
-                                reserved_internal_tables.insert(id);
-                            }
-                            continue;
+                }
+                Ok(fragment) => {
+                    let fragment: TableFragments = fragment;
+                    // 3. For those in initial state (i.e. not running / created),
+                    // we should purge them.
+                    if fragment.state() == State::Initial {
+                        tracing::debug!("cleaning table_id no initial state: {:#?}", table.id);
+                        tables_to_clean.push(table);
+                        continue;
+                    } else {
+                        assert_eq!(table.create_type, CreateType::Background as i32);
+                        // 4. Get all the corresponding internal tables, the rest we can purge.
+                        for id in fragment.internal_table_ids() {
+                            reserved_internal_tables.insert(id);
                         }
+                        continue;
                     }
                 }
             }
@@ -834,6 +834,15 @@ impl CatalogManager {
         let database_core = &mut core.database;
         database_core.clear_creating_stream_jobs();
 
+        let tables = &mut database_core.tables;
+        let mut tables = BTreeMapTransaction::new(tables);
+        for table in &tables_to_clean {
+            tracing::debug!("cleaning table_id: {}", table.id);
+            let table = tables.remove(table.id);
+            assert!(table.is_some())
+        }
+        commit_meta!(self, tables)?;
+
         let user_core = &mut core.user;
         for table in &tables_to_clean {
             // Recovered when init database manager.
@@ -844,14 +853,6 @@ impl CatalogManager {
             user_core.decrease_ref(table.owner);
         }
 
-        let tables = &mut database_core.tables;
-        let mut tables = BTreeMapTransaction::new(tables);
-        for table in tables_to_clean {
-            tracing::debug!("cleaning table_id: {}", table.id);
-            let table = tables.remove(table.id);
-            assert!(table.is_some())
-        }
-        commit_meta!(self, tables)?;
         Ok(())
     }
 
