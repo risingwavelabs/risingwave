@@ -412,7 +412,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 | AggKind::FirstValue
                 | AggKind::LastValue
                 | AggKind::StringAgg
-                | AggKind::ArrayAgg => {
+                | AggKind::ArrayAgg
+                | AggKind::JsonbAgg
+                | AggKind::JsonbObjectAgg => {
                     // columns with order requirement in state table
                     let sort_keys = {
                         match agg_call.agg_kind {
@@ -425,7 +427,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                             AggKind::FirstValue
                             | AggKind::LastValue
                             | AggKind::StringAgg
-                            | AggKind::ArrayAgg => {
+                            | AggKind::ArrayAgg
+                            | AggKind::JsonbAgg => {
                                 if agg_call.order_by.is_empty() {
                                     me.ctx().warn_to_user(format!(
                                         "{} without ORDER BY may produce non-deterministic result",
@@ -447,6 +450,11 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                     })
                                     .collect()
                             }
+                            AggKind::JsonbObjectAgg => agg_call
+                                .order_by
+                                .iter()
+                                .map(|o| (o.order_type, o.column_index))
+                                .collect(),
                             _ => unreachable!(),
                         }
                     };
@@ -455,7 +463,11 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         AggKind::FirstValue
                         | AggKind::LastValue
                         | AggKind::StringAgg
-                        | AggKind::ArrayAgg => agg_call.inputs.iter().map(|i| i.index).collect(),
+                        | AggKind::ArrayAgg
+                        | AggKind::JsonbAgg
+                        | AggKind::JsonbObjectAgg => {
+                            agg_call.inputs.iter().map(|i| i.index).collect()
+                        }
                         _ => vec![],
                     };
                     let state = gen_materialized_input_state(sort_keys, include_keys);

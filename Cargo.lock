@@ -4541,8 +4541,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.2.22"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=fedb1e3#fedb1e3a0a8758650c9e15076941c999150bdb31"
+version = "0.3.0+0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00f9ab2d0545a55e4f209fc72c180a7e7b45a4e7baee7b4994c4628a877c5525"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -6616,8 +6617,9 @@ dependencies = [
 
 [[package]]
 name = "rdkafka-sys"
-version = "4.3.0+1.9.2"
-source = "git+https://github.com/MaterializeInc/rust-rdkafka?rev=8ea07c4#8ea07c4d2b96636ff093e670bc921892aee0d56a"
+version = "4.6.0+2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad63c279fca41a27c231c450a2d2ad18288032e9cbb159ad16c9d96eba35aaaf"
 dependencies = [
  "cmake",
  "libc",
