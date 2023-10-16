@@ -1316,7 +1316,6 @@ dependencies = ["k", "l", "check-logs", "wait-processes-exit"]
 description = "Kill cluster, dump logs and check logs"
 
 [tasks.wait-processes-exit]
-private = true
 category = "Misc"
 description = "Wait for RisingWave processes to exit"
 script = """
