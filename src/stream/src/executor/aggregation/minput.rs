@@ -137,7 +137,10 @@ impl MaterializedInputState {
                     agg_call.args.arg_types(),
                 ))
             }
-            AggKind::StringAgg | AggKind::ArrayAgg => Box::new(GenericAggStateCache::new(
+            AggKind::StringAgg
+            | AggKind::ArrayAgg
+            | AggKind::JsonbAgg
+            | AggKind::JsonbObjectAgg => Box::new(GenericAggStateCache::new(
                 OrderedStateCache::new(),
                 agg_call.args.arg_types(),
             )),
