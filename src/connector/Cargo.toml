@@ -71,7 +71,7 @@ moka = { version = "0.12", features = ["future"] }
 mysql_async = { version = "0.32", default-features = false, features = [
     "default",
 ] }
-mysql_common = { version = "0.30", default-features = false, features = [
+mysql_common = { version = "0.31", default-features = false, features = [
     "chrono",
 ] }
 nexmark = { version = "0.2", features = ["serde"] }

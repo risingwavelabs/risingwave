@@ -1431,6 +1431,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "btoi"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9dd6407f73a9b8b6162d8a2ef999fe6afd7cc15902ebf42c5cd296addf17e0ad"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4852,7 +4861,7 @@ dependencies = [
  "lazy_static",
  "lru 0.10.1",
  "mio",
- "mysql_common",
+ "mysql_common 0.30.6",
  "native-tls",
  "once_cell",
  "pem 2.0.1",
@@ -4884,7 +4893,6 @@ dependencies = [
  "byteorder",
  "bytes",
  "cc",
- "chrono",
  "cmake",
  "crc32fast",
  "flate2",
@@ -4907,6 +4915,40 @@ dependencies = [
  "thiserror",
  "time",
  "uuid",
+]
+
+[[package]]
+name = "mysql_common"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06f19e4cfa0ab5a76b627cec2d81331c49b034988eaf302c3bafeada684eadef"
+dependencies = [
+ "base64 0.21.4",
+ "bindgen",
+ "bitflags 2.4.0",
+ "btoi",
+ "byteorder",
+ "bytes",
+ "cc",
+ "chrono",
+ "cmake",
+ "crc32fast",
+ "flate2",
+ "lazy_static",
+ "num-bigint",
+ "num-traits",
+ "rand",
+ "regex",
+ "saturating",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "smallvec",
+ "subprocess",
+ "thiserror",
+ "uuid",
+ "zstd 0.12.4",
 ]
 
 [[package]]
@@ -7280,7 +7322,7 @@ dependencies = [
  "maplit",
  "moka",
  "mysql_async",
- "mysql_common",
+ "mysql_common 0.31.0",
  "nexmark",
  "nkeys",
  "num-bigint",
