@@ -791,10 +791,14 @@ impl CatalogManager {
                     .select_table_fragments_by_table_id(&table.id.into())
                     .await
                 {
-                    Err(_) => {
-                        tracing::debug!("cleaning table_id for no fragments: {:#?}", table.id);
-                        tables_to_clean.push(table);
-                        continue;
+                    Err(e) => {
+                        if e.is_fragment_not_found() {
+                            tracing::debug!("cleaning table_id for no fragments: {:#?}", table.id);
+                            tables_to_clean.push(table);
+                            continue;
+                        } else {
+                            return Err(e);
+                        }
                     }
                     Ok(fragment) => {
                         let fragment: TableFragments = fragment;

@@ -43,7 +43,7 @@ use crate::model::{
 };
 use crate::storage::Transaction;
 use crate::stream::{SplitAssignment, TableRevision};
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 pub struct FragmentManagerCore {
     table_fragments: BTreeMap<TableId, TableFragments>,
@@ -281,10 +281,11 @@ impl FragmentManager {
         table_id: &TableId,
     ) -> MetaResult<TableFragments> {
         let map = &self.core.read().await.table_fragments;
-        Ok(map
-            .get(table_id)
-            .cloned()
-            .with_context(|| format!("table_fragment not exist: id={}", table_id))?)
+        if let Some(table_fragment) = map.get(table_id) {
+            Ok(table_fragment.clone())
+        } else {
+            Err(MetaError::fragment_not_found(table_id.table_id))
+        }
     }
 
     pub async fn select_table_fragments_by_ids(
@@ -294,11 +295,11 @@ impl FragmentManager {
         let map = &self.core.read().await.table_fragments;
         let mut table_fragments = Vec::with_capacity(table_ids.len());
         for table_id in table_ids {
-            table_fragments.push(
-                map.get(table_id)
-                    .cloned()
-                    .with_context(|| format!("table_fragment not exist: id={}", table_id))?,
-            );
+            table_fragments.push(if let Some(table_fragment) = map.get(table_id) {
+                table_fragment.clone()
+            } else {
+                return Err(MetaError::fragment_not_found(table_id.table_id));
+            });
         }
         Ok(table_fragments)
     }
