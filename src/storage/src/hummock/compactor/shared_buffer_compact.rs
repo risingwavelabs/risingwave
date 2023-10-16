@@ -383,9 +383,10 @@ pub async fn merge_imms_in_memory(
     let target_extended_user_key =
         PointRange::from_user_key(UserKey::new(table_id, TableKey(pivot.as_ref())), false);
     while del_iter.is_valid() && del_iter.key().le(&target_extended_user_key) {
+        let event_key = del_iter.key().to_vec();
         del_iter.next().await?;
         monotonic_tombstone_events.push(MonotonicDeleteEvent {
-            event_key: del_iter.key().to_vec(),
+            event_key,
             new_epoch: del_iter.earliest_epoch(),
         });
     }
@@ -404,9 +405,10 @@ pub async fn merge_imms_in_memory(
             let target_extended_user_key =
                 PointRange::from_user_key(UserKey::new(table_id, TableKey(pivot.as_ref())), false);
             while del_iter.is_valid() && del_iter.key().le(&target_extended_user_key) {
+                let event_key = del_iter.key().to_vec();
                 del_iter.next().await?;
                 monotonic_tombstone_events.push(MonotonicDeleteEvent {
-                    event_key: del_iter.key().to_vec(),
+                    event_key,
                     new_epoch: del_iter.earliest_epoch(),
                 });
             }
@@ -433,9 +435,10 @@ pub async fn merge_imms_in_memory(
         versions.push((epoch, value));
     }
     while del_iter.is_valid() {
+        let event_key = del_iter.key().to_vec();
         del_iter.next().await?;
         monotonic_tombstone_events.push(MonotonicDeleteEvent {
-            event_key: del_iter.key().to_vec(),
+            event_key,
             new_epoch: del_iter.earliest_epoch(),
         });
     }
