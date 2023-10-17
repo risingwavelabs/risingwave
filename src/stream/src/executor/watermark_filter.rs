@@ -23,7 +23,8 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_expr::expr::{
-    build_func_non_strict, Expression, InfallibleExpression, InputRefExpression, LiteralExpression,
+    build_func_non_strict, ExpressionBoxExt, InfallibleExpression, InputRefExpression,
+    LiteralExpression,
 };
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;

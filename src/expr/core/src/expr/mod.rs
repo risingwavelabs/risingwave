@@ -67,6 +67,7 @@ pub use super::{ExprError, Result};
 /// should be implemented. Prefer calling and implementing `eval_v2` instead of `eval` if possible,
 /// to gain the performance benefit of scalar expression.
 #[async_trait::async_trait]
+#[auto_impl::auto_impl(&, Box)]
 pub trait Expression: std::fmt::Debug + Sync + Send {
     /// Get the return data type.
     fn return_type(&self) -> DataType;
@@ -101,78 +102,38 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     fn eval_const(&self) -> Result<Datum> {
         Err(ExprError::NotConstant)
     }
-
-    /// Wrap the expression in a Box.
-    fn boxed(self) -> BoxedExpression
-    where
-        Self: Sized + Send + 'static,
-    {
-        Box::new(self)
-    }
-}
-
-// TODO: make this an extension, or implement it on a `NonStrict` newtype.
-impl dyn Expression {
-    /// Evaluate the expression in vectorized execution and assert it succeeds. Returns an array.
-    ///
-    /// Use with expressions built in non-strict mode.
-    pub async fn eval_infallible(&self, input: &DataChunk) -> ArrayRef {
-        self.eval(input).await.expect("evaluation failed")
-    }
-
-    /// Evaluate the expression in row-based execution and assert it succeeds. Returns a nullable
-    /// scalar.
-    ///
-    /// Use with expressions built in non-strict mode.
-    pub async fn eval_row_infallible(&self, input: &OwnedRow) -> Datum {
-        self.eval_row(input).await.expect("evaluation failed")
-    }
 }
 
 /// An owned dynamically typed [`Expression`].
 pub type BoxedExpression = Box<dyn Expression>;
 
-// TODO: avoid the overhead of extra boxing.
-#[async_trait::async_trait]
-impl Expression for BoxedExpression {
-    fn return_type(&self) -> DataType {
-        (**self).return_type()
-    }
-
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        (**self).eval(input).await
-    }
-
-    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
-        (**self).eval_v2(input).await
-    }
-
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        (**self).eval_row(input).await
-    }
-
-    fn eval_const(&self) -> Result<Datum> {
-        (**self).eval_const()
-    }
-
-    fn boxed(self) -> BoxedExpression {
-        self
+/// Extension trait for boxing expressions.
+#[easy_ext::ext(ExpressionBoxExt)]
+impl<E: Expression + 'static> E {
+    /// Wrap the expression in a Box.
+    pub fn boxed(self) -> BoxedExpression {
+        Box::new(self)
     }
 }
 
 #[derive(Debug)]
 pub struct InfallibleExpression<E = BoxedExpression>(E);
 
-impl InfallibleExpression {
-    pub fn for_test(inner: impl Expression + 'static) -> Self {
-        Self(inner.boxed())
-    }
-}
-
 impl<E> InfallibleExpression<E>
 where
     E: Expression,
 {
+    pub fn for_test(inner: E) -> InfallibleExpression
+    where
+        E: 'static,
+    {
+        InfallibleExpression(inner.boxed())
+    }
+
+    pub fn todo(inner: E) -> Self {
+        Self(inner)
+    }
+
     /// Get the return data type.
     pub fn return_type(&self) -> DataType {
         self.0.return_type()

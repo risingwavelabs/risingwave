@@ -114,9 +114,10 @@ impl ValueRowSerdeNew for ColumnAwareSerde {
                     // It's okay since we previously banned impure expressions in default columns.
                     build_from_prost(&expr.expect("expr should not be none"))
                         .expect("build_from_prost error")
-                        .eval_row_infallible(&OwnedRow::empty())
+                        .eval_row(&OwnedRow::empty())
                         .now_or_never()
                         .expect("constant expression should not be async")
+                        .expect("eval_row failed")
                 };
                 Some((i, value))
             } else {

@@ -183,7 +183,8 @@ mod tests {
         let actor_id = progress.actor_id();
         let (tx, barrier_receiver) = unbounded_channel();
         let value = StructValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
-        let exprs = vec![Box::new(LiteralExpression::new(
+        let exprs = vec![
+            Box::new(LiteralExpression::new(
                 DataType::Int16,
                 Some(ScalarImpl::Int16(1)),
             )) as BoxedExpression,

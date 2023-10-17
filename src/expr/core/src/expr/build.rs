@@ -29,7 +29,9 @@ use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
 use super::wrapper::{Checked, EvalErrorReport, NonStrict};
 use super::InfallibleExpression;
-use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
+use crate::expr::{
+    BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
+};
 use crate::sig::FUNCTION_REGISTRY;
 use crate::{bail, ExprError, Result};
 
@@ -156,7 +158,7 @@ impl<E: Build + 'static> BuildBoxed for E {
         prost: &ExprNode,
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
     ) -> Result<BoxedExpression> {
-        Self::build(prost, build_child).map(Expression::boxed)
+        Self::build(prost, build_child).map(ExpressionBoxExt::boxed)
     }
 }
 

@@ -109,7 +109,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                             build_non_strict_from_prost(
                                 delta_expression.delta.as_ref().unwrap(),
                                 params.eval_error_report.clone(),
-                            )?.into_inner(),
+                            )?
+                            .into_inner(),
                         ],
                         params.eval_error_report.clone(),
                     )?)

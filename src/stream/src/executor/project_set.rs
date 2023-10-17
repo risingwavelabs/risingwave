@@ -24,11 +24,10 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::{BoxedExpression, InfallibleExpression};
+use risingwave_expr::expr::InfallibleExpression;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
-use super::test_utils::expr::build_from_pretty;
 use super::{
     ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndices, PkIndicesRef,
     StreamExecutorResult, Watermark,
@@ -263,7 +262,7 @@ impl Inner {
                     watermark
                         .clone()
                         .transform_with_expr(
-                            &build_from_pretty(""), // TODO
+                            &InfallibleExpression::todo(expr),
                             expr_idx + PROJ_ROW_ID_OFFSET,
                         )
                         .await
