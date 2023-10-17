@@ -1,4 +1,4 @@
-FROM ubuntu:22.04 AS feature-store-server
+FROM ubuntu:20.04 AS feature-store-server
 ARG BUILD_ARG
 ENV DEBIAN_FRONTEND=noninteractive 
 
@@ -11,7 +11,7 @@ WORKDIR $WORK_DIR
 
 RUN apt update
 RUN apt install -y lsof curl openssl libssl-dev pkg-config build-essential \
-    cmake librdkafka-dev \
+    cmake \
     python3 python3-pip wget ca-certificates \
     postgresql-client \
     protobuf-compiler

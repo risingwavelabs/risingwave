@@ -13,7 +13,7 @@ sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres"] }
 tokio = { version = "1", features = ["full"] }
 tonic = "0.10.2"
 reqwest = { version = "0.11", features = ["blocking"] }
-rdkafka = { version = "=0.31", features = ["dynamic-linking"] }
+rdkafka = { version = "0.34", features = ["cmake-build"] }
 serde_json = "1.0"
 prost = "0.12"
 clap = "4.4.6"
