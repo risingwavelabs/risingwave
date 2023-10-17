@@ -1,4 +1,4 @@
-FROM ubuntu:20.04 AS feature-store-server
+FROM ubuntu:22.04 AS feature-store-server
 ARG BUILD_ARG
 ENV DEBIAN_FRONTEND=noninteractive 
 
@@ -10,8 +10,11 @@ RUN mkdir -p $WORK_DIR
 WORKDIR $WORK_DIR
 
 RUN apt update
-RUN apt install -y python3 python3-pip wget ca-certificates
-RUN apt install -y postgresql-client
+RUN apt install -y lsof curl openssl libssl-dev pkg-config build-essential \
+    cmake librdkafka-dev \
+    python3 python3-pip wget ca-certificates \
+    postgresql-client \
+    protobuf-compiler
 
 ADD ./server/model/requirements.txt $WORK_DIR/model-pipreqs.txt
 ADD ./generator/requirements.txt $WORK_DIR/generator-pipreqs.txt
@@ -19,9 +22,6 @@ RUN pip3 install --upgrade pip
 RUN pip3 install -r $WORK_DIR/model-pipreqs.txt
 RUN pip3 install -r $WORK_DIR/generator-pipreqs.txt
 RUN pip3 install risingwave
-
-RUN apt install -y lsof curl openssl libssl-dev pkg-config build-essential
-RUN apt install -y cmake librdkafka-dev
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path -y
 ENV PATH /root/.cargo/bin/:$PATH
@@ -33,7 +33,6 @@ RUN rm packages-microsoft-prod.deb
 RUN apt-get update && apt-get install -y dotnet-sdk-6.0
 RUN apt install -y liblttng-ust0
 
-RUN apt install -y protobuf-compiler
 # `cargo build` included in ./build
 ADD ./server $WORK_DIR/build/server
 ADD ./simulator $WORK_DIR/build/simulator
@@ -54,9 +53,9 @@ ADD ./run.sh $WORK_DIR/run-sh/
 ADD ./run-mfa.sh $WORK_DIR/run-sh/
 
 RUN if [ "$BUILD_ARG" = "mfa" ]; then \
-        cp $WORK_DIR/run-sh/run-mfa.sh $WORK_DIR/run.sh;\
+    cp $WORK_DIR/run-sh/run-mfa.sh $WORK_DIR/run.sh;\
     else \
-        cp $WORK_DIR/run-sh/run.sh $WORK_DIR/run.sh;\
+    cp $WORK_DIR/run-sh/run.sh $WORK_DIR/run.sh;\
     fi
 
 RUN chmod +x $WORK_DIR/run.sh && rm -rf $WORK_DIR/run-sh
