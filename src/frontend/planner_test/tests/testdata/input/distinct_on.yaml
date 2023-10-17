@@ -2,9 +2,28 @@
     create table t1 (k int, v int) append only;
     select distinct on (k) k + v as sum from t1;
   expected_outputs:
-  - stream_plan
+    - stream_plan
+    - batch_plan
 - sql: |
     create table t2 (k int, v int);
     select distinct on (k) k + v as sum from t2;
   expected_outputs:
-  - stream_plan
+    - stream_plan
+    - batch_plan
+- sql: |
+    create table t (a int, b int, c int);
+    select distinct on (foo, b) a as foo, b from t;
+  expected_outputs:
+    - stream_plan
+    - batch_plan
+- sql: |
+    create table t (a int, b int, c int);
+    select distinct on (2) a as foo, b from t;
+  expected_outputs:
+    - stream_plan
+    - batch_plan
+- sql: |
+    create table t (a int, b int, c int);
+    select distinct on (4) * from t;
+  expected_outputs:
+    - binder_error

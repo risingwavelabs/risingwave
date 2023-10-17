@@ -83,6 +83,7 @@ impl MockOffsetGenExecutor {
                 txid: None,
                 tx_usec: None,
             },
+            is_heartbeat: false,
         };
 
         self.start_offset += 1;

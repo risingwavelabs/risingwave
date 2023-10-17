@@ -18,7 +18,7 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{ColumnCatalog, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
@@ -41,10 +41,10 @@ use crate::utils::infer_stmt_row_desc::infer_show_object;
 pub fn get_columns_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
-) -> Result<Vec<ColumnDesc>> {
+) -> Result<Vec<ColumnCatalog>> {
     let mut binder = Binder::new_for_system(session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
-    let catalogs = match relation {
+    let column_catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
         Relation::BaseTable(t) => t.table_catalog.columns,
         Relation::SystemTable(t) => t.sys_table_catalog.columns.clone(),
@@ -53,11 +53,7 @@ pub fn get_columns_from_table(
         }
     };
 
-    Ok(catalogs
-        .into_iter()
-        .filter(|c| !c.is_hidden)
-        .map(|c| c.column_desc)
-        .collect())
+    Ok(column_catalogs)
 }
 
 pub fn get_indexes_from_table(
@@ -441,6 +437,8 @@ mod tests {
             "country.city.zipcode".into() => "character varying".into(),
             "rate".into() => "real".into(),
             "country".into() => "test.Country".into(),
+            "_rw_kafka_timestamp".into() => "timestamp with time zone".into(),
+            "_row_id".into() => "serial".into(),
         };
 
         assert_eq!(columns, expected_columns);

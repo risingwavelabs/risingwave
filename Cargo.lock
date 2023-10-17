@@ -1855,35 +1855,36 @@ dependencies = [
 
 [[package]]
 name = "console-api"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2895653b4d9f1538a83970077cb01dfc77a4810524e51a110944688e916b18e"
+checksum = "fd326812b3fd01da5bb1af7d340d0d555fd3d4b641e7f1dfcf5962a902952787"
 dependencies = [
- "prost 0.11.9",
- "prost-types 0.11.9",
- "tonic 0.9.2",
+ "futures-core",
+ "prost 0.12.1",
+ "prost-types 0.12.1",
+ "tonic 0.10.2",
  "tracing-core",
 ]
 
 [[package]]
 name = "console-subscriber"
-version = "0.1.10"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4cf42660ac07fcebed809cfe561dd8730bcd35b075215e6479c516bcd0d11cb"
+checksum = "7481d4c57092cd1c19dd541b92bdce883de840df30aa5d03fd48a3935c01842e"
 dependencies = [
  "console-api",
  "crossbeam-channel",
  "crossbeam-utils",
- "futures",
+ "futures-task",
  "hdrhistogram",
  "humantime",
- "prost-types 0.11.9",
+ "prost-types 0.12.1",
  "serde",
  "serde_json",
  "thread_local",
  "tokio",
  "tokio-stream",
- "tonic 0.9.2",
+ "tonic 0.10.2",
  "tracing",
  "tracing-core",
  "tracing-subscriber",
@@ -6248,13 +6249,13 @@ dependencies = [
 
 [[package]]
 name = "prometheus-http-query"
-version = "0.6.6"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7970fd6e91b5cb87e9a093657572a896d133879ced7752d2c7635beae29eaba0"
+checksum = "8e7c6186f0b66203811641c88ca4e5817182caa7553868359bafa5b17d97f37f"
 dependencies = [
+ "mime",
  "reqwest",
  "serde",
- "serde_json",
  "time",
  "url",
 ]
@@ -6957,7 +6958,7 @@ dependencies = [
  "risingwave_storage",
  "serde",
  "tokio-stream",
- "toml 0.7.8",
+ "toml 0.8.2",
  "tracing",
  "tracing-subscriber",
  "workspace-hack",
@@ -7099,7 +7100,7 @@ dependencies = [
  "thiserror",
  "tikv-jemalloc-ctl",
  "tinyvec",
- "toml 0.7.8",
+ "toml 0.8.2",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -7971,7 +7972,7 @@ dependencies = [
  "serde_with 3.3.0",
  "tokio-postgres",
  "tokio-stream",
- "toml 0.7.8",
+ "toml 0.8.2",
  "tracing",
  "workspace-hack",
 ]
@@ -9000,9 +9001,9 @@ dependencies = [
 
 [[package]]
 name = "simd-json"
-version = "0.11.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "474b451aaac1828ed12f6454a80fe58b940ae2998d10389d41533940a6f641bf"
+checksum = "f0f07a84c7456b901b8dd2c1d44caca8b0fd2c2616206ee5acc9d9da61e8d9ec"
 dependencies = [
  "getrandom",
  "halfbrown",
@@ -11006,6 +11007,7 @@ dependencies = [
  "tokio-util",
  "toml_datetime",
  "toml_edit 0.19.15",
+ "tonic 0.10.2",
  "tonic 0.9.2",
  "tower",
  "tracing",
@@ -11035,9 +11037,9 @@ checksum = "4d25c75bf9ea12c4040a97f829154768bbbce366287e2dc044af160cd79a13fd"
 
 [[package]]
 name = "xorf"
-version = "0.8.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57901b00e3f8e14f4d20b8955bf8087ecb545cfe2ed8741c2a2dbc89847a1a29"
+checksum = "7d36478bcf71152a2f9f6cf9bc48273333f32780c769ef90e13d464ab778db5f"
 dependencies = [
  "libm",
  "rand",
