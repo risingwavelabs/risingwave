@@ -21,7 +21,6 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 #[derive(Clone)]
 pub struct ExchangeServiceMetrics {
     pub stream_fragment_exchange_bytes: GenericCounterVec<AtomicU64>,
-    pub actor_sampled_serialize_duration_ns: GenericCounterVec<AtomicU64>,
 }
 
 pub static GLOBAL_EXCHANGE_SERVICE_METRICS: LazyLock<ExchangeServiceMetrics> =
@@ -37,17 +36,8 @@ impl ExchangeServiceMetrics {
         )
         .unwrap();
 
-        let actor_sampled_serialize_duration_ns = register_int_counter_vec_with_registry!(
-            "actor_sampled_serialize_duration_ns",
-            "Duration (ns) of sampled chunk serialization",
-            &["actor_id"],
-            registry
-        )
-        .unwrap();
-
         Self {
             stream_fragment_exchange_bytes,
-            actor_sampled_serialize_duration_ns,
         }
     }
 }
