@@ -59,7 +59,6 @@ start_standalone() {
         --dashboard-ui-path $RW_PREFIX/ui" \
      --compute-opts=" \
         --listen-addr 127.0.0.1:5688 \
-        --prometheus-listener-addr 127.0.0.1:1222 \
         --advertise-addr 127.0.0.1:5688 \
         --async-stack-trace verbose \
         --connector-rpc-endpoint 127.0.0.1:50051 \
@@ -70,14 +69,13 @@ start_standalone() {
      --frontend-opts=" \
        --listen-addr 127.0.0.1:4566 \
        --advertise-addr 127.0.0.1:4566 \
-       --prometheus-listener-addr 127.0.0.1:2222 \
        --health-check-listener-addr 127.0.0.1:6786 \
        --meta-addr http://127.0.0.1:5690" \
      --compactor-opts=" \
          --listen-addr 127.0.0.1:6660 \
-         --prometheus-listener-addr 127.0.0.1:1260 \
          --advertise-addr 127.0.0.1:6660 \
-         --meta-address http://127.0.0.1:5690" >"$1" 2>&1
+         --meta-address http://127.0.0.1:5690" \
+     --prometheus-listener-addr 127.0.0.1:1222 >"$1" 2>&1
 }
 
 stop_standalone() {
