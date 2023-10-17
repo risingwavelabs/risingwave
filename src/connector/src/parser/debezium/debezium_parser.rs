@@ -22,7 +22,8 @@ use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, JsonProperties,
-    ParseResult, ProtocolProperties, SourceStreamChunkRowWriter, SpecificParserConfig,
+    ParseResult, ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter,
+    SpecificParserConfig,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -111,7 +112,7 @@ impl DebeziumParser {
                 if let Ok(transaction_control) = row_op.transaction_control() {
                     Ok(ParseResult::TransactionControl(transaction_control))
                 } else {
-                    Err(err)
+                    Err(err)?
                 }
             }
         }
@@ -125,6 +126,10 @@ impl ByteStreamSourceParser for DebeziumParser {
 
     fn source_ctx(&self) -> &SourceContext {
         &self.source_ctx
+    }
+
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::Debezium
     }
 
     #[allow(clippy::unused_async)] // false positive for `async_trait`

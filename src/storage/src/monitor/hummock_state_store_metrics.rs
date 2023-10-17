@@ -81,6 +81,10 @@ impl HummockStateStoreMetrics {
     pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
         // 10ms ~ max 2.7h
         let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
+
+        // 1ms - 100s
+        let state_store_read_time_buckets = exponential_buckets(0.001, 10.0, 5).unwrap();
+
         let bloom_filter_true_negative_counts = register_int_counter_vec_with_registry!(
             "state_store_bloom_filter_true_negative_counts",
             "Total number of sstables that have been considered true negative by bloom filters",
@@ -177,7 +181,7 @@ impl HummockStateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_iter_fetch_meta_duration",
             "Histogram of iterator fetch SST meta time that have been issued to state store",
-            time_buckets.clone(),
+            state_store_read_time_buckets.clone(),
         );
         let iter_fetch_meta_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();

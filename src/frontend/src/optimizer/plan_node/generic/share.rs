@@ -44,7 +44,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Share<PlanRef> {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        Some(self.input.borrow().stream_key().to_vec())
+        Some(self.input.borrow().stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {

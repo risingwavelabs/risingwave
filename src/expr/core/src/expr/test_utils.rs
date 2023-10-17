@@ -18,9 +18,9 @@ use std::num::NonZeroUsize;
 
 use num_traits::CheckedSub;
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
-use risingwave_common::util::value_encoding::serialize_datum;
+use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::{PbDataType, PbDatum};
+use risingwave_pb::data::PbDataType;
 use risingwave_pb::expr::expr_node::Type::Field;
 use risingwave_pb::expr::expr_node::{self, RexNode, Type};
 use risingwave_pb::expr::{ExprNode, FunctionCall};
@@ -57,9 +57,9 @@ pub fn make_i32_literal(data: i32) -> ExprNode {
             type_name: TypeName::Int32 as i32,
             ..Default::default()
         }),
-        rex_node: Some(RexNode::Constant(PbDatum {
-            body: serialize_datum(Some(ScalarImpl::Int32(data)).as_ref()),
-        })),
+        rex_node: Some(RexNode::Constant(
+            Some(ScalarImpl::Int32(data)).to_protobuf(),
+        )),
     }
 }
 
@@ -70,9 +70,9 @@ fn make_interval_literal(data: Interval) -> ExprNode {
             type_name: TypeName::Interval as i32,
             ..Default::default()
         }),
-        rex_node: Some(RexNode::Constant(PbDatum {
-            body: serialize_datum(Some(ScalarImpl::Interval(data)).as_ref()),
-        })),
+        rex_node: Some(RexNode::Constant(
+            Some(ScalarImpl::Interval(data)).to_protobuf(),
+        )),
     }
 }
 

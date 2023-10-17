@@ -23,8 +23,9 @@ use arrow_schema::{DataType as ArrowDataType, Schema as ArrowSchema, SchemaRef};
 use async_trait::async_trait;
 use icelake::catalog::{load_catalog, CATALOG_NAME, CATALOG_TYPE};
 use icelake::io::file_writer::DeltaWriterResult;
+use icelake::io::EmptyLayer;
 use icelake::transaction::Transaction;
-use icelake::types::{data_file_from_json, data_file_to_json, DataFile};
+use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
 use icelake::{Table, TableIdentifier};
 use risingwave_common::array::{to_record_batch_with_schema, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
@@ -33,7 +34,6 @@ use risingwave_common::error::anyhow_error;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_rpc_client::ConnectorClient;
 use serde::de;
 use serde_derive::Deserialize;
 use url::Url;
@@ -362,13 +362,14 @@ impl Sink for IcebergSink {
         .into_log_sinker(writer_param.sink_metrics))
     }
 
-    async fn new_coordinator(
-        &self,
-        _connector_client: Option<ConnectorClient>,
-    ) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         let table = self.create_table().await?;
+        let partition_type = table.current_partition_type()?;
 
-        Ok(IcebergSinkCommitter { table })
+        Ok(IcebergSinkCommitter {
+            table,
+            partition_type,
+        })
     }
 }
 
@@ -437,7 +438,7 @@ impl SinkWriter for IcebergWriter {
 
 struct AppendOnlyWriter {
     table: Table,
-    writer: icelake::io::task_writer::TaskWriter,
+    writer: icelake::io::task_writer::TaskWriter<EmptyLayer>,
     schema: SchemaRef,
 }
 
@@ -455,7 +456,9 @@ impl AppendOnlyWriter {
 
         Ok(Self {
             writer: table
-                .task_writer()
+                .writer_builder()
+                .await?
+                .build_task_writer()
                 .await
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
             table,
@@ -484,7 +487,9 @@ impl AppendOnlyWriter {
         let old_writer = std::mem::replace(
             &mut self.writer,
             self.table
-                .task_writer()
+                .writer_builder()
+                .await?
+                .build_task_writer()
                 .await
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
         );
@@ -539,6 +544,7 @@ impl UpsertWriter {
     }
 
     fn partition_ops(ops: &[Op]) -> Vec<(usize, usize)> {
+        assert!(!ops.is_empty());
         let mut res = vec![];
         let mut start = 0;
         let mut prev_op = ops[0];
@@ -555,6 +561,9 @@ impl UpsertWriter {
 
     pub async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
         let (chunk, ops) = chunk.compact().into_parts();
+        if ops.len() == 0 {
+            return Ok(());
+        }
         let chunk = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         let ranges = Self::partition_ops(&ops);
@@ -604,7 +613,7 @@ impl UpsertWriter {
 
 struct UnpartitionDeltaWriter {
     table: Table,
-    writer: icelake::io::file_writer::EqualityDeltaWriter,
+    writer: icelake::io::file_writer::EqualityDeltaWriter<EmptyLayer>,
     unique_column_ids: Vec<usize>,
 }
 
@@ -646,7 +655,10 @@ impl UnpartitionDeltaWriter {
 
 struct PartitionDeltaWriter {
     table: Table,
-    writers: HashMap<icelake::types::PartitionKey, icelake::io::file_writer::EqualityDeltaWriter>,
+    writers: HashMap<
+        icelake::types::PartitionKey,
+        icelake::io::file_writer::EqualityDeltaWriter<EmptyLayer>,
+    >,
     partition_splitter: icelake::types::PartitionSplitter,
     unique_column_ids: Vec<usize>,
 }
@@ -730,10 +742,8 @@ struct WriteResult {
     delete_files: Vec<DataFile>,
 }
 
-impl<'a> TryFrom<&'a SinkMetadata> for WriteResult {
-    type Error = SinkError;
-
-    fn try_from(value: &'a SinkMetadata) -> std::result::Result<Self, Self::Error> {
+impl WriteResult {
+    fn try_from(value: &SinkMetadata, partition_type: &Any) -> Result<Self> {
         if let Some(Serialized(v)) = &value.metadata {
             let mut values = if let serde_json::Value::Object(v) =
                 serde_json::from_slice::<serde_json::Value>(&v.metadata).map_err(
@@ -752,7 +762,7 @@ impl<'a> TryFrom<&'a SinkMetadata> for WriteResult {
             {
                 data_files = values
                     .into_iter()
-                    .map(data_file_from_json)
+                    .map(|value| data_file_from_json(value, partition_type.clone()))
                     .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
                     .unwrap();
             } else {
@@ -764,7 +774,7 @@ impl<'a> TryFrom<&'a SinkMetadata> for WriteResult {
             {
                 delete_files = values
                     .into_iter()
-                    .map(data_file_from_json)
+                    .map(|value| data_file_from_json(value, partition_type.clone()))
                     .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
                     .map_err(|e| anyhow!("Failed to parse data file from json: {}", e))?;
             } else {
@@ -822,6 +832,7 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
 
 pub struct IcebergSinkCommitter {
     table: Table,
+    partition_type: Any,
 }
 
 #[async_trait::async_trait]
@@ -836,7 +847,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 
         let write_results = metadata
             .iter()
-            .map(WriteResult::try_from)
+            .map(|meta| WriteResult::try_from(meta, &self.partition_type))
             .collect::<Result<Vec<WriteResult>>>()?;
 
         let mut txn = Transaction::new(&mut self.table);

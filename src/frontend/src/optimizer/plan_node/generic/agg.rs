@@ -22,10 +22,9 @@ use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
-use risingwave_common::util::value_encoding;
+use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
-use risingwave_expr::sig::agg::AGG_FUNC_SIG_MAP;
-use risingwave_pb::data::PbDatum;
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
@@ -91,7 +90,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         self.ctx().session_ctx().config().get_force_two_phase_agg()
     }
 
-    fn two_phase_agg_enabled(&self) -> bool {
+    pub fn two_phase_agg_enabled(&self) -> bool {
         self.enable_two_phase
     }
 
@@ -344,7 +343,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         window_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
         let in_fields = self.input.schema().fields().to_vec();
-        let in_pks = self.input.stream_key().to_vec();
+        let in_pks = self.input.stream_key().unwrap().to_vec();
         let in_append_only = self.input.append_only();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
 
@@ -413,7 +412,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 | AggKind::FirstValue
                 | AggKind::LastValue
                 | AggKind::StringAgg
-                | AggKind::ArrayAgg => {
+                | AggKind::ArrayAgg
+                | AggKind::JsonbAgg
+                | AggKind::JsonbObjectAgg => {
                     // columns with order requirement in state table
                     let sort_keys = {
                         match agg_call.agg_kind {
@@ -426,7 +427,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                             AggKind::FirstValue
                             | AggKind::LastValue
                             | AggKind::StringAgg
-                            | AggKind::ArrayAgg => {
+                            | AggKind::ArrayAgg
+                            | AggKind::JsonbAgg => {
                                 if agg_call.order_by.is_empty() {
                                     me.ctx().warn_to_user(format!(
                                         "{} without ORDER BY may produce non-deterministic result",
@@ -448,6 +450,11 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                     })
                                     .collect()
                             }
+                            AggKind::JsonbObjectAgg => agg_call
+                                .order_by
+                                .iter()
+                                .map(|o| (o.order_type, o.column_index))
+                                .collect(),
                             _ => unreachable!(),
                         }
                     };
@@ -456,7 +463,11 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         AggKind::FirstValue
                         | AggKind::LastValue
                         | AggKind::StringAgg
-                        | AggKind::ArrayAgg => agg_call.inputs.iter().map(|i| i.index).collect(),
+                        | AggKind::ArrayAgg
+                        | AggKind::JsonbAgg
+                        | AggKind::JsonbObjectAgg => {
+                            agg_call.inputs.iter().map(|i| i.index).collect()
+                        }
                         _ => vec![],
                     };
                     let state = gen_materialized_input_state(sort_keys, include_keys);
@@ -489,15 +500,15 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .iter()
             .zip_eq_fast(&mut out_fields[self.group_key.len()..])
         {
-            let sig = AGG_FUNC_SIG_MAP
-                .get(
+            let sig = FUNCTION_REGISTRY
+                .get_aggregate(
                     agg_call.agg_kind,
                     &agg_call
                         .inputs
                         .iter()
-                        .map(|input| (&input.data_type).into())
+                        .map(|input| input.data_type.clone())
                         .collect_vec(),
-                    (&agg_call.return_type).into(),
+                    &agg_call.return_type,
                     in_append_only,
                 )
                 .expect("agg not found");
@@ -506,7 +517,10 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 // for backward compatibility, the state type is same as the return type.
                 // its values in the intermediate state table are always null.
             } else {
-                field.data_type = sig.state_type.into();
+                field.data_type = sig
+                    .state_type
+                    .clone()
+                    .unwrap_or(sig.ret_type.as_exact().clone());
             }
         }
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
@@ -715,9 +729,7 @@ impl PlanAggCall {
                 .direct_args
                 .iter()
                 .map(|x| PbConstant {
-                    datum: Some(PbDatum {
-                        body: value_encoding::serialize_datum(x.get_data()),
-                    }),
+                    datum: Some(x.get_data().to_protobuf()),
                     r#type: Some(x.return_type().to_protobuf()),
                 })
                 .collect(),

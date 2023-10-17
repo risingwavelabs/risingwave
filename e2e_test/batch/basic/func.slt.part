@@ -261,7 +261,7 @@ unknown
 query T
 select pg_typeof('123'::varchar);
 ----
-varchar
+character varying
 
 query T
 select pg_typeof('123'::int);
@@ -276,7 +276,7 @@ unknown
 query T
 select pg_typeof(null::varchar);
 ----
-varchar
+character varying
 
 query T
 select pg_typeof(null::bool);

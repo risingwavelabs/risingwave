@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use sea_orm::entity::prelude::*;
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum WorkerType {
     #[sea_orm(string_value = "FRONTEND")]
@@ -46,6 +46,7 @@ pub struct Model {
     pub host: String,
     pub port: i32,
     pub status: WorkerStatus,
+    pub transaction_id: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

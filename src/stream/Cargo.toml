@@ -39,13 +39,13 @@ local_stats_alloc = { path = "../utils/local_stats_alloc" }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 maplit = "1.0.2"
 memcomparable = "0.2"
-multimap = "0.8"
+multimap = "0.9"
 num-traits = "0.2"
 parking_lot = "0.12"
 parse-display = "0.8"
 pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.11"
+prost = { workspace = true }
 rand = "0.8"
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }

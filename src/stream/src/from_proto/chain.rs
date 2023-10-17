@@ -162,8 +162,6 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     None
                 };
 
-                let snapshot_read_interval = node.get_snapshot_read_barrier_interval();
-
                 BackfillExecutor::new(
                     upstream_table,
                     mview,
@@ -175,7 +173,6 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     stream.streaming_metrics.clone(),
                     params.env.config().developer.chunk_size,
                     params.executor_id,
-                    snapshot_read_interval as usize,
                 )
                 .boxed()
             }
