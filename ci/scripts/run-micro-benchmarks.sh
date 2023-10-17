@@ -40,9 +40,16 @@ bench() {
 }
 
 main() {
+  # FIXME(kwannoel): This is a workaround
+  # Microbenchmarks need to be namespaced by instance types,
+  # the result upload endpoint needs to be parameterized by instance type as well to support this.
   echo "--- Getting aws instance type"
-  get_instance_type > instance_type.txt
-  buildkite-agent artifact upload "./instance_type.txt"
+  local instance_type=get_instance_type
+  echo $instance_type
+  if [[ $(cat instance_type) != "m6i.4xlarge" ]]; then
+    echo "Only m6i.4xlarge is supported, skipping microbenchmark"
+    exit 0
+  fi
 
   # We need cargo criterion to generate machine-readable benchmark results from
   # microbench.
