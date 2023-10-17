@@ -24,7 +24,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::NonStrictExpression;
+use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
@@ -46,7 +46,7 @@ pub struct ProjectSetExecutor {
 
 struct Inner {
     info: ExecutorInfo,
-    _ctx: ActorContextRef,
+    ctx: ActorContextRef,
     /// Expressions of the current project_section.
     select_list: Vec<ProjectSetSelectItem>,
     chunk_size: usize,
@@ -84,7 +84,7 @@ impl ProjectSetExecutor {
 
         let inner = Inner {
             info,
-            _ctx: ctx,
+            ctx,
             select_list,
             chunk_size,
             watermark_derivations,
@@ -262,7 +262,7 @@ impl Inner {
                     watermark
                         .clone()
                         .transform_with_expr(
-                            &NonStrictExpression::todo(expr),
+                            &NonStrictExpression::todo(expr, LogReport),
                             expr_idx + PROJ_ROW_ID_OFFSET,
                         )
                         .await

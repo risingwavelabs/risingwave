@@ -58,7 +58,7 @@ pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
 pub use self::value::{ValueImpl, ValueRef};
-pub use self::wrapper::EvalErrorReport;
+pub use self::wrapper::*;
 pub use super::{ExprError, Result};
 
 /// Interface of an expression.
@@ -135,9 +135,14 @@ where
 
     /// Create a non-strict expression from the given expression, where only the evaluation of the
     /// top-level expression is non-strict (which is subtly different from
-    /// [`crate::expr::build_non_strict_from_prost`]), and error will only be simply logged.
-    pub fn todo(inner: E) -> NonStrictExpression<impl Expression> {
-        let inner = wrapper::non_strict::NonStrict::new(inner, wrapper::LogReport);
+    /// [`crate::expr::build_non_strict_from_prost`]).
+    ///
+    /// This should be used as a "TODO".
+    pub fn todo(
+        inner: E,
+        error_report: impl EvalErrorReport,
+    ) -> NonStrictExpression<impl Expression> {
+        let inner = wrapper::non_strict::NonStrict::new(inner, error_report);
         NonStrictExpression(inner)
     }
 

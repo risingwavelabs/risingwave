@@ -265,7 +265,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         let dynamic_cond = {
             let eval_error_report = ActorEvalErrorReport {
                 actor_context: self.ctx.clone(),
-                identity: self.identity.as_str().into(),
+                identity: Arc::from(self.identity.as_str()),
             };
             move |literal: Datum| {
                 literal.map(|scalar| {
