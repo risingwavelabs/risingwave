@@ -150,6 +150,12 @@ test_background_ddl_recovery() {
   # Test after backfill finished
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
 
+  # After cluster restart(s), backfilled mv should still be present.
+  restart_cluster
+  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+  restart_cluster
+  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_mv.slt"
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
 
@@ -405,6 +411,12 @@ test_backfill_restart_cn_recovery() {
    sleep 60
 
    # Test after backfill finished
+   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+
+   # After cluster restart(s), backfilled mv should still be present.
+   restart_cluster
+   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+   restart_cluster
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
 
    sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_mv.slt"
