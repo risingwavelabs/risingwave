@@ -32,7 +32,9 @@ use crate::parser::schema_registry::handle_sr_list;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_accessor_on_stream_chunk_writer;
 use crate::parser::unified::AccessImpl;
-use crate::parser::{AccessBuilder, ByteStreamSourceParser, SourceStreamChunkRowWriter};
+use crate::parser::{
+    AccessBuilder, ByteStreamSourceParser, ParserFormat, SourceStreamChunkRowWriter,
+};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -179,6 +181,10 @@ impl ByteStreamSourceParser for JsonParser {
 
     fn source_ctx(&self) -> &SourceContext {
         &self.source_ctx
+    }
+
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::Json
     }
 
     async fn parse_one<'a>(
