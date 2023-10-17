@@ -90,6 +90,7 @@ pub enum TimestampHandlingMode {
 #[derive(Clone)]
 pub enum CustomJsonType {
     Doris(HashMap<String, (u8, u8)>),
+    Kafka(String),
     None,
 }
 

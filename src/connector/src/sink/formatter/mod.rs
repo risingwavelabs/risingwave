@@ -106,12 +106,31 @@ impl SinkFormatterImpl {
                 )))
             }
             SinkFormat::Upsert => {
-                let key_encoder = JsonEncoder::new(
-                    schema.clone(),
-                    Some(pk_indices),
-                    TimestampHandlingMode::Milli,
-                );
-                let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+                let schema_enable = matches!(format_desc.options.get("schema.enable"), Some(s) if s.to_lowercase() == "true");
+                let key_encoder = if schema_enable {
+                    JsonEncoder::new_with_kafka(
+                        schema.clone(),
+                        Some(pk_indices),
+                        TimestampHandlingMode::Milli,
+                        format!("{}.{}", db_name, sink_from_name),
+                    )
+                } else {
+                    JsonEncoder::new(
+                        schema.clone(),
+                        Some(pk_indices),
+                        TimestampHandlingMode::Milli,
+                    )
+                };
+                let val_encoder = if schema_enable {
+                    JsonEncoder::new_with_kafka(
+                        schema,
+                        None,
+                        TimestampHandlingMode::Milli,
+                        format!("{}.{}", db_name, sink_from_name),
+                    )
+                } else {
+                    JsonEncoder::new(schema, None, TimestampHandlingMode::Milli)
+                };
 
                 // Initialize the upsert_stream
                 let formatter = UpsertFormatter::new(key_encoder, val_encoder);

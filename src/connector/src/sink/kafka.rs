@@ -45,7 +45,7 @@ use crate::sink::{DummySinkCommitCoordinator, LogSinker, Result, SinkWriterParam
 use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkProducerContext};
 use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
-    deserialize_duration_from_string, deserialize_u32_from_string, dispatch_sink_formatter_impl, deserialize_bool_from_string
+    deserialize_duration_from_string, deserialize_u32_from_string, dispatch_sink_formatter_impl,
 };
 
 pub const KAFKA_SINK: &str = "kafka";
@@ -227,13 +227,6 @@ pub struct KafkaConfig {
         deserialize_with = "deserialize_duration_from_string"
     )]
     pub retry_interval: Duration,
-
-    #[serde(
-        rename = "schema.enable",
-        default,
-        deserialize_with = "deserialize_bool_from_string"
-    )]
-    pub schema_enable: bool,
 
     /// We have parsed the primary key for an upsert kafka sink into a `usize` vector representing
     /// the indices of the pk columns in the frontend, so we simply store the primary key here

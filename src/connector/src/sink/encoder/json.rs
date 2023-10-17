@@ -18,6 +18,7 @@ use base64::engine::general_purpose;
 use base64::Engine as _;
 use chrono::{Datelike, Timelike};
 use indexmap::IndexMap;
+use itertools::Itertools;
 use risingwave_common::array::{ArrayError, ArrayResult};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
@@ -62,6 +63,20 @@ impl JsonEncoder {
             custom_json_type: CustomJsonType::Doris(map),
         }
     }
+
+    pub fn new_with_kafka(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        timestamp_handling_mode: TimestampHandlingMode,
+        schema_name: String,
+    ) -> Self {
+        Self {
+            schema,
+            col_indices,
+            timestamp_handling_mode,
+            custom_json_type: CustomJsonType::Kafka(schema_name),
+        }
+    }
 }
 
 impl RowEncoder for JsonEncoder {
@@ -81,19 +96,31 @@ impl RowEncoder for JsonEncoder {
         col_indices: impl Iterator<Item = usize>,
     ) -> Result<Self::Output> {
         let mut mappings = Map::with_capacity(self.schema.len());
-        for idx in col_indices {
-            let field = &self.schema[idx];
+        let col_indices = col_indices.collect_vec();
+        for idx in &col_indices {
+            let field = &self.schema[*idx];
             let key = field.name.clone();
             let value = datum_to_json_object(
                 field,
-                row.datum_at(idx),
+                row.datum_at(*idx),
                 self.timestamp_handling_mode,
                 &self.custom_json_type,
             )
             .map_err(|e| SinkError::Encode(e.to_string()))?;
             mappings.insert(key, value);
         }
-        Ok(mappings)
+
+        Ok(match &self.custom_json_type {
+            CustomJsonType::Kafka(name) => json_converter_with_schema(
+                Value::Object(mappings),
+                Some(name.to_owned()),
+                col_indices
+                    .into_iter()
+                    .map(|i| &self.schema()[i])
+                    .collect_vec(),
+            ),
+            _ => mappings,
+        })
     }
 }
 
@@ -162,7 +189,7 @@ pub fn datum_to_json_object(
                 }
                 json!(v_string)
             }
-            CustomJsonType::None => {
+            _ => {
                 json!(v.to_text())
             }
         },
@@ -178,11 +205,12 @@ pub fn datum_to_json_object(
             json!(v.0.num_seconds_from_midnight() as i64 * 1000)
         }
         (DataType::Date, ScalarRefImpl::Date(v)) => match custom_json_type {
-            CustomJsonType::None => json!(v.0.num_days_from_ce()),
             CustomJsonType::Doris(_) => {
                 let a = v.0.format("%Y-%m-%d").to_string();
                 json!(a)
             }
+
+            _ => json!(v.0.num_days_from_ce()),
         },
         (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => match timestamp_handling_mode {
             TimestampHandlingMode::Milli => json!(v.0.timestamp_millis()),
@@ -234,7 +262,7 @@ pub fn datum_to_json_object(
                         ArrayError::internal(format!("Json to string err{:?}", err))
                     })?)
                 }
-                CustomJsonType::None => {
+                _ => {
                     let mut map = Map::with_capacity(st.len());
                     for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
                         st.iter()
@@ -260,6 +288,73 @@ pub fn datum_to_json_object(
     };
 
     Ok(value)
+}
+
+fn json_converter_with_schema(
+    object: Value,
+    name: Option<String>,
+    fields: Vec<&Field>,
+) -> Map<String, Value> {
+    let mut mapping = Map::with_capacity(2);
+    mapping.insert(
+        "schema".to_string(),
+        json!({
+            "type": "struct",
+            "fields": fields.into_iter().map(json_converter_field_to_json).collect::<Vec<_>>(),
+            "optional": "false",
+            "name": name,
+        }),
+    );
+    mapping.insert("payload".to_string(), object);
+    mapping
+}
+
+// reference: https://github.com/apache/kafka/blob/80982c4ae3fe6be127b48ec09caff11ab5f87c69/connect/json/src/main/java/org/apache/kafka/connect/json/JsonSchema.java#L39
+fn json_converter_field_to_json(field: &Field) -> Value {
+    let mut mapping = Map::with_capacity(4);
+    let type_mapping = |rw_type: &DataType| match rw_type {
+        DataType::Boolean => "boolean",
+        DataType::Int16 => "int16",
+        DataType::Int32 => "int32",
+        DataType::Int64 => "int64",
+        DataType::Float32 => "float",
+        DataType::Float64 => "double",
+        DataType::Decimal => "string",
+        DataType::Date => "int32",
+        DataType::Varchar => "string",
+        DataType::Time => "int64",
+        DataType::Timestamp => "int64",
+        DataType::Timestamptz => "string",
+        DataType::Interval => "string",
+        DataType::Struct(_) => "struct",
+        DataType::List(_) => "array",
+        DataType::Bytea => "bytes",
+        DataType::Jsonb => "string",
+        DataType::Serial => "int32",
+        DataType::Int256 => "string",
+    };
+    mapping.insert("type".into(), json!(type_mapping(&field.data_type)));
+    mapping.insert("optional".into(), json!("true"));
+    mapping.insert("field".into(), json!(field.name));
+    match &field.data_type {
+        DataType::Struct(_) => {
+            let mut sub_fields = Vec::new();
+            for sub_field in &field.sub_fields {
+                sub_fields.push(json_converter_field_to_json(sub_field));
+            }
+            mapping.insert("fields".into(), json!(sub_fields));
+        }
+        DataType::List(list_type) => {
+            mapping.insert(
+                "items".into(),
+                json!({
+                    "type": type_mapping(list_type),
+                }),
+            );
+        }
+        _ => {}
+    }
+    json!(mapping)
 }
 
 #[cfg(test)]
