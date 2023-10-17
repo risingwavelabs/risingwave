@@ -198,7 +198,9 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
             | expr_node::Type::Format
-            | expr_node::Type::ArrayTransform =>
+            | expr_node::Type::ArrayTransform
+            | expr_node::Type::Greatest
+            | expr_node::Type::Least =>
             // expression output is deterministic(same result for the same input)
             {
                 let x = func_call
