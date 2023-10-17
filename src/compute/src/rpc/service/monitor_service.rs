@@ -20,9 +20,7 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::config::ServerConfig;
-use risingwave_common_heap_profiling::{
-    self, AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX,
-};
+use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
@@ -219,7 +217,11 @@ impl MonitorService for MonitorServiceImpl {
 
         // run jeprof if the target was not analyzed before
         if !collapsed_path.exists() {
-            heap_profiling::jeprof::run(dumped_path_str, collapsed_path_str.clone()).await?;
+            risingwave_common_heap_profiling::jeprof::run(
+                dumped_path_str,
+                collapsed_path_str.clone(),
+            )
+            .await?;
         }
 
         let file = fs::read(Path::new(&collapsed_path_str))?;
