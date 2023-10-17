@@ -37,6 +37,7 @@ third-party = [
     # For some reasons, tikv-jemalloc-sys would be compiled twice if being added into `workspace-hack`
     { name = "tikv-jemalloc-sys", git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" },
     { name = "tikv-jemallocator", git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" },
+    { name = "tikv-jemalloc-ctl", git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" },
     # These are solely dev-dependencies. Unifying them may slow down build.
     { name = "criterion" },
     { name = "console" },
