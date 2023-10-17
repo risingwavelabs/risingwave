@@ -17,15 +17,14 @@ use std::sync::OnceLock;
 use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
-    register_histogram_vec_with_registry, register_histogram_with_registry,
-    register_int_counter_vec_with_registry, register_int_counter_with_registry,
-    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram, IntCounter,
-    IntGauge, Registry,
+    register_histogram_with_registry, register_int_counter_vec_with_registry,
+    register_int_counter_with_registry, register_int_gauge_vec_with_registry,
+    register_int_gauge_with_registry, Histogram, IntCounter, IntGauge, Registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
-    RelabeledHistogramVec,
+    RelabeledGuardedHistogramVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -43,8 +42,8 @@ pub struct StreamingMetrics {
 
     // Streaming actor metrics from tokio (disabled by default)
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
-    pub actor_output_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
-    pub actor_input_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
+    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
+    pub actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
     pub actor_scheduled_duration: GenericGaugeVec<AtomicF64>,
     pub actor_scheduled_cnt: GenericGaugeVec<AtomicI64>,
     pub actor_fast_poll_duration: GenericGaugeVec<AtomicF64>,
@@ -58,8 +57,8 @@ pub struct StreamingMetrics {
 
     // Streaming actor
     pub actor_memory_usage: GenericGaugeVec<AtomicI64>,
-    pub actor_in_record_cnt: GenericCounterVec<AtomicU64>,
-    pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
+    pub actor_in_record_cnt: LabelGuardedIntCounterVec<2>,
+    pub actor_out_record_cnt: LabelGuardedIntCounterVec<2>,
 
     // Source
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
@@ -74,14 +73,14 @@ pub struct StreamingMetrics {
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
 
     // Streaming Join
-    pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
-    pub join_lookup_total_count: GenericCounterVec<AtomicU64>,
-    pub join_insert_cache_miss_count: GenericCounterVec<AtomicU64>,
-    pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
-    pub join_match_duration_ns: GenericCounterVec<AtomicU64>,
-    pub join_barrier_align_duration: RelabeledHistogramVec,
-    pub join_cached_entry_count: GenericGaugeVec<AtomicI64>,
-    pub join_matched_join_keys: RelabeledHistogramVec,
+    pub join_lookup_miss_count: LabelGuardedIntCounterVec<5>,
+    pub join_lookup_total_count: LabelGuardedIntCounterVec<5>,
+    pub join_insert_cache_miss_count: LabelGuardedIntCounterVec<5>,
+    pub join_actor_input_waiting_duration_ns: LabelGuardedIntCounterVec<2>,
+    pub join_match_duration_ns: LabelGuardedIntCounterVec<3>,
+    pub join_barrier_align_duration: RelabeledGuardedHistogramVec<3>,
+    pub join_cached_entry_count: LabelGuardedIntGaugeVec<3>,
+    pub join_matched_join_keys: RelabeledGuardedHistogramVec<3>,
 
     // Streaming Aggregation
     pub agg_lookup_miss_count: GenericCounterVec<AtomicU64>,
@@ -238,21 +237,23 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let actor_output_buffer_blocking_duration_ns = register_int_counter_vec_with_registry!(
-            "stream_actor_output_buffer_blocking_duration_ns",
-            "Total blocking duration (ns) of output buffer",
-            &["actor_id", "fragment_id", "downstream_fragment_id"],
-            registry
-        )
-        .unwrap();
+        let actor_output_buffer_blocking_duration_ns =
+            register_guarded_int_counter_vec_with_registry!(
+                "stream_actor_output_buffer_blocking_duration_ns",
+                "Total blocking duration (ns) of output buffer",
+                &["actor_id", "fragment_id", "downstream_fragment_id"],
+                registry
+            )
+            .unwrap();
 
-        let actor_input_buffer_blocking_duration_ns = register_int_counter_vec_with_registry!(
-            "stream_actor_input_buffer_blocking_duration_ns",
-            "Total blocking duration (ns) of input buffer",
-            &["actor_id", "fragment_id", "upstream_fragment_id"],
-            registry
-        )
-        .unwrap();
+        let actor_input_buffer_blocking_duration_ns =
+            register_guarded_int_counter_vec_with_registry!(
+                "stream_actor_input_buffer_blocking_duration_ns",
+                "Total blocking duration (ns) of input buffer",
+                &["actor_id", "fragment_id", "upstream_fragment_id"],
+                registry
+            )
+            .unwrap();
 
         let exchange_frag_recv_size = register_int_counter_vec_with_registry!(
             "stream_exchange_frag_recv_size",
@@ -342,7 +343,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let actor_in_record_cnt = register_int_counter_vec_with_registry!(
+        let actor_in_record_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_in_record_cnt",
             "Total number of rows actor received",
             &["actor_id", "fragment_id"],
@@ -350,7 +351,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let actor_out_record_cnt = register_int_counter_vec_with_registry!(
+        let actor_out_record_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_out_record_cnt",
             "Total number of rows actor sent",
             &["actor_id", "fragment_id"],
@@ -366,7 +367,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let join_lookup_miss_count = register_int_counter_vec_with_registry!(
+        let join_lookup_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
             "Join executor lookup miss duration",
             &[
@@ -380,7 +381,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let join_lookup_total_count = register_int_counter_vec_with_registry!(
+        let join_lookup_total_count = register_guarded_int_counter_vec_with_registry!(
             "stream_join_lookup_total_count",
             "Join executor lookup total operation",
             &[
@@ -394,7 +395,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let join_insert_cache_miss_count = register_int_counter_vec_with_registry!(
+        let join_insert_cache_miss_count = register_guarded_int_counter_vec_with_registry!(
             "stream_join_insert_cache_miss_count",
             "Join executor cache miss when insert operation",
             &[
@@ -408,7 +409,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let join_actor_input_waiting_duration_ns = register_int_counter_vec_with_registry!(
+        let join_actor_input_waiting_duration_ns = register_guarded_int_counter_vec_with_registry!(
             "stream_join_actor_input_waiting_duration_ns",
             "Total waiting duration (ns) of input buffer of join actor",
             &["actor_id", "fragment_id"],
@@ -416,7 +417,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let join_match_duration_ns = register_int_counter_vec_with_registry!(
+        let join_match_duration_ns = register_guarded_int_counter_vec_with_registry!(
             "stream_join_match_duration_ns",
             "Matching duration for each side",
             &["actor_id", "fragment_id", "side"],
@@ -429,21 +430,21 @@ impl StreamingMetrics {
             "Duration of join align barrier",
             exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
-        let join_barrier_align_duration = register_histogram_vec_with_registry!(
+        let join_barrier_align_duration = register_guarded_histogram_vec_with_registry!(
             opts,
             &["actor_id", "fragment_id", "wait_side"],
             registry
         )
         .unwrap();
 
-        let join_barrier_align_duration = RelabeledHistogramVec::with_metric_level_relabel_n(
+        let join_barrier_align_duration = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
             MetricLevel::Debug,
             join_barrier_align_duration,
             level,
             1,
         );
 
-        let join_cached_entry_count = register_int_gauge_vec_with_registry!(
+        let join_cached_entry_count = register_guarded_int_gauge_vec_with_registry!(
             "stream_join_cached_entry_count",
             "Number of cached entries in streaming join operators",
             &["actor_id", "fragment_id", "side"],
@@ -457,14 +458,14 @@ impl StreamingMetrics {
             exponential_buckets(16.0, 2.0, 28).unwrap() // max 2^31
         );
 
-        let join_matched_join_keys = register_histogram_vec_with_registry!(
+        let join_matched_join_keys = register_guarded_histogram_vec_with_registry!(
             join_matched_join_keys_opts,
             &["actor_id", "fragment_id", "table_id"],
             registry
         )
         .unwrap();
 
-        let join_matched_join_keys = RelabeledHistogramVec::with_metric_level_relabel_n(
+        let join_matched_join_keys = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
             MetricLevel::Debug,
             join_matched_join_keys,
             level,

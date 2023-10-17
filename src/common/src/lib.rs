@@ -46,6 +46,7 @@
 #![feature(negative_impls)]
 #![feature(async_fn_in_trait)]
 #![feature(bound_map)]
+#![feature(array_methods)]
 
 #[macro_use]
 pub mod jemalloc;
