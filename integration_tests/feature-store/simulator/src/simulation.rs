@@ -15,7 +15,7 @@ use crate::{entities, entities_taxi};
 
 fn get_delay_mills(delay_val: f64) -> u64 {
     let turbulence =
-        rand::thread_rng().gen_range((delay_val * 0.6) as f64, (delay_val * 1.1) as f64) as f64;
+        rand::thread_rng().gen_range((delay_val * 0.6) as f64..(delay_val * 1.1) as f64) as f64;
     (turbulence * 10000.0) as u64
 }
 

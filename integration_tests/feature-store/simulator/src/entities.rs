@@ -38,7 +38,7 @@ impl User {
         &'a self,
         client: &'a mut ServerClient<Channel>,
     ) -> Result<ActionHistory, &str> {
-        let changenum: i64 = rand::thread_rng().gen_range(0, 90);
+        let changenum: i64 = rand::thread_rng().gen_range(0..90);
         let (changenum, event_type) = {
             if changenum > 0 && changenum < 30 {
                 (changenum, "mfa+")
