@@ -117,17 +117,17 @@ impl<E: Expression + 'static> E {
 }
 
 #[derive(Debug)]
-pub struct InfallibleExpression<E = BoxedExpression>(E);
+pub struct NonStrictExpression<E = BoxedExpression>(E);
 
-impl<E> InfallibleExpression<E>
+impl<E> NonStrictExpression<E>
 where
     E: Expression,
 {
-    pub fn for_test(inner: E) -> InfallibleExpression
+    pub fn for_test(inner: E) -> NonStrictExpression
     where
         E: 'static,
     {
-        InfallibleExpression(inner.boxed())
+        NonStrictExpression(inner.boxed())
     }
 
     pub fn todo(inner: E) -> Self {

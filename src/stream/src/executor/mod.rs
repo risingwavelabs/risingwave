@@ -31,7 +31,7 @@ use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_connector::source::SplitImpl;
-use risingwave_expr::expr::{Expression, InfallibleExpression};
+use risingwave_expr::expr::{Expression, NonStrictExpression};
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, PbMutation};
@@ -641,7 +641,7 @@ impl Watermark {
 
     pub async fn transform_with_expr(
         self,
-        expr: &InfallibleExpression<impl Expression>,
+        expr: &NonStrictExpression<impl Expression>,
         new_col_idx: usize,
     ) -> Option<Self> {
         let Self { col_idx, val, .. } = self;

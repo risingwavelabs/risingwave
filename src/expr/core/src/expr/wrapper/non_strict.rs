@@ -46,7 +46,7 @@ impl EvalErrorReport for ! {
 /// - When an error occurs during chunk-level evaluation, recompute in row-based execution and pad
 ///   with NULL for each failed row.
 /// - Report all error occurred during row-level evaluation to the [`EvalErrorReport`].
-pub struct NonStrict<E, R> {
+pub(crate) struct NonStrict<E, R> {
     inner: E,
     report: R,
 }

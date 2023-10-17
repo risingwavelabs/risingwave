@@ -24,7 +24,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::InfallibleExpression;
+use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
@@ -262,7 +262,7 @@ impl Inner {
                     watermark
                         .clone()
                         .transform_with_expr(
-                            &InfallibleExpression::todo(expr),
+                            &NonStrictExpression::todo(expr),
                             expr_idx + PROJ_ROW_ID_OFFSET,
                         )
                         .await

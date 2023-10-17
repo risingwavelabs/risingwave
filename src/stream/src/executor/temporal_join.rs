@@ -32,7 +32,7 @@ use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::InfallibleExpression;
+use risingwave_expr::expr::NonStrictExpression;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -57,7 +57,7 @@ pub struct TemporalJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrim
     left_join_keys: Vec<usize>,
     right_join_keys: Vec<usize>,
     null_safe: Vec<bool>,
-    condition: Option<InfallibleExpression>,
+    condition: Option<NonStrictExpression>,
     output_indices: Vec<usize>,
     pk_indices: PkIndices,
     schema: Schema,
@@ -338,7 +338,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
         left_join_keys: Vec<usize>,
         right_join_keys: Vec<usize>,
         null_safe: Vec<bool>,
-        condition: Option<InfallibleExpression>,
+        condition: Option<NonStrictExpression>,
         pk_indices: PkIndices,
         output_indices: Vec<usize>,
         table_output_indices: Vec<usize>,

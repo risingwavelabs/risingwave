@@ -264,10 +264,10 @@ pub trait StreamExecutorTestExt: MessageStream + Unpin {
 impl StreamExecutorTestExt for BoxedMessageStream {}
 
 pub mod expr {
-    use risingwave_expr::expr::InfallibleExpression;
+    use risingwave_expr::expr::NonStrictExpression;
 
-    pub fn build_from_pretty(s: impl AsRef<str>) -> InfallibleExpression {
-        InfallibleExpression::for_test(risingwave_expr::expr::build_from_pretty(s))
+    pub fn build_from_pretty(s: impl AsRef<str>) -> NonStrictExpression {
+        NonStrictExpression::for_test(risingwave_expr::expr::build_from_pretty(s))
     }
 }
 

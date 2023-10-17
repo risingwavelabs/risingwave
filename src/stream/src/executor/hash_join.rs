@@ -28,7 +28,7 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::InfallibleExpression;
+use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
 use risingwave_storage::StateStore;
 use tokio::time::Instant;
@@ -242,9 +242,9 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// The parameters of the right join executor
     side_r: JoinSide<K, S>,
     /// Optional non-equi join conditions
-    cond: Option<InfallibleExpression>,
+    cond: Option<NonStrictExpression>,
     /// Column indices of watermark output and offset expression of each inequality, respectively.
-    inequality_pairs: Vec<(Vec<usize>, Option<InfallibleExpression>)>,
+    inequality_pairs: Vec<(Vec<usize>, Option<NonStrictExpression>)>,
     /// The output watermark of each inequality condition and its value is the minimum of the
     /// calculation result of both side. It will be used to generate watermark into downstream
     /// and do state cleaning if `clean_state` field of that inequality is `true`.
@@ -313,7 +313,7 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     side_l: &'a mut JoinSide<K, S>,
     side_r: &'a mut JoinSide<K, S>,
     actual_output_data_types: &'a [DataType],
-    cond: &'a mut Option<InfallibleExpression>,
+    cond: &'a mut Option<NonStrictExpression>,
     inequality_watermarks: &'a [Option<Watermark>],
     chunk: StreamChunk,
     append_only_optimize: bool,
@@ -448,8 +448,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         pk_indices: PkIndices,
         output_indices: Vec<usize>,
         executor_id: u64,
-        cond: Option<InfallibleExpression>,
-        inequality_pairs: Vec<(usize, usize, bool, Option<InfallibleExpression>)>,
+        cond: Option<NonStrictExpression>,
+        inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
         op_info: String,
         state_table_l: StateTable<S>,
         degree_state_table_l: StateTable<S>,
@@ -1327,7 +1327,7 @@ mod tests {
         (state_table, degree_state_table)
     }
 
-    fn create_cond(condition_text: Option<String>) -> InfallibleExpression {
+    fn create_cond(condition_text: Option<String>) -> NonStrictExpression {
         build_from_pretty(
             condition_text
                 .as_deref()
@@ -1339,7 +1339,7 @@ mod tests {
         with_condition: bool,
         null_safe: bool,
         condition_text: Option<String>,
-        inequality_pairs: Vec<(usize, usize, bool, Option<InfallibleExpression>)>,
+        inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let schema = Schema {
             fields: vec![

@@ -21,7 +21,7 @@ use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::ensure;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::InfallibleExpression;
+use risingwave_expr::expr::NonStrictExpression;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{
@@ -40,7 +40,7 @@ pub struct ValuesExecutor {
     barrier_receiver: UnboundedReceiver<Barrier>,
     progress: CreateMviewProgress,
 
-    rows: vec::IntoIter<Vec<InfallibleExpression>>,
+    rows: vec::IntoIter<Vec<NonStrictExpression>>,
     pk_indices: PkIndices,
     identity: String,
     schema: Schema,
@@ -51,7 +51,7 @@ impl ValuesExecutor {
     pub fn new(
         ctx: ActorContextRef,
         progress: CreateMviewProgress,
-        rows: Vec<Vec<InfallibleExpression>>,
+        rows: Vec<Vec<NonStrictExpression>>,
         schema: Schema,
         barrier_receiver: UnboundedReceiver<Barrier>,
         executor_id: u64,
@@ -167,7 +167,7 @@ mod tests {
     };
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl, StructType};
-    use risingwave_expr::expr::{BoxedExpression, InfallibleExpression, LiteralExpression};
+    use risingwave_expr::expr::{BoxedExpression, LiteralExpression, NonStrictExpression};
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::ValuesExecutor;
@@ -217,7 +217,7 @@ mod tests {
             progress,
             vec![exprs
                 .into_iter()
-                .map(InfallibleExpression::for_test)
+                .map(NonStrictExpression::for_test)
                 .collect()],
             Schema { fields },
             barrier_receiver,

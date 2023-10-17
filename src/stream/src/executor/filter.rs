@@ -19,7 +19,7 @@ use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::InfallibleExpression;
+use risingwave_expr::expr::NonStrictExpression;
 
 use super::*;
 
@@ -34,14 +34,14 @@ pub struct FilterExecutor {
 
     /// Expression of the current filter, note that the filter must always have the same output for
     /// the same input.
-    expr: InfallibleExpression,
+    expr: NonStrictExpression,
 }
 
 impl FilterExecutor {
     pub fn new(
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
-        expr: InfallibleExpression,
+        expr: NonStrictExpression,
         executor_id: u64,
     ) -> Self {
         let input_info = input.info();

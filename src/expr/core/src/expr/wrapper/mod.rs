@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod checked;
-mod non_strict;
+pub(crate) mod checked;
+pub(crate) mod non_strict;
 
-pub use checked::Checked;
-pub use non_strict::{EvalErrorReport, NonStrict};
+pub use non_strict::EvalErrorReport;

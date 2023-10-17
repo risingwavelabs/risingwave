@@ -23,8 +23,8 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_expr::expr::{
-    build_func_non_strict, ExpressionBoxExt, InfallibleExpression, InputRefExpression,
-    LiteralExpression,
+    build_func_non_strict, ExpressionBoxExt, InputRefExpression, LiteralExpression,
+    NonStrictExpression,
 };
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
@@ -45,7 +45,7 @@ use crate::task::ActorEvalErrorReport;
 pub struct WatermarkFilterExecutor<S: StateStore> {
     input: BoxedExecutor,
     /// The expression used to calculate the watermark value.
-    watermark_expr: InfallibleExpression,
+    watermark_expr: NonStrictExpression,
     /// The column we should generate watermark and filter on.
     event_time_col_idx: usize,
     ctx: ActorContextRef,
@@ -56,7 +56,7 @@ pub struct WatermarkFilterExecutor<S: StateStore> {
 impl<S: StateStore> WatermarkFilterExecutor<S> {
     pub fn new(
         input: BoxedExecutor,
-        watermark_expr: InfallibleExpression,
+        watermark_expr: NonStrictExpression,
         event_time_col_idx: usize,
         ctx: ActorContextRef,
         table: StateTable<S>,
@@ -299,7 +299,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         event_time_col_idx: usize,
         watermark: ScalarImpl,
         eval_error_report: ActorEvalErrorReport,
-    ) -> ExprResult<InfallibleExpression> {
+    ) -> ExprResult<NonStrictExpression> {
         build_func_non_strict(
             Type::GreaterThanOrEqual,
             DataType::Boolean,

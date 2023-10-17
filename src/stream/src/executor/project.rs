@@ -21,7 +21,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::InfallibleExpression;
+use risingwave_expr::expr::NonStrictExpression;
 
 use super::*;
 
@@ -38,7 +38,7 @@ struct Inner {
     info: ExecutorInfo,
 
     /// Expressions of the current projection.
-    exprs: Vec<InfallibleExpression>,
+    exprs: Vec<NonStrictExpression>,
     /// All the watermark derivations, (input_column_index, output_column_index). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: MultiMap<usize, usize>,
@@ -58,7 +58,7 @@ impl ProjectExecutor {
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
         pk_indices: PkIndices,
-        exprs: Vec<InfallibleExpression>,
+        exprs: Vec<NonStrictExpression>,
         executor_id: u64,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
@@ -346,7 +346,7 @@ mod tests {
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
-        let c_expr = InfallibleExpression::for_test(DummyNondecreasingExpr);
+        let c_expr = NonStrictExpression::for_test(DummyNondecreasingExpr);
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),
