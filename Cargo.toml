@@ -127,6 +127,7 @@ risingwave_batch = { path = "./src/batch" }
 risingwave_cmd = { path = "./src/cmd" }
 risingwave_common = { path = "./src/common" }
 risingwave_common_service = { path = "./src/common/common_service" }
+risingwave_common_heap_profiling = { path = "./src/common/heap_profiling" }
 risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }

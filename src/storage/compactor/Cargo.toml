@@ -22,6 +22,7 @@ clap = { version = "4", features = ["derive"] }
 parking_lot = "0.12"
 prometheus = { version = "0.13" }
 risingwave_common = { workspace = true }
+risingwave_common_heap_profiling = { workspace = true }
 risingwave_common_service = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
