@@ -31,7 +31,7 @@ use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_connector::source::SplitImpl;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::{InfallibleExpression, Expression};
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, PbMutation};
@@ -641,7 +641,7 @@ impl Watermark {
 
     pub async fn transform_with_expr(
         self,
-        expr: &BoxedExpression,
+        expr: &InfallibleExpression,
         new_col_idx: usize,
     ) -> Option<Self> {
         let Self { col_idx, val, .. } = self;
@@ -651,7 +651,7 @@ impl Watermark {
             OwnedRow::new(row)
         };
         let val = expr.eval_row_infallible(&row).await?;
-        Some(Self::new(new_col_idx, expr.return_type(), val))
+        Some(Self::new(new_col_idx, expr.inner().return_type(), val))
     }
 
     /// Transform the watermark with the given output indices. If this watermark is not in the

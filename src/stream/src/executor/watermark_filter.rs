@@ -23,7 +23,7 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_expr::expr::{
-    build_func_non_strict, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
+    build_func_non_strict, Expression, InfallibleExpression, InputRefExpression, LiteralExpression,
 };
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
@@ -44,7 +44,7 @@ use crate::task::ActorEvalErrorReport;
 pub struct WatermarkFilterExecutor<S: StateStore> {
     input: BoxedExecutor,
     /// The expression used to calculate the watermark value.
-    watermark_expr: BoxedExpression,
+    watermark_expr: InfallibleExpression,
     /// The column we should generate watermark and filter on.
     event_time_col_idx: usize,
     ctx: ActorContextRef,
@@ -55,7 +55,7 @@ pub struct WatermarkFilterExecutor<S: StateStore> {
 impl<S: StateStore> WatermarkFilterExecutor<S> {
     pub fn new(
         input: BoxedExecutor,
-        watermark_expr: BoxedExpression,
+        watermark_expr: InfallibleExpression,
         event_time_col_idx: usize,
         ctx: ActorContextRef,
         table: StateTable<S>,
@@ -298,7 +298,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         event_time_col_idx: usize,
         watermark: ScalarImpl,
         eval_error_report: ActorEvalErrorReport,
-    ) -> ExprResult<BoxedExpression> {
+    ) -> ExprResult<InfallibleExpression> {
         build_func_non_strict(
             Type::GreaterThanOrEqual,
             DataType::Boolean,
@@ -350,11 +350,11 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::Date;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::expr::build_from_pretty;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::Distribution;
 
     use super::*;
+    use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::ActorContext;
 

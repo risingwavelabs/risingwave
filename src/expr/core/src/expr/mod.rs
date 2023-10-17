@@ -160,6 +160,50 @@ impl Expression for BoxedExpression {
     }
 }
 
+#[derive(Debug)]
+pub struct InfallibleExpression<E = BoxedExpression>(E);
+
+impl InfallibleExpression {
+    pub fn for_test(inner: impl Expression + 'static) -> Self {
+        Self(inner.boxed())
+    }
+}
+
+impl<E> InfallibleExpression<E>
+where
+    E: Expression,
+{
+    /// Get the return data type.
+    pub fn return_type(&self) -> DataType {
+        self.0.return_type()
+    }
+
+    /// Evaluate the expression in vectorized execution and assert it succeeds. Returns an array.
+    ///
+    /// Use with expressions built in non-strict mode.
+    pub async fn eval_infallible(&self, input: &DataChunk) -> ArrayRef {
+        self.0.eval(input).await.expect("evaluation failed")
+    }
+
+    /// Evaluate the expression in row-based execution and assert it succeeds. Returns a nullable
+    /// scalar.
+    ///
+    /// Use with expressions built in non-strict mode.
+    pub async fn eval_row_infallible(&self, input: &OwnedRow) -> Datum {
+        self.0.eval_row(input).await.expect("evaluation failed")
+    }
+
+    /// Unwrap the inner expression.
+    pub fn into_inner(self) -> E {
+        self.0
+    }
+
+    /// Get a reference to the inner expression.
+    pub fn inner(&self) -> &E {
+        &self.0
+    }
+}
+
 /// An optional context that can be used in a function.
 ///
 /// # Example

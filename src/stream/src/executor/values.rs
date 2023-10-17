@@ -21,7 +21,7 @@ use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::ensure;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::InfallibleExpression;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{
@@ -40,7 +40,7 @@ pub struct ValuesExecutor {
     barrier_receiver: UnboundedReceiver<Barrier>,
     progress: CreateMviewProgress,
 
-    rows: vec::IntoIter<Vec<BoxedExpression>>,
+    rows: vec::IntoIter<Vec<InfallibleExpression>>,
     pk_indices: PkIndices,
     identity: String,
     schema: Schema,
@@ -51,7 +51,7 @@ impl ValuesExecutor {
     pub fn new(
         ctx: ActorContextRef,
         progress: CreateMviewProgress,
-        rows: Vec<Vec<BoxedExpression>>,
+        rows: Vec<Vec<InfallibleExpression>>,
         schema: Schema,
         barrier_receiver: UnboundedReceiver<Barrier>,
         executor_id: u64,
@@ -167,7 +167,7 @@ mod tests {
     };
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl, StructType};
-    use risingwave_expr::expr::{BoxedExpression, LiteralExpression};
+    use risingwave_expr::expr::{BoxedExpression, InfallibleExpression, LiteralExpression};
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::ValuesExecutor;
@@ -183,8 +183,7 @@ mod tests {
         let actor_id = progress.actor_id();
         let (tx, barrier_receiver) = unbounded_channel();
         let value = StructValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
-        let exprs = vec![
-            Box::new(LiteralExpression::new(
+        let exprs = vec![Box::new(LiteralExpression::new(
                 DataType::Int16,
                 Some(ScalarImpl::Int16(1)),
             )) as BoxedExpression,
@@ -202,11 +201,11 @@ mod tests {
                     vec![],
                 ),
                 Some(ScalarImpl::Struct(value)),
-            )) as BoxedExpression,
+            )),
             Box::new(LiteralExpression::new(
                 DataType::Int64,
                 Some(ScalarImpl::Int64(0)),
-            )) as BoxedExpression,
+            )),
         ];
         let fields = exprs
             .iter() // for each column
@@ -215,7 +214,10 @@ mod tests {
         let values_executor_struct = ValuesExecutor::new(
             ActorContext::create(actor_id),
             progress,
-            vec![exprs],
+            vec![exprs
+                .into_iter()
+                .map(InfallibleExpression::for_test)
+                .collect()],
             Schema { fields },
             barrier_receiver,
             10005,

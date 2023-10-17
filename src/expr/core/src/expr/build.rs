@@ -28,6 +28,7 @@ use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
 use super::wrapper::{Checked, EvalErrorReport, NonStrict};
+use super::InfallibleExpression;
 use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use crate::sig::FUNCTION_REGISTRY;
 use crate::{bail, ExprError, Result};
@@ -41,8 +42,10 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
 pub fn build_non_strict_from_prost(
     prost: &ExprNode,
     error_report: impl EvalErrorReport + 'static,
-) -> Result<BoxedExpression> {
-    ExprBuilder::new_non_strict(error_report).build(prost)
+) -> Result<InfallibleExpression> {
+    ExprBuilder::new_non_strict(error_report)
+        .build(prost)
+        .map(InfallibleExpression)
 }
 
 /// Build an expression from protobuf with possibly some wrappers attached to each node.
@@ -217,9 +220,9 @@ pub fn build_func_non_strict(
     ret_type: DataType,
     children: Vec<BoxedExpression>,
     error_report: impl EvalErrorReport + 'static,
-) -> Result<BoxedExpression> {
+) -> Result<InfallibleExpression> {
     let expr = build_func(func, ret_type, children)?;
-    let wrapped = ExprBuilder::new_non_strict(error_report).wrap(expr);
+    let wrapped = InfallibleExpression(ExprBuilder::new_non_strict(error_report).wrap(expr));
 
     Ok(wrapped)
 }

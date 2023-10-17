@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{
-    build_func_non_strict, build_non_strict_from_prost, BoxedExpression, InputRefExpression,
+    build_func_non_strict, build_non_strict_from_prost, InfallibleExpression, InputRefExpression,
 };
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
@@ -109,7 +109,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                             build_non_strict_from_prost(
                                 delta_expression.delta.as_ref().unwrap(),
                                 params.eval_error_report.clone(),
-                            )?,
+                            )?.into_inner(),
                         ],
                         params.eval_error_report.clone(),
                     )?)
@@ -175,8 +175,8 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     pk_indices: PkIndices,
     output_indices: Vec<usize>,
     executor_id: u64,
-    cond: Option<BoxedExpression>,
-    inequality_pairs: Vec<(usize, usize, bool, Option<BoxedExpression>)>,
+    cond: Option<InfallibleExpression>,
+    inequality_pairs: Vec<(usize, usize, bool, Option<InfallibleExpression>)>,
     op_info: String,
     state_table_l: StateTable<S>,
     degree_state_table_l: StateTable<S>,

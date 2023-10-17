@@ -19,7 +19,7 @@ use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::InfallibleExpression;
 
 use super::*;
 
@@ -34,14 +34,14 @@ pub struct FilterExecutor {
 
     /// Expression of the current filter, note that the filter must always have the same output for
     /// the same input.
-    expr: BoxedExpression,
+    expr: InfallibleExpression,
 }
 
 impl FilterExecutor {
     pub fn new(
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
-        expr: BoxedExpression,
+        expr: InfallibleExpression,
         executor_id: u64,
     ) -> Self {
         let input_info = input.info();
@@ -190,8 +190,8 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::build_from_pretty;
 
+    use super::super::test_utils::expr::build_from_pretty;
     use super::super::test_utils::MockSource;
     use super::super::*;
     use super::*;
