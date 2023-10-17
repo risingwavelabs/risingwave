@@ -1,0 +1,38 @@
+init_sqls = [
+    'CREATE SCHEMA IF NOT EXISTS demo_db',
+    'DROP TABLE IF EXISTS demo_db.demo_table',
+    '''
+    CREATE TABLE demo_db.demo_table (
+    id long,
+    v_int int,
+    v_long long,
+    v_float float,
+    v_double double,
+    v_varchar string,
+    v_bool boolean,
+    v_date date,
+    v_timestamp timestamp,
+    v_ts_ntz timestamp_ntz
+    ) TBLPROPERTIES ('format-version'='2');
+    '''
+]
+
+slt = 'test_case/iceberg_sink_append_only.slt'
+
+verify_schema = ['long', 'int', 'long', 'float', 'double', 'string', 'boolean', 'date', 'timestamp', 'timestamp_ntz']
+
+verify_sql = 'SELECT * FROM demo_db.demo_table ORDER BY id ASC'
+
+
+verify_data = """
+1,1,1000,1.1,1.11,1-1,true,2022-03-11,2022-03-11 01:00:00+00:00,2022-03-11 01:00:00
+2,2,2000,2.2,2.22,2-2,false,2022-03-12,2022-03-12 02:00:00+00:00,2022-03-12 02:00:00
+3,3,3000,3.3,3.33,3-3,true,2022-03-13,2022-03-13 03:00:00+00:00,2022-03-13 03:00:00
+4,4,4000,4.4,4.44,4-4,false,2022-03-14,2022-03-14 04:00:00+00:00,2022-03-14 04:00:00
+5,5,5000,5.5,5.55,5-5,true,2022-03-15,2022-03-15 05:00:00+00:00,2022-03-15 05:00:00
+"""
+
+drop_sqls = [
+ 'DROP TABLE IF EXISTS demo_db.demo_table',
+ 'DROP SCHEMA IF EXISTS demo_db'
+]

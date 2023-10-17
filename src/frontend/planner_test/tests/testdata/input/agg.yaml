@@ -923,3 +923,38 @@
     SELECT count(DISTINCT i) FROM integers;
   expected_outputs:
   - batch_plan
+- sql: |
+    CREATE TABLE t(id int primary key, a int, b int);
+    SELECT count(*) FROM t group by a, id, b;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+
+- sql: |
+    CREATE TABLE t (a int, b int);
+    SELECT a, sum((sum(b))) OVER (PARTITION BY a ORDER BY a) FROM t GROUP BY a;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- sql: |
+    CREATE TABLE t (a int, b int);
+    SELECT a, row_number() OVER (PARTITION BY a ORDER BY a DESC) FROM t GROUP BY a;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- sql: |
+    CREATE TABLE t (a int, b int, c int);
+    SELECT a, b, sum(sum(c)) OVER (PARTITION BY a ORDER BY b)
+    FROM t
+    GROUP BY a, b;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- sql: |
+    CREATE TABLE t (a int, b int, c int, d int, e int);
+    SELECT a, b, sum(sum(c)) OVER (PARTITION BY a, avg(d) ORDER BY max(e), b)
+    FROM t
+    GROUP BY a, b;
+  expected_outputs:
+    - batch_plan
+    - stream_plan

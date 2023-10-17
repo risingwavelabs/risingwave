@@ -14,8 +14,7 @@
 
 use risingwave_common::array::list_array::display_for_explain;
 use risingwave_common::types::{literal_type_match, DataType, Datum, ToText};
-use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
-use risingwave_pb::data::PbDatum;
+use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::Expr;
@@ -121,8 +120,7 @@ impl Expr for Literal {
 
 /// Convert a literal value (datum) into protobuf.
 pub fn literal_to_value_encoding(d: &Datum) -> RexNode {
-    let body = serialize_datum(d.as_ref());
-    RexNode::Constant(PbDatum { body })
+    RexNode::Constant(d.to_protobuf())
 }
 
 /// Convert protobuf into a literal value (datum).
@@ -132,7 +130,7 @@ fn value_encoding_to_literal(
 ) -> risingwave_common::error::Result<Datum> {
     if let Some(rex_node) = proto {
         if let RexNode::Constant(prost_datum) = rex_node {
-            let datum = deserialize_datum(prost_datum.body.as_ref(), ty)?;
+            let datum = Datum::from_protobuf(prost_datum, ty)?;
             Ok(datum)
         } else {
             unreachable!()
@@ -145,8 +143,8 @@ fn value_encoding_to_literal(
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{ListValue, StructValue};
-    use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::value_encoding::deserialize_datum;
+    use risingwave_common::types::{DataType, Datum, ScalarImpl};
+    use risingwave_common::util::value_encoding::DatumFromProtoExt;
     use risingwave_pb::expr::expr_node::RexNode;
 
     use crate::expr::literal::literal_to_value_encoding;
@@ -161,8 +159,8 @@ mod tests {
         let data = Some(ScalarImpl::Struct(value.clone()));
         let node = literal_to_value_encoding(&data);
         if let RexNode::Constant(prost) = node {
-            let data2 = deserialize_datum(
-                prost.get_body().as_slice(),
+            let data2 = Datum::from_protobuf(
+                &prost,
                 &DataType::new_struct(
                     vec![DataType::Varchar, DataType::Int32, DataType::Int32],
                     vec![],
@@ -184,12 +182,9 @@ mod tests {
         let data = Some(ScalarImpl::List(value.clone()));
         let node = literal_to_value_encoding(&data);
         if let RexNode::Constant(prost) = node {
-            let data2 = deserialize_datum(
-                prost.get_body().as_slice(),
-                &DataType::List(Box::new(DataType::Varchar)),
-            )
-            .unwrap()
-            .unwrap();
+            let data2 = Datum::from_protobuf(&prost, &DataType::List(Box::new(DataType::Varchar)))
+                .unwrap()
+                .unwrap();
             assert_eq!(ScalarImpl::List(value), data2);
         }
     }

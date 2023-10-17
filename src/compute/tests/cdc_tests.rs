@@ -83,6 +83,7 @@ impl MockOffsetGenExecutor {
                 txid: None,
                 tx_usec: None,
             },
+            is_heartbeat: false,
         };
 
         self.start_offset += 1;
@@ -106,8 +107,8 @@ impl MockOffsetGenExecutor {
             match msg {
                 Message::Chunk(chunk) => {
                     let mut offset_builder = Utf8ArrayBuilder::new(chunk.cardinality());
+                    assert!(chunk.is_compacted());
                     let (ops, mut columns, vis) = chunk.into_inner();
-                    assert!(vis.as_visibility().is_none());
 
                     for _ in 0..ops.len() {
                         let offset_str = self.next_offset()?;
@@ -116,7 +117,7 @@ impl MockOffsetGenExecutor {
 
                     let offsets = offset_builder.finish();
                     columns.push(offsets.into_ref());
-                    yield Message::Chunk(StreamChunk::new(ops, columns, vis.into_visibility()));
+                    yield Message::Chunk(StreamChunk::with_visibility(ops, columns, vis));
                 }
                 Message::Barrier(barrier) => {
                     yield Message::Barrier(barrier);

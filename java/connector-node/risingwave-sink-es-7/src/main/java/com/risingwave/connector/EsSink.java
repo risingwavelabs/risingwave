@@ -14,6 +14,10 @@
 
 package com.risingwave.connector;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
@@ -183,17 +187,35 @@ public class EsSink extends SinkWriterBase {
      *
      * @param row
      * @return Map from Field name to Value
+     * @throws JsonProcessingException
+     * @throws JsonMappingException
      */
-    private Map<String, Object> buildDoc(SinkRow row) {
+    private Map<String, Object> buildDoc(SinkRow row)
+            throws JsonMappingException, JsonProcessingException {
         Map<String, Object> doc = new HashMap();
-        for (int i = 0; i < getTableSchema().getNumColumns(); i++) {
+        var tableSchema = getTableSchema();
+        var columnDescs = tableSchema.getColumnDescs();
+        for (int i = 0; i < row.size(); i++) {
+            var type = columnDescs.get(i).getDataType().getTypeName();
             Object col = row.get(i);
-            if (col instanceof Date) {
-                // es client doesn't natively support java.sql.Timestamp/Time/Date
-                // so we need to convert Date type into a string as suggested in
-                // https://github.com/elastic/elasticsearch/issues/31377#issuecomment-398102292
-                col = col.toString();
+            switch (type) {
+                case DATE:
+                    // es client doesn't natively support java.sql.Timestamp/Time/Date
+                    // so we need to convert Date type into a string as suggested in
+                    // https://github.com/elastic/elasticsearch/issues/31377#issuecomment-398102292
+                    col = col.toString();
+                    break;
+                case JSONB:
+                    ObjectMapper mapper = new ObjectMapper();
+                    col =
+                            mapper.readValue(
+                                    (String) col, new TypeReference<Map<String, Object>>() {});
+                    break;
+                default:
+                    break;
             }
+            if (col instanceof Date) {}
+
             doc.put(getTableSchema().getColumnDesc(i).getName(), col);
         }
         return doc;
@@ -219,7 +241,7 @@ public class EsSink extends SinkWriterBase {
         return id;
     }
 
-    private void processUpsert(SinkRow row) {
+    private void processUpsert(SinkRow row) throws JsonMappingException, JsonProcessingException {
         Map<String, Object> doc = buildDoc(row);
         final String key = buildId(row);
 
@@ -234,7 +256,7 @@ public class EsSink extends SinkWriterBase {
         bulkProcessor.add(deleteRequest);
     }
 
-    private void writeRow(SinkRow row) {
+    private void writeRow(SinkRow row) throws JsonMappingException, JsonProcessingException {
         switch (row.getOp()) {
             case INSERT:
             case UPDATE_INSERT:
@@ -254,10 +276,11 @@ public class EsSink extends SinkWriterBase {
     @Override
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
-            try (SinkRow row = rows.next()) {
+            SinkRow row = rows.next();
+            try {
                 writeRow(row);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
             }
         }
     }

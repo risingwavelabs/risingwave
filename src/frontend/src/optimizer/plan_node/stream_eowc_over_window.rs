@@ -101,7 +101,7 @@ impl StreamEowcOverWindow {
             tbl_builder.add_order_column(order_key_index, OrderType::ascending());
             order_cols.insert(order_key_index);
         }
-        for idx in self.logical.input.logical_pk() {
+        for idx in self.logical.input.expect_stream_key() {
             if !order_cols.contains(idx) {
                 tbl_builder.add_order_column(*idx, OrderType::ascending());
                 order_cols.insert(*idx);

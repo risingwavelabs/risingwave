@@ -19,6 +19,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::generic::{DistillUnit, TopNLimit};
 use super::utils::{plan_node_name, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::property::Order;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
@@ -51,8 +52,22 @@ impl StreamGroupTopN {
             watermark_columns
         };
 
-        let base = PlanBase::new_stream_with_logical(
-            &logical,
+        let mut stream_key = logical
+            .stream_key()
+            .expect("logical node should have stream key here");
+        if let Some(vnode_col_idx) = vnode_col_idx && stream_key.len() > 1 {
+            // The output stream key of `GroupTopN` is a union of group key and input stream key,
+            // while vnode is calculated from a subset of input stream key. So we can safely remove
+            // the vnode column from output stream key. While at meanwhile we cannot leave the stream key
+            // as empty, so we only remove it when stream key length is > 1.
+            stream_key.remove(stream_key.iter().position(|i| *i == vnode_col_idx).unwrap());
+        }
+
+        let base = PlanBase::new_stream(
+            logical.ctx(),
+            logical.schema(),
+            Some(stream_key),
+            logical.functional_dependency(),
             input.distribution().clone(),
             false,
             // TODO: https://github.com/risingwavelabs/risingwave/issues/8348
@@ -93,7 +108,7 @@ impl StreamNode for StreamGroupTopN {
             .infer_internal_table_catalog(
                 input.schema(),
                 input.ctx(),
-                input.logical_pk(),
+                input.expect_stream_key(),
                 self.vnode_col_idx,
             )
             .with_id(state.gen_table_id_wrapped());

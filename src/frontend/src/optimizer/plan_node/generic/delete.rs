@@ -60,9 +60,9 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Delete<PlanRef> {
         }
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         if self.returning {
-            Some(self.input.logical_pk().to_vec())
+            Some(self.input.stream_key()?.to_vec())
         } else {
             Some(vec![])
         }

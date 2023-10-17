@@ -15,8 +15,8 @@
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_expr::agg::AggKind;
-use risingwave_expr::sig::agg::AGG_FUNC_SIG_MAP;
+use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 
 use super::{Expr, ExprImpl, Literal, OrderBy};
 use crate::utils::Condition;
@@ -70,11 +70,6 @@ impl AggCall {
 
             // min/max allowed for all types except for bool and jsonb (#7981)
             (AggKind::Min | AggKind::Max, [DataType::Jsonb]) => return Err(err()),
-            // may return list or struct type
-            (AggKind::Min | AggKind::Max | AggKind::FirstValue | AggKind::LastValue, [input]) => {
-                input.clone()
-            }
-            (AggKind::ArrayAgg, [input]) => List(Box::new(input.clone())),
             // functions that are rewritten in the frontend and don't exist in the expr crate
             (AggKind::Avg, [input]) => match input {
                 Int16 | Int32 | Int64 | Decimal => Decimal,
@@ -90,21 +85,9 @@ impl AggCall {
                 Float32 | Float64 | Int256 => Float64,
                 _ => return Err(err()),
             },
-            // Ordered-Set Aggregation
-            (AggKind::PercentileCont, [input]) => match input {
-                Float64 => Float64,
-                _ => return Err(err()),
-            },
-            (AggKind::PercentileDisc | AggKind::Mode, [input]) => input.clone(),
             (AggKind::Grouping, _) => Int32,
             // other functions are handled by signature map
-            _ => {
-                let args = args.iter().map(|t| t.into()).collect::<Vec<_>>();
-                return match AGG_FUNC_SIG_MAP.get_return_type(agg_kind, &args) {
-                    Some(t) => Ok(t.into()),
-                    None => Err(err()),
-                };
-            }
+            _ => FUNCTION_REGISTRY.get_return_type(agg_kind, args)?,
         })
     }
 

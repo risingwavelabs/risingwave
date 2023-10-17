@@ -419,6 +419,12 @@ impl Bitmap {
     }
 }
 
+impl From<usize> for Bitmap {
+    fn from(val: usize) -> Self {
+        Self::ones(val)
+    }
+}
+
 impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
     type Output = Bitmap;
 
@@ -465,6 +471,12 @@ impl BitAnd for Bitmap {
 
 impl BitAndAssign<&Bitmap> for Bitmap {
     fn bitand_assign(&mut self, rhs: &Bitmap) {
+        *self = &*self & rhs;
+    }
+}
+
+impl BitAndAssign<Bitmap> for Bitmap {
+    fn bitand_assign(&mut self, rhs: Bitmap) {
         *self = &*self & rhs;
     }
 }

@@ -386,8 +386,9 @@ impl HummockManager {
         &self,
         compaction_group_ids: &[CompactionGroupId],
         config_to_update: &[MutableConfig],
-    ) -> Result<()> {
-        self.compaction_group_manager
+    ) -> Result<Vec<CompactionGroup>> {
+        let result = self
+            .compaction_group_manager
             .write()
             .await
             .update_compaction_config(
@@ -402,7 +403,7 @@ impl HummockManager {
         {
             self.try_update_write_limits(compaction_group_ids).await;
         }
-        Ok(())
+        Ok(result)
     }
 
     /// Gets complete compaction group info.
@@ -475,6 +476,7 @@ impl HummockManager {
                 )));
             }
         }
+
         if table_ids.len() == parent_group.member_table_ids.len() {
             return Err(Error::CompactionGroup(format!(
                 "invalid split attempt for group {}: all member tables are moved",
@@ -593,8 +595,10 @@ impl HummockManager {
                 new_compaction_group_id
             }
         };
+
         let mut current_version = versioning.current_version.clone();
         let sst_split_info = current_version.apply_version_delta(&new_version_delta);
+
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
@@ -652,10 +656,17 @@ impl HummockManager {
                 }
             }
         }
-        for mut task in canceled_tasks {
-            task.set_task_status(TaskStatus::ManualCanceled);
+
+        for task in canceled_tasks {
             if !self
-                .report_compact_task_impl(&mut task, &mut compaction_guard, None)
+                .report_compact_task_impl(
+                    task.task_id,
+                    None,
+                    TaskStatus::ManualCanceled,
+                    vec![],
+                    &mut compaction_guard,
+                    None,
+                )
                 .await
                 .unwrap_or(false)
             {
@@ -791,13 +802,14 @@ impl CompactionGroupManager {
         self.default_config.clone()
     }
 
-    async fn update_compaction_config<S: MetaStore>(
+    pub async fn update_compaction_config<S: MetaStore>(
         &mut self,
         compaction_group_ids: &[CompactionGroupId],
         config_to_update: &[MutableConfig],
         meta_store: &S,
-    ) -> Result<()> {
+    ) -> Result<Vec<CompactionGroup>> {
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
+        let mut result = Vec::with_capacity(compaction_group_ids.len());
         for compaction_group_id in compaction_group_ids.iter().unique() {
             let group = compaction_groups.get(compaction_group_id).ok_or_else(|| {
                 Error::CompactionGroup(format!("invalid group {}", *compaction_group_id))
@@ -809,14 +821,15 @@ impl CompactionGroupManager {
             }
             let mut new_group = group.clone();
             new_group.compaction_config = Arc::new(config);
-            compaction_groups.insert(*compaction_group_id, new_group);
+            compaction_groups.insert(*compaction_group_id, new_group.clone());
+            result.push(new_group);
         }
 
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
         meta_store.txn(trx).await?;
         compaction_groups.commit();
-        Ok(())
+        Ok(result)
     }
 
     /// Initializes the config for a group.
@@ -910,6 +923,12 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::Level0MaxCompactFileNumber(c) => {
                 target.level0_max_compact_file_number = *c;
+            }
+            MutableConfig::EnableEmergencyPicker(c) => {
+                target.enable_emergency_picker = *c;
+            }
+            MutableConfig::TombstoneReclaimRatio(c) => {
+                target.tombstone_reclaim_ratio = *c;
             }
         }
     }

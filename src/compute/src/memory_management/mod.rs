@@ -22,7 +22,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use risingwave_batch::task::BatchManager;
-use risingwave_common::config::{AutoDumpHeapProfileConfig, StorageConfig, StorageMemoryConfig};
+use risingwave_common::config::{StorageConfig, StorageMemoryConfig};
 use risingwave_common::util::pretty_bytes::convert;
 use risingwave_stream::task::LocalStreamManager;
 
@@ -67,23 +67,10 @@ pub trait MemoryControl: Send + Sync + std::fmt::Debug {
     ) -> MemoryControlStats;
 }
 
-pub fn build_memory_control_policy(
-    total_memory_bytes: usize,
-    auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
-) -> MemoryControlRef {
+pub fn build_memory_control_policy(total_memory_bytes: usize) -> MemoryControlRef {
     use self::policy::JemallocMemoryControl;
 
-    if cfg!(target_os = "linux") {
-        Box::new(JemallocMemoryControl::new(
-            total_memory_bytes,
-            auto_dump_heap_profile_config,
-        ))
-    } else {
-        // We disable memory control on operating systems other than Linux now because jemalloc
-        // stats do not work well.
-        tracing::warn!("memory control is only enabled on Linux now");
-        Box::new(DummyPolicy)
-    }
+    Box::new(JemallocMemoryControl::new(total_memory_bytes))
 }
 
 /// `DummyPolicy` is used for operarting systems other than Linux. It does nothing as memory control
@@ -165,20 +152,34 @@ pub fn storage_memory_config(
             .ceil() as usize)
             >> 20,
     );
+
+    // `foyer` uses a buffer pool to manage dirty buffers.
+    //
+    // buffer size = region size (single file size with fs device)
+    //
+    // writing buffer + flushing buffer + free buffer = buffer pool buffers
+    //
+    // To utilize flushers and allocators, buffers should >= allocators + flushers.
+    //
+    // Adding more buffers can prevent allocators from waiting for buffers to be freed by flushers.
+
     let data_file_cache_buffer_pool_capacity_mb = storage_config
         .data_file_cache
         .buffer_pool_size_mb
         .unwrap_or(
             storage_config.data_file_cache.file_capacity_mb
-                * storage_config.data_file_cache.flushers,
+                * (storage_config.data_file_cache.flushers
+                    + 2 * (1 << storage_config.data_file_cache.allocation_bits)),
         );
     let meta_file_cache_buffer_pool_capacity_mb = storage_config
         .meta_file_cache
         .buffer_pool_size_mb
         .unwrap_or(
             storage_config.meta_file_cache.file_capacity_mb
-                * storage_config.meta_file_cache.flushers,
+                * (storage_config.meta_file_cache.flushers
+                    + 2 * (1 << storage_config.meta_file_cache.allocation_bits)),
         );
+
     let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
     );
@@ -242,8 +243,8 @@ mod tests {
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
         assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
-        assert_eq!(memory_config.data_file_cache_buffer_pool_capacity_mb, 256);
-        assert_eq!(memory_config.meta_file_cache_buffer_pool_capacity_mb, 256);
+        assert_eq!(memory_config.data_file_cache_buffer_pool_capacity_mb, 384);
+        assert_eq!(memory_config.meta_file_cache_buffer_pool_capacity_mb, 384);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
         storage_config.block_cache_capacity_mb = Some(512);

@@ -184,7 +184,7 @@
         └─BatchExchange { order: [], dist: HashShard(t.y) }
           └─BatchScan { table: t, columns: [t.x, t.y, t.w], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, sum, max, min, t._row_id(hidden), t.y(hidden)], stream_key: [t._row_id, t.y, y], pk_columns: [t._row_id, t.y, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, sum, max, min, t._row_id(hidden), t.y(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
     └─StreamHashJoin { type: Inner, predicate: t.y = t.y, output: [t.x, t.y, sum(t.x), max(t.x), min(t.w), t._row_id, t.y] }
       ├─StreamExchange { dist: HashShard(t.y) }
       │ └─StreamShare { id: 1 }
@@ -436,7 +436,7 @@
           └─BatchExchange { order: [], dist: HashShard(t.x) }
             └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, t._row_id(hidden), rank], stream_key: [t._row_id, x], pk_columns: [t._row_id, x], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, t._row_id(hidden), rank], stream_key: [x, t._row_id], pk_columns: [x, t._row_id], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─StreamGroupTopN { order: [t.x ASC], limit: 2, offset: 0, group_key: [t.x] }
         └─StreamExchange { dist: HashShard(t.x) }
@@ -463,7 +463,7 @@
       └─BatchExchange { order: [], dist: HashShard(t.y) }
         └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamGroupTopN { order: [t.x ASC], limit: 3, offset: 0, group_key: [t.y] }
       └─StreamExchange { dist: HashShard(t.y) }
         └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
@@ -490,7 +490,7 @@
         └─BatchFilter { predicate: (t.x > t.y) }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamGroupTopN { order: [t.x ASC], limit: 2, offset: 0, group_key: [t.y] }
       └─StreamExchange { dist: HashShard(t.y) }
         └─StreamFilter { predicate: (t.x > t.y) }
@@ -517,7 +517,7 @@
       └─BatchExchange { order: [], dist: HashShard(t.y) }
         └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamGroupTopN { order: [t.x ASC], limit: 3, offset: 0, with_ties: true, group_key: [t.y] }
       └─StreamExchange { dist: HashShard(t.y) }
         └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
@@ -717,9 +717,9 @@
     └── read pk prefix len hint: 2
 
     Table 1
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -770,8 +770,8 @@
                   └─BatchExchange { order: [], dist: HashShard(t.x) }
                     └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [r1, t._row_id(hidden), t.x(hidden), t.y(hidden)], stream_key: [t._row_id, t.x, t.y], pk_columns: [t._row_id, t.x, t.y], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [row_number, t._row_id, t.x, t.y] }
+    StreamMaterialize { columns: [r1, t.x(hidden), t.y(hidden), t._row_id(hidden)], stream_key: [t.x, t.y, t._row_id], pk_columns: [t.x, t.y, t._row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [row_number, t.x, t.y, t._row_id] }
       └─StreamGroupTopN { order: [t.z ASC], limit: 9, offset: 0, with_ties: true, group_key: [t.x, t.y] }
         └─StreamGroupTopN { order: [t.z ASC], limit: 9, offset: 0, group_key: [t.x, t.y] }
           └─StreamExchange { dist: HashShard(t.x, t.y) }
@@ -844,7 +844,7 @@
           TUMBLE(Bid, bidtime, INTERVAL '10' MINUTE)
     ) WHERE rownum <= 3;
   stream_plan: |-
-    StreamMaterialize { columns: [window_start, window_end, supplier_id, price, bid._row_id(hidden)], stream_key: [bid._row_id, window_start, window_end], pk_columns: [bid._row_id, window_start, window_end], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [window_start, window_end, supplier_id, price, bid._row_id(hidden)], stream_key: [window_start, window_end, bid._row_id], pk_columns: [window_start, window_end, bid._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [$expr1, $expr2, bid.supplier_id, bid.price, bid._row_id] }
       └─StreamGroupTopN { order: [bid.price DESC], limit: 3, offset: 0, group_key: [$expr1, $expr2] }
         └─StreamExchange { dist: HashShard($expr1, $expr2) }
@@ -875,8 +875,8 @@
         └─BatchExchange { order: [], dist: HashShard(t.x) }
           └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [z, t._row_id(hidden), t.x(hidden)], stream_key: [t._row_id, t.x], pk_columns: [t._row_id, t.x], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t.z, t._row_id, t.x] }
+    StreamMaterialize { columns: [z, t.x(hidden), t._row_id(hidden)], stream_key: [t.x, t._row_id], pk_columns: [t.x, t._row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.z, t.x, t._row_id] }
       └─StreamGroupTopN { order: [t.y ASC], limit: 3, offset: 0, group_key: [t.x] }
         └─StreamExchange { dist: HashShard(t.x) }
           └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

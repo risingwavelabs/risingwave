@@ -111,11 +111,13 @@ pub fn align_array_and_element(
 pub fn cast_ok(source: &DataType, target: &DataType, allows: CastContext) -> bool {
     cast_ok_struct(source, target, allows)
         || cast_ok_array(source, target, allows)
-        || cast_ok_base(source.into(), target.into(), allows)
+        || cast_ok_base(source, target, allows)
 }
 
-pub fn cast_ok_base(source: DataTypeName, target: DataTypeName, allows: CastContext) -> bool {
-    matches!(CAST_MAP.get(&(source, target)), Some(context) if *context <= allows)
+/// Checks whether casting from `source` to `target` is ok in `allows` context.
+/// Both `source` and `target` must be base types, i.e. not struct or array.
+pub fn cast_ok_base(source: &DataType, target: &DataType, allows: CastContext) -> bool {
+    matches!(CAST_MAP.get(&(source.into(), target.into())), Some(context) if *context <= allows)
 }
 
 fn cast_ok_struct(source: &DataType, target: &DataType, allows: CastContext) -> bool {

@@ -218,6 +218,15 @@ impl RewriteExprsRecursive for PlanRef {
 }
 
 impl PlanRef {
+    pub fn expect_stream_key(&self) -> &[usize] {
+        self.stream_key().unwrap_or_else(|| {
+            panic!(
+                "a stream key is expected but not exist, plan:\n{}",
+                self.explain_to_string()
+            )
+        })
+    }
+
     fn prune_col_inner(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
             // Check the share cache first. If cache exists, it means this is the second round of
@@ -435,8 +444,8 @@ impl GenericPlanRef for PlanRef {
         &self.plan_base().schema
     }
 
-    fn logical_pk(&self) -> &[usize] {
-        &self.plan_base().logical_pk
+    fn stream_key(&self) -> Option<&[usize]> {
+        self.plan_base().stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -514,8 +523,8 @@ impl dyn PlanNode {
         &self.plan_base().schema
     }
 
-    pub fn logical_pk(&self) -> &[usize] {
-        &self.plan_base().logical_pk
+    pub fn stream_key(&self) -> Option<&[usize]> {
+        self.plan_base().stream_key()
     }
 
     pub fn order(&self) -> &Order {
@@ -566,7 +575,12 @@ impl dyn PlanNode {
             identity: self.explain_myself_to_string(),
             node_body: node,
             operator_id: self.id().0 as _,
-            stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
+            stream_key: self
+                .stream_key()
+                .unwrap_or_default()
+                .iter()
+                .map(|x| *x as u32)
+                .collect(),
             fields: self.schema().to_prost(),
             append_only: self.append_only(),
         }
@@ -689,6 +703,7 @@ mod stream_eowc_over_window;
 mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
+mod stream_fs_fetch;
 mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
@@ -773,6 +788,7 @@ pub use stream_eowc_over_window::StreamEowcOverWindow;
 pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
+pub use stream_fs_fetch::StreamFsFetch;
 pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
@@ -898,6 +914,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, EowcOverWindow }
             , { Stream, EowcSort }
             , { Stream, OverWindow }
+            , { Stream, FsFetch }
         }
     };
 }
@@ -1005,6 +1022,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, EowcOverWindow }
             , { Stream, EowcSort }
             , { Stream, OverWindow }
+            , { Stream, FsFetch }
         }
     };
 }

@@ -7,9 +7,8 @@
 # Hence keeping it in case we ever need to debug backfill again.
 
 # USAGE:
-# Start a rw cluster then run this script.
 # ```sh
-# ./risedev d
+# cargo make ci-start ci-backfill
 # ./ci/scripts/run-backfill-tests.sh
 # ```
 
@@ -30,26 +29,59 @@ flush() {
   run_sql "FLUSH;"
 }
 
-run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
-run_sql_file "$PARENT_PATH"/sql/backfill/insert_seed.sql
+basic() {
+  echo "--- e2e, test_backfill_basic"
+  cargo make ci-start ci-backfill
+  run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
 
-# Provide snapshot
-for i in $(seq 1 12)
-do
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert_recurse.sql
-  flush
-done
+  # Provide snapshot
+  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
 
-run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
+  wait
 
-# Provide upstream updates
-for i in $(seq 1 5)
-do
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert_recurse.sql &
-done
+  run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
 
-wait
+  echo "--- Kill cluster"
+  cargo make kill
+}
 
-run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
+# Lots of upstream tombstone, backfill should still proceed.
+test_backfill_tombstone() {
+  echo "--- e2e, test_backfill_tombstone"
+  cargo make ci-start ci-backfill
+  ./risedev psql -c "
+  CREATE TABLE tomb (v1 int)
+  WITH (
+    connector = 'datagen',
+    fields.v1._.kind = 'sequence',
+    datagen.rows.per.second = '10000000'
+  )
+  FORMAT PLAIN
+  ENCODE JSON;
+  "
 
-echo "Backfill tests complete"
+  sleep 30
+
+  bash -c '
+    set -euo pipefail
+
+    for i in $(seq 1 1000)
+    do
+      ./risedev psql -c "DELETE FROM tomb; FLUSH;"
+      sleep 1
+    done
+  ' 1>deletes.log 2>&1 &
+
+  ./risedev psql -c "CREATE MATERIALIZED VIEW m1 as select * from tomb;"
+  echo "--- Kill cluster"
+  cargo make kill
+}
+
+main() {
+  basic
+  test_backfill_tombstone
+}
+
+main

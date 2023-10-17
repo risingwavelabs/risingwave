@@ -88,8 +88,8 @@ for_all_filter_key_extractor_variants! { impl_filter_key_extractor }
 pub struct FullKeyFilterKeyExtractor;
 
 impl FilterKeyExtractor for FullKeyFilterKeyExtractor {
-    fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        full_key
+    fn extract<'a>(&self, user_key: &'a [u8]) -> &'a [u8] {
+        user_key
     }
 }
 
@@ -448,7 +448,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::PbTable;
+    use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
     use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
     use risingwave_pb::plan_common::PbColumnCatalog;
 
@@ -549,6 +549,8 @@ mod tests {
             cardinality: None,
             created_at_epoch: None,
             cleaned_by_watermark: false,
+            stream_job_status: PbStreamJobStatus::Created.into(),
+            create_type: PbCreateType::Foreground.into(),
         }
     }
 

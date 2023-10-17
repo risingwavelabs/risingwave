@@ -22,11 +22,11 @@ await-tree = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
 crossbeam = "0.8.2"
 dashmap = { version = "5", default-features = false }
-dyn-clone = "1.0.13"
+dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-foyer = { git = "https://github.com/mrcroxx/foyer", rev = "41b1d39" }
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "438eec8" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
@@ -38,7 +38,7 @@ more-asserts = "0.3"
 num-integer = "0.1"
 parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.11"
+prost = { workspace = true }
 rand = "0.8"
 risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
@@ -66,11 +66,12 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tokio-retry = "0.3"
+tonic = { workspace = true }
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 xorf = "0.8.1"
 xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
-zstd = { version = "0.12", default-features = false }
+zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { version = "0.15", default-features = false }
@@ -87,7 +88,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_futures"] }
-moka = { version = "0.11", features = ["future"] }
+moka = { version = "0.12", features = ["future"] }
 risingwave_test_runner = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 

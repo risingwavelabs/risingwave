@@ -38,6 +38,7 @@ mod utils;
 /// - [Rust Function Signature](#rust-function-signature)
 ///     - [Nullable Arguments](#nullable-arguments)
 ///     - [Return Value](#return-value)
+///     - [Variadic Function](#variadic-function)
 ///     - [Optimization](#optimization)
 ///     - [Functions Returning Strings](#functions-returning-strings)
 ///     - [Preprocessing Constant Arguments](#preprocessing-constant-arguments)
@@ -62,13 +63,15 @@ mod utils;
 /// invocation. The signature follows this pattern:
 ///
 /// ```text
-/// name ( [arg_types],* ) [ -> [setof] return_type ]
+/// name ( [arg_types],* [...] ) [ -> [setof] return_type ]
 /// ```
 ///
-/// Where `name` is the function name, which must match the function name defined in `prost`.
+/// Where `name` is the function name in `snake_case`, which must match the function name defined
+/// in `prost`.
 ///
-/// The allowed data types are listed in the `name` column of the appendix's [type matrix].
-/// Wildcards or `auto` can also be used, as explained below.
+/// `arg_types` is a comma-separated list of argument types. The allowed data types are listed in
+/// in the `name` column of the appendix's [type matrix]. Wildcards or `auto` can also be used, as
+/// explained below. If the function is variadic, the last argument can be denoted as `...`.
 ///
 /// When `setof` appears before the return type, this indicates that the function is a set-returning
 /// function (table function), meaning it can return multiple values instead of just one. For more
@@ -151,7 +154,7 @@ mod utils;
 ///
 /// ```ignore
 /// #[function(
-///     "unnest(list) -> setof any",
+///     "unnest(anyarray) -> setof any",
 ///     type_infer = "|args| Ok(args[0].unnest_list())"
 /// )]
 /// ```
@@ -169,7 +172,7 @@ mod utils;
 /// For instance:
 ///
 /// ```ignore
-/// #[function("trim_array(list, int32) -> list")]
+/// #[function("trim_array(anyarray, int32) -> anyarray")]
 /// fn trim_array(array: ListRef<'_>, n: i32) -> ListValue {...}
 /// ```
 ///
@@ -179,7 +182,7 @@ mod utils;
 /// to be considered, the `Option` type can be used:
 ///
 /// ```ignore
-/// #[function("trim_array(list, int32) -> list")]
+/// #[function("trim_array(anyarray, int32) -> anyarray")]
 /// fn trim_array(array: Option<ListRef<'_>>, n: Option<i32>) -> ListValue {...}
 /// ```
 ///
@@ -202,6 +205,21 @@ mod utils;
 /// generate SIMD vectorized execution code.
 ///
 /// Therefore, try to avoid returning `Option` and `Result` whenever possible.
+///
+/// ## Variadic Function
+///
+/// Variadic functions accept a `impl Row` input to represent tailing arguments.
+/// For example:
+///
+/// ```ignore
+/// #[function("concat_ws(varchar, ...) -> varchar")]
+/// fn concat_ws(sep: &str, vals: impl Row) -> Option<Box<str>> {
+///     let mut string_iter = vals.iter().flatten();
+///     // ...
+/// }
+/// ```
+///
+/// See `risingwave_common::row::Row` for more details.
 ///
 /// ## Functions Returning Strings
 ///
@@ -350,12 +368,12 @@ mod utils;
 /// | name        | SQL type           | owned type    | reference type     | primitive? |
 /// | ----------- | ------------------ | ------------- | ------------------ | ---------- |
 /// | boolean     | `boolean`          | `bool`        | `bool`             | yes        |
-/// | int16       | `smallint`         | `i16`         | `i16`              | yes        |
-/// | int32       | `integer`          | `i32`         | `i32`              | yes        |
-/// | int64       | `bigint`           | `i64`         | `i64`              | yes        |
+/// | int2        | `smallint`         | `i16`         | `i16`              | yes        |
+/// | int4        | `integer`          | `i32`         | `i32`              | yes        |
+/// | int8        | `bigint`           | `i64`         | `i64`              | yes        |
 /// | int256      | `rw_int256`        | `Int256`      | `Int256Ref<'_>`    | no         |
-/// | float32     | `real`             | `F32`         | `F32`              | yes        |
-/// | float64     | `double precision` | `F64`         | `F64`              | yes        |
+/// | float4      | `real`             | `F32`         | `F32`              | yes        |
+/// | float8      | `double precision` | `F64`         | `F64`              | yes        |
 /// | decimal     | `numeric`          | `Decimal`     | `Decimal`          | yes        |
 /// | serial      | `serial`           | `Serial`      | `Serial`           | yes        |
 /// | date        | `date`             | `Date`        | `Date`             | yes        |
@@ -372,7 +390,7 @@ mod utils;
 ///
 /// | name                   | SQL type             | owned type    | reference type     |
 /// | ---------------------- | -------------------- | ------------- | ------------------ |
-/// | list                   | `any[]`              | `ListValue`   | `ListRef<'_>`      |
+/// | anyarray               | `any[]`              | `ListValue`   | `ListRef<'_>`      |
 /// | struct                 | `record`             | `StructValue` | `StructRef<'_>`    |
 /// | T[^1][]                | `T[]`                | `ListValue`   | `ListRef<'_>`      |
 /// | struct<name T[^1], ..> | `struct<name T, ..>` | `(T, ..)`     | `(&T, ..)`         |
@@ -477,6 +495,8 @@ struct FunctionAttr {
     prebuild: Option<String>,
     /// Type inference function.
     type_infer: Option<String>,
+    /// Generic type.
+    generic: Option<String>,
     /// Whether the function is volatile.
     volatile: bool,
     /// Whether the function is deprecated.
@@ -492,9 +512,9 @@ struct UserFunctionAttr {
     async_: bool,
     /// Whether contains argument `&Context`.
     context: bool,
-    /// The last argument type is `&mut dyn Write`.
+    /// Whether contains argument `&mut impl Write`.
     write: bool,
-    /// The last argument type is `retract: bool`.
+    /// Whether the last argument type is `retract: bool`.
     retract: bool,
     /// The argument type are `Option`s.
     arg_option: bool,
@@ -518,6 +538,7 @@ struct AggregateImpl {
     #[allow(dead_code)] // TODO(wrj): add merge to trait
     merge: Option<UserFunctionAttr>,
     finalize: Option<UserFunctionAttr>,
+    create_state: Option<UserFunctionAttr>,
     #[allow(dead_code)] // TODO(wrj): support encode
     encode_state: Option<UserFunctionAttr>,
     #[allow(dead_code)] // TODO(wrj): support decode
@@ -568,7 +589,8 @@ impl FunctionAttr {
     /// Return a unique name that can be used as an identifier.
     fn ident_name(&self) -> String {
         format!("{}_{}_{}", self.name, self.args.join("_"), self.ret)
-            .replace("[]", "list")
+            .replace("[]", "array")
+            .replace("...", "variadic")
             .replace(['<', '>', ' ', ','], "_")
             .replace("__", "_")
     }

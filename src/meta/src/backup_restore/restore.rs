@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use clap::Parser;
 use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
@@ -33,7 +32,7 @@ use crate::model::{ClusterId, MetadataModel, TableFragments};
 use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
 
 /// Command-line arguments for restore.
-#[derive(Parser, Debug, Clone)]
+#[derive(clap::Args, Debug, Clone)]
 pub struct RestoreOpts {
     /// Id of snapshot used to restore. Available snapshots can be found in
     /// <storage_directory>/manifest.json.
@@ -65,7 +64,7 @@ pub struct RestoreOpts {
     pub hummock_storage_url: String,
     /// Directory of storage to restore hummock version to.
     #[clap(long, default_value_t = String::from("hummock_001"))]
-    pub hummock_storage_dir: String,
+    pub hummock_storage_directory: String,
     /// Print the target snapshot, but won't restore to meta store.
     #[clap(long)]
     pub dry_run: bool,
@@ -73,7 +72,7 @@ pub struct RestoreOpts {
 
 async fn restore_hummock_version(
     hummock_storage_url: &str,
-    hummock_storage_dir: &str,
+    hummock_storage_directory: &str,
     hummock_version: &HummockVersion,
 ) -> BackupResult<()> {
     let object_store = Arc::new(
@@ -84,7 +83,7 @@ async fn restore_hummock_version(
         )
         .await,
     );
-    let checkpoint_path = version_checkpoint_path(hummock_storage_dir);
+    let checkpoint_path = version_checkpoint_path(hummock_storage_directory);
     let checkpoint = HummockVersionCheckpoint {
         version: Some(hummock_version.clone()),
         // Ignore stale objects. Full GC will clear them.
@@ -153,7 +152,6 @@ async fn restore_default_cf<S: MetaStore>(
 
 async fn restore_metadata<S: MetaStore>(meta_store: S, snapshot: MetaSnapshot) -> BackupResult<()> {
     restore_default_cf(&meta_store, &snapshot).await?;
-    restore_metadata_model(&meta_store, &[snapshot.metadata.hummock_version]).await?;
     restore_metadata_model(&meta_store, &[snapshot.metadata.version_stats]).await?;
     restore_metadata_model(
         &meta_store,
@@ -260,7 +258,7 @@ async fn restore_impl(
     }
     restore_hummock_version(
         &opts.hummock_storage_url,
-        &opts.hummock_storage_dir,
+        &opts.hummock_storage_directory,
         &target_snapshot.metadata.hummock_version,
     )
     .await?;
@@ -288,11 +286,10 @@ pub async fn restore(opts: RestoreOpts) -> BackupResult<()> {
 mod tests {
     use std::collections::HashMap;
 
-    use clap::Parser;
     use itertools::Itertools;
     use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
-    use risingwave_common::config::SystemConfig;
-    use risingwave_pb::hummock::HummockVersion;
+    use risingwave_common::config::{MetaBackend, SystemConfig};
+    use risingwave_pb::hummock::{HummockVersion, HummockVersionStats};
     use risingwave_pb::meta::SystemParams;
 
     use crate::backup_restore::restore::restore_impl;
@@ -304,17 +301,19 @@ mod tests {
     use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
 
     fn get_restore_opts() -> RestoreOpts {
-        RestoreOpts::parse_from([
-            "restore",
-            "--meta-snapshot-id",
-            "1",
-            "--meta-store-type",
-            "mem",
-            "--backup-storage-url",
-            "memory",
-            "--hummock-storage-url",
-            "memory",
-        ])
+        RestoreOpts {
+            meta_snapshot_id: 1,
+            meta_store_type: MetaBackend::Mem,
+            etcd_endpoints: "".to_string(),
+            etcd_auth: false,
+            etcd_username: "".to_string(),
+            etcd_password: "".to_string(),
+            backup_storage_url: "memory".to_string(),
+            backup_storage_directory: "".to_string(),
+            hummock_storage_url: "memory".to_string(),
+            hummock_storage_directory: "".to_string(),
+            dry_run: false,
+        }
     }
 
     fn get_system_params() -> SystemParams {
@@ -331,8 +330,8 @@ mod tests {
         let backup_store = get_backup_store(opts.clone()).await.unwrap();
         let nonempty_meta_store = get_meta_store(opts.clone()).await.unwrap();
         dispatch_meta_store!(nonempty_meta_store.clone(), store, {
-            let hummock_version = HummockVersion::default();
-            hummock_version.insert(&store).await.unwrap();
+            let stats = HummockVersionStats::default();
+            stats.insert(&store).await.unwrap();
         });
         let empty_meta_store = get_meta_store(opts.clone()).await.unwrap();
         let system_param = get_system_params();
@@ -377,13 +376,6 @@ mod tests {
         .unwrap();
 
         dispatch_meta_store!(empty_meta_store, store, {
-            let restored_hummock_version = HummockVersion::list(&store)
-                .await
-                .unwrap()
-                .into_iter()
-                .next()
-                .unwrap();
-            assert_eq!(restored_hummock_version.id, 123);
             let restored_system_param = SystemParams::get(&store).await.unwrap().unwrap();
             assert_eq!(restored_system_param, system_param);
         });
@@ -547,7 +539,6 @@ mod tests {
         .unwrap();
 
         dispatch_meta_store!(empty_meta_store, store, {
-            assert!(HummockVersion::list(&store).await.unwrap().is_empty());
             assert!(SystemParams::get(&store).await.unwrap().is_none());
         });
     }

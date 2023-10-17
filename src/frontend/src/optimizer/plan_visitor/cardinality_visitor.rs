@@ -36,11 +36,14 @@ impl CardinalityVisitor {
         input_card: Cardinality,
         eq_set: HashSet<usize>,
     ) -> Cardinality {
-        let mut unique_keys: Vec<HashSet<_>> = vec![input.logical_pk().iter().copied().collect()];
-
+        let mut unique_keys: Vec<HashSet<_>> = if let Some(stream_key) = input.stream_key() {
+            vec![stream_key.iter().copied().collect()]
+        } else {
+            vec![]
+        };
         // We don't have UNIQUE key now. So we hack here to support some complex queries on
         // system tables.
-        // TODO(card): remove this after we have UNIQUE key.
+        // TODO(card): remove this after we have UNIQUE key. https://github.com/risingwavelabs/risingwave/issues/12514
         if let Some(scan) = input.as_logical_scan()
             && scan.is_sys_table()
             && scan.table_name() == PG_NAMESPACE_TABLE_NAME
@@ -55,7 +58,6 @@ impl CardinalityVisitor {
 
         if unique_keys
             .iter()
-            .filter(|unique_key| !unique_key.is_empty())
             .any(|unique_key| eq_set.is_superset(unique_key))
         {
             input_card.min(0..=1)

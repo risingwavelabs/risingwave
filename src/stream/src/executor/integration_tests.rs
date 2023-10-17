@@ -20,7 +20,7 @@ use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 
@@ -111,6 +111,7 @@ async fn test_merger_sum_aggr() {
             0,
         ))],
         0,
+        0,
         ctx,
         metrics,
     );
@@ -186,7 +187,6 @@ async fn test_merger_sum_aggr() {
             let chunk = StreamChunk::new(
                 vec![op; i],
                 vec![I64Array::from_iter(vec![1; i]).into_ref()],
-                None,
             );
             input.send(Message::Chunk(chunk)).await.unwrap();
         }

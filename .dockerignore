@@ -48,3 +48,6 @@ risedev-components.user.env
 riselab-components.user.env
 
 .git/
+
+Dockerfile
+.dockerignore
