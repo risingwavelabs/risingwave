@@ -396,6 +396,18 @@ pub enum ParseResult {
     TransactionControl(TransactionControl),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ParserFormat {
+    CanalJson,
+    Csv,
+    Json,
+    Maxwell,
+    Debezium,
+    DebeziumMongo,
+    Upsert,
+    Plain,
+}
+
 /// `ByteStreamSourceParser` is a new message parser, the parser should consume
 /// the input data stream and return a stream of parsed msgs.
 pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
@@ -404,6 +416,9 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
 
     /// The source context, used to report parsing error.
     fn source_ctx(&self) -> &SourceContext;
+
+    /// The format of the specific parser.
+    fn parser_format(&self) -> ParserFormat;
 
     /// Parse one record from the given `payload` and write rows to the `writer`.
     ///
@@ -512,6 +527,15 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
         for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
+                if parser.parser_format() == ParserFormat::Debezium {
+                    tracing::debug!("heartbeat message {}, skip parser", msg.offset);
+                    // empty payload means a heartbeat in cdc source
+                    // heartbeat message offset should not overwrite data messages offset
+                    split_offset_mapping
+                        .entry(msg.split_id)
+                        .or_insert(msg.offset.clone());
+                }
+
                 continue;
             }
             let parse_span = tracing::info_span!(

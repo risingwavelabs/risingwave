@@ -21,7 +21,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "std",
 ] }
 console = "0.15"
-console-subscriber = "0.1.10"
+console-subscriber = "0.2.0"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.3"

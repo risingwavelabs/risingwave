@@ -91,10 +91,14 @@ impl MonitoredStorageMetrics {
         buckets.extend(exponential_buckets(0.001, 2.0, 5).unwrap()); // 1 ~ 16ms.
         buckets.extend(exponential_buckets(0.05, 4.0, 5).unwrap()); // 0.05 ~ 1.28s.
         buckets.push(16.0); // 16s
+
+        // 1ms - 100s
+        let state_store_read_time_buckets = exponential_buckets(0.001, 10.0, 5).unwrap();
+
         let get_duration_opts = histogram_opts!(
             "state_store_get_duration",
             "Total latency of get that have been issued to state store",
-            buckets.clone(),
+            state_store_read_time_buckets.clone(),
         );
         let get_duration = register_guarded_histogram_vec_with_registry!(
             get_duration_opts,
@@ -131,7 +135,7 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_iter_init_duration",
             "Histogram of the time spent on iterator initialization.",
-            buckets.clone(),
+            state_store_read_time_buckets.clone(),
         );
         let iter_init_duration =
             register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -144,7 +148,7 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_iter_scan_duration",
             "Histogram of the time spent on iterator scanning.",
-            buckets.clone(),
+            state_store_read_time_buckets.clone(),
         );
         let iter_scan_duration =
             register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();

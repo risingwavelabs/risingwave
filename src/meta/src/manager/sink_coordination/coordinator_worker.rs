@@ -166,7 +166,7 @@ impl CoordinatorWorker {
             registered_vnode.insert(vnode);
         }
 
-        loop {
+        while remaining_count > 0 {
             let new_writer_request = self.next_new_writer().await?;
             if self.param != new_writer_request.param {
                 // TODO: may return error.
@@ -188,10 +188,6 @@ impl CoordinatorWorker {
                 }
                 registered_vnode.insert(vnode);
                 remaining_count -= 1;
-            }
-
-            if remaining_count == 0 {
-                break;
             }
         }
 
