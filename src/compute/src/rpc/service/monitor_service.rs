@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::config::ServerConfig;
-use risingwave_common::heap_profiling::{
+use risingwave_common_heap_profiling::{
     self, AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX,
 };
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;

@@ -57,7 +57,7 @@ pub(super) mod handlers {
     use axum::Json;
     use itertools::Itertools;
     use risingwave_common::bail;
-    use risingwave_common::heap_profiling::COLLAPSED_SUFFIX;
+    use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table};
     use risingwave_pb::common::WorkerNode;
