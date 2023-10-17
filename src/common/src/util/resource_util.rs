@@ -18,13 +18,13 @@ pub enum CgroupVersion {
     V2,
 }
 
-// Current controllers available in implementation.
+/// Current controllers available in implementation.
 pub enum Controller {
     Cpu,
     Memory,
 }
 
-// Default constant Cgroup paths and hierarchy.
+/// Default constant Cgroup paths and hierarchy.
 const DEFAULT_CGROUP_ROOT_HIERARCYHY: &str = "/sys/fs/cgroup";
 const DEFAULT_CGROUP_V2_CONTROLLER_LIST_PATH: &str = "/sys/fs/cgroup/cgroup.controllers";
 const DEFAULT_CGROUP_MAX_INDICATOR: &str = "max";
@@ -44,33 +44,33 @@ mod runtime {
         env::consts::OS.eq(DEFAULT_LINUX_IDENTIFIER)
     }
 
-    // checks if is running in a docker container by checking for docker env file, or if it is
-    // running in a kubernetes pod.
+    /// checks if is running in a docker container by checking for docker env file, or if it is
+    /// running in a kubernetes pod.
     fn is_running_in_container() -> bool {
         return env_var_check_if_running_in_container()
             || docker_env_exists()
             || is_running_in_kubernetes_pod();
 
-        // checks for existence of docker env file
+        /// checks for existence of docker env file
         fn docker_env_exists() -> bool {
             Path::new(DEFAULT_DOCKER_ENV_PATH).exists()
         }
 
-        // checks for environment
+        /// checks for environment
         fn env_var_check_if_running_in_container() -> bool {
             env::var(DEFAULT_IN_CONTAINER_ENV_VARIABLE).is_ok()
         }
 
-        // checks if it is running in a kubernetes pod
+        /// checks if it is running in a kubernetes pod
         fn is_running_in_kubernetes_pod() -> bool {
             Path::new(DEFAULT_KUBERNETES_SECRETS_PATH).exists()
         }
     }
 
-    // Given a certain controller, checks if it is enabled.
-    // For cgroup_v1, existence of directory with controller name is checked in cgroup default root
-    // hierarchy. e.g if directory "/sys/fs/cgroup"/cpu" exists then CPU controller is enabled.
-    // For cgroup_v2, check the controller list path for the controller name.
+    /// Given a certain controller, checks if it is enabled.
+    /// For cgroup v1, existence of directory with controller name is checked in cgroup default root
+    /// hierarchy. e.g if directory "/sys/fs/cgroup"/cpu" exists then CPU controller is enabled.
+    /// For cgroup v2, check the controller list path for the controller name.
     pub fn is_controller_activated(
         controller_type: super::Controller,
         cgroup_version: CgroupVersion,
@@ -90,7 +90,7 @@ mod runtime {
         }
     }
 
-    // If cgroup exists or is enabled in kernel, returnb true, else false.
+    /// If cgroup exists or is enabled in kernel, returnb true, else false.
     fn cgroup_exists() -> bool {
         Path::new(super::DEFAULT_CGROUP_ROOT_HIERARCYHY).is_dir()
     }
@@ -134,20 +134,20 @@ pub mod memory {
 
     use super::runtime::get_resource;
 
-    // Default paths for memory limtiations and usage for cgroup_v1 and cgroup_v2.
+    /// Default paths for memory limtiations and usage for cgroup v1 and cgroup v2.
     const V1_MEMORY_LIMIT_PATH: &str = "/sys/fs/cgroup/memory/memory.limit_in_bytes";
     const V1_MEMORY_CURRENT_PATH: &str = "/sys/fs/cgroup/memory/memory.usage_in_bytes";
     const V2_MEMORY_LIMIT_PATH: &str = "/sys/fs/cgroup/memory.max";
     const V2_MEMORY_CURRENT_PATH: &str = "/sys/fs/cgroup/memory.current";
 
-    // Returns the system memory.
+    /// Returns the system memory.
     pub fn get_system_memory() -> usize {
         let mut sys = System::new();
         sys.refresh_memory();
         sys.total_memory() as usize
     }
 
-    // Returns the used memory of the system.
+    /// Returns the used memory of the system.
     pub fn get_system_memory_used() -> usize {
         let mut sys = System::new();
         sys.refresh_memory();
@@ -187,9 +187,9 @@ pub mod memory {
     ///
     /// Basic usage:
     /// ``` ignore
-    /// let mem_available = memory::total_memory_available_bytes();
+    /// let mem_available = memory::system_memory_available_bytes();
     /// ```
-    pub fn total_memory_available_bytes() -> usize {
+    pub fn system_memory_available_bytes() -> usize {
         get_resource(
             "memory available",
             super::Controller::Memory,
@@ -198,10 +198,10 @@ pub mod memory {
         )
     }
 
-    // Returns the memory limit of a container if running in a container else returns the system
-    // memory available.
-    // When the limit is set to max, total_memory_available_bytes() will return default system
-    // memory.
+    /// Returns the memory limit of a container if running in a container else returns the system
+    /// memory available.
+    /// When the limit is set to max, [`system_memory_available_bytes()`] will return default system
+    /// memory.
     fn get_container_memory_limit(
         cgroup_version: super::CgroupVersion,
     ) -> Result<usize, std::io::Error> {
@@ -214,8 +214,8 @@ pub mod memory {
         Ok(std::cmp::min(value, system))
     }
 
-    // Returns the memory used in a container if running in a container else returns the system
-    // memory used.
+    /// Returns the memory used in a container if running in a container else returns the system
+    /// memory used.
     fn get_container_memory_used(
         cgroup_version: super::CgroupVersion,
     ) -> Result<usize, std::io::Error> {
@@ -235,7 +235,7 @@ pub mod cpu {
     use super::runtime::get_resource;
     use super::util::parse_error;
 
-    // Default constant Cgroup paths and hierarchy.
+    /// Default constant Cgroup paths and hierarchy.
     const V1_CPU_QUOTA_PATH: &str = "/sys/fs/cgroup/cpu/cpu.cfs_quota_us";
     const V1_CPU_PERIOD_PATH: &str = "/sys/fs/cgroup/cpu/cpu.cfs_period_us";
     const V2_CPU_LIMIT_PATH: &str = "/sys/fs/cgroup/cpu.max";
@@ -264,7 +264,7 @@ pub mod cpu {
         )
     }
 
-    // Returns the CPU limit of the container.
+    /// Returns the CPU limit of the container.
     fn get_container_cpu_limit(
         cgroup_version: super::CgroupVersion,
     ) -> Result<f32, std::io::Error> {
@@ -277,7 +277,7 @@ pub mod cpu {
         }
     }
 
-    // Returns the total system cpu.
+    /// Returns the total system cpu.
     pub fn get_system_cpu() -> f32 {
         match thread::available_parallelism() {
             Ok(available_parallelism) => available_parallelism.get() as f32,
@@ -285,7 +285,7 @@ pub mod cpu {
         }
     }
 
-    // Returns the CPU limit when cgroup_V1 is utilised.
+    /// Returns the CPU limit when cgroup v1 is utilised.
     pub fn get_cpu_limit_v1(
         quota_path: &str,
         period_path: &str,
@@ -304,7 +304,7 @@ pub mod cpu {
         Ok((cpu_quota as f32) / (cpu_period as f32))
     }
 
-    // Returns the CPU limit when cgroup_V2 is utilised.
+    /// Returns the CPU limit when cgroup v2 is utilised.
     pub fn get_cpu_limit_v2(limit_path: &str, max_value: f32) -> Result<f32, std::io::Error> {
         let cpu_limit_string = fs_err::read_to_string(limit_path)?;
 
@@ -333,7 +333,7 @@ pub mod cpu {
 }
 
 mod util {
-    // Parses the filepath and checks for the existence of controller_name in the file.
+    /// Parses the filepath and checks for the existence of `controller_name` in the file.
     pub fn parse_controller_enable_file_for_cgroup_v2(
         file_path: &str,
         controller_name: &str,
@@ -362,7 +362,7 @@ mod util {
         )
     }
 
-    // Reads an integer value from a file path.
+    /// Reads an integer value from a file path.
     pub fn read_usize(file_path: &str) -> Result<usize, std::io::Error> {
         let content = fs_err::read_to_string(file_path)?;
         let limit_val = content
@@ -372,8 +372,8 @@ mod util {
         Ok(limit_val)
     }
 
-    // Helper function that helps to retrieve value in file, if value is "max", max_value will be
-    // returned instead.
+    /// Helper function that helps to retrieve value in file, if value is "max", `max_value` will be
+    /// returned instead.
     pub fn read_usize_or_max(file_path: &str, max_value: usize) -> Result<usize, std::io::Error> {
         let content = fs_err::read_to_string(file_path)?;
         if content.trim() == super::DEFAULT_CGROUP_MAX_INDICATOR {

@@ -161,7 +161,7 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
         });
 
         while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {
-            tracing::debug!("receive events {:?}", events.len());
+            tracing::trace!("receive events {:?}", events.len());
             self.source_ctx
                 .metrics
                 .connector_source_rows_received
