@@ -100,8 +100,8 @@ test_replication_with_column_pruning() {
 }
 
 main() {
-#  basic
-#  test_backfill_tombstone
+  basic
+  test_backfill_tombstone
   test_replication_with_column_pruning
 }
 
