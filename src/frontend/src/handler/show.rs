@@ -36,6 +36,7 @@ use crate::catalog::{CatalogError, IndexCatalog};
 use crate::handler::util::{col_descs_to_rows, indexes_to_rows};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
+use crate::utils::infer_stmt_row_desc::infer_show_object;
 
 pub fn get_columns_from_table(
     session: &SessionImpl,
@@ -91,6 +92,7 @@ pub async fn handle_show_object(
         )
         .into());
     }
+    let row_desc = infer_show_object(&command);
 
     let catalog_reader = session.env().catalog_reader();
 
@@ -142,26 +144,7 @@ pub async fn handle_show_object(
             let rows = col_descs_to_rows(columns);
 
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .values(
-                    rows.into(),
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Name".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Type".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Is Hidden".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ],
-                )
+                .values(rows.into(), row_desc)
                 .into());
         }
         ShowObject::Indexes { table } => {
@@ -169,36 +152,7 @@ pub async fn handle_show_object(
             let rows = indexes_to_rows(indexes);
 
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .values(
-                    rows.into(),
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Name".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "On".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Key".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Include".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Distributed By".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ],
-                )
+                .values(rows.into(), row_desc)
                 .into());
         }
         ShowObject::Connection { schema } => {
@@ -247,26 +201,7 @@ pub async fn handle_show_object(
                 })
                 .collect_vec();
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .values(
-                    rows.into(),
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Name".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Type".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Properties".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ],
-                )
+                .values(rows.into(), row_desc)
                 .into());
         }
         ShowObject::Function { schema } => {
@@ -285,36 +220,7 @@ pub async fn handle_show_object(
                 })
                 .collect_vec();
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .values(
-                    rows.into(),
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Name".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Arguments".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Return Type".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Language".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Link".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ],
-                )
+                .values(rows.into(), row_desc)
                 .into());
         }
         ShowObject::Cluster => {
@@ -342,41 +248,7 @@ pub async fn handle_show_object(
                 })
                 .collect_vec();
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .values(
-                    rows.into(),
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Addr".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "State".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Parallel Units".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Is Streaming".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Is Serving".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Is Unschedulable".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ],
-                )
+                .values(rows.into(), row_desc)
                 .into());
         }
         ShowObject::Jobs => {
@@ -392,26 +264,7 @@ pub async fn handle_show_object(
                 })
                 .collect_vec();
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .values(
-                    rows.into(),
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Id".to_owned(),
-                            DataType::Int64.to_oid(),
-                            DataType::Int64.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Statement".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Progress".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ],
-                )
+                .values(rows.into(), row_desc)
                 .into());
         }
     };
