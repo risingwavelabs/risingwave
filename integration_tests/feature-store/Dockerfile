@@ -1,7 +1,10 @@
-FROM rust:1.73 as feature-store-server
+FROM ubuntu:20.04 AS feature-store-server
 ARG BUILD_ARG
 
 USER root
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
+ENV PATH /root/.cargo/bin/:$PATH
 
 ENV WORK_DIR /opt/feature-store
 RUN mkdir -p $WORK_DIR
@@ -27,7 +30,7 @@ RUN wget https://packages.microsoft.com/config/debian/11/packages-microsoft-prod
 RUN dpkg -i packages-microsoft-prod.deb
 RUN rm packages-microsoft-prod.deb
 RUN apt-get update && apt-get install -y dotnet-sdk-6.0
-RUN apt install -y liblttng-ust1
+RUN apt install -y liblttng-ust0
 
 RUN apt install -y protobuf-compiler
 # `cargo build` included in ./build
