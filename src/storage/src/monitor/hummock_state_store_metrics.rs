@@ -339,13 +339,13 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+
         let read_req_check_bloom_filter_counts = RelabeledCounterVec::with_metric_level(
             MetricLevel::Info,
             read_req_check_bloom_filter_counts,
             metric_level,
         );
 
-        // todo(wcy-fdu): may replace instance_id with actor_id.
         let mem_table_memory_size = register_int_gauge_vec_with_registry!(
             "state_store_mem_table_memory_size",
             "Memory usage of mem_table",
@@ -354,6 +354,12 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
+        let mem_table_memory_size = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Info,
+            mem_table_memory_size,
+            metric_level,
+        );
+
         let mem_table_item_count = register_int_gauge_vec_with_registry!(
             "state_store_mem_table_item_count",
             "Item counts in mem_table",
@@ -361,6 +367,12 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
+
+        let mem_table_item_count = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Info,
+            mem_table_item_count,
+            metric_level,
+        );
 
         Self {
             bloom_filter_true_negative_counts,

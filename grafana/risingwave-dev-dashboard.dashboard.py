@@ -2212,12 +2212,17 @@ def section_hummock_write(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Mem Table Size (Max)",
+                    "Write Batch Size",
                     "This metric shows the statistics of mem_table size on flush. By default only max (p100) is shown.",
                     [
                         panels.target(
                             f"histogram_quantile(1.0, sum(rate({metric('state_store_write_batch_size_bucket')}[$__rate_interval])) by (le, table_id, job, instance))",
                             "pmax - {{table_id}} @ {{job}} @ {{instance}}",
+                        ),
+
+                        panels.target(
+                            f"sum by(le, job, instance) (rate({metric('state_store_write_batch_size_sum')}[$__rate_interval])) / sum by(le, table_id, job, instance) (rate({metric('state_store_write_batch_size_count')}[$__rate_interval]))",
+                            "avg - {{table_id}} {{job}} @ {{instance}}",
                         ),
                     ],
                 ),
