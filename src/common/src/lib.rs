@@ -46,6 +46,7 @@
 #![feature(negative_impls)]
 #![feature(async_fn_in_trait)]
 #![feature(bound_map)]
+#![feature(array_methods)]
 
 #[macro_use]
 pub mod jemalloc;
@@ -77,7 +78,6 @@ pub mod test_utils;
 pub mod types;
 pub mod vnode_mapping;
 
-pub mod heap_profiling;
 pub mod range;
 
 pub mod test_prelude {

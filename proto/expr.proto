@@ -33,6 +33,8 @@ message ExprNode {
     LESS_THAN_OR_EQUAL = 11;
     GREATER_THAN = 12;
     GREATER_THAN_OR_EQUAL = 13;
+    GREATEST = 14;
+    LEAST = 15;
     // logical operators
     AND = 21;
     OR = 22;
@@ -229,6 +231,7 @@ message ExprNode {
 
     // Adminitration functions
     COL_DESCRIPTION = 2100;
+    CAST_REGCLASS = 2101;
   }
   Type function_type = 1;
   data.DataType return_type = 3;
