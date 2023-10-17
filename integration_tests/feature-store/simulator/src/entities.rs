@@ -60,7 +60,7 @@ impl User {
 
         Ok(ActionHistory {
             userid: self.userid.clone(),
-            changenum: changenum,
+            changenum,
             event_type: event_type.to_string(),
             timestamp,
         })
@@ -93,5 +93,5 @@ pub fn parse_user_metadata() -> Result<Vec<User>, ()> {
 
     let users = read_users_json(Path::new(&*generator_path).join("users.json")).unwrap();
 
-    return Ok(users);
+    Ok(users)
 }
