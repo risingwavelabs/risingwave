@@ -1091,7 +1091,7 @@ pub mod default {
         }
 
         pub fn enable_fast_compaction() -> bool {
-            true
+            false
         }
     }
 
