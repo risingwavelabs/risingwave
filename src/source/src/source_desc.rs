@@ -21,7 +21,8 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
-    SourceColumnDesc, SourceColumnType, SourceEncode, SourceFormat, SourceStruct,
+    ConnectorProperties, SourceColumnDesc, SourceColumnType, SourceEncode, SourceFormat,
+    SourceStruct,
 };
 use risingwave_connector::ConnectorParams;
 use risingwave_pb::catalog::PbStreamSourceInfo;
@@ -33,12 +34,14 @@ use crate::fs_connector_source::FsConnectorSource;
 pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 
 /// `SourceDesc` describes a stream source.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourceDesc {
     pub source: ConnectorSource,
     pub source_struct: SourceStruct,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
+
+    pub is_new_fs_source: bool,
 }
 
 /// `FsSourceDesc` describes a stream source.
@@ -101,12 +104,18 @@ impl SourceDescBuilder {
         columns
     }
 
-    pub fn build(self) -> Result<SourceDesc> {
+    pub fn build(mut self) -> Result<SourceDesc> {
         let columns = self.column_catalogs_to_source_column_descs();
 
         let source_struct = extract_source_struct(&self.source_info)?;
         let psrser_config =
             SpecificParserConfig::new(source_struct, &self.source_info, &self.properties)?;
+
+        let is_new_fs_source = ConnectorProperties::is_new_fs_connector_hash_map(&self.properties);
+        if is_new_fs_source {
+            // new fs source requires `connector='s3_v2' but we simply reuse S3 connector`
+            ConnectorProperties::rewrite_upstream_source_key_hash_map(&mut self.properties);
+        }
 
         let source = ConnectorSource::new(
             self.properties,
@@ -120,6 +129,7 @@ impl SourceDescBuilder {
             source_struct,
             columns,
             metrics: self.metrics,
+            is_new_fs_source,
         })
     }
 

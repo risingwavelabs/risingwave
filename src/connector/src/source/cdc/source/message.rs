@@ -21,7 +21,11 @@ impl From<CdcMessage> for SourceMessage {
     fn from(message: CdcMessage) -> Self {
         SourceMessage {
             key: None,
-            payload: Some(message.payload.as_bytes().to_vec()),
+            payload: if message.payload.is_empty() {
+                None // heartbeat message
+            } else {
+                Some(message.payload.as_bytes().to_vec())
+            },
             offset: message.offset,
             split_id: message.partition.into(),
             meta: SourceMeta::Empty,
