@@ -619,6 +619,8 @@ impl ConfigMap {
         } else if key.eq_ignore_ascii_case(BackgroundDdl::entry_name()) {
             self.background_ddl = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(ServerEncoding::entry_name()) {
+            let enc: ServerEncoding = val.as_slice().try_into()?;
+            // https://github.com/postgres/postgres/blob/REL_15_3/src/common/encnames.c#L525
             let clean = enc
                 .as_str()
                 .replace(|c: char| !c.is_ascii_alphanumeric(), "");
