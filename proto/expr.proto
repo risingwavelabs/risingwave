@@ -104,6 +104,7 @@ message ExprNode {
     REGEXP_MATCH = 232;
     REGEXP_REPLACE = 280;
     REGEXP_COUNT = 281;
+    REGEXP_SPLIT_TO_ARRAY = 282;
     POW = 233;
     EXP = 234;
     CHR = 235;
@@ -214,6 +215,7 @@ message ExprNode {
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
+    JSONB_CAT = 605;
 
     // Non-pure functions below (> 1000)
     // ------------------------
@@ -227,6 +229,7 @@ message ExprNode {
 
     // Adminitration functions
     COL_DESCRIPTION = 2100;
+    CAST_REGCLASS = 2101;
   }
   Type function_type = 1;
   data.DataType return_type = 3;

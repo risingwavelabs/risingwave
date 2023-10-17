@@ -18,7 +18,7 @@ use crate::only_parse_payload;
 use crate::parser::unified::maxwell::MaxwellChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParserFormat,
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
@@ -61,7 +61,7 @@ impl MaxwellParser {
         let payload_accessor = self.payload_builder.generate_accessor(payload).await?;
         let row_op = MaxwellChangeEvent::new(payload_accessor);
 
-        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
+        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer).map_err(Into::into)
     }
 }
 
@@ -72,6 +72,10 @@ impl ByteStreamSourceParser for MaxwellParser {
 
     fn source_ctx(&self) -> &SourceContext {
         &self.source_ctx
+    }
+
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::Maxwell
     }
 
     async fn parse_one<'a>(

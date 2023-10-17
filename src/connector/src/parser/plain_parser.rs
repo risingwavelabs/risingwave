@@ -21,6 +21,7 @@ use super::{
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::only_parse_payload;
+use crate::parser::ParserFormat;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -62,7 +63,7 @@ impl PlainParser {
     ) -> Result<()> {
         let accessor = self.payload_builder.generate_accessor(payload).await?;
 
-        apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer)
+        apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer).map_err(Into::into)
     }
 }
 
@@ -73,6 +74,10 @@ impl ByteStreamSourceParser for PlainParser {
 
     fn source_ctx(&self) -> &SourceContext {
         &self.source_ctx
+    }
+
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::Plain
     }
 
     async fn parse_one<'a>(

@@ -105,6 +105,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::RegexpMatch
             | expr_node::Type::RegexpReplace
             | expr_node::Type::RegexpCount
+            | expr_node::Type::RegexpSplitToArray
             | expr_node::Type::Pow
             | expr_node::Type::Exp
             | expr_node::Type::Ln
@@ -169,6 +170,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ArrayReplace
             | expr_node::Type::ArrayPosition
             | expr_node::Type::HexToInt256
+            | expr_node::Type::JsonbCat
             | expr_node::Type::JsonbAccessInner
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbTypeof
@@ -213,7 +215,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::PgSleep
             | expr_node::Type::PgSleepFor
             | expr_node::Type::PgSleepUntil
-            | expr_node::Type::ColDescription => true,
+            | expr_node::Type::ColDescription
+            | expr_node::Type::CastRegclass => true,
         }
     }
 }

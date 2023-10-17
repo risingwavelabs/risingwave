@@ -43,6 +43,7 @@ mod format;
 mod format_type;
 mod int256;
 mod jsonb_access;
+mod jsonb_concat;
 mod jsonb_info;
 mod length;
 mod lower;

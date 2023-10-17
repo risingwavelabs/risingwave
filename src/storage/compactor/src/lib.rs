@@ -77,6 +77,11 @@ pub struct CompactorOpts {
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
 
+    /// Enable heap profile dump when memory usage is high.
+    #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
+    #[override_opts(path = server.heap_profiling.dir)]
+    pub heap_profiling_dir: Option<String>,
+
     #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
     #[override_opts(path = storage.object_store_streaming_read_timeout_ms)]
     pub object_store_streaming_read_timeout_ms: Option<u64>,
@@ -109,9 +114,10 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             tracing::info!("Proxy rpc endpoint: {}", opts.proxy_rpc_endpoint.clone());
 
             let listen_addr = opts.listen_addr.parse().unwrap();
-            tracing::info!("Server Listening at {}", listen_addr);
 
             let (join_handle, _shutdown_sender) = shared_compactor_serve(listen_addr, opts).await;
+
+            tracing::info!("Server listening at {}", listen_addr);
 
             join_handle.await.unwrap();
         }),
@@ -120,7 +126,6 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             tracing::info!("meta address: {}", opts.meta_address.clone());
 
             let listen_addr = opts.listen_addr.parse().unwrap();
-            tracing::info!("Server Listening at {}", listen_addr);
 
             let advertise_addr = opts
                 .advertise_addr
@@ -134,6 +139,8 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             tracing::info!(" address is {}", advertise_addr);
             let (join_handle, observer_join_handle, _shutdown_sender) =
                 compactor_serve(listen_addr, advertise_addr, opts).await;
+
+            tracing::info!("Server listening at {}", listen_addr);
 
             join_handle.await.unwrap();
             observer_join_handle.abort();

@@ -261,7 +261,7 @@ unknown
 query T
 select pg_typeof('123'::varchar);
 ----
-varchar
+character varying
 
 query T
 select pg_typeof('123'::int);
@@ -276,7 +276,7 @@ unknown
 query T
 select pg_typeof(null::varchar);
 ----
-varchar
+character varying
 
 query T
 select pg_typeof(null::bool);
@@ -650,3 +650,48 @@ query T
 select regexp_count('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', '亲爱的😭', 1, 'i');
 ----
 1
+
+query T
+select regexp_split_to_array('apple,banana,orange', ',');
+----
+{apple,banana,orange}
+
+query T
+select regexp_split_to_array('apple.banana!orange', '[.!]');
+----
+{apple,banana,orange}
+
+query T
+select regexp_split_to_array('applebananaorange', ',');
+----
+{applebananaorange}
+
+query T
+select regexp_split_to_array('', ',');
+----
+{""}
+
+query T
+select regexp_split_to_array('the quick brown fox jumps over the lazy dog', '\s+');
+----
+{the,quick,brown,fox,jumps,over,the,lazy,dog}
+
+query T
+select regexp_split_to_array('the quick brown fox jumps over the lazy dog', '\s*');
+----
+{t,h,e,q,u,i,c,k,b,r,o,w,n,f,o,x,j,u,m,p,s,o,v,e,r,t,h,e,l,a,z,y,d,o,g}
+
+query T
+select regexp_split_to_array('apple\\banana,orange', '\\\\|,');
+----
+{apple,banana,orange}
+
+query T
+select regexp_split_to_array('apple!!!banana?orange???grape', '[!?]+');
+----
+{apple,banana,orange,grape}
+
+query T
+select regexp_split_to_array('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', '亲爱的😭');
+----
+{💩💩💩💩💩foo🤔️bar,baz这不是爱情❤️‍🔥}

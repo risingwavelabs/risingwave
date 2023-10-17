@@ -781,6 +781,7 @@ impl Binder {
                 ("regexp_match", raw_call(ExprType::RegexpMatch)),
                 ("regexp_replace", raw_call(ExprType::RegexpReplace)),
                 ("regexp_count", raw_call(ExprType::RegexpCount)),
+                ("regexp_split_to_array", raw_call(ExprType::RegexpSplitToArray)),
                 ("chr", raw_call(ExprType::Chr)),
                 ("starts_with", raw_call(ExprType::StartsWith)),
                 ("initcap", raw_call(ExprType::Initcap)),
@@ -1162,6 +1163,12 @@ impl Binder {
                 ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
                 // TODO: implement pg_sleep_until
                 // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
+
+                // cast functions
+                // only functions required by the existing PostgreSQL tool are implemented
+                ("date", guard_by_len(1, raw(|_binder, inputs| {
+                    inputs[0].clone().cast_explicit(DataType::Date).map_err(Into::into)
+                }))),
             ]
             .into_iter()
             .collect()

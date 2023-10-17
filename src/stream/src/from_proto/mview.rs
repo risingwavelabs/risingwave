@@ -48,14 +48,19 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
+        let info = ExecutorInfo {
+            schema: params.schema,
+            pk_indices: params.pk_indices,
+            identity: params.identity,
+        };
 
         macro_rules! new_executor {
             ($SD:ident) => {
                 MaterializeExecutor::<_, $SD>::new(
                     input,
+                    info,
                     store,
                     order_key,
-                    params.executor_id,
                     params.actor_context,
                     params.vnode_bitmap.map(Arc::new),
                     table,
@@ -106,11 +111,16 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
+        let info = ExecutorInfo {
+            schema: params.schema,
+            pk_indices: params.pk_indices,
+            identity: params.identity,
+        };
         let executor = MaterializeExecutor::<_, BasicSerde>::new(
             input,
+            info,
             store,
             keys,
-            params.executor_id,
             params.actor_context,
             vnodes,
             table,

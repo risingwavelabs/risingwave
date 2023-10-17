@@ -67,7 +67,7 @@ use risingwave_expr::{build_aggregate, Result};
 /// statement ok
 /// drop table t;
 /// ```
-#[build_aggregate("percentile_disc(*) -> auto")]
+#[build_aggregate("percentile_disc(any) -> any")]
 fn build(agg: &AggCall) -> Result<BoxedAggregateFunction> {
     let fractions = agg.direct_args[0]
         .literal()

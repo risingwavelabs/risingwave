@@ -34,7 +34,7 @@ impl RowEncoder for RedisFormatEncoder {
         match self {
             RedisFormatEncoder::Json(json) => {
                 Ok(serde_json::to_string(&json.encode_cols(row, col_indices)?)
-                    .map_err(|err| SinkError::JsonParse(err.to_string()))?)
+                    .map_err(|err| SinkError::Encode(err.to_string()))?)
             }
             RedisFormatEncoder::Template(template) => template.encode_cols(row, col_indices),
         }

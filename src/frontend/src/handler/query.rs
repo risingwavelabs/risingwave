@@ -464,18 +464,12 @@ async fn distribute_execute(
 #[expect(clippy::unused_async)]
 async fn local_execute(session: Arc<SessionImpl>, query: Query) -> Result<LocalQueryStream> {
     let front_env = session.env();
+
     // TODO: if there's no table scan, we don't need to acquire snapshot.
     let snapshot = session.pinned_snapshot();
 
     // TODO: Passing sql here
-    let execution = LocalQueryExecution::new(
-        query,
-        front_env.clone(),
-        "",
-        snapshot,
-        session.auth_context(),
-        session.reset_cancel_query_flag(),
-    );
+    let execution = LocalQueryExecution::new(query, front_env.clone(), "", snapshot, session);
 
     Ok(execution.stream_rows())
 }

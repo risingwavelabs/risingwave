@@ -18,6 +18,7 @@ members = [
   "src/java_binding",
   "src/jni_core",
   "src/meta",
+  "src/meta/src/model_v2/migration",
   "src/object_store",
   "src/prost",
   "src/prost/helpers",
@@ -92,10 +93,10 @@ aws-smithy-http = "0.55"
 aws-smithy-types = "0.55"
 aws-endpoint = "0.55"
 aws-types = "0.55"
-etcd-client = { package = "madsim-etcd-client", version = "0.3" }
+etcd-client = { package = "madsim-etcd-client", version = "0.4" }
 futures-async-stream = "0.2"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim.git", rev = "fedb1e3", features = [
+rdkafka = { package = "madsim-rdkafka", version = "0.3.0", features = [
   "cmake-build",
 ] }
 hashbrown = { version = "0.14.0", features = [
@@ -104,14 +105,18 @@ hashbrown = { version = "0.14.0", features = [
   "nightly",
 ] }
 criterion = { version = "0.5", features = ["async_futures"] }
-tonic = { package = "madsim-tonic", version = "0.3.1" }
-tonic-build = { package = "madsim-tonic-build", version = "0.3.1" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "166a36b1a40a64086db09a0e0f2ed6791cec548b" }
-arrow-array = "46"
-arrow-schema = "46"
-arrow-buffer = "46"
-arrow-flight = "46"
-arrow-select = "46"
+tonic = { package = "madsim-tonic", version = "0.4.0" }
+tonic-build = { package = "madsim-tonic-build", version = "0.4.0" }
+prost = { version = "0.12" }
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "16dab0e36ab337e58ee8002d828def2d212fa116" }
+arrow-array = "47"
+arrow-cast = "47"
+arrow-schema = "47"
+arrow-buffer = "47"
+arrow-flight = "47"
+arrow-select = "47"
+arrow-ord = "47"
+tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",
   "stats",
@@ -226,4 +231,4 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 # patch: unlimit 4MB message size for grpc client
-etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "d55550a" }
+etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }

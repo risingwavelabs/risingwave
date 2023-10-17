@@ -937,7 +937,15 @@ pub fn add_ssts_to_sub_level(
                 let b = sst2.key_range.as_ref().unwrap();
                 a.compare(b)
             });
-        assert!(can_concat(&l0.sub_levels[sub_level_idx].table_infos));
+        assert!(
+            can_concat(&l0.sub_levels[sub_level_idx].table_infos),
+            "sstable ids: {:?}",
+            l0.sub_levels[sub_level_idx]
+                .table_infos
+                .iter()
+                .map(|sst| sst.sst_id)
+                .collect_vec()
+        );
     }
 }
 
@@ -1039,7 +1047,15 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     if operand.level_type == LevelType::Overlapping as i32 {
         operand.level_type = LevelType::Nonoverlapping as i32;
     }
-    assert!(can_concat(&operand.table_infos));
+    assert!(
+        can_concat(&operand.table_infos),
+        "sstable ids: {:?}",
+        operand
+            .table_infos
+            .iter()
+            .map(|sst| sst.sst_id)
+            .collect_vec()
+    );
 }
 
 pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObjectId, u64> {
