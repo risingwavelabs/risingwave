@@ -1,6 +1,6 @@
 FROM ubuntu:20.04 AS feature-store-server
 ARG BUILD_ARG
-ENV DEBIAN_FRONTEND=noninteractive 
+ENV DEBIAN_FRONTEND=noninteractive
 
 USER root
 
