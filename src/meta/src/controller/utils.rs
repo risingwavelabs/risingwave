@@ -145,7 +145,7 @@ where
     if count == 0 {
         return Err(MetaError::catalog_id_not_found(
             object_type.as_str(),
-            obj_id as u32,
+            obj_id,
         ));
     }
     Ok(())
