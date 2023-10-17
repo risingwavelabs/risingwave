@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use async_trait::async_trait;
-use futures::future::try_join_all;
-use futures::TryFutureExt;
+use futures::{FutureExt, TryFuture, TryFutureExt};
 use pulsar::producer::{Message, SendFuture};
 use pulsar::{Producer, ProducerOptions, Pulsar, TokioExecutor};
 use risingwave_common::array::StreamChunk;
@@ -28,10 +26,14 @@ use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
-use super::{Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam};
+use super::{Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::common::PulsarCommon;
+use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
-use crate::sink::writer::{FormattedSink, LogSinkerOf, SinkWriterExt};
+use crate::sink::log_store::DeliveryFutureManagerAddFuture;
+use crate::sink::writer::{
+    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
+};
 use crate::sink::{DummySinkCommitCoordinator, Result};
 use crate::{deserialize_duration_from_string, dispatch_sink_formatter_impl};
 
@@ -155,11 +157,15 @@ impl TryFrom<SinkParam> for PulsarSink {
 
 impl Sink for PulsarSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<PulsarSinkWriter>;
+    type LogSinker = AsyncTruncateLogSinkerOf<PulsarSinkWriter>;
 
     const SINK_NAME: &'static str = PULSAR_SINK;
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+    fn default_sink_decouple(desc: &SinkDesc) -> bool {
+        desc.sink_type.is_append_only()
+    }
+
+    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(PulsarSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
@@ -169,7 +175,7 @@ impl Sink for PulsarSink {
             self.sink_from_name.clone(),
         )
         .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(PULSAR_SEND_FUTURE_BUFFER_MAX_SIZE))
     }
 
     async fn validate(&self) -> Result<()> {
@@ -190,15 +196,26 @@ impl Sink for PulsarSink {
 }
 
 pub struct PulsarSinkWriter {
-    payload_writer: PulsarPayloadWriter,
     formatter: SinkFormatterImpl,
-}
-
-struct PulsarPayloadWriter {
     pulsar: Pulsar<TokioExecutor>,
     producer: Producer<TokioExecutor>,
     config: PulsarConfig,
-    send_future_buffer: VecDeque<SendFuture>,
+}
+
+struct PulsarPayloadWriter<'w> {
+    producer: &'w mut Producer<TokioExecutor>,
+    config: &'w PulsarConfig,
+    add_future: DeliveryFutureManagerAddFuture<'w, PulsarDeliveryFuture>,
+}
+
+pub type PulsarDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
+
+fn may_delivery_future(future: SendFuture) -> PulsarDeliveryFuture {
+    future.map(|result| {
+        result
+            .map(|_| ())
+            .map_err(|e: pulsar::Error| SinkError::Pulsar(anyhow!(e)))
+    })
 }
 
 impl PulsarSinkWriter {
@@ -216,17 +233,14 @@ impl PulsarSinkWriter {
         let producer = build_pulsar_producer(&pulsar, &config).await?;
         Ok(Self {
             formatter,
-            payload_writer: PulsarPayloadWriter {
-                pulsar,
-                producer,
-                config,
-                send_future_buffer: VecDeque::new(),
-            },
+            pulsar,
+            producer,
+            config,
         })
     }
 }
 
-impl PulsarPayloadWriter {
+impl<'w> PulsarPayloadWriter<'w> {
     async fn send_message(&mut self, message: Message) -> Result<()> {
         let mut success_flag = false;
         let mut connection_err = None;
@@ -237,17 +251,10 @@ impl PulsarPayloadWriter {
                 // a SendFuture holding the message receipt
                 // or error after sending is returned
                 Ok(send_future) => {
-                    // Check if send_future_buffer is greater than the preset limit
-                    while self.send_future_buffer.len() >= PULSAR_SEND_FUTURE_BUFFER_MAX_SIZE {
-                        self.send_future_buffer
-                            .pop_front()
-                            .expect("Expect the SendFuture not to be None")
-                            .map_err(|e| SinkError::Pulsar(anyhow!(e)))
-                            .await?;
-                    }
-
+                    self.add_future
+                        .add_future_may_await(may_delivery_future(send_future))
+                        .await?;
                     success_flag = true;
-                    self.send_future_buffer.push_back(send_future);
                     break;
                 }
                 // error upon sending
@@ -285,24 +292,9 @@ impl PulsarPayloadWriter {
         self.send_message(message).await?;
         Ok(())
     }
-
-    async fn commit_inner(&mut self) -> Result<()> {
-        self.producer
-            .send_batch()
-            .map_err(pulsar_to_sink_err)
-            .await?;
-        try_join_all(
-            self.send_future_buffer
-                .drain(..)
-                .map(|send_future| send_future.map_err(|e| SinkError::Pulsar(anyhow!(e)))),
-        )
-        .await?;
-
-        Ok(())
-    }
 }
 
-impl FormattedSink for PulsarPayloadWriter {
+impl<'w> FormattedSink for PulsarPayloadWriter<'w> {
     type K = String;
     type V = Vec<u8>;
 
@@ -311,23 +303,21 @@ impl FormattedSink for PulsarPayloadWriter {
     }
 }
 
-#[async_trait]
-impl SinkWriter for PulsarSinkWriter {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+impl AsyncTruncateSinkWriter for PulsarSinkWriter {
+    type DeliveryFuture = PulsarDeliveryFuture;
+
+    async fn write_chunk<'a>(
+        &'a mut self,
+        chunk: StreamChunk,
+        add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+    ) -> Result<()> {
         dispatch_sink_formatter_impl!(&self.formatter, formatter, {
-            self.payload_writer.write_chunk(chunk, formatter).await
+            let mut payload_writer = PulsarPayloadWriter {
+                producer: &mut self.producer,
+                add_future,
+                config: &self.config,
+            };
+            payload_writer.write_chunk(chunk, formatter).await
         })
-    }
-
-    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
-        Ok(())
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
-        if is_checkpoint {
-            self.payload_writer.commit_inner().await?;
-        }
-
-        Ok(())
     }
 }

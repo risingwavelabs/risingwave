@@ -29,7 +29,11 @@ use serde_with::serde_as;
 
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::common::ClickHouseCommon;
-use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
+use crate::sink::catalog::desc::SinkDesc;
+use crate::sink::log_store::DeliveryFutureManagerAddFuture;
+use crate::sink::writer::{
+    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
+};
 use crate::sink::{
     Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
@@ -209,9 +213,13 @@ impl ClickHouseSink {
 }
 impl Sink for ClickHouseSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<ClickHouseSinkWriter>;
+    type LogSinker = AsyncTruncateLogSinkerOf<ClickHouseSinkWriter>;
 
     const SINK_NAME: &'static str = CLICKHOUSE_SINK;
+
+    fn default_sink_decouple(desc: &SinkDesc) -> bool {
+        desc.sink_type.is_append_only()
+    }
 
     async fn validate(&self) -> Result<()> {
         // For upsert clickhouse sink, the primary key must be defined.
@@ -243,7 +251,7 @@ impl Sink for ClickHouseSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(ClickHouseSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
@@ -251,7 +259,7 @@ impl Sink for ClickHouseSink {
             self.is_append_only,
         )
         .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(usize::MAX))
     }
 }
 pub struct ClickHouseSinkWriter {
@@ -462,23 +470,17 @@ impl ClickHouseSinkWriter {
     }
 }
 
-#[async_trait::async_trait]
-impl SinkWriter for ClickHouseSinkWriter {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+impl AsyncTruncateSinkWriter for ClickHouseSinkWriter {
+    async fn write_chunk<'a>(
+        &'a mut self,
+        chunk: StreamChunk,
+        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+    ) -> Result<()> {
         if self.is_append_only {
             self.append_only(chunk).await
         } else {
             self.upsert(chunk).await
         }
-    }
-
-    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
-        // clickhouse no transactional guarantees, so we do nothing here.
-        Ok(())
-    }
-
-    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        Ok(())
     }
 }
 

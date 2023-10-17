@@ -25,10 +25,14 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
 use super::utils::chunk_to_json;
-use super::{DummySinkCommitCoordinator, SinkWriter, SinkWriterParam};
+use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::common::NatsCommon;
+use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
-use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
+use crate::sink::log_store::DeliveryFutureManagerAddFuture;
+use crate::sink::writer::{
+    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
+};
 use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY};
 
 pub const NATS_SINK: &str = "nats";
@@ -88,9 +92,13 @@ impl TryFrom<SinkParam> for NatsSink {
 
 impl Sink for NatsSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<NatsSinkWriter>;
+    type LogSinker = AsyncTruncateLogSinkerOf<NatsSinkWriter>;
 
     const SINK_NAME: &'static str = NATS_SINK;
+
+    fn default_sink_decouple(desc: &SinkDesc) -> bool {
+        desc.sink_type.is_append_only()
+    }
 
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
@@ -110,11 +118,11 @@ impl Sink for NatsSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(
             NatsSinkWriter::new(self.config.clone(), self.schema.clone())
                 .await?
-                .into_log_sinker(writer_param.sink_metrics),
+                .into_log_sinker(usize::MAX),
         )
     }
 }
@@ -153,17 +161,12 @@ impl NatsSinkWriter {
     }
 }
 
-#[async_trait::async_trait]
-impl SinkWriter for NatsSinkWriter {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+impl AsyncTruncateSinkWriter for NatsSinkWriter {
+    async fn write_chunk<'a>(
+        &'a mut self,
+        chunk: StreamChunk,
+        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+    ) -> Result<()> {
         self.append_only(chunk).await
-    }
-
-    async fn begin_epoch(&mut self, _epoch_id: u64) -> Result<()> {
-        Ok(())
-    }
-
-    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        Ok(())
     }
 }

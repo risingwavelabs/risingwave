@@ -12,17 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::{Future, Ready};
+use std::pin::pin;
 use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use futures::future::{select, Either};
+use futures::TryFuture;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::util::drop_either_future;
 
 use crate::sink::encoder::SerTo;
 use crate::sink::formatter::SinkFormatter;
-use crate::sink::log_store::{LogReader, LogStoreReadItem, TruncateOffset};
-use crate::sink::{LogSinker, Result, SinkMetrics};
+use crate::sink::log_store::{
+    DeliveryFutureManager, DeliveryFutureManagerAddFuture, LogReader, LogStoreReadItem,
+    TruncateOffset,
+};
+use crate::sink::{LogSinker, Result, SinkError, SinkMetrics};
 
 #[async_trait]
 pub trait SinkWriter: Send + 'static {
@@ -48,22 +56,17 @@ pub trait SinkWriter: Send + 'static {
     }
 }
 
-// TODO: remove this trait after KafkaSinkWriter implements SinkWriter
-#[async_trait]
-// An old version of SinkWriter for backward compatibility
-pub trait SinkWriterV1: Send + 'static {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
+pub type DummyDeliveryFuture = Ready<std::result::Result<(), SinkError>>;
 
-    // the following interface is for transactions, if not supported, return Ok(())
-    // start a transaction with epoch number. Note that epoch number should be increasing.
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
+pub trait AsyncTruncateSinkWriter: Send + 'static {
+    type DeliveryFuture: TryFuture<Ok = (), Error = SinkError> + Unpin + Send + 'static =
+        DummyDeliveryFuture;
 
-    // commits the current transaction and marks all messages in the transaction success.
-    async fn commit(&mut self) -> Result<()>;
-
-    // aborts the current transaction because some error happens. we should rollback to the last
-    // commit point.
-    async fn abort(&mut self) -> Result<()>;
+    fn write_chunk<'a>(
+        &'a mut self,
+        chunk: StreamChunk,
+        add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+    ) -> impl Future<Output = Result<()>> + Send + 'a;
 }
 
 /// A free-form sink that may output in multiple formats and encodings. Examples include kafka,
@@ -104,12 +107,12 @@ pub trait FormattedSink {
     }
 }
 
-pub struct LogSinkerOf<W: SinkWriter<CommitMetadata = ()>> {
+pub struct LogSinkerOf<W> {
     writer: W,
     sink_metrics: SinkMetrics,
 }
 
-impl<W: SinkWriter<CommitMetadata = ()>> LogSinkerOf<W> {
+impl<W> LogSinkerOf<W> {
     pub fn new(writer: W, sink_metrics: SinkMetrics) -> Self {
         LogSinkerOf {
             writer,
@@ -220,5 +223,65 @@ where
             writer: self,
             sink_metrics,
         }
+    }
+}
+
+pub struct AsyncTruncateLogSinkerOf<W: AsyncTruncateSinkWriter> {
+    writer: W,
+    future_manager: DeliveryFutureManager<W::DeliveryFuture>,
+}
+
+impl<W: AsyncTruncateSinkWriter> AsyncTruncateLogSinkerOf<W> {
+    pub fn new(writer: W, max_future_count: usize) -> Self {
+        AsyncTruncateLogSinkerOf {
+            writer,
+            future_manager: DeliveryFutureManager::new(max_future_count),
+        }
+    }
+}
+
+impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
+    async fn consume_log_and_sink(mut self, mut log_reader: impl LogReader) -> Result<()> {
+        log_reader.init().await?;
+        loop {
+            let select_result = drop_either_future(
+                select(
+                    pin!(log_reader.next_item()),
+                    pin!(self.future_manager.next_truncate_offset()),
+                )
+                .await,
+            );
+            match select_result {
+                Either::Left(item_result) => {
+                    let (epoch, item) = item_result?;
+                    match item {
+                        LogStoreReadItem::StreamChunk { chunk_id, chunk } => {
+                            let add_future = self.future_manager.start_write_chunk(epoch, chunk_id);
+                            self.writer.write_chunk(chunk, add_future).await?;
+                        }
+                        LogStoreReadItem::Barrier {
+                            is_checkpoint: _is_checkpoint,
+                        } => {
+                            self.future_manager.add_barrier(epoch);
+                        }
+                        LogStoreReadItem::UpdateVnodeBitmap(_) => {}
+                    }
+                }
+                Either::Right(offset_result) => {
+                    let offset = offset_result?;
+                    log_reader.truncate(offset).await?;
+                }
+            }
+        }
+    }
+}
+
+#[easy_ext::ext(AsyncTruncateSinkWriterExt)]
+impl<T> T
+where
+    T: AsyncTruncateSinkWriter + Sized,
+{
+    pub fn into_log_sinker(self, max_future_count: usize) -> AsyncTruncateLogSinkerOf<Self> {
+        AsyncTruncateLogSinkerOf::new(self, max_future_count)
     }
 }
