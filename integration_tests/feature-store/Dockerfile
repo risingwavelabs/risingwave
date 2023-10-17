@@ -29,6 +29,7 @@ RUN rm packages-microsoft-prod.deb
 RUN apt-get update && apt-get install -y dotnet-sdk-6.0
 RUN apt install -y liblttng-ust1
 
+RUN apt install -y protobuf-compiler
 # `cargo build` included in ./build
 ADD ./server $WORK_DIR/build/server
 ADD ./simulator $WORK_DIR/build/simulator
