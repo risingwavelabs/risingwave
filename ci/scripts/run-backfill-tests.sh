@@ -32,16 +32,16 @@ flush() {
 basic() {
   echo "--- e2e, test_backfill_basic"
   cargo make ci-start ci-backfill
-  run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_base_table.sql
 
   # Provide snapshot
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
-  run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql &
 
   wait
 
-  run_sql_file "$PARENT_PATH"/sql/backfill/select.sql </dev/null
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/select.sql </dev/null
 
   echo "--- Kill cluster"
   cargo make kill
