@@ -163,17 +163,6 @@ macro_rules! ensure_arity {
             .into());
         }
     };
-    ($func:literal, | $inputs:ident | > $lower:literal) => {
-        if !($inputs.len() > $lower) {
-            return Err(ErrorCode::BindError(format!(
-                "Function `{}` must take more than {} arguments ({} given)",
-                $func,
-                $lower,
-                $inputs.len(),
-            ))
-            .into());
-        }
-    };
 }
 
 /// An intermediate representation of struct type when resolving the type to cast.
@@ -549,7 +538,7 @@ fn infer_type_for_special(
             Ok(Some(DataType::Int16))
         }
         ExprType::Greatest | ExprType::Least => {
-            ensure_arity!("greatest/least", | inputs | > 0);
+            ensure_arity!("greatest/least", 1 <= | inputs |);
             Ok(Some(align_types(inputs.iter_mut())?))
         }
         _ => Ok(None),
