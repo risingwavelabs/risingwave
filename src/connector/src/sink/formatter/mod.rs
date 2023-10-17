@@ -114,14 +114,24 @@ impl SinkFormatterImpl {
                 );
                 let mut val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
 
-                if matches!(format_desc.options.get("schema.enable"), Some(s) if s.to_lowercase() == "true")
-                {
-                    let kafka_connect = KafkaConnectParams {
-                        schema_name: format!("{}.{}", db_name, sink_from_name),
-                    };
-                    key_encoder = key_encoder.with_kafka_connect(kafka_connect.clone());
-                    val_encoder = val_encoder.with_kafka_connect(kafka_connect);
-                }
+                if let Some(s) = format_desc.options.get("schemas.enable") {
+                    match s.to_lowercase().as_str() {
+                        "true" => {
+                            let kafka_connect = KafkaConnectParams {
+                                schema_name: format!("{}.{}", db_name, sink_from_name),
+                            };
+                            key_encoder = key_encoder.with_kafka_connect(kafka_connect.clone());
+                            val_encoder = val_encoder.with_kafka_connect(kafka_connect);
+                        }
+                        "false" => (),
+                        other => {
+                            return Err(SinkError::Config(anyhow!(
+                                "schemas.enable is expected to be `true` or `false`, got {}",
+                                other
+                            )))
+                        }
+                    }
+                };
 
                 // Initialize the upsert_stream
                 let formatter = UpsertFormatter::new(key_encoder, val_encoder);

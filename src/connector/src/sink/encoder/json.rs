@@ -111,10 +111,7 @@ impl RowEncoder for JsonEncoder {
             json_converter_with_schema(
                 Value::Object(mappings),
                 Some(param.schema_name.to_owned()),
-                col_indices
-                    .into_iter()
-                    .map(|i| &self.schema()[i])
-                    .collect_vec(),
+                col_indices.into_iter().map(|i| &self.schema[i]),
             )
         } else {
             mappings
@@ -172,6 +169,9 @@ pub fn datum_to_json_object(
             json!(v)
         }
         (DataType::Decimal, ScalarRefImpl::Decimal(mut v)) => match custom_json_type {
+            CustomJsonType::None => {
+                json!(v.to_text())
+            }
             CustomJsonType::Doris(map) => {
                 if !matches!(v, Decimal::Normalized(_)) {
                     return Err(ArrayError::internal(
@@ -187,9 +187,6 @@ pub fn datum_to_json_object(
                 }
                 json!(v_string)
             }
-            _ => {
-                json!(v.to_text())
-            }
         },
         (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => {
             // risingwave's timestamp with timezone is stored in UTC and does not maintain the
@@ -203,12 +200,11 @@ pub fn datum_to_json_object(
             json!(v.0.num_seconds_from_midnight() as i64 * 1000)
         }
         (DataType::Date, ScalarRefImpl::Date(v)) => match custom_json_type {
+            CustomJsonType::None => json!(v.0.num_days_from_ce()),
             CustomJsonType::Doris(_) => {
                 let a = v.0.format("%Y-%m-%d").to_string();
                 json!(a)
             }
-
-            _ => json!(v.0.num_days_from_ce()),
         },
         (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => match timestamp_handling_mode {
             TimestampHandlingMode::Milli => json!(v.0.timestamp_millis()),
@@ -241,6 +237,22 @@ pub fn datum_to_json_object(
         }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
             match custom_json_type {
+                CustomJsonType::None => {
+                    let mut map = Map::with_capacity(st.len());
+                    for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
+                        st.iter()
+                            .map(|(name, dt)| Field::with_name(dt.clone(), name)),
+                    ) {
+                        let value = datum_to_json_object(
+                            &sub_field,
+                            sub_datum_ref,
+                            timestamp_handling_mode,
+                            custom_json_type,
+                        )?;
+                        map.insert(sub_field.name.clone(), value);
+                    }
+                    json!(map)
+                }
                 CustomJsonType::Doris(_) => {
                     // We need to ensure that the order of elements in the json matches the insertion order.
                     let mut map = IndexMap::with_capacity(st.len());
@@ -260,22 +272,6 @@ pub fn datum_to_json_object(
                         ArrayError::internal(format!("Json to string err{:?}", err))
                     })?)
                 }
-                _ => {
-                    let mut map = Map::with_capacity(st.len());
-                    for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
-                        st.iter()
-                            .map(|(name, dt)| Field::with_name(dt.clone(), name)),
-                    ) {
-                        let value = datum_to_json_object(
-                            &sub_field,
-                            sub_datum_ref,
-                            timestamp_handling_mode,
-                            custom_json_type,
-                        )?;
-                        map.insert(sub_field.name.clone(), value);
-                    }
-                    json!(map)
-                }
             }
         }
         (data_type, scalar_ref) => {
@@ -288,17 +284,17 @@ pub fn datum_to_json_object(
     Ok(value)
 }
 
-fn json_converter_with_schema(
+fn json_converter_with_schema<'a>(
     object: Value,
     name: Option<String>,
-    fields: Vec<&Field>,
+    fields: impl Iterator<Item = &'a Field>,
 ) -> Map<String, Value> {
     let mut mapping = Map::with_capacity(2);
     mapping.insert(
         "schema".to_string(),
         json!({
             "type": "struct",
-            "fields": fields.into_iter().map(field_to_json).collect_vec(),
+            "fields": fields.map(field_to_json).collect_vec(),
             "optional": "false",
             "name": name,
         }),
