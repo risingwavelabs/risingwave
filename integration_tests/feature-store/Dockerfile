@@ -27,7 +27,7 @@ RUN wget https://packages.microsoft.com/config/debian/11/packages-microsoft-prod
 RUN dpkg -i packages-microsoft-prod.deb
 RUN rm packages-microsoft-prod.deb
 RUN apt-get update && apt-get install -y dotnet-sdk-6.0
-RUN apt install -y liblttng-ust0
+RUN apt install -y liblttng-ust1
 
 # `cargo build` included in ./build
 ADD ./server $WORK_DIR/build/server
