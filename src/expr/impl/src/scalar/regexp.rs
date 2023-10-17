@@ -515,5 +515,9 @@ fn regexp_split_to_array(text: &str, regex: &RegexpContext) -> Option<ListValue>
         list.push(Some(text[start..].into()));
     }
 
+    if start == n && !empty_flag {
+        list.push(Some("".to_string().into()));
+    }
+
     Some(ListValue::new(list))
 }

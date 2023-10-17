@@ -669,7 +669,7 @@ select regexp_split_to_array('applebananaorange', ',');
 query T
 select regexp_split_to_array('', ',');
 ----
-{}
+{""}
 
 query T
 select regexp_split_to_array('the quick brown fox jumps over the lazy dog', '\s+');
