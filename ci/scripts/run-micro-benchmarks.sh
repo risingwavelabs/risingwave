@@ -44,7 +44,7 @@ main() {
   # Microbenchmarks need to be namespaced by instance types,
   # the result upload endpoint needs to be parameterized by instance type as well to support this.
   echo "--- Getting aws instance type"
-  local instance_type=get_instance_type
+  local instance_type=$(get_instance_type)
   echo "instance_type: $instance_type"
   if [[ $(echo instance_type) != "m6i.4xlarge" ]]; then
     echo "Only m6i.4xlarge is supported, skipping microbenchmark"
