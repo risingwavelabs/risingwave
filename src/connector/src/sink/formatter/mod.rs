@@ -77,7 +77,8 @@ impl SinkFormatterImpl {
     ) -> Result<Self> {
         let err_unsupported = || {
             Err(SinkError::Config(anyhow!(
-                "sink encode unsupported: {:?}",
+                "sink format/encode unsupported: {:?} {:?}",
+                format_desc.format,
                 format_desc.encode,
             )))
         };
@@ -126,6 +127,10 @@ impl SinkFormatterImpl {
                 )))
             }
             SinkFormat::Upsert => {
+                if format_desc.encode != SinkEncode::Json {
+                    return err_unsupported();
+                }
+
                 let key_encoder = JsonEncoder::new(
                     schema.clone(),
                     Some(pk_indices),
