@@ -1,4 +1,4 @@
-FROM rust:1.67 as feature-store-server
+FROM rust:1.73 as feature-store-server
 ARG BUILD_ARG
 
 USER root
