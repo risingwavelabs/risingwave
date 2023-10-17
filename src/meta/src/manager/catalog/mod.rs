@@ -840,8 +840,6 @@ impl CatalogManager {
 
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        database_core.clear_creating_stream_jobs();
-
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
         for table in &tables_to_clean {
@@ -851,6 +849,7 @@ impl CatalogManager {
         }
         commit_meta!(self, tables)?;
 
+        database_core.clear_creating_stream_jobs();
         let user_core = &mut core.user;
         for table in &tables_to_clean {
             // Recovered when init database manager.
