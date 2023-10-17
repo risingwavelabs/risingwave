@@ -90,7 +90,7 @@ impl RowEncoder for JsonEncoder {
                 self.timestamp_handling_mode,
                 &self.custom_json_type,
             )
-            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
+            .map_err(|e| SinkError::Encode(e.to_string()))?;
             mappings.insert(key, value);
         }
         Ok(mappings)

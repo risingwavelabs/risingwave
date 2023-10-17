@@ -63,7 +63,7 @@ impl<S: StateStore> CdcBackfillStateImpl<S> {
     }
 }
 
-const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
+pub const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
 
 /// The state manager for single cdc table
 pub struct SingleTableState<S: StateStore> {
@@ -147,6 +147,9 @@ impl<S: StateStore> SingleTableState<S> {
                             "server".to_string() => server
                         },
                         source_offset,
+                        // upstream heartbeat event would not emit to the cdc backfill executor,
+                        // since we don't parse heartbeat event in the source parser.
+                        is_heartbeat: false,
                     }
                 });
 

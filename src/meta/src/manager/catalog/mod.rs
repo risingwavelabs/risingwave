@@ -2252,10 +2252,6 @@ impl CatalogManager {
         self.core.lock().await.database.list_sources()
     }
 
-    pub async fn get_source(&self, source_id: SourceId) -> Option<Source> {
-        self.core.lock().await.database.get_source(source_id)
-    }
-
     pub async fn list_source_ids(&self, schema_id: SchemaId) -> Vec<SourceId> {
         self.core.lock().await.database.list_source_ids(schema_id)
     }

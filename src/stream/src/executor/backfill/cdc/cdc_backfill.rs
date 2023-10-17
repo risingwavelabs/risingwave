@@ -206,7 +206,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut total_snapshot_processed_rows: u64 = 0;
         let mut snapshot_read_epoch;
 
-        let mut last_binlog_offset: Option<CdcOffset>;
+        // Read the current binlog offset as a low watermark
+        let mut last_binlog_offset: Option<CdcOffset> =
+            upstream_table_reader.current_binlog_offset().await?;
 
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
@@ -230,7 +232,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         //
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
         if to_backfill {
-            last_binlog_offset = upstream_table_reader.current_binlog_offset().await?;
             // drive the upstream changelog first to ensure we can receive timely changelog event,
             // otherwise the upstream changelog may be blocked by the snapshot read stream
             let _ = Pin::new(&mut upstream).peek().await;
@@ -331,6 +332,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     break;
                                 }
                                 Message::Chunk(chunk) => {
+                                    // skip empty upstream chunk
+                                    if chunk.cardinality() == 0 {
+                                        continue;
+                                    }
+
                                     let chunk_binlog_offset = get_cdc_chunk_last_offset(
                                         upstream_table_reader.inner().table_reader(),
                                         &chunk,
@@ -417,12 +423,17 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     }
                 }
             }
-        } else {
+        } else if is_snapshot_empty {
+            tracing::info!(
+                upstream_table_id,
+                initial_binlog_offset = ?last_binlog_offset,
+                "upstream snapshot is empty, mark backfill is done and persist current binlog offset");
+
             // The snapshot is empty, just set backfill to finished
-            state_impl.mutate_state(None).await?;
+            state_impl.mutate_state(last_binlog_offset).await?;
         }
 
-        tracing::debug!(
+        tracing::info!(
             actor = self.actor_id,
             "CdcBackfill has already finished and forward messages directly to the downstream"
         );

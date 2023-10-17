@@ -194,7 +194,7 @@ impl BatchManager {
         pb_task_output_id: &PbTaskOutputId,
     ) -> Result<()> {
         let task_id = TaskOutputId::try_from(pb_task_output_id)?;
-        tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?task_id, "serve exchange RPC");
+        tracing::debug!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?task_id, "serve exchange RPC");
         let mut task_output = self.take_output(pb_task_output_id)?;
         self.runtime.spawn(async move {
             let mut writer = GrpcExchangeWriter::new(tx.clone());

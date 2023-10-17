@@ -39,19 +39,21 @@ use std::future::Future;
 use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use prometheus::core::{AtomicU64, GenericCounter};
-use prometheus::{Histogram, HistogramOpts, Opts};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
+use risingwave_common::metrics::{
+    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
+};
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
-use risingwave_rpc_client::{ConnectorClient, MetaClient};
+use risingwave_rpc_client::MetaClient;
 use thiserror::Error;
 pub use tracing;
 
 use self::catalog::{SinkFormatDesc, SinkType};
+use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::log_store::LogReader;
 use crate::sink::writer::SinkWriter;
@@ -101,7 +103,8 @@ macro_rules! dispatch_sink {
 
 #[macro_export]
 macro_rules! match_sink_name_str {
-    ({$({$variant_name:ident, $sink_type:ty}),*}, $name_str:tt, $type_name:ident, $body:tt, $on_other_closure:tt) => {
+    ({$({$variant_name:ident, $sink_type:ty}),*}, $name_str:tt, $type_name:ident, $body:tt, $on_other_closure:tt) => {{
+        use $crate::sink::Sink;
         match $name_str {
             $(
                 <$sink_type>::SINK_NAME => {
@@ -113,7 +116,7 @@ macro_rules! match_sink_name_str {
             )*
             other => ($on_other_closure)(other),
         }
-    };
+    }};
     ($name_str:expr, $type_name:ident, $body:expr, $on_other_closure:expr) => {{
         $crate::for_all_sinks! {$crate::match_sink_name_str, {$name_str}, $type_name, {$body}, {$on_other_closure}}
     }};
@@ -213,19 +216,25 @@ impl From<SinkCatalog> for SinkParam {
 
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration_metrics: Histogram,
-    pub connector_sink_rows_received: GenericCounter<AtomicU64>,
+    pub sink_commit_duration_metrics: LabelGuardedHistogram,
+    pub connector_sink_rows_received: LabelGuardedIntCounter,
+    pub log_store_first_write_epoch: LabelGuardedIntGauge,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge,
+    pub log_store_write_rows: LabelGuardedIntCounter,
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge,
+    pub log_store_read_rows: LabelGuardedIntCounter,
 }
 
 impl SinkMetrics {
     fn for_test() -> Self {
         SinkMetrics {
-            sink_commit_duration_metrics: Histogram::with_opts(HistogramOpts::new(
-                "unused", "unused",
-            ))
-            .unwrap(),
-            connector_sink_rows_received: GenericCounter::with_opts(Opts::new("unused", "unused"))
-                .unwrap(),
+            sink_commit_duration_metrics: LabelGuardedHistogram::test_histogram(),
+            connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
+            log_store_first_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
+            log_store_latest_write_epoch: LabelGuardedIntGauge::test_int_gauge(),
+            log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
+            log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
+            log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
         }
     }
 }
@@ -256,13 +265,14 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     type LogSinker: LogSinker;
     type Coordinator: SinkCommitCoordinator;
 
+    fn default_sink_decouple(_desc: &SinkDesc) -> bool {
+        false
+    }
+
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
     #[expect(clippy::unused_async)]
-    async fn new_coordinator(
-        &self,
-        _connector_client: Option<ConnectorClient>,
-    ) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
@@ -363,8 +373,8 @@ pub enum SinkError {
     Kinesis(anyhow::Error),
     #[error("Remote sink error: {0}")]
     Remote(anyhow::Error),
-    #[error("Json parse error: {0}")]
-    JsonParse(String),
+    #[error("Encode error: {0}")]
+    Encode(String),
     #[error("Iceberg error: {0}")]
     Iceberg(anyhow::Error),
     #[error("config error: {0}")]

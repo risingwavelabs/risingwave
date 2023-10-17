@@ -56,7 +56,7 @@ use risingwave_expr::function;
 /// ----
 /// 1
 /// ```
-#[function("generate_subscripts(list, int4, boolean) -> setof int4")]
+#[function("generate_subscripts(anyarray, int4, boolean) -> setof int4")]
 fn generate_subscripts_reverse(
     array: ListRef<'_>,
     dim: i32,
@@ -104,7 +104,7 @@ fn generate_subscripts_reverse(
 /// ----
 /// 1
 /// ```
-#[function("generate_subscripts(list, int4) -> setof int4")]
+#[function("generate_subscripts(anyarray, int4) -> setof int4")]
 fn generate_subscripts(array: ListRef<'_>, dim: i32) -> impl Iterator<Item = i32> {
     generate_subscripts_iterator(array, dim, false)
 }
@@ -130,7 +130,7 @@ fn generate_subscripts_inner(array: ListRef<'_>, dim: i32) -> (i32, i32) {
         ..=0 => nothing,
         1 => (1, array.len() as i32 + 1),
         // Although RW's array can be zig-zag, we just look at the first element.
-        2.. => match array.elem_at(0) {
+        2.. => match array.get(0) {
             Some(Some(ScalarRefImpl::List(list))) => generate_subscripts_inner(list, dim - 1),
             _ => nothing,
         },

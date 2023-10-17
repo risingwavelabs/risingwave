@@ -213,9 +213,9 @@ impl<S: StateStore> SortBuffer<S> {
 
         let streams: Vec<_> =
             futures::future::try_join_all(buffer_table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                buffer_table.iter_row_with_pk_range(
-                    &pk_range,
+                buffer_table.iter_with_vnode(
                     vnode,
+                    &pk_range,
                     PrefetchOptions::new_with_exhaust_iter(filler.capacity().is_none()),
                 )
             }))

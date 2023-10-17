@@ -681,7 +681,7 @@ impl MetaClient {
                         extra_info.push(info);
                     }
                 }
-                tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
+                tracing::debug!(target: "events::meta::client_heartbeat", "heartbeat");
                 match tokio::time::timeout(
                     // TODO: decide better min_interval for timeout
                     min_interval * 3,

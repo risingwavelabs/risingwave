@@ -105,6 +105,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::RegexpMatch
             | expr_node::Type::RegexpReplace
             | expr_node::Type::RegexpCount
+            | expr_node::Type::RegexpSplitToArray
             | expr_node::Type::Pow
             | expr_node::Type::Exp
             | expr_node::Type::Ln

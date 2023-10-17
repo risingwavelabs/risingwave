@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use risingwave_common::array::ListValue;
-use risingwave_common::types::{Datum, ScalarRef};
+use risingwave_common::types::{Datum, ScalarRefImpl, ToOwnedDatum};
 use risingwave_expr::aggregate;
 
-#[aggregate("array_agg(*) -> list")]
-fn array_agg<'a>(state: Option<ListValue>, value: Option<impl ScalarRef<'a>>) -> ListValue {
+#[aggregate("array_agg(any) -> anyarray")]
+fn array_agg(state: Option<ListValue>, value: Option<ScalarRefImpl<'_>>) -> ListValue {
     let mut state: Vec<Datum> = state.unwrap_or_default().into();
-    state.push(value.map(|v| v.to_owned_scalar().into()));
+    state.push(value.to_owned_datum());
     state.into()
 }
 

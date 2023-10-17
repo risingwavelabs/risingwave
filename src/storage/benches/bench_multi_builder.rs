@@ -144,6 +144,7 @@ fn bench_builder(
         0,
         FileCache::none(),
         FileCache::none(),
+        None,
     ));
 
     let mut group = c.benchmark_group("bench_multi_builder");

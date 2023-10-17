@@ -35,6 +35,7 @@ pub static RW_FRAGMENTS_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = La
             "upstream_fragment_ids",
         ),
         (DataType::List(Box::new(DataType::Varchar)), "flags"),
+        (DataType::Int32, "parallelism"),
     ]
 });
 
@@ -93,6 +94,7 @@ impl SysCatalogReaderImpl {
                             .map(|t| Some(ScalarImpl::Utf8(t.into())))
                             .collect_vec(),
                     ))),
+                    Some(ScalarImpl::Int32(distribution.parallelism as i32)),
                 ])
             })
             .collect_vec())
