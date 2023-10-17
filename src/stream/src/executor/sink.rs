@@ -241,7 +241,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             .await?;
                         if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_context.id)
                         {
-                            log_writer.update_vnode_bitmap(vnode_bitmap);
+                            log_writer.update_vnode_bitmap(vnode_bitmap).await?;
                         }
                         yield Message::Barrier(barrier);
                     }
@@ -276,7 +276,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             .await?;
                         if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(actor_context.id)
                         {
-                            log_writer.update_vnode_bitmap(vnode_bitmap);
+                            log_writer.update_vnode_bitmap(vnode_bitmap).await?;
                         }
                         yield Message::Barrier(barrier);
                     }
