@@ -4,9 +4,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 USER root
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path -y
-ENV PATH /root/.cargo/bin/:$PATH
-
 ENV WORK_DIR /opt/feature-store
 RUN mkdir -p $WORK_DIR
 
@@ -25,6 +22,9 @@ RUN pip3 install risingwave
 
 RUN apt install -y lsof curl openssl libssl-dev pkg-config build-essential
 RUN apt install -y cmake librdkafka-dev
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path -y
+ENV PATH /root/.cargo/bin/:$PATH
 
 # Install .NET 6.0
 RUN wget https://packages.microsoft.com/config/debian/11/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
