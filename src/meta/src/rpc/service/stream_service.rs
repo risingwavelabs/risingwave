@@ -207,6 +207,7 @@ impl StreamManagerService for StreamServiceImpl {
                             state_table_ids: fragment.state_table_ids.clone(),
                             upstream_fragment_ids: fragment.upstream_fragment_ids.clone(),
                             fragment_type_mask: fragment.fragment_type_mask,
+                            parallelism: fragment.actors.len() as _,
                         }
                     })
                 })

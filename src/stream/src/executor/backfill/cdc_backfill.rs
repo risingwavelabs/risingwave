@@ -48,7 +48,7 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
+pub const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
 
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -349,6 +349,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     break;
                                 }
                                 Message::Chunk(chunk) => {
+                                    // skip empty upstream chunk
+                                    if chunk.cardinality() == 0 {
+                                        continue;
+                                    }
+
                                     let chunk_binlog_offset = get_cdc_chunk_last_offset(
                                         upstream_table_reader.inner().table_reader(),
                                         &chunk,
@@ -528,6 +533,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 "server".to_string() => server
                             },
                             source_offset,
+                            // upstream heartbeat event would not emit to the cdc backfill executor,
+                            // since we don't parse heartbeat event in the source parser.
+                            is_heartbeat: false,
                         }
                     });
 

@@ -22,7 +22,9 @@ use crate::parser::canal::operators::*;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::unified::ChangeEventOperation;
-use crate::parser::{ByteStreamSourceParser, JsonProperties, SourceStreamChunkRowWriter};
+use crate::parser::{
+    ByteStreamSourceParser, JsonProperties, ParserFormat, SourceStreamChunkRowWriter,
+};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const DATA: &str = "data";
@@ -119,6 +121,10 @@ impl ByteStreamSourceParser for CanalJsonParser {
 
     fn source_ctx(&self) -> &SourceContext {
         &self.source_ctx
+    }
+
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::CanalJson
     }
 
     async fn parse_one<'a>(

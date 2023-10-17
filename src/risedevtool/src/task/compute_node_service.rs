@@ -58,8 +58,6 @@ impl ComputeNodeService {
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--async-stack-trace")
             .arg(&config.async_stack_trace)
-            .arg("--connector-rpc-endpoint")
-            .arg(&config.connector_rpc_endpoint)
             .arg("--parallelism")
             .arg(&config.parallelism.to_string())
             .arg("--total-memory-bytes")
