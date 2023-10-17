@@ -169,9 +169,6 @@ pub fn datum_to_json_object(
             json!(v)
         }
         (DataType::Decimal, ScalarRefImpl::Decimal(mut v)) => match custom_json_type {
-            CustomJsonType::None => {
-                json!(v.to_text())
-            }
             CustomJsonType::Doris(map) => {
                 if !matches!(v, Decimal::Normalized(_)) {
                     return Err(ArrayError::internal(
@@ -186,6 +183,9 @@ pub fn datum_to_json_object(
                         format!("rw Decimal's precision is large than doris max decimal len is {:?}, doris max is {:?}",v_string.len(),p)));
                 }
                 json!(v_string)
+            }
+            CustomJsonType::None => {
+                json!(v.to_text())
             }
         },
         (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => {
@@ -237,22 +237,6 @@ pub fn datum_to_json_object(
         }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
             match custom_json_type {
-                CustomJsonType::None => {
-                    let mut map = Map::with_capacity(st.len());
-                    for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
-                        st.iter()
-                            .map(|(name, dt)| Field::with_name(dt.clone(), name)),
-                    ) {
-                        let value = datum_to_json_object(
-                            &sub_field,
-                            sub_datum_ref,
-                            timestamp_handling_mode,
-                            custom_json_type,
-                        )?;
-                        map.insert(sub_field.name.clone(), value);
-                    }
-                    json!(map)
-                }
                 CustomJsonType::Doris(_) => {
                     // We need to ensure that the order of elements in the json matches the insertion order.
                     let mut map = IndexMap::with_capacity(st.len());
@@ -271,6 +255,22 @@ pub fn datum_to_json_object(
                     Value::String(serde_json::to_string(&map).map_err(|err| {
                         ArrayError::internal(format!("Json to string err{:?}", err))
                     })?)
+                }
+                CustomJsonType::None => {
+                    let mut map = Map::with_capacity(st.len());
+                    for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
+                        st.iter()
+                            .map(|(name, dt)| Field::with_name(dt.clone(), name)),
+                    ) {
+                        let value = datum_to_json_object(
+                            &sub_field,
+                            sub_datum_ref,
+                            timestamp_handling_mode,
+                            custom_json_type,
+                        )?;
+                        map.insert(sub_field.name.clone(), value);
+                    }
+                    json!(map)
                 }
             }
         }

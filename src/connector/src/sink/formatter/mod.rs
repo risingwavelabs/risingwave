@@ -123,7 +123,7 @@ impl SinkFormatterImpl {
                             key_encoder = key_encoder.with_kafka_connect(kafka_connect.clone());
                             val_encoder = val_encoder.with_kafka_connect(kafka_connect);
                         }
-                        "false" => (),
+                        "false" => {}
                         other => {
                             return Err(SinkError::Config(anyhow!(
                                 "schemas.enable is expected to be `true` or `false`, got {}",
