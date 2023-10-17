@@ -218,6 +218,15 @@ impl RewriteExprsRecursive for PlanRef {
 }
 
 impl PlanRef {
+    pub fn expect_stream_key(&self) -> &[usize] {
+        self.stream_key().unwrap_or_else(|| {
+            panic!(
+                "a stream key is expected but not exist, plan:\n{}",
+                self.explain_to_string()
+            )
+        })
+    }
+
     fn prune_col_inner(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
             // Check the share cache first. If cache exists, it means this is the second round of
@@ -435,8 +444,8 @@ impl GenericPlanRef for PlanRef {
         &self.plan_base().schema
     }
 
-    fn stream_key(&self) -> &[usize] {
-        &self.plan_base().stream_key
+    fn stream_key(&self) -> Option<&[usize]> {
+        self.plan_base().stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -514,8 +523,8 @@ impl dyn PlanNode {
         &self.plan_base().schema
     }
 
-    pub fn stream_key(&self) -> &[usize] {
-        &self.plan_base().stream_key
+    pub fn stream_key(&self) -> Option<&[usize]> {
+        self.plan_base().stream_key()
     }
 
     pub fn order(&self) -> &Order {
@@ -566,7 +575,12 @@ impl dyn PlanNode {
             identity: self.explain_myself_to_string(),
             node_body: node,
             operator_id: self.id().0 as _,
-            stream_key: self.stream_key().iter().map(|x| *x as u32).collect(),
+            stream_key: self
+                .stream_key()
+                .unwrap_or_default()
+                .iter()
+                .map(|x| *x as u32)
+                .collect(),
             fields: self.schema().to_prost(),
             append_only: self.append_only(),
         }

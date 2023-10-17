@@ -36,14 +36,12 @@ impl<S: StateStore, const WITH_TIES: bool> TopNExecutor<S, WITH_TIES> {
     pub fn new(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
-        executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
-        let info = input.info();
-
         Ok(TopNExecutorWrapper {
             input,
             ctx,
@@ -52,7 +50,6 @@ impl<S: StateStore, const WITH_TIES: bool> TopNExecutor<S, WITH_TIES> {
                 storage_key,
                 offset_and_limit,
                 order_by,
-                executor_id,
                 state_table,
             )?,
         })
@@ -67,22 +64,14 @@ impl<S: StateStore> TopNExecutor<S, true> {
     pub fn new_with_ties_for_test(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
-        executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
-        let info = input.info();
-
-        let mut inner = InnerTopNExecutor::new(
-            info,
-            storage_key,
-            offset_and_limit,
-            order_by,
-            executor_id,
-            state_table,
-        )?;
+        let mut inner =
+            InnerTopNExecutor::new(info, storage_key, offset_and_limit, order_by, state_table)?;
 
         inner.cache.high_capacity = 2;
 
@@ -115,29 +104,21 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutor<S, WITH_TIES> {
     /// into `CacheKey`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input_info: ExecutorInfo,
+        info: ExecutorInfo,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
-        executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
-        let ExecutorInfo {
-            pk_indices, schema, ..
-        } = input_info;
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
 
-        let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &[]);
+        let cache_key_serde = create_cache_key_serde(&storage_key, &info.schema, &order_by, &[]);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
-        let data_types = schema.data_types();
+        let data_types = info.schema.data_types();
 
         Ok(Self {
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: format!("TopNExecutor {:X}", executor_id),
-            },
+            info,
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             cache: TopNCache::new(num_offset, num_limit, data_types),
@@ -311,14 +292,20 @@ mod tests {
                 &pk_indices(),
             )
             .await;
+
+            let info = ExecutorInfo {
+                schema: source.schema().clone(),
+                pk_indices: source.pk_indices().to_vec(),
+                identity: "TopNExecutor 1".to_string(),
+            };
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
+                    info,
                     storage_key(),
                     (3, 1000),
                     order_by(),
-                    1,
                     state_table,
                 )
                 .unwrap(),
@@ -407,14 +394,19 @@ mod tests {
                 &pk_indices(),
             )
             .await;
+            let info = ExecutorInfo {
+                schema: source.schema().clone(),
+                pk_indices: source.pk_indices().to_vec(),
+                identity: "TopNExecutor 1".to_string(),
+            };
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
+                    info,
                     storage_key(),
                     (0, 4),
                     order_by(),
-                    1,
                     state_table,
                 )
                 .unwrap(),
@@ -515,14 +507,19 @@ mod tests {
                 &pk_indices(),
             )
             .await;
+            let info = ExecutorInfo {
+                schema: source.schema().clone(),
+                pk_indices: source.pk_indices().to_vec(),
+                identity: "TopNExecutor 1".to_string(),
+            };
             let top_n_executor = Box::new(
                 TopNExecutor::<_, true>::new(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
+                    info,
                     storage_key(),
                     (0, 4),
                     order_by(),
-                    1,
                     state_table,
                 )
                 .unwrap(),
@@ -622,14 +619,19 @@ mod tests {
                 &pk_indices(),
             )
             .await;
+            let info = ExecutorInfo {
+                schema: source.schema().clone(),
+                pk_indices: source.pk_indices().to_vec(),
+                identity: "TopNExecutor 1".to_string(),
+            };
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
+                    info,
                     storage_key(),
                     (3, 4),
                     order_by(),
-                    1,
                     state_table,
                 )
                 .unwrap(),
@@ -849,14 +851,19 @@ mod tests {
                 &pk_indices(),
             )
             .await;
+            let info = ExecutorInfo {
+                schema: source.schema().clone(),
+                pk_indices: source.pk_indices().to_vec(),
+                identity: "TopNExecutor 1".to_string(),
+            };
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
+                    info,
                     storage_key(),
                     (1, 3),
                     order_by(),
-                    1,
                     state_table,
                 )
                 .unwrap(),
@@ -927,14 +934,20 @@ mod tests {
                 state_store.clone(),
             )
             .await;
+            let source = create_source_new_before_recovery();
+            let info = ExecutorInfo {
+                schema: source.schema().clone(),
+                pk_indices: source.pk_indices().to_vec(),
+                identity: "TopNExecutor 1".to_string(),
+            };
             let top_n_executor = Box::new(
                 TopNExecutor::<_, false>::new(
-                    create_source_new_before_recovery() as Box<dyn Executor>,
+                    source as Box<dyn Executor>,
                     ActorContext::create(0),
+                    info,
                     storage_key(),
                     (1, 3),
                     order_by(),
-                    1,
                     state_table,
                 )
                 .unwrap(),
@@ -981,14 +994,20 @@ mod tests {
             .await;
 
             // recovery
+            let source = create_source_new_after_recovery();
+            let info = ExecutorInfo {
+                schema: source.schema().clone(),
+                pk_indices: source.pk_indices().to_vec(),
+                identity: "TopNExecutor 1".to_string(),
+            };
             let top_n_executor_after_recovery = Box::new(
                 TopNExecutor::<_, false>::new(
-                    create_source_new_after_recovery() as Box<dyn Executor>,
+                    source as Box<dyn Executor>,
                     ActorContext::create(0),
+                    info,
                     storage_key(),
                     (1, 3),
                     order_by(),
-                    1,
                     state_table,
                 )
                 .unwrap(),
@@ -1110,14 +1129,19 @@ mod tests {
                 &pk_indices(),
             )
             .await;
+            let info = ExecutorInfo {
+                schema: source.schema().clone(),
+                pk_indices: source.pk_indices().to_vec(),
+                identity: "TopNExecutor 1".to_string(),
+            };
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
+                    info,
                     storage_key(),
                     (0, 3),
                     order_by(),
-                    1,
                     state_table,
                 )
                 .unwrap(),
@@ -1260,14 +1284,20 @@ mod tests {
                 state_store.clone(),
             )
             .await;
+            let source = create_source_before_recovery();
+            let info = ExecutorInfo {
+                schema: source.schema().clone(),
+                pk_indices: source.pk_indices().to_vec(),
+                identity: "TopNExecutor 1".to_string(),
+            };
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
-                    create_source_before_recovery() as Box<dyn Executor>,
+                    source as Box<dyn Executor>,
                     ActorContext::create(0),
+                    info,
                     storage_key(),
                     (0, 3),
                     order_by(),
-                    1,
                     state_table,
                 )
                 .unwrap(),
@@ -1317,14 +1347,20 @@ mod tests {
             .await;
 
             // recovery
+            let source = create_source_after_recovery();
+            let info = ExecutorInfo {
+                schema: source.schema().clone(),
+                pk_indices: source.pk_indices().to_vec(),
+                identity: "TopNExecutor 1".to_string(),
+            };
             let top_n_executor_after_recovery = Box::new(
                 TopNExecutor::new_with_ties_for_test(
-                    create_source_after_recovery() as Box<dyn Executor>,
+                    source as Box<dyn Executor>,
                     ActorContext::create(0),
+                    info,
                     storage_key(),
                     (0, 3),
                     order_by(),
-                    1,
                     state_table,
                 )
                 .unwrap(),

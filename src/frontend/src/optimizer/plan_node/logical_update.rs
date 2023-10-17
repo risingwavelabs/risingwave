@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::vec;
-
-use risingwave_common::catalog::{Field, Schema, TableVersionId};
+use risingwave_common::catalog::TableVersionId;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 
 use super::utils::impl_distill_by_unit;
 use super::{
@@ -28,7 +25,6 @@ use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// [`LogicalUpdate`] iterates on input relation, set some columns, and inject update records into
@@ -43,14 +39,7 @@ pub struct LogicalUpdate {
 
 impl From<generic::Update<PlanRef>> for LogicalUpdate {
     fn from(core: generic::Update<PlanRef>) -> Self {
-        let ctx = core.input.ctx();
-        let schema = if core.returning {
-            core.input.schema().clone()
-        } else {
-            Schema::new(vec![Field::unnamed(DataType::Int64)])
-        };
-        let fd_set = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
+        let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 }
