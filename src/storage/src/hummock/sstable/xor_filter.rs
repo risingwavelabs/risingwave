@@ -480,6 +480,7 @@ mod tests {
             opts,
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
             None,
+            false,
         );
         let mut rng = rand::thread_rng();
         for i in 0..TEST_KEYS_COUNT {

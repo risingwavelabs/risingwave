@@ -196,7 +196,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             epoch_set: BTreeSet::default(),
             memory_limiter,
             vnode_bitmap_builder,
-            last_vnode: 0,
+            last_vnode: usize::MAX,
         }
     }
 
@@ -559,11 +559,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         };
 
-        let vnode_bitmap = if let Some(vnode_bitmap_builder) = self.vnode_bitmap_builder {
-            Some(vnode_bitmap_builder.finish().to_protobuf())
-        } else {
-            None
-        };
+        let vnode_bitmap = self
+            .vnode_bitmap_builder
+            .map(|vnode_bitmap_builder| vnode_bitmap_builder.finish().to_protobuf());
+
         let sst_info = SstableInfo {
             object_id: self.sstable_id,
             sst_id: self.sstable_id,
