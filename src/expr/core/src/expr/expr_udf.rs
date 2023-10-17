@@ -89,7 +89,8 @@ impl UdfExpression {
                     .expect("failed covert ArrayRef to arrow_array::ArrayRef")
             })
             .collect();
-        let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(vis.len()));
+        let opts =
+            arrow_array::RecordBatchOptions::default().with_row_count(Some(vis.count_ones()));
         let input = arrow_array::RecordBatch::try_new_with_options(
             self.arg_schema.clone(),
             compacted_columns,
