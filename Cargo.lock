@@ -7030,7 +7030,6 @@ dependencies = [
  "async-trait",
  "auto_enums",
  "auto_impl",
- "bincode 2.0.0-rc.3",
  "bitflags 2.4.0",
  "byteorder",
  "bytes",

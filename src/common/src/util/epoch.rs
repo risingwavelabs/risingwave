@@ -16,7 +16,6 @@ use std::cmp::Ordering;
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
-use bincode::{Decode, Encode};
 use parse_display::Display;
 
 use crate::types::{ScalarImpl, Timestamptz};
@@ -119,7 +118,7 @@ impl From<u64> for Epoch {
     }
 }
 
-#[derive(Debug, Encode, Decode, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EpochPair {
     pub curr: u64,
     pub prev: u64,
