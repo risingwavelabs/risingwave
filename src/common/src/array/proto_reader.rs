@@ -52,9 +52,7 @@ impl ArrayImpl {
             PbArrayType::Timestamp => read_timestamp_array(array, cardinality)?,
             PbArrayType::Timestamptz => read_timestamptz_array(array, cardinality)?,
             PbArrayType::Interval => read_interval_array(array, cardinality)?,
-            PbArrayType::Jsonb => {
-                read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
-            }
+            PbArrayType::Jsonb => JsonbArray::from_protobuf(array)?,
             PbArrayType::Struct => StructArray::from_protobuf(array)?,
             PbArrayType::List => ListArray::from_protobuf(array)?,
             PbArrayType::Unspecified => unreachable!(),

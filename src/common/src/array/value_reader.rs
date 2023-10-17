@@ -19,8 +19,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 
 use super::ArrayResult;
 use crate::array::{
-    ArrayBuilder, BytesArrayBuilder, JsonbArrayBuilder, PrimitiveArrayItemType, Serial,
-    Utf8ArrayBuilder,
+    ArrayBuilder, BytesArrayBuilder, PrimitiveArrayItemType, Serial, Utf8ArrayBuilder,
 };
 use crate::types::{Decimal, F32, F64};
 
@@ -86,18 +85,6 @@ pub struct BytesValueReader;
 impl VarSizedValueReader<BytesArrayBuilder> for BytesValueReader {
     fn read(buf: &[u8], builder: &mut BytesArrayBuilder) -> ArrayResult<()> {
         builder.append(Some(buf));
-        Ok(())
-    }
-}
-
-pub struct JsonbValueReader;
-
-impl VarSizedValueReader<JsonbArrayBuilder> for JsonbValueReader {
-    fn read(buf: &[u8], builder: &mut JsonbArrayBuilder) -> ArrayResult<()> {
-        let Some(v) = super::JsonbVal::value_deserialize(buf) else {
-            bail!("failed to read jsonb from bytes");
-        };
-        builder.append_move(v);
         Ok(())
     }
 }

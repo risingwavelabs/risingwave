@@ -42,6 +42,7 @@ ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 fs-err = "2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+jsonbb = { path = "../../../jsonbb" }
 hex = "0.4.3"
 http = "0.2"
 humantime = "2.1"
