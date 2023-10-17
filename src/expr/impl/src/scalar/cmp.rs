@@ -311,11 +311,12 @@ where
         .flatten()
         .map(
             |scalar| match <<T as Scalar>::ScalarRefType<'_>>::try_from(scalar) {
-                Ok(v) => v.to_owned_scalar(),
+                Ok(v) => v,
                 Err(_) => unreachable!("all input type should have been aligned in the frontend"),
             },
         )
         .max()
+        .map(|v| v.to_owned_scalar())
 }
 
 #[function("least(...) -> boolean")]
@@ -340,11 +341,12 @@ where
         .flatten()
         .map(
             |scalar| match <<T as Scalar>::ScalarRefType<'_>>::try_from(scalar) {
-                Ok(v) => v.to_owned_scalar(),
+                Ok(v) => v,
                 Err(_) => unreachable!("all input type should have been aligned in the frontend"),
             },
         )
         .min()
+        .map(|v| v.to_owned_scalar())
 }
 
 // optimized functions for bool arrays
