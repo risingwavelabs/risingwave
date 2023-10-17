@@ -12,7 +12,7 @@ normal = ["workspace-hack"]
 [dependencies]
 jni = "0.21.1"
 prost = { workspace = true }
-risingwave_common = { workspace = true }
+risingwave_common = { workspace = true, features = ["disable_initial_exec_tls"] }
 risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
