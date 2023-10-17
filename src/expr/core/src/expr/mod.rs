@@ -123,6 +123,9 @@ impl<E> NonStrictExpression<E>
 where
     E: Expression,
 {
+    /// Create a non-strict expression directly wrapping the given expression.
+    ///
+    /// Should only be used in tests as evaluation may panic.
     pub fn for_test(inner: E) -> NonStrictExpression
     where
         E: 'static,
@@ -130,8 +133,12 @@ where
         NonStrictExpression(inner.boxed())
     }
 
-    pub fn todo(inner: E) -> Self {
-        Self(inner)
+    /// Create a non-strict expression from the given expression, where only the evaluation of the
+    /// top-level expression is non-strict (which is subtly different from
+    /// [`crate::expr::build_non_strict_from_prost`]), and error will only be simply logged.
+    pub fn todo(inner: E) -> NonStrictExpression<impl Expression> {
+        let inner = wrapper::non_strict::NonStrict::new(inner, wrapper::LogReport);
+        NonStrictExpression(inner)
     }
 
     /// Get the return data type.
