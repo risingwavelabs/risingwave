@@ -354,12 +354,6 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
-        let mem_table_memory_size = RelabeledCounterVec::with_metric_level(
-            MetricLevel::Info,
-            mem_table_memory_size,
-            metric_level,
-        );
-
         let mem_table_item_count = register_int_gauge_vec_with_registry!(
             "state_store_mem_table_item_count",
             "Item counts in mem_table",
@@ -367,12 +361,6 @@ impl HummockStateStoreMetrics {
             registry
         )
         .unwrap();
-
-        let mem_table_item_count = RelabeledCounterVec::with_metric_level(
-            MetricLevel::Info,
-            mem_table_item_count,
-            metric_level,
-        );
 
         Self {
             bloom_filter_true_negative_counts,
