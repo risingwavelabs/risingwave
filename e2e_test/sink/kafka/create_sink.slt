@@ -104,7 +104,8 @@ create sink si_kafka_upsert_schema from t_kafka with (
     topic = 'test-rw-sink-upsert-schema',
     type = 'upsert',
     primary_key = 'id',
-    schema.enable = true,
+) format upsert encode json (
+    schema.enable = true
 );
 
 statement ok
