@@ -18,7 +18,7 @@ use risingwave_common::array::StreamChunk;
 use crate::sink::{Result, SinkError};
 
 mod append_only;
-mod debezium_json;
+pub mod debezium_json;
 mod upsert;
 
 pub use append_only::AppendOnlyFormatter;
@@ -27,6 +27,7 @@ use risingwave_common::catalog::Schema;
 pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
+use super::encoder::KafkaConnectParams;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 
 /// Transforms a `StreamChunk` into a sequence of key-value pairs according a specific format,
@@ -106,31 +107,21 @@ impl SinkFormatterImpl {
                 )))
             }
             SinkFormat::Upsert => {
-                let schema_enable = matches!(format_desc.options.get("schema.enable"), Some(s) if s.to_lowercase() == "true");
-                let key_encoder = if schema_enable {
-                    JsonEncoder::new_with_kafka(
-                        schema.clone(),
-                        Some(pk_indices),
-                        TimestampHandlingMode::Milli,
-                        format!("{}.{}", db_name, sink_from_name),
-                    )
-                } else {
-                    JsonEncoder::new(
-                        schema.clone(),
-                        Some(pk_indices),
-                        TimestampHandlingMode::Milli,
-                    )
-                };
-                let val_encoder = if schema_enable {
-                    JsonEncoder::new_with_kafka(
-                        schema,
-                        None,
-                        TimestampHandlingMode::Milli,
-                        format!("{}.{}", db_name, sink_from_name),
-                    )
-                } else {
-                    JsonEncoder::new(schema, None, TimestampHandlingMode::Milli)
-                };
+                let mut key_encoder = JsonEncoder::new(
+                    schema.clone(),
+                    Some(pk_indices),
+                    TimestampHandlingMode::Milli,
+                );
+                let mut val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+
+                if matches!(format_desc.options.get("schema.enable"), Some(s) if s.to_lowercase() == "true")
+                {
+                    let kafka_connect = KafkaConnectParams {
+                        schema_name: format!("{}.{}", db_name, sink_from_name),
+                    };
+                    key_encoder = key_encoder.with_kafka_connect(kafka_connect.clone());
+                    val_encoder = val_encoder.with_kafka_connect(kafka_connect);
+                }
 
                 // Initialize the upsert_stream
                 let formatter = UpsertFormatter::new(key_encoder, val_encoder);
