@@ -1102,6 +1102,11 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
                     DataType::Varchar.to_oid(),
                     DataType::Varchar.type_len(),
                 ),
+                PgFieldDescriptor::new(
+                    "Is Hidden".to_owned(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
             ]),
             _ => Ok(vec![PgFieldDescriptor::new(
                 "Name".to_owned(),
@@ -1157,6 +1162,11 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             ),
             PgFieldDescriptor::new(
                 "Type".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Is Hidden".to_owned(),
                 DataType::Varchar.to_oid(),
                 DataType::Varchar.type_len(),
             ),
