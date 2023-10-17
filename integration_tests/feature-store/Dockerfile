@@ -14,10 +14,10 @@ RUN apt install -y postgresql-client
 
 ADD ./server/model/requirements.txt $WORK_DIR/model-pipreqs.txt
 ADD ./generator/requirements.txt $WORK_DIR/generator-pipreqs.txt
-RUN pip3 install --upgrade pip
-RUN pip3 install -r $WORK_DIR/model-pipreqs.txt
-RUN pip3 install -r $WORK_DIR/generator-pipreqs.txt
-RUN pip3 install risingwave
+RUN pip3 install --upgrade pip --break-system-packages
+RUN pip3 install -r $WORK_DIR/model-pipreqs.txt --break-system-packages
+RUN pip3 install -r $WORK_DIR/generator-pipreqs.txt --break-system-packages
+RUN pip3 install risingwave --break-system-packages
 
 RUN apt install -y lsof curl openssl libssl-dev pkg-config build-essential
 RUN apt install -y cmake librdkafka-dev
