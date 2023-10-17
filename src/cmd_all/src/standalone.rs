@@ -194,7 +194,7 @@ mod test {
     fn test_parse_opt_args() {
         // Test parsing into standalone-level opts.
         let raw_opts = "
---compute-opts=--listen-addr 127.0.0.1:8000
+--compute-opts=--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10
 --meta-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001
 --frontend-opts=--config-path=src/config/original.toml
 --prometheus-listener-addr=127.0.0.1:1234
@@ -202,7 +202,7 @@ mod test {
 ";
         let actual = StandaloneOpts::parse_from(raw_opts.lines());
         let opts = StandaloneOpts {
-            compute_opts: Some("--listen-addr 127.0.0.1:8000".into()),
+            compute_opts: Some("--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10".into()),
             meta_opts: Some("--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001".into()),
             frontend_opts: Some("--config-path=src/config/original.toml".into()),
             compactor_opts: None,
