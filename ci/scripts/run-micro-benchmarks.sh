@@ -10,6 +10,11 @@ set -euo pipefail
 # Make sure the added benchmark has a unique name.
 BENCHMARKS="stream_hash_agg json_parser bench_block_iter bench_compactor bench_lru_cache bench_merge_iter"
 
+get_instance_type() {
+  TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"` \
+  && curl -H "X-aws-ec2-metadata-token: $TOKEN" -v http://169.254.169.254/latest/meta-data/
+}
+
 # cargo criterion --bench stream_hash_agg --message-format=json
 bench() {
   BENCHMARK_NAME=$1
@@ -34,6 +39,10 @@ bench() {
 }
 
 main() {
+  echo "--- Getting aws instance type"
+  get_instance_type > instance_type
+  buildkite-agent artifact upload "./instance_type"
+
   # We need cargo criterion to generate machine-readable benchmark results from
   # microbench.
   echo "--- Installing cargo criterion"
