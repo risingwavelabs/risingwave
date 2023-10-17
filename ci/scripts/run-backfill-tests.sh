@@ -171,12 +171,13 @@ test_background_ddl_cancel() {
 
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
 
-
   # Restart
   restart_cluster
 
   # Recover
   sleep 3
+
+  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
 
   cancel_stream_jobs
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
