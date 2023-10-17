@@ -19,8 +19,8 @@ use risingwave_pb::meta::meta_member_service_server::MetaMemberService;
 use risingwave_pb::meta::{MembersRequest, MembersResponse, MetaMember};
 use tonic::{Request, Response, Status};
 
-use crate::rpc::server::{AddressInfo, ElectionClientRef};
-
+use crate::AddressInfo;
+pub type ElectionClientRef = std::sync::Arc<dyn risingwave_meta::ElectionClient>;
 #[derive(Clone)]
 pub struct MetaMemberServiceImpl {
     election_client_or_self: Either<ElectionClientRef, AddressInfo>,

@@ -216,7 +216,6 @@ macro_rules! write_lock {
     };
 }
 pub(crate) use write_lock;
-
 macro_rules! start_measure_real_process_timer {
     ($hummock_mgr:expr) => {
         $hummock_mgr
@@ -253,7 +252,7 @@ pub enum CompactionResumeTrigger {
 }
 
 impl HummockManager {
-    pub(crate) async fn new(
+    pub async fn new(
         env: MetaSrvEnv,
         cluster_manager: ClusterManagerRef,
         fragment_manager: FragmentManagerRef,

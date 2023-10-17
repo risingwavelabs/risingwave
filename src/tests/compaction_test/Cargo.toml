@@ -27,6 +27,7 @@ risingwave_compactor = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { workspace = true }
 risingwave_meta = { workspace = true }
+risingwave_meta_node = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
