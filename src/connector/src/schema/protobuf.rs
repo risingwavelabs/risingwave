@@ -25,16 +25,23 @@ pub async fn fetch_descriptor(
     format_options: &BTreeMap<String, String>,
     aws_auth_props: Option<&AwsAuthProps>,
 ) -> Result<MessageDescriptor, SchemaFetchError> {
+    let row_schema_location = format_options
+        .get(SCHEMA_LOCATION_KEY)
+        .ok_or_else(|| SchemaFetchError(format!("{SCHEMA_LOCATION_KEY} required")))?
+        .clone();
+    let message_name = format_options
+        .get(MESSAGE_NAME_KEY)
+        .ok_or_else(|| SchemaFetchError(format!("{MESSAGE_NAME_KEY} required")))?
+        .clone();
+
+    if row_schema_location.starts_with("s3") && aws_auth_props.is_none() {
+        return Err(SchemaFetchError("s3 URL not supported yet".into()));
+    }
+
     let enc = EncodingProperties::Protobuf(ProtobufProperties {
         use_schema_registry: false,
-        row_schema_location: format_options
-            .get(SCHEMA_LOCATION_KEY)
-            .ok_or_else(|| SchemaFetchError(format!("{SCHEMA_LOCATION_KEY} required")))?
-            .clone(),
-        message_name: format_options
-            .get(MESSAGE_NAME_KEY)
-            .ok_or_else(|| SchemaFetchError(format!("{MESSAGE_NAME_KEY} required")))?
-            .clone(),
+        row_schema_location,
+        message_name,
         aws_auth_props: aws_auth_props.cloned(),
         // name_strategy, topic, key_message_name, enable_upsert, client_config
         ..Default::default()

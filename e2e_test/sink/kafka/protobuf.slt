@@ -65,3 +65,33 @@ select
 ----
 t Rising \x6130   3.5 4.25 22 23 24  0 26 27 (1,)    {4,0,4} (1136239445,0) 42
 f Wave   \x5a4446 1.5 0    11 12 13 14 15 16 (4,foo) {}               (0,0)  0
+
+statement error failed to read file
+create sink sink_err from into_kafka with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-append-only-protobuf',
+  properties.bootstrap.server = '127.0.0.1:29092')
+format plain encode protobuf (
+  force_append_only = true,
+  schema.location = 'file:///risingwave/proto-recursiv',
+  message = 'recursive.AllTypes');
+
+statement error encode extra_column error: field not in proto
+create sink sink_err as select 1 as extra_column with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-append-only-protobuf',
+  properties.bootstrap.server = '127.0.0.1:29092')
+format plain encode protobuf (
+  force_append_only = true,
+  schema.location = 'file:///risingwave/proto-recursive',
+  message = 'recursive.AllTypes');
+
+statement error s3 URL not supported yet
+create sink sink_err from into_kafka with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-append-only-protobuf',
+  properties.bootstrap.server = '127.0.0.1:29092')
+format plain encode protobuf (
+  force_append_only = true,
+  schema.location = 's3:///risingwave/proto-recursive',
+  message = 'recursive.AllTypes');

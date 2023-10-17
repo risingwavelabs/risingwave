@@ -79,6 +79,15 @@ impl Sink for KinesisSink {
                 "kinesis sink requires partition key (please define in `primary_key` field)",
             )));
         }
+        // Check for formatter constructor error, before it is too late for error reporting.
+        SinkFormatterImpl::new(
+            &self.format_desc,
+            self.schema.clone(),
+            self.pk_indices.clone(),
+            self.db_name.clone(),
+            self.sink_from_name.clone(),
+        )
+        .await?;
 
         // check reachability
         let client = self.config.common.build_client().await?;
