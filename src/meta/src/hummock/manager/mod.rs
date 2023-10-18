@@ -253,7 +253,7 @@ pub enum CompactionResumeTrigger {
 }
 
 impl HummockManager {
-    pub(crate) async fn new(
+    pub async fn new(
         env: MetaSrvEnv,
         cluster_manager: ClusterManagerRef,
         fragment_manager: FragmentManagerRef,

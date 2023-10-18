@@ -17,7 +17,6 @@ normal = ["workspace-hack"]
 anyhow = "1"
 assert_matches = "1"
 async-recursion = "1"
-async-stream = "0.3.5"
 async-trait = "0.1"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -53,7 +52,6 @@ tokio-metrics = "0.3.0"
 tokio-stream = "0.1"
 tonic = { workspace = true }
 tracing = "0.1"
-uuid = "1"
 
 [target.'cfg(enable_task_local_alloc)'.dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }

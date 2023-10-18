@@ -1,12 +1,11 @@
 [package]
-name = "risingwave_compaction_test"
+name = "risingwave_meta_node"
 version = { workspace = true }
 edition = { workspace = true }
 homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack"]
@@ -16,25 +15,29 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-async-trait = "0.1"
-bytes = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
+either = "1"
+etcd-client = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-prometheus = { version = "0.13" }
-rand = "0.8"
+itertools = "0.11"
+model_migration = { path = "../src/model_v2/migration" }
+prometheus-http-query = "0.7"
+regex = "1"
 risingwave_common = { workspace = true }
-risingwave_compactor = { workspace = true }
-risingwave_hummock_sdk = { workspace = true }
-risingwave_hummock_test = { workspace = true }
+risingwave_common_heap_profiling = { workspace = true }
+risingwave_common_service = { workspace = true }
 risingwave_meta = { workspace = true }
-risingwave_meta_node = { workspace = true }
-risingwave_object_store = { workspace = true }
+risingwave_meta_service = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-risingwave_rt = { workspace = true }
-risingwave_storage = { workspace = true, features = ["test"] }
+sea-orm = { version = "0.12.0", features = [
+    "sqlx-mysql",
+    "sqlx-postgres",
+    "sqlx-sqlite",
+    "runtime-tokio-native-tls",
+    "macros",
+] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "fs",
     "rt",
     "rt-multi-thread",
     "sync",
@@ -42,18 +45,13 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
+tonic = { workspace = true }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
 
-[[bin]]
-name = "compaction-test"
-path = "src/bin/compaction.rs"
-
-[[bin]]
-name = "delete-range-test"
-path = "src/bin/delete_range.rs"
+[dev-dependencies]
 
 [lints]
 workspace = true
