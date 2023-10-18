@@ -20,8 +20,8 @@ use risingwave_expr::define_context;
 use crate::session::AuthContext;
 
 define_context! {
-    pub(in crate::expr::function_impl) CATALOG_READER: crate::catalog::CatalogReader,
-    pub(in crate::expr::function_impl) AUTH_CONTEXT: Arc<AuthContext>,
-    pub(in crate::expr::function_impl) DB_NAME: String,
-    pub(in crate::expr::function_impl) SEARCH_PATH: SearchPath,
+    pub(super) CATALOG_READER: crate::catalog::CatalogReader,
+    pub(super) AUTH_CONTEXT: Arc<AuthContext>,
+    pub(super) DB_NAME: String,
+    pub(super) SEARCH_PATH: SearchPath,
 }

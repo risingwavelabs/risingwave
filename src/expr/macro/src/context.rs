@@ -18,6 +18,8 @@ use quote::{quote, quote_spanned, ToTokens};
 use syn::parse::{Parse, ParseStream};
 use syn::{Error, FnArg, Ident, ItemFn, Result, Token, Type, Visibility};
 
+use crate::utils::extend_vis_with_super;
+
 /// See [`super::define_context!`].
 #[derive(Debug, Clone)]
 pub(super) struct DefineContextField {
@@ -55,6 +57,9 @@ impl Parse for DefineContextAttr {
 impl DefineContextField {
     pub(super) fn gen(self) -> Result<TokenStream> {
         let Self { vis, name, ty } = self;
+
+        // We create a sub mod, so we need to extend the vis of getter.
+        let vis: Visibility = extend_vis_with_super(vis);
 
         {
             let name_s = name.to_string();
