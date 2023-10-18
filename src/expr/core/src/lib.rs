@@ -33,6 +33,6 @@ pub mod sig;
 pub mod table_function;
 pub mod window_function;
 
-pub use error::{ExprError, Result};
+pub use error::{ContextUnavailable, ExprError, Result};
 pub use risingwave_common::{bail, ensure};
 pub use risingwave_expr_macro::*;

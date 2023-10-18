@@ -6249,13 +6249,13 @@ dependencies = [
 
 [[package]]
 name = "prometheus-http-query"
-version = "0.6.6"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7970fd6e91b5cb87e9a093657572a896d133879ced7752d2c7635beae29eaba0"
+checksum = "8e7c6186f0b66203811641c88ca4e5817182caa7553868359bafa5b17d97f37f"
 dependencies = [
+ "mime",
  "reqwest",
  "serde",
- "serde_json",
  "time",
  "url",
 ]
@@ -6958,7 +6958,7 @@ dependencies = [
  "risingwave_storage",
  "serde",
  "tokio-stream",
- "toml 0.7.8",
+ "toml 0.8.2",
  "tracing",
  "tracing-subscriber",
  "workspace-hack",
@@ -7098,9 +7098,8 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror",
- "tikv-jemalloc-ctl",
  "tinyvec",
- "toml 0.7.8",
+ "toml 0.8.2",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -7110,6 +7109,19 @@ dependencies = [
  "url",
  "uuid",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_common_heap_profiling"
+version = "1.3.0-alpha"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "madsim-tokio",
+ "parking_lot 0.12.1",
+ "risingwave_common",
+ "tikv-jemalloc-ctl",
+ "tracing",
 ]
 
 [[package]]
@@ -7182,6 +7194,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "prometheus",
  "risingwave_common",
+ "risingwave_common_heap_profiling",
  "risingwave_common_service",
  "risingwave_object_store",
  "risingwave_pb",
@@ -7215,6 +7228,7 @@ dependencies = [
  "rand",
  "risingwave_batch",
  "risingwave_common",
+ "risingwave_common_heap_profiling",
  "risingwave_common_service",
  "risingwave_connector",
  "risingwave_hummock_sdk",
@@ -7667,6 +7681,7 @@ dependencies = [
  "reqwest",
  "risingwave_backup",
  "risingwave_common",
+ "risingwave_common_heap_profiling",
  "risingwave_common_service",
  "risingwave_connector",
  "risingwave_hummock_sdk",
@@ -7972,7 +7987,7 @@ dependencies = [
  "serde_with 3.3.0",
  "tokio-postgres",
  "tokio-stream",
- "toml 0.7.8",
+ "toml 0.8.2",
  "tracing",
  "workspace-hack",
 ]
@@ -9001,9 +9016,9 @@ dependencies = [
 
 [[package]]
 name = "simd-json"
-version = "0.11.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "474b451aaac1828ed12f6454a80fe58b940ae2998d10389d41533940a6f641bf"
+checksum = "f0f07a84c7456b901b8dd2c1d44caca8b0fd2c2616206ee5acc9d9da61e8d9ec"
 dependencies = [
  "getrandom",
  "halfbrown",
@@ -11037,9 +11052,9 @@ checksum = "4d25c75bf9ea12c4040a97f829154768bbbce366287e2dc044af160cd79a13fd"
 
 [[package]]
 name = "xorf"
-version = "0.8.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57901b00e3f8e14f4d20b8955bf8087ecb545cfe2ed8741c2a2dbc89847a1a29"
+checksum = "7d36478bcf71152a2f9f6cf9bc48273333f32780c769ef90e13d464ab778db5f"
 dependencies = [
  "libm",
  "rand",
