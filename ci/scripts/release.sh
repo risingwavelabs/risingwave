@@ -64,6 +64,10 @@ elif [[ -n "${BINARY_NAME+x}" ]]; then
     aws s3 cp risingwave-${BINARY_NAME}-x86_64-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
 fi
 
+echo "--- Build connector node"
+cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust && cd ..
+mv ${REPO_ROOT}/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+
 if [[ -n "${BUILDKITE_TAG}" ]]; then
   echo "--- Install gh cli"
   yum install -y dnf
@@ -87,8 +91,6 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
 
   echo "--- Release build and upload risingwave connector node jar asset"
-  cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust
-  cd connector-node/assembly/target && mv risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
   gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 fi
 
