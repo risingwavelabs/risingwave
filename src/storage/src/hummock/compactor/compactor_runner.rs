@@ -475,8 +475,8 @@ pub async fn compact(
             task_progress_guard.progress.clone(),
         );
         match runner.run().await {
-            Ok(ssts) => {
-                output_ssts.push((0, ssts, CompactionStatistics::default()));
+            Ok((ssts, statistics)) => {
+                output_ssts.push((0, ssts, statistics));
             }
             Err(e) => {
                 task_status = TaskStatus::ExecuteFailed;

@@ -1454,13 +1454,8 @@ pub(crate) mod tests {
             .await
             .unwrap();
         let ret = ret1.into_iter().map(|sst| sst.sst_info).collect_vec();
-        let fast_ret = fast_compact_runner
-            .run()
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|sst| sst.sst_info)
-            .collect_vec();
+        let (ssts, _) = fast_compact_runner.run().await.unwrap();
+        let fast_ret = ssts.into_iter().map(|sst| sst.sst_info).collect_vec();
         println!("ssts: {} vs {}", fast_ret.len(), ret.len());
         let mut fast_tables = Vec::with_capacity(fast_ret.len());
         let mut normal_tables = Vec::with_capacity(ret.len());
