@@ -108,6 +108,10 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
 pub type BoxedExpression = Box<dyn Expression>;
 
 /// Extension trait for boxing expressions.
+///
+/// This is not directly made into [`Expression`] trait because...
+/// - an expression does not have to be `'static`,
+/// - and for the ease of `auto_impl`.
 #[easy_ext::ext(ExpressionBoxExt)]
 impl<E: Expression + 'static> E {
     /// Wrap the expression in a Box.
@@ -116,6 +120,19 @@ impl<E: Expression + 'static> E {
     }
 }
 
+/// An type-safe wrapper that indicates the inner expression can be evaluated in a non-strict
+/// manner, i.e., developers can directly call `eval_infallible` and `eval_row_infallible` without
+/// checking the result.
+///
+/// This is usually created by non-strict build functions like [`crate::expr::build_non_strict_from_prost`]
+/// and [`crate::expr::build_func_non_strict`]. It can also be created directly by
+/// [`NonStrictExpression::new_topmost`], where only the evaluation of the topmost level expression
+/// node is non-strict and should be treated as a TODO.
+///
+/// Compared to [`crate::expr::wrapper::non_strict::NonStrict`], this is more like an indicator
+/// applied on the root of an expression tree, while the latter is a wrapper that can be applied on
+/// each node of the tree and actually changes the behavior. As a result, [`NonStrictExpression`]
+/// does not implement [`Expression`] trait and instead deals directly with developers.
 #[derive(Debug)]
 pub struct NonStrictExpression<E = BoxedExpression>(E);
 
