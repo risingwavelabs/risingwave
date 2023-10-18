@@ -594,6 +594,14 @@ impl HummockManagerService for HummockServiceImpl {
         );
         Ok(Response::new(ListHummockMetaConfigResponse { configs }))
     }
+
+    async fn rise_ctl_rebuild_table_stats(
+        &self,
+        _request: Request<RiseCtlRebuildTableStatsRequest>,
+    ) -> Result<Response<RiseCtlRebuildTableStatsResponse>, Status> {
+        self.hummock_manager.rebuild_table_stats().await?;
+        Ok(Response::new(RiseCtlRebuildTableStatsResponse {}))
+    }
 }
 
 #[cfg(test)]

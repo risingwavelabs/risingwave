@@ -246,6 +246,8 @@ enum HummockCommands {
     },
     /// Validate the current HummockVersion.
     ValidateVersion,
+    /// Rebuild table stats
+    RebuildTableStats,
 }
 
 #[derive(Subcommand)]
@@ -607,6 +609,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Hummock(HummockCommands::ValidateVersion) => {
             cmd_impl::hummock::validate_version(context).await?;
+        }
+        Commands::Hummock(HummockCommands::RebuildTableStats) => {
+            cmd_impl::hummock::rebuild_table_stats(context).await?;
         }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?
