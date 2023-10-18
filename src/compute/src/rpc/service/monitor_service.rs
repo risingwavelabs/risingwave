@@ -244,7 +244,7 @@ pub mod grpc_middleware {
     use tower::{Layer, Service};
 
     /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
-    pub type AwaitTreeRegistryRef = Arc<Mutex<await_tree::Registry<u64>>>;
+    pub type AwaitTreeRegistryRef = Arc<Mutex<await_tree::Registry<String>>>;
 
     #[derive(Clone)]
     pub struct AwaitTreeMiddlewareLayer {
@@ -308,12 +308,14 @@ pub mod grpc_middleware {
             let mut inner = std::mem::replace(&mut self.inner, clone);
 
             let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+            let key = if let Some(authority) = req.uri().authority() {
+                format!("{authority} - {id}")
+            } else {
+                format!("?? - {id}")
+            };
 
             Either::Right(async move {
-                let root = registry
-                    .lock()
-                    .await
-                    .register(id, req.uri().to_string());
+                let root = registry.lock().await.register(key, req.uri().to_string());
 
                 root.instrument(inner.call(req)).await
             })
