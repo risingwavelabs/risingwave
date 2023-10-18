@@ -110,7 +110,7 @@ impl RowEncoder for JsonEncoder {
         Ok(if let Some(param) = &self.kafka_connect {
             json_converter_with_schema(
                 Value::Object(mappings),
-                Some(param.schema_name.to_owned()),
+                param.schema_name.to_owned(),
                 col_indices.into_iter().map(|i| &self.schema[i]),
             )
         } else {
@@ -286,7 +286,7 @@ pub fn datum_to_json_object(
 
 fn json_converter_with_schema<'a>(
     object: Value,
-    name: Option<String>,
+    name: String,
     fields: impl Iterator<Item = &'a Field>,
 ) -> Map<String, Value> {
     let mut mapping = Map::with_capacity(2);
