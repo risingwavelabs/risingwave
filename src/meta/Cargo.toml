@@ -99,8 +99,6 @@ assert_matches = "1"
 maplit = "1.0.2"
 rand = "0.8"
 risingwave_test_runner = { workspace = true }
-static_assertions = "1"
-tempfile = "3"
 
 [features]
 test = []

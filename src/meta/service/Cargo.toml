@@ -45,17 +45,9 @@ tonic = { workspace = true }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
-axum = "0.6"
-tower-http = { version = "0.4", features = ["add-extension", "cors", "fs"] }
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
-assert_matches = "1"
-maplit = "1.0.2"
-rand = "0.8"
-risingwave_test_runner = { workspace = true }
-static_assertions = "1"
-tempfile = "3"
 
 [lints]
 workspace = true
