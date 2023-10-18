@@ -25,7 +25,7 @@ fn merge(a: &mut StackTraceResponse, b: StackTraceResponse) {
     a.compaction_task_traces.extend(b.compaction_task_traces);
 }
 
-pub async fn trace(context: &CtlContext) -> anyhow::Result<()> {
+pub async fn dump(context: &CtlContext) -> anyhow::Result<()> {
     let mut all = Default::default();
 
     let meta_client = context.meta_client().await?;
