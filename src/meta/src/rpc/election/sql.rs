@@ -17,7 +17,8 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use sea_orm::{
-    ConnectionTrait, DatabaseBackend, FromQueryResult, Statement, TransactionTrait, Value,
+    ConnectionTrait, DatabaseBackend, DatabaseConnection, DbBackend, FromQueryResult, Statement,
+    TransactionTrait, Value,
 };
 use sqlx::{MySql, MySqlPool, PgPool, Postgres, Sqlite, SqlitePool};
 use tokio::sync::watch;
@@ -91,6 +92,12 @@ pub struct PostgresDriver {
 
 pub struct SqliteDriver {
     pub(crate) conn: sea_orm::DatabaseConnection,
+}
+
+impl SqliteDriver {
+    pub fn from_conn(conn: DatabaseConnection) -> Arc<Self> {
+        Arc::new(Self { conn })
+    }
 }
 
 #[async_trait::async_trait]

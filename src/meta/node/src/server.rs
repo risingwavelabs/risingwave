@@ -129,12 +129,12 @@ pub async fn rpc_serve(
     };
 
     let mut election_client = if let Some(sql_store) = &meta_store_sql {
-        let election_client: ElectionClientRef = match sql_store.conn.get_database_backend() {
+        let id = address_info.advertise_addr.clone();
+        let conn = sql_store.conn.clone();
+        let election_client: ElectionClientRef = match conn.get_database_backend() {
             DbBackend::Sqlite => Arc::new(SqlBackendElectionClient::new(
-                address_info.advertise_addr.clone(),
-                Arc::new(SqliteDriver {
-                    conn: sql_store.conn.clone(),
-                }),
+                id,
+                SqliteDriver::from_conn(conn),
             )),
             _ => {
                 todo!()
