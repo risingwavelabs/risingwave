@@ -293,7 +293,11 @@ fn json_converter_with_schema<'a>(
         "schema".to_string(),
         json!({
             "type": "struct",
-            "fields": fields.map(field_as_json_schema).collect_vec(),
+            "fields": fields.map(|field| {
+                let mut mapping = type_as_json_schema(&field.data_type);
+                mapping.insert("field".to_string(), json!(field.name));
+                mapping
+            }).collect_vec(),
             "optional": "false",
             "name": name,
         }),
