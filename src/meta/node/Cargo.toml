@@ -49,7 +49,6 @@ regex = "1"
 reqwest = "0.11"
 risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
-
 risingwave_common_heap_profiling = { workspace = true }
 risingwave_common_service = { workspace = true }
 risingwave_connector = { workspace = true }
