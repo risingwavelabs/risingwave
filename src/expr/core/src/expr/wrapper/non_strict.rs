@@ -23,7 +23,7 @@ use crate::expr::{Expression, ValueImpl};
 use crate::ExprError;
 
 /// Report an error during evaluation.
-#[auto_impl(Arc)]
+#[auto_impl(&, Arc)]
 pub trait EvalErrorReport: Clone + Send + Sync {
     /// Perform the error reporting.
     ///

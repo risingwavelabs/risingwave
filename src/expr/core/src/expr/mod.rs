@@ -134,11 +134,11 @@ where
     }
 
     /// Create a non-strict expression from the given expression, where only the evaluation of the
-    /// top-level expression is non-strict (which is subtly different from
-    /// [`crate::expr::build_non_strict_from_prost`]).
+    /// topmost level expression node is non-strict (which is subtly different from
+    /// [`crate::expr::build_non_strict_from_prost`] where every node is non-strict).
     ///
-    /// This should be used as a "TODO".
-    pub fn todo(
+    /// This should be used as a TODO.
+    pub fn new_topmost(
         inner: E,
         error_report: impl EvalErrorReport,
     ) -> NonStrictExpression<impl Expression> {
