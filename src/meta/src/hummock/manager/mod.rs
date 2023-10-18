@@ -353,7 +353,12 @@ impl HummockManager {
             if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
                 && !env.opts.do_not_config_object_storage_lifecycle
             {
-                s3.inner().configure_bucket_lifecycle().await;
+                let is_bucket_expiration_configured = s3.inner().configure_bucket_lifecycle().await;
+                if is_bucket_expiration_configured{
+                    return Err(ObjectError::internal("Cluster cannot start with object expiration configured for bucket because RisingWave data will be lost when object expiration kicks in.
+                    Please disable object expiration and restart the cluster.")
+                    .into());
+                }
             }
         }
         let checkpoint_path = version_checkpoint_path(state_store_dir);
