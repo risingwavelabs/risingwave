@@ -187,9 +187,10 @@ impl Task for MetaNodeService {
         }
 
         if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
+            let prefix_bin = env::var("PREFIX_BIN")?;
             cmd.env(
                 "CONNECTOR_LIBS_PATH",
-                ".risingwave/bin/connector-node/libs/",
+                Path::new(&prefix_bin).join("connector-node/libs/"),
             );
         }
 
