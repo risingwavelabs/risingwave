@@ -94,11 +94,6 @@ impl StructType {
         self.0.field_types.is_empty()
     }
 
-    /// Returns `true` if the struct field is unnamed.
-    pub fn is_unnamed(&self) -> bool {
-        self.0.field_names.is_empty()
-    }
-
     /// Gets an iterator over the names of the fields.
     ///
     /// If the struct field is unnamed, the iterator returns **no names**.
