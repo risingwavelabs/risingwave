@@ -54,7 +54,6 @@ pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 
 use crate::manager::MetaOpts;
 
-
 #[derive(Debug)]
 pub enum MetaStoreBackend {
     Etcd {
