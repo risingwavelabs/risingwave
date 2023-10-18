@@ -7,13 +7,19 @@ create materialized view mv3 as select sum(v1) as sum_v1 from t3;
 statement ok
 create view v3 as select sum(v2) as sum_v2 from t3;
 
-query TT
+statement ok
+comment on column t3.v2 is 'column desc';
+
+statement ok
+comment on column t3._row_id is '_row_id desc';
+
+query TTT
 describe t3;
 ----
-v1 integer
-v2 integer
-v3 integer
-primary key _row_id
+v1 integer NULL
+v2 integer column desc
+v3 integer NULL
+primary key _row_id _row_id desc
 
 query TT
 show columns from t3;
@@ -30,14 +36,14 @@ show indexes from t3;
 ----
 idx1 t3 v1 ASC, v2 ASC v3 v1
 
-query TT
+query TTT
 describe t3;
 ----
-v1 integer
-v2 integer
-v3 integer
-primary key _row_id
-idx1 index(v1 ASC, v2 ASC) include(v3) distributed by(v1)
+v1 integer NULL
+v2 integer column desc
+v3 integer NULL
+primary key _row_id _row_id desc
+idx1 index(v1 ASC, v2 ASC) include(v3) distributed by(v1) NULL
 
 query TT
 show create index idx1;

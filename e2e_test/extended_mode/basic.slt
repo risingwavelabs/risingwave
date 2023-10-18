@@ -39,13 +39,13 @@ values(round(42.4382));
 statement ok
 create table t3 (v1 int, v2 int, v3 int);
 
-query TT
+query TTT
 describe t3;
 ----
-v1 integer
-v2 integer
-v3 integer
-primary key _row_id
+v1 integer NULL
+v2 integer NULL
+v3 integer NULL
+primary key _row_id NULL
 
 query TT
 show columns from t3;
