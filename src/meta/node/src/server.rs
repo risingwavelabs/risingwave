@@ -63,8 +63,8 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
 use sea_orm::{
-    DatabaseConnection, SqlxMySqlPoolConnection, SqlxPostgresPoolConnection,
-    SqlxSqlitePoolConnection,
+    ConnectionTrait, DatabaseConnection, DbBackend, SqlxMySqlPoolConnection,
+    SqlxPostgresPoolConnection, SqlxSqlitePoolConnection,
 };
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
@@ -83,7 +83,9 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election::etcd::EtcdElectionClient;
-use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
+use crate::rpc::election::sql::{
+    MySqlDriver, PostgresDriver, SqlBackendElectionClient, SqliteDriver,
+};
 use crate::rpc::election::ElectionClient;
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
@@ -126,29 +128,23 @@ pub async fn rpc_serve(
         None => None,
     };
 
-    if let Some(x) = &meta_store_sql {
-        let election_client: ElectionClientRef = match &x.conn {
-            DatabaseConnection::SqlxMySqlPoolConnection(SqlxMySqlPoolConnection {
-                pool, ..
-            }) => Arc::new(SqlBackendElectionClient::new(
+    let mut election_client = if let Some(sql_store) = &meta_store_sql {
+        let election_client: ElectionClientRef = match sql_store.conn.get_database_backend() {
+            DbBackend::Sqlite => Arc::new(SqlBackendElectionClient::new(
                 address_info.advertise_addr.clone(),
-                Arc::new(MySqlDriver { pool: pool.clone() }),
+                Arc::new(SqliteDriver {
+                    conn: sql_store.conn.clone(),
+                }),
             )),
-            DatabaseConnection::SqlxPostgresPoolConnection(SqlxPostgresPoolConnection {
-                pool,
-                ..
-            }) => Arc::new(SqlBackendElectionClient::new(
-                address_info.advertise_addr.clone(),
-                Arc::new(PostgresDriver { pool: pool.clone() }),
-            )),
-            DatabaseConnection::SqlxSqlitePoolConnection(_) => {
-                todo!()
-            }
             _ => {
                 todo!()
             }
         };
-    }
+
+        Some(election_client)
+    } else {
+        None
+    };
 
     match meta_store_backend {
         MetaStoreBackend::Etcd {
@@ -167,25 +163,27 @@ pub async fn rpc_serve(
                     .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = EtcdMetaStore::new(client).into_ref();
 
-            // `with_keep_alive` option will break the long connection in election client.
-            let mut election_options = ConnectOptions::default();
-            if let Some((username, password)) = &credentials {
-                election_options = election_options.with_user(username, password)
-            }
+            if election_client.is_none() {
+                // `with_keep_alive` option will break the long connection in election client.
+                let mut election_options = ConnectOptions::default();
+                if let Some((username, password)) = &credentials {
+                    election_options = election_options.with_user(username, password)
+                }
 
-            let election_client = Arc::new(
-                EtcdElectionClient::new(
-                    endpoints,
-                    Some(election_options),
-                    auth_enabled,
-                    address_info.advertise_addr.clone(),
-                )
-                .await?,
-            );
+                election_client = Some(Arc::new(
+                    EtcdElectionClient::new(
+                        endpoints,
+                        Some(election_options),
+                        auth_enabled,
+                        address_info.advertise_addr.clone(),
+                    )
+                    .await?,
+                ));
+            }
 
             rpc_serve_with_store(
                 meta_store,
-                Some(election_client),
+                election_client,
                 meta_store_sql,
                 address_info,
                 max_cluster_heartbeat_interval,
