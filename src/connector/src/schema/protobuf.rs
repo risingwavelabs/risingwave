@@ -46,6 +46,10 @@ pub async fn fetch_descriptor(
         // name_strategy, topic, key_message_name, enable_upsert, client_config
         ..Default::default()
     });
+    // Ideally, we should extract the schema loading logic from source parser to this place,
+    // and call this in both source and sink.
+    // But right now this function calls into source parser for its schema loading functionality.
+    // This reversed dependency will be fixed when we support schema registry.
     let conf = ProtobufParserConfig::new(enc)
         .await
         .map_err(|e| SchemaFetchError(e.to_string()))?;
