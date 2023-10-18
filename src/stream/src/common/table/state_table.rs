@@ -899,10 +899,7 @@ where
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        assert!(self.epoch() >= new_epoch.prev);
-        if self.epoch() >= new_epoch.curr {
-            panic!("Fail to commit, the epoch gap runs out");
-        }
+        assert_eq!(self.epoch(), new_epoch.prev);
         trace!(
             table_id = %self.table_id,
             epoch = ?self.epoch(),

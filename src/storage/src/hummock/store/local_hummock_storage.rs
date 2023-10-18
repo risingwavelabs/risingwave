@@ -50,7 +50,7 @@ use crate::store::*;
 use crate::StateStoreIter;
 
 const AVAILABLE: u64 = 256;
-const MEM_TABLE_SPILL_THRESHOLD: usize = 64 * 1024 * 1024;
+const MEM_TABLE_SPILL_THRESHOLD: usize = 64 << 20;
 
 /// `LocalHummockStorage` is a handle for a state table shard to access data from and write data to
 /// the hummock state backend. It is created via `HummockStorage::new_local`.
@@ -351,7 +351,8 @@ impl LocalStateStore for LocalHummockStorage {
     async fn try_flush(&mut self) -> StorageResult<()> {
         if self.mem_table.kv_size.size() > MEM_TABLE_SPILL_THRESHOLD {
             tracing::info!(
-                "The size of mem table exceeds 64 Mb and spill occurs. table_id {}",
+                "The size of mem table exceeds {} Mb and spill occurs. table_id {}",
+                MEM_TABLE_SPILL_THRESHOLD >> 20,
                 self.table_id.table_id()
             );
 
