@@ -26,7 +26,6 @@ use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
-use crate::catalog::table_catalog::CreateType;
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -155,14 +154,6 @@ impl StreamTableScan {
         let properties = self.ctx().with_options().internal_table_subset();
         let mut catalog_builder = TableCatalogBuilder::new(properties);
         let upstream_schema = &self.logical.table_desc.columns;
-
-        let run_in_background = self.base.ctx().session_ctx().config().get_background_ddl();
-        let create_type = if run_in_background {
-            CreateType::Background
-        } else {
-            CreateType::Foreground
-        };
-        catalog_builder.set_create_type(create_type);
 
         // We use vnode as primary key in state table.
         // If `Distribution::Single`, vnode will just be `VirtualNode::default()`.

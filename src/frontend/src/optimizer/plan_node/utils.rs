@@ -40,7 +40,6 @@ pub struct TableCatalogBuilder {
     read_prefix_len_hint: usize,
     watermark_columns: Option<FixedBitSet>,
     dist_key_in_pk: Option<Vec<usize>>,
-    create_type: Option<CreateType>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -137,10 +136,6 @@ impl TableCatalogBuilder {
         self.column_names.insert(column_desc.name.clone(), 0);
     }
 
-    pub(crate) fn set_create_type(&mut self, create_type: CreateType) {
-        self.create_type = Some(create_type)
-    }
-
     /// Consume builder and create `TableCatalog` (for proto). The `read_prefix_len_hint` is the
     /// anticipated read prefix pattern (number of fields) for the table, which can be utilized for
     /// implementing the table's bloom filter or other storage optimization techniques.
@@ -182,7 +177,9 @@ impl TableCatalogBuilder {
             created_at_epoch: None,
             initialized_at_epoch: None,
             cleaned_by_watermark: false,
-            create_type: self.create_type.unwrap_or(CreateType::Foreground),
+            // NOTE(kwannoel): This may not match the create type of the materialized table.
+            // It should be ignored for internal tables.
+            create_type: CreateType::Foreground,
         }
     }
 
