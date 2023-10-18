@@ -25,7 +25,9 @@ use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgres
 
 use super::command::CommandContext;
 use super::notifier::Notifier;
-use crate::barrier::Command;
+use crate::barrier::{
+    Command, TableActorMap, TableDefinitionMap, TableNotifierMap, TableUpstreamMvCountMap,
+};
 use crate::model::ActorId;
 
 type ConsumedRows = u64;
@@ -175,14 +177,15 @@ impl CreateMviewProgressTracker {
     /// 1. `CreateMviewProgress`.
     /// 2. `Backfill` position.
     pub fn recover(
-        table_map: HashMap<TableId, Vec<ActorId>>,
-        mut upstream_mv_counts: HashMap<TableId, HashMap<TableId, usize>>,
-        mut definitions: HashMap<TableId, String>,
+        table_map: TableActorMap,
+        mut upstream_mv_counts: TableUpstreamMvCountMap,
+        mut definitions: TableDefinitionMap,
         version_stats: HummockVersionStats,
-        mut finished_notifiers: HashMap<TableId, Notifier>,
+        mut finished_notifiers: TableNotifierMap,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
+        let table_map: HashMap<_, Vec<ActorId>> = table_map.into();
         for (creating_table_id, actors) in table_map {
             // 1. Recover `ChainState` in the tracker.
             let mut states = HashMap::new();

@@ -76,6 +76,37 @@ pub use self::command::{Command, Reschedule};
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct TableMap<T> {
+    inner: HashMap<TableId, T>,
+}
+
+impl<T> TableMap<T> {
+    pub fn remove(&mut self, table_id: &TableId) -> Option<T> {
+        self.inner.remove(table_id)
+    }
+}
+
+impl<T> From<HashMap<TableId, T>> for TableMap<T> {
+    fn from(inner: HashMap<TableId, T>) -> Self {
+        Self { inner }
+    }
+}
+
+impl<T> From<TableMap<T>> for HashMap<TableId, T> {
+    fn from(table_map: TableMap<T>) -> Self {
+        table_map.inner
+    }
+}
+
+pub(crate) type TableActorMap = TableMap<Vec<ActorId>>;
+
+pub(crate) type TableUpstreamMvCountMap = TableMap<HashMap<TableId, usize>>;
+
+pub(crate) type TableDefinitionMap = TableMap<String>;
+
+pub(crate) type TableNotifierMap = TableMap<Notifier>;
+
 /// Status of barrier manager.
 enum BarrierManagerStatus {
     /// Barrier manager is starting.
@@ -967,11 +998,11 @@ impl GlobalBarrierManager {
         {
             let mut tracker = self.tracker.lock().await;
             *tracker = CreateMviewProgressTracker::recover(
-                table_map,
-                upstream_mv_counts,
-                definitions,
+                table_map.into(),
+                upstream_mv_counts.into(),
+                definitions.into(),
                 version_stats,
-                senders,
+                senders.into(),
             );
         }
         for (table, internal_tables, finished) in receivers {
