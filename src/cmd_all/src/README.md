@@ -26,5 +26,5 @@ You may run and reference the [demo script](../scripts/e2e-full-standalone-demo.
 
 Standalone mode simply passes the options to the corresponding node, and starts them in the same process.
 
-For example `--meta-opts` is parsed, and then Meta Node's entrypoint, `risingwave_meta::start`, is called with the parsed options.
+For example `--meta-opts` is parsed, and then Meta Node's entrypoint, `risingwave_meta_node::start`, is called with the parsed options.
 If any option is missing, the corresponding node will not be started.

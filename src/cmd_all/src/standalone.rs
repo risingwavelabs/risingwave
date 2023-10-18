@@ -17,7 +17,7 @@ use clap::Parser;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_frontend::FrontendOpts;
-use risingwave_meta::MetaNodeOpts;
+use risingwave_meta_node::MetaNodeOpts;
 use shell_words::split;
 use tokio::signal;
 
@@ -142,7 +142,7 @@ pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
 
         let _meta_handle = tokio::spawn(async move {
-            risingwave_meta::start(opts).await;
+            risingwave_meta_node::start(opts).await;
             tracing::warn!("meta is stopped, shutdown all nodes");
         });
         // wait for the service to be ready
