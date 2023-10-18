@@ -186,6 +186,13 @@ impl Task for MetaNodeService {
             cmd.env("MALLOC_CONF", conf); // unprefixed for linux
         }
 
+        if crate::util::is_env_set("CONNECTOR_LIBS_PATH") {
+            cmd.env(
+                "CONNECTOR_LIBS_PATH",
+                env::var("CONNECTOR_LIBS_PATH").unwrap(),
+            );
+        }
+
         Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Isolated)?;
 
         let prefix_config = env::var("PREFIX_CONFIG")?;

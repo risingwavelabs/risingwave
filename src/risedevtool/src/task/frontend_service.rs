@@ -96,6 +96,14 @@ impl Task for FrontendService {
         let prefix_config = env::var("PREFIX_CONFIG")?;
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
+
+        if crate::util::is_env_set("CONNECTOR_LIBS_PATH") {
+            cmd.env(
+                "CONNECTOR_LIBS_PATH",
+                env::var("CONNECTOR_LIBS_PATH").unwrap(),
+            );
+        }
+
         Self::apply_command_args(&mut cmd, &self.config)?;
 
         if !self.config.user_managed {

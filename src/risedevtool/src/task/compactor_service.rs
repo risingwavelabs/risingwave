@@ -96,6 +96,13 @@ impl Task for CompactorService {
             cmd.env("MALLOC_CONF", conf); // unprefixed for linux
         }
 
+        if crate::util::is_env_set("CONNECTOR_LIBS_PATH") {
+            cmd.env(
+                "CONNECTOR_LIBS_PATH",
+                env::var("CONNECTOR_LIBS_PATH").unwrap(),
+            );
+        }
+
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config)?;
