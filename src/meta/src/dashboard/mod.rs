@@ -210,7 +210,7 @@ pub(super) mod handlers {
         }
 
         for worker_node in worker_nodes {
-            let client = compute_clients.get(&worker_node).await.map_err(err)?;
+            let client = compute_clients.get(worker_node).await.map_err(err)?;
             let result = client.stack_trace().await.map_err(err)?;
 
             merge(&mut all, result);
