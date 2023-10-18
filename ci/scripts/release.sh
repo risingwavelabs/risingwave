@@ -65,8 +65,8 @@ elif [[ -n "${BINARY_NAME+x}" ]]; then
 fi
 
 echo "--- Build connector node"
-cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust && cd ..
-mv ${REPO_ROOT}/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust
+cd ${REPO_ROOT} && mv ${REPO_ROOT}/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 
 if [[ -n "${BUILDKITE_TAG}" ]]; then
   echo "--- Install gh cli"
