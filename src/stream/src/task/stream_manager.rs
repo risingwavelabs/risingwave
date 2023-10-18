@@ -586,7 +586,8 @@ impl LocalStreamManagerCore {
         assert_eq!(
             executor.pk_indices(),
             &pk_indices,
-            "`pk_indices` of {identity} not consistent with what derived by optimizer"
+            "`pk_indices` of {} not consistent with what derived by optimizer",
+            executor.identity()
         );
 
         // Wrap the executor for debug purpose.
