@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::{Future, Ready};
+use std::future::Ready;
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Instant;
@@ -58,15 +58,15 @@ pub trait SinkWriter: Send + 'static {
 
 pub type DummyDeliveryFuture = Ready<std::result::Result<(), SinkError>>;
 
-pub trait AsyncTruncateSinkWriter: Send + 'static {
+pub trait AsyncTruncateSinkWriter: 'static {
     type DeliveryFuture: TryFuture<Ok = (), Error = SinkError> + Unpin + Send + 'static =
         DummyDeliveryFuture;
 
-    fn write_chunk<'a>(
+    async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
         add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
-    ) -> impl Future<Output = Result<()>> + Send + 'a;
+    ) -> Result<()>;
 }
 
 /// A free-form sink that may output in multiple formats and encodings. Examples include kafka,

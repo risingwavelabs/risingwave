@@ -34,7 +34,6 @@ pub mod utils;
 pub mod writer;
 
 use std::collections::HashMap;
-use std::future::Future;
 
 use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
@@ -277,11 +276,8 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 }
 
-pub trait LogSinker: Send + 'static {
-    fn consume_log_and_sink(
-        self,
-        log_reader: impl LogReader,
-    ) -> impl Future<Output = Result<()>> + Send + 'static;
+pub trait LogSinker: 'static {
+    async fn consume_log_and_sink(self, log_reader: impl LogReader) -> Result<()>;
 }
 
 #[async_trait]
