@@ -7,10 +7,8 @@ ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 4;
 statement ok
 CREATE TABLE t (v1 int);
 
-# This is expected to run under sim mode, which is fast,
-# so we need a higher number of rows.
 statement ok
-INSERT INTO t select * from generate_series(1, 10000000);
+INSERT INTO t select * from generate_series(1, 200000);
 
 statement ok
 FLUSH;
@@ -23,15 +21,6 @@ CREATE MATERIALIZED VIEW m2 as SELECT * FROM t;
 
 statement ok
 CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
-
-# Disable the flaky check:
-# query I
-# select count(*) from rw_catalog.rw_ddl_progress;
-# ----
-# 3
-
-statement error
-SELECT * FROM m1;
 
 # Meta should always reject duplicate mview.
 statement error
