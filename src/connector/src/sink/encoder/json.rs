@@ -27,7 +27,6 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{json, Map, Value};
 
 use super::{CustomJsonType, KafkaConnectParams, Result, RowEncoder, SerTo, TimestampHandlingMode};
-use crate::sink::formatter::debezium_json::field_to_json;
 use crate::sink::SinkError;
 
 pub struct JsonEncoder {
@@ -294,13 +293,79 @@ fn json_converter_with_schema<'a>(
         "schema".to_string(),
         json!({
             "type": "struct",
-            "fields": fields.map(field_to_json).collect_vec(),
+            "fields": fields.map(field_as_json_schema).collect_vec(),
             "optional": "false",
             "name": name,
         }),
     );
     mapping.insert("payload".to_string(), object);
     mapping
+}
+
+// reference: https://github.com/apache/kafka/blob/80982c4ae3fe6be127b48ec09caff11ab5f87c69/connect/json/src/main/java/org/apache/kafka/connect/json/JsonSchema.java#L39
+pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
+    match rw_type {
+        DataType::Boolean => "boolean",
+        DataType::Int16 => "int16",
+        DataType::Int32 => "int32",
+        DataType::Int64 => "int64",
+        DataType::Float32 => "float",
+        DataType::Float64 => "double",
+        DataType::Decimal => "string",
+        DataType::Date => "int32",
+        DataType::Varchar => "string",
+        DataType::Time => "int64",
+        DataType::Timestamp => "int64",
+        DataType::Timestamptz => "string",
+        DataType::Interval => "string",
+        DataType::Struct(_) => "struct",
+        DataType::List(_) => "array",
+        DataType::Bytea => "bytes",
+        DataType::Jsonb => "string",
+        DataType::Serial => "int32",
+        DataType::Int256 => "string",
+    }
+}
+
+fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
+    let mut mapping = Map::with_capacity(4); // type + optional + fields/items + field
+    mapping.insert("type".to_string(), json!(schema_type_mapping(rw_type)));
+    mapping.insert("optional".to_string(), json!("true"));
+    match rw_type {
+        DataType::Struct(struct_type) => {
+            let mut sub_fields = Vec::new();
+            let map_sub_struct = |(sub_name, sub_type): (String, &DataType)| {
+                let mut sub_mapping = type_as_json_schema(sub_type);
+                sub_mapping.insert("field".to_string(), json!(sub_name));
+                sub_fields.push(sub_mapping);
+            };
+            if struct_type.is_unnamed() {
+                // unnamed struct, rename with `f{idx+1}`
+                struct_type
+                    .types()
+                    .enumerate()
+                    .map(|(idx, sub_type)| (format!("f{}", idx + 1), sub_type))
+                    .for_each(map_sub_struct);
+            } else {
+                struct_type
+                    .iter()
+                    .map(|(sub_name, sub_type)| (sub_name.to_string(), sub_type))
+                    .for_each(map_sub_struct);
+            }
+            mapping.insert("fields".to_string(), json!(sub_fields));
+        }
+        DataType::List(sub_type) => {
+            mapping.insert("items".to_string(), json!(type_as_json_schema(sub_type)));
+        }
+        _ => {}
+    }
+
+    mapping
+}
+
+// reference: https://github.com/apache/kafka/blob/80982c4ae3fe6be127b48ec09caff11ab5f87c69/connect/json/src/main/java/org/apache/kafka/connect/json/JsonConverter.java#L356
+fn field_as_json_schema(field: &Field) -> Value {
+    Value::Object(type_as_json_schema(&field.data_type))
 }
 
 #[cfg(test)]
