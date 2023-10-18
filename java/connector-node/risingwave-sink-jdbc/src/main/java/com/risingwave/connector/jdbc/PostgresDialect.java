@@ -141,9 +141,7 @@ public class PostgresDialect implements JdbcDialect {
                     if (typeName == null) {
                         typeName = fieldType.getTypeName().name();
                     }
-                    stmt.setArray(
-                            placeholderIdx++,
-                            conn.createArrayOf(typeName, objArray));
+                    stmt.setArray(placeholderIdx++, conn.createArrayOf(typeName, objArray));
                     break;
                 case VARCHAR:
                     // since VARCHAR column may sink to a UUID column, we get the target type
