@@ -20,12 +20,12 @@ use tonic::{Request, Response, Status, Streaming};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 
 #[derive(Clone)]
-pub(crate) struct SinkCoordinationServiceImpl {
+pub struct SinkCoordinationServiceImpl {
     sink_manager: SinkCoordinatorManager,
 }
 
 impl SinkCoordinationServiceImpl {
-    pub(crate) fn new(sink_manager: SinkCoordinatorManager) -> Self {
+    pub fn new(sink_manager: SinkCoordinatorManager) -> Self {
         Self { sink_manager }
     }
 }

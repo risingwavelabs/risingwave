@@ -103,7 +103,7 @@ fn to_deleted_fragment_parallel_unit_mapping(
         .collect()
 }
 
-pub(crate) async fn on_meta_start(
+pub async fn on_meta_start(
     notification_manager: NotificationManagerRef,
     cluster_manager: ClusterManagerRef,
     fragment_manager: FragmentManagerRef,
@@ -126,7 +126,7 @@ pub(crate) async fn on_meta_start(
     );
 }
 
-pub(crate) async fn start_serving_vnode_mapping_worker(
+pub async fn start_serving_vnode_mapping_worker(
     notification_manager: NotificationManagerRef,
     cluster_manager: ClusterManagerRef,
     fragment_manager: FragmentManagerRef,

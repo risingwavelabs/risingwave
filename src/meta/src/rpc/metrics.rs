@@ -37,7 +37,7 @@ use tokio::task::JoinHandle;
 
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
-use crate::rpc::server::ElectionClientRef;
+use crate::rpc::ElectionClientRef;
 
 #[derive(Clone)]
 pub struct MetaMetrics {
@@ -690,7 +690,7 @@ impl Default for MetaMetrics {
     }
 }
 
-pub async fn start_worker_info_monitor(
+pub fn start_worker_info_monitor(
     cluster_manager: ClusterManagerRef,
     election_client: Option<ElectionClientRef>,
     interval: Duration,
@@ -738,7 +738,7 @@ pub async fn start_worker_info_monitor(
     (join_handle, shutdown_tx)
 }
 
-pub async fn start_fragment_info_monitor(
+pub fn start_fragment_info_monitor(
     cluster_manager: ClusterManagerRef,
     catalog_manager: CatalogManagerRef,
     fragment_manager: FragmentManagerRef,

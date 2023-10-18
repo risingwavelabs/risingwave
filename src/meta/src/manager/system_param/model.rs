@@ -67,20 +67,21 @@ impl SystemParamsModel for SystemParams {
         S: MetaStore,
     {
         let mut txn = Transaction::default();
-        self.upsert_in_transaction(&mut txn)?;
+        self.upsert_in_transaction(&mut txn).await?;
         Ok(store.txn(txn).await?)
     }
 }
 
-impl Transactional for SystemParams {
-    fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
+#[async_trait]
+impl Transactional<Transaction> for SystemParams {
+    async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         for (k, v) in system_params_to_kv(self).map_err(MetadataModelError::internal)? {
             trx.put(Self::cf_name(), k.into_bytes(), v.into_bytes());
         }
         Ok(())
     }
 
-    fn delete_in_transaction(&self, _trx: &mut Transaction) -> MetadataModelResult<()> {
+    async fn delete_in_transaction(&self, _trx: &mut Transaction) -> MetadataModelResult<()> {
         unreachable!()
     }
 }

@@ -30,13 +30,13 @@ pub struct SqlBackendElectionClient<T: SqlDriver> {
 }
 
 #[derive(sqlx::FromRow, Debug)]
-pub(crate) struct ElectionRow {
+pub struct ElectionRow {
     service: String,
     id: String,
 }
 
 #[async_trait::async_trait]
-pub(crate) trait SqlDriver: Send + Sync + 'static {
+pub trait SqlDriver: Send + Sync + 'static {
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()>;
 
     async fn try_campaign(&self, service_name: &str, id: &str, ttl: i64)
@@ -48,7 +48,7 @@ pub(crate) trait SqlDriver: Send + Sync + 'static {
     async fn resign(&self, service_name: &str, id: &str) -> MetaResult<()>;
 }
 
-pub(crate) trait SqlDriverCommon {
+pub trait SqlDriverCommon {
     const ELECTION_LEADER_TABLE_NAME: &'static str = "election_leader";
     const ELECTION_MEMBER_TABLE_NAME: &'static str = "election_members";
 
