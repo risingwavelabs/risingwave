@@ -17,15 +17,15 @@ use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::{Set, Unchanged};
 use sea_orm::EntityTrait;
 
-use crate::model::MetadataModelResult;
+use crate::model::{MetadataModelResult, Transactional};
 use crate::model_v2::hummock_pinned_version;
-use crate::model_v2::trx::Transactional;
+use crate::model_v2::trx::Transaction;
 
 #[async_trait::async_trait]
-impl Transactional for HummockPinnedVersion {
+impl Transactional<Transaction> for HummockPinnedVersion {
     async fn upsert_in_transaction(
         &self,
-        trx: &crate::model_v2::trx::Transaction,
+        trx: &mut crate::model_v2::trx::Transaction,
     ) -> MetadataModelResult<()> {
         // TODO: error type conversion
         // TODO: integer type conversion
@@ -47,7 +47,7 @@ impl Transactional for HummockPinnedVersion {
 
     async fn delete_in_transaction(
         &self,
-        trx: &crate::model_v2::trx::Transaction,
+        trx: &mut crate::model_v2::trx::Transaction,
     ) -> MetadataModelResult<()> {
         // TODO: error type conversion
         // TODO: integer type conversion

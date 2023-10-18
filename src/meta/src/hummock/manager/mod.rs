@@ -159,7 +159,7 @@ macro_rules! commit_multi_var {
                 let mut trx = $trx_extern_part;
                 // Apply the change in `ValTransaction` to trx
                 $(
-                    $val_txn.apply_to_txn(&mut trx)?;
+                    $val_txn.apply_to_txn(&mut trx).await?;
                 )*
                 // Commit to state store
                 $hummock_mgr.commit_trx($hummock_mgr.env.meta_store(), trx, $context_id)
@@ -1490,7 +1490,7 @@ impl HummockManager {
             .id_gen_manager()
             .generate_interval::<{ IdCategory::HummockSstableId }>(new_sst_id_number as u64)
             .await?;
-        let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
+        let mut branched_ssts = BTreeMapTransaction::<'_, _, _>::new(&mut versioning.branched_ssts);
         let original_sstables = std::mem::take(&mut sstables);
         sstables.reserve_exact(original_sstables.len() - incorrect_ssts.len() + new_sst_id_number);
         let mut incorrect_ssts = incorrect_ssts.into_iter();

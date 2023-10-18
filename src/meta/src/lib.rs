@@ -33,6 +33,7 @@
 #![feature(is_sorted)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(type_name_of_val)]
+#![feature(async_fn_in_trait)]
 
 pub mod backup_restore;
 mod barrier;
