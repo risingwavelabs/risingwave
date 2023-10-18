@@ -62,6 +62,10 @@ use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServ
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
+use sea_orm::{
+    DatabaseConnection, SqlxMySqlPoolConnection, SqlxPostgresPoolConnection,
+    SqlxSqlitePoolConnection,
+};
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
@@ -79,6 +83,8 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election::etcd::EtcdElectionClient;
+use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
+use crate::rpc::election::ElectionClient;
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
 };
@@ -119,6 +125,31 @@ pub async fn rpc_serve(
         }
         None => None,
     };
+
+    if let Some(x) = &meta_store_sql {
+        let election_client: ElectionClientRef = match &x.conn {
+            DatabaseConnection::SqlxMySqlPoolConnection(SqlxMySqlPoolConnection {
+                pool, ..
+            }) => Arc::new(SqlBackendElectionClient::new(
+                address_info.advertise_addr.clone(),
+                Arc::new(MySqlDriver { pool: pool.clone() }),
+            )),
+            DatabaseConnection::SqlxPostgresPoolConnection(SqlxPostgresPoolConnection {
+                pool,
+                ..
+            }) => Arc::new(SqlBackendElectionClient::new(
+                address_info.advertise_addr.clone(),
+                Arc::new(PostgresDriver { pool: pool.clone() }),
+            )),
+            DatabaseConnection::SqlxSqlitePoolConnection(_) => {
+                todo!()
+            }
+            _ => {
+                todo!()
+            }
+        };
+    }
+
     match meta_store_backend {
         MetaStoreBackend::Etcd {
             endpoints,

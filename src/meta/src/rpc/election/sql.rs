@@ -29,6 +29,17 @@ pub struct SqlBackendElectionClient<T: SqlDriver> {
     is_leader_sender: watch::Sender<bool>,
 }
 
+impl<T: SqlDriver> SqlBackendElectionClient<T> {
+    pub fn new(id: String, driver: Arc<T>) -> Self {
+        let (sender, _) = watch::channel(false);
+        Self {
+            id,
+            driver,
+            is_leader_sender: sender,
+        }
+    }
+}
+
 #[derive(sqlx::FromRow, Debug)]
 pub struct ElectionRow {
     service: String,
@@ -67,11 +78,11 @@ impl SqlDriverCommon for PostgresDriver {}
 impl SqlDriverCommon for SqliteDriver {}
 
 pub struct MySqlDriver {
-    pool: MySqlPool,
+    pub(crate) pool: MySqlPool,
 }
 
 pub struct PostgresDriver {
-    pool: PgPool,
+    pub(crate) pool: PgPool,
 }
 
 pub struct SqliteDriver {
