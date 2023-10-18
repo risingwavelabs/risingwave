@@ -60,7 +60,6 @@ pub struct StreamingMetrics {
     pub actor_memory_usage: GenericGaugeVec<AtomicI64>,
     pub actor_in_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
-    pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
 
     // Source
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
@@ -356,14 +355,6 @@ impl StreamingMetrics {
         let actor_out_record_cnt = register_int_counter_vec_with_registry!(
             "stream_actor_out_record_cnt",
             "Total number of rows actor sent",
-            &["actor_id", "fragment_id"],
-            registry
-        )
-        .unwrap();
-
-        let actor_sampled_deserialize_duration_ns = register_int_counter_vec_with_registry!(
-            "actor_sampled_deserialize_duration_ns",
-            "Duration (ns) of sampled chunk deserialization",
             &["actor_id", "fragment_id"],
             registry
         )
@@ -956,7 +947,6 @@ impl StreamingMetrics {
             actor_memory_usage,
             actor_in_record_cnt,
             actor_out_record_cnt,
-            actor_sampled_deserialize_duration_ns,
             source_output_row_count,
             source_row_per_barrier,
             source_split_change_count,
