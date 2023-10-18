@@ -79,7 +79,7 @@ macro_rules! commit_meta_with_trx {
             async {
                 // Apply the change in `ValTransaction` to trx
                 $(
-                    $val_txn.apply_to_txn(&mut $trx)?;
+                    $val_txn.apply_to_txn(&mut $trx).await?;
                 )*
                 // Commit to meta store
                 $manager.env.meta_store().txn($trx).await?;
