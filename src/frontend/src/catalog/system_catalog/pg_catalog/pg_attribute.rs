@@ -53,7 +53,8 @@ pub static PG_ATTRIBUTE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
                  ''::varchar AS attidentity, \
                  ''::varchar AS attgenerated, \
                  -1 AS atttypmod \
-           FROM rw_catalog.rw_columns c\
+           FROM rw_catalog.rw_columns c \
+           WHERE c.is_hidden = false\
     "
     .to_string(),
 });

@@ -32,6 +32,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(iter_from_generator)]
 #![feature(if_let_guard)]
+#![feature(iterator_try_collect)]
 
 use std::time::Duration;
 
