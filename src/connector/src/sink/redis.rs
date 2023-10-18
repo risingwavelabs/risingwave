@@ -16,23 +16,39 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use redis::{Connection, Pipeline};
+use redis::aio::Connection;
+use redis::{Client as RedisClient, Pipeline};
 use regex::Regex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 use serde_with::serde_as;
 
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
-use crate::common::RedisCommon;
 use crate::dispatch_sink_formatter_impl;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const REDIS_SINK: &str = "redis";
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct RedisCommon {
+    #[serde(rename = "redis.url")]
+    pub url: String,
+    #[serde(rename = "redis.keyformat")]
+    pub key_format: Option<String>,
+    #[serde(rename = "redis.valueformat")]
+    pub value_format: Option<String>,
+}
+
+impl RedisCommon {
+    pub(crate) fn build_client(&self) -> anyhow::Result<RedisClient> {
+        let client = RedisClient::open(self.url.clone())?;
+        Ok(client)
+    }
+}
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct RedisConfig {
@@ -69,6 +85,9 @@ pub struct RedisSink {
 
 fn check_string_format(format: &Option<String>, set: &HashSet<String>) -> Result<()> {
     if let Some(format) = format {
+        // We will check if the string inside {} corresponds to a column name in rw.
+        // In other words, the content within {} should exclusively consist of column names from rw,
+        // which means '{{column_name}}' or '{{column_name1},{column_name2}}' would be incorrect.
         let re = Regex::new(r"\{([^}]*)\}").unwrap();
         if !re.is_match(format) {
             return Err(SinkError::Redis(
@@ -116,7 +135,8 @@ impl Sink for RedisSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
-        )?
+        )
+        .await?
         .into_log_sinker(writer_param.sink_metrics))
     }
 
@@ -159,10 +179,11 @@ struct RedisSinkPayloadWriter {
     pipe: Pipeline,
 }
 impl RedisSinkPayloadWriter {
-    pub fn new(config: RedisConfig) -> Result<Self> {
+    pub async fn new(config: RedisConfig) -> Result<Self> {
         let client = config.common.build_client()?;
-        let conn = Some(client.get_connection()?);
+        let conn = Some(client.get_async_connection().await?);
         let pipe = redis::pipe();
+
         Ok(Self { conn, pipe })
     }
 
@@ -173,8 +194,8 @@ impl RedisSinkPayloadWriter {
         Self { conn, pipe }
     }
 
-    pub fn commit(&mut self) -> Result<()> {
-        self.pipe.query(&mut self.conn.as_mut().unwrap())?;
+    pub async fn commit(&mut self) -> Result<()> {
+        self.pipe.query_async(self.conn.as_mut().unwrap()).await?;
         self.pipe.clear();
         Ok(())
     }
@@ -195,13 +216,13 @@ impl FormattedSink for RedisSinkPayloadWriter {
 }
 
 impl RedisSinkWriter {
-    pub fn new(
+    pub async fn new(
         config: RedisConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let payload_writer = RedisSinkPayloadWriter::new(config.clone())?;
+        let payload_writer = RedisSinkPayloadWriter::new(config.clone()).await?;
         let formatter = SinkFormatterImpl::new_with_redis(
             schema.clone(),
             pk_indices.clone(),
@@ -261,7 +282,7 @@ impl SinkWriter for RedisSinkWriter {
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
         if is_checkpoint {
-            self.payload_writer.commit()?;
+            self.payload_writer.commit().await?;
         }
         Ok(())
     }

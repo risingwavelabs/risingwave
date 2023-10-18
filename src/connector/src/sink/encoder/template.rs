@@ -16,44 +16,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::ToText;
 
-use super::{JsonEncoder, Result, RowEncoder};
-use crate::sink::SinkError;
-
-pub enum RedisFormatEncoder {
-    Json(JsonEncoder),
-    Template(TemplateEncoder),
-}
-impl RowEncoder for RedisFormatEncoder {
-    type Output = String;
-
-    fn encode_cols(
-        &self,
-        row: impl risingwave_common::row::Row,
-        col_indices: impl Iterator<Item = usize>,
-    ) -> Result<Self::Output> {
-        match self {
-            RedisFormatEncoder::Json(json) => {
-                Ok(serde_json::to_string(&json.encode_cols(row, col_indices)?)
-                    .map_err(|err| SinkError::Encode(err.to_string()))?)
-            }
-            RedisFormatEncoder::Template(template) => template.encode_cols(row, col_indices),
-        }
-    }
-
-    fn schema(&self) -> &Schema {
-        match self {
-            RedisFormatEncoder::Json(json) => json.schema(),
-            RedisFormatEncoder::Template(template) => template.schema(),
-        }
-    }
-
-    fn col_indices(&self) -> Option<&[usize]> {
-        match self {
-            RedisFormatEncoder::Json(json) => json.col_indices(),
-            RedisFormatEncoder::Template(template) => template.col_indices(),
-        }
-    }
-}
+use super::{Result, RowEncoder};
 
 /// Encode a row according to a specified string template `user_id:{user_id}`
 pub struct TemplateEncoder {
@@ -62,6 +25,7 @@ pub struct TemplateEncoder {
     template: String,
 }
 
+/// todo! improve the performance.
 impl TemplateEncoder {
     pub fn new(schema: Schema, col_indices: Option<Vec<usize>>, template: String) -> Self {
         Self {

@@ -27,7 +27,7 @@ use risingwave_common::catalog::Schema;
 pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
-use super::encoder::template::{RedisFormatEncoder, TemplateEncoder};
+use super::encoder::template::TemplateEncoder;
 use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
 
 /// Transforms a `StreamChunk` into a sequence of key-value pairs according a specific format,
@@ -65,8 +65,8 @@ pub enum SinkFormatterImpl {
     AppendOnlyJson(AppendOnlyFormatter<JsonEncoder, JsonEncoder>),
     UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
     DebeziumJson(DebeziumJsonFormatter),
-    RedisAppendOnly(AppendOnlyFormatter<RedisFormatEncoder, RedisFormatEncoder>),
-    RedisUpsert(UpsertFormatter<RedisFormatEncoder, RedisFormatEncoder>),
+    AppendOnlyTemplate(AppendOnlyFormatter<TemplateEncoder, TemplateEncoder>),
+    UpsertTemplate(UpsertFormatter<TemplateEncoder, TemplateEncoder>),
 }
 
 impl SinkFormatterImpl {
@@ -129,60 +129,41 @@ impl SinkFormatterImpl {
         key_format: Option<String>,
         value_format: Option<String>,
     ) -> Result<Self> {
-        let (key_encoder, val_encoder) = match (key_format, value_format) {
+        match (key_format, value_format) {
             (Some(k), Some(v)) => {
-                let key_encoder = RedisFormatEncoder::Template(TemplateEncoder::new(
+                let key_encoder = TemplateEncoder::new(
                     schema.clone(),
                     Some(pk_indices),
                     k,
-                ));
+                );
                 let val_encoder =
-                    RedisFormatEncoder::Template(TemplateEncoder::new(schema, None, v));
-                (key_encoder, val_encoder)
+                    TemplateEncoder::new(schema, None, v);
+                if is_append_only {
+                    Ok(SinkFormatterImpl::AppendOnlyTemplate(AppendOnlyFormatter::new(Some(key_encoder), val_encoder)))
+                } else {
+                    Ok(SinkFormatterImpl::UpsertTemplate(UpsertFormatter::new(key_encoder, val_encoder)))
+                }
             }
             (None, None) => {
-                let key_encoder = RedisFormatEncoder::Json(JsonEncoder::new(
+                let key_encoder = JsonEncoder::new(
                     schema.clone(),
                     Some(pk_indices),
                     TimestampHandlingMode::Milli,
-                ));
-                let val_encoder = RedisFormatEncoder::Json(JsonEncoder::new(
+                );
+                let val_encoder = JsonEncoder::new(
                     schema,
                     None,
                     TimestampHandlingMode::Milli,
-                ));
-                (key_encoder, val_encoder)
+                );
+                if is_append_only {
+                    Ok(SinkFormatterImpl::AppendOnlyJson(AppendOnlyFormatter::new(Some(key_encoder), val_encoder)))
+                } else {
+                    Ok(SinkFormatterImpl::UpsertJson(UpsertFormatter::new(key_encoder, val_encoder)))
+                }
             }
-            (None, Some(v)) => {
-                let key_encoder = RedisFormatEncoder::Json(JsonEncoder::new(
-                    schema.clone(),
-                    Some(pk_indices),
-                    TimestampHandlingMode::Milli,
-                ));
-                let val_encoder =
-                    RedisFormatEncoder::Template(TemplateEncoder::new(schema, None, v));
-                (key_encoder, val_encoder)
+            _ => {
+                Err(SinkError::Encode("Please provide template formats for both key and value, or choose the JSON format.".to_string()))
             }
-            (Some(k), None) => {
-                let key_encoder = RedisFormatEncoder::Template(TemplateEncoder::new(
-                    schema.clone(),
-                    Some(pk_indices),
-                    k,
-                ));
-                let val_encoder = RedisFormatEncoder::Json(JsonEncoder::new(
-                    schema,
-                    None,
-                    TimestampHandlingMode::Milli,
-                ));
-                (key_encoder, val_encoder)
-            }
-        };
-        if is_append_only {
-            let formatter = AppendOnlyFormatter::new(Some(key_encoder), val_encoder);
-            Ok(SinkFormatterImpl::RedisAppendOnly(formatter))
-        } else {
-            let formatter = UpsertFormatter::new(key_encoder, val_encoder);
-            Ok(SinkFormatterImpl::RedisUpsert(formatter))
         }
     }
 }
@@ -194,8 +175,8 @@ macro_rules! dispatch_sink_formatter_impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
             SinkFormatterImpl::UpsertJson($name) => $body,
             SinkFormatterImpl::DebeziumJson($name) => $body,
-            SinkFormatterImpl::RedisAppendOnly($name) => $body,
-            SinkFormatterImpl::RedisUpsert($name) => $body,
+            SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
+            SinkFormatterImpl::UpsertTemplate($name) => $body,
         }
     };
 }
