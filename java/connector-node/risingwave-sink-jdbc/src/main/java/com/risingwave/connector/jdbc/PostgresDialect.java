@@ -34,7 +34,7 @@ public class PostgresDialect implements JdbcDialect {
     public PostgresDialect(int[] columnSqlTypes) {
         this.columnSqlTypes = columnSqlTypes;
     }
-    
+
     private static final HashMap<TypeName, String> RW_TYPE_TO_JDBC_TYPE_NAME;
 
     static {
