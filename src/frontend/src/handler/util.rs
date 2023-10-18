@@ -182,7 +182,11 @@ pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
                     } else {
                         c.data_type.to_string()
                     };
-                    Row::new(vec![Some(c.name.into()), Some(type_name.into())])
+                    Row::new(vec![
+                        Some(c.name.into()),
+                        Some(type_name.into()),
+                        c.description.map(Into::into),
+                    ])
                 })
                 .collect_vec()
         })

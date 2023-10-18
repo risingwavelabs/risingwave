@@ -100,15 +100,28 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
 
     // Convert primary key to rows
     if !pk_columns.is_empty() {
+        let names = format!(
+            "{}",
+            display_comma_separated(&pk_columns.iter().map(|x| &x.name).collect_vec())
+        );
+        let descs = format!(
+            "{}",
+            display_comma_separated(
+                &pk_columns
+                    .iter()
+                    .map(|x| x.description.as_deref().unwrap_or_default())
+                    .collect_vec()
+            )
+        );
+
         rows.push(Row::new(vec![
             Some("primary key".into()),
-            Some(
-                format!(
-                    "{}",
-                    display_comma_separated(&pk_columns.into_iter().map(|x| x.name).collect_vec()),
-                )
-                .into(),
-            ),
+            Some(names.into()),
+            if descs.is_empty() {
+                None
+            } else {
+                Some(descs.into())
+            },
         ]));
     }
 
@@ -138,9 +151,13 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                     .into(),
                 )
             },
+            None,
+            // TODO: index description
+            // index.description.map(Into::into),
         ])
     }));
 
+    // TODO: table name and description as title of response
     // TODO: recover the original user statement
     Ok(PgResponse::builder(StatementType::DESCRIBE)
         .values(
@@ -153,6 +170,11 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                 ),
                 PgFieldDescriptor::new(
                     "Type".to_owned(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Description".to_owned(),
                     DataType::Varchar.to_oid(),
                     DataType::Varchar.type_len(),
                 ),
