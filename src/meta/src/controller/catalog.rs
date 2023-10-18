@@ -560,7 +560,7 @@ impl CatalogController {
         let index_table_ids: Vec<TableId> = Index::find()
             .select_only()
             .column(index::Column::IndexTableId)
-            .filter(index::Column::PrimaryTableId.is_in(to_drop_index_ids))
+            .filter(index::Column::IndexId.is_in(to_drop_index_ids))
             .into_tuple()
             .all(&txn)
             .await?;
