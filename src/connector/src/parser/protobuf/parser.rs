@@ -260,44 +260,94 @@ fn extract_any_info(dyn_msg: &DynamicMessage) -> (String, Value) {
     (type_url, payload)
 }
 
-fn parse_fields(fields: &[Datum]) -> Vec<String> {
-    let mut ret_vec: Vec<String> = Vec::new();
+/// TODO: Resolve the potential naming conflict in the map
+/// i.e., If the two anonymous type shares the same key (e.g., "Int32"),
+/// the latter will overwrite the former one in `serde_json::Map`.
+/// Possible solution, maintaining a global id map, for the same types
+/// In the same level of fields, add the unique id at the tail of the name.
+/// e.g., "Int32.1" & "Int32.2" in the above example
+fn recursive_parse_json(fields: &[Datum], full_name_vec: Option<Vec<String>>) -> serde_json::Value {
+    println!("fields length: {}", fields.len());
+    let mut ret: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
 
     for i in 0..fields.len() {
+        let mut key = if full_name_vec.is_some() {
+            full_name_vec.as_ref().unwrap()[i].to_string()
+        } else {
+            "".to_string()
+        };
+
         match fields[i].clone() {
             Some(ScalarImpl::Int16(v)) => {
-                ret_vec.push(v.to_string());
+                if key.is_empty() {
+                    key = "Int16".to_string();
+                }
+                ret.insert(key, serde_json::Value::Number(serde_json::Number::from(v)));
             }
             Some(ScalarImpl::Int32(v)) => {
-                ret_vec.push(v.to_string());
+                if key.is_empty() {
+                    key = "Int32".to_string();
+                }
+                ret.insert(key, serde_json::Value::Number(serde_json::Number::from(v)));
             }
             Some(ScalarImpl::Int64(v)) => {
-                ret_vec.push(v.to_string());
+                if key.is_empty() {
+                    key = "Int64".to_string();
+                }
+                ret.insert(key, serde_json::Value::Number(serde_json::Number::from(v)));
             }
             Some(ScalarImpl::Bool(v)) => {
-                ret_vec.push(v.to_string());
+                if key.is_empty() {
+                    key = "Bool".to_string();
+                }
+                ret.insert(key, serde_json::Value::Bool(v));
             }
             Some(ScalarImpl::Bytea(v)) => {
-                ret_vec.push(String::from_utf8(v.to_vec()).unwrap());
+                if key.is_empty() {
+                    key = "Bytea".to_string();
+                }
+                let s = String::from_utf8(v.to_vec()).unwrap();
+                ret.insert(key, serde_json::Value::String(s));
             }
             Some(ScalarImpl::Float32(v)) => {
-                ret_vec.push(v.to_string());
+                if key.is_empty() {
+                    key = "Int16".to_string();
+                }
+                ret.insert(
+                    key,
+                    serde_json::Value::Number(
+                        serde_json::Number::from_f64(v.into_inner() as f64).unwrap(),
+                    ),
+                );
             }
             Some(ScalarImpl::Float64(v)) => {
-                ret_vec.push(v.to_string());
+                if key.is_empty() {
+                    key = "Float64".to_string();
+                }
+                ret.insert(
+                    key,
+                    serde_json::Value::Number(
+                        serde_json::Number::from_f64(v.into_inner()).unwrap(),
+                    ),
+                );
             }
             Some(ScalarImpl::Utf8(v)) => {
-                ret_vec.push(v.to_string());
+                if key.is_empty() {
+                    key = "Utf8".to_string();
+                }
+                ret.insert(key, serde_json::Value::String(v.to_string()));
             }
             Some(ScalarImpl::Struct(v)) => {
-                let v = parse_fields(v.fields()).join(", ");
-                ret_vec.push(v);
+                if key.is_empty() {
+                    key = "Struct".to_string();
+                }
+                ret.insert(key, recursive_parse_json(v.fields(), None));
             }
             _ => panic!("Not yet support ScalarImpl type"),
         }
     }
 
-    ret_vec
+    serde_json::Value::Object(ret)
 }
 
 pub fn from_protobuf_value(
@@ -338,7 +388,10 @@ pub fn from_protobuf_value(
                 any_flag = false;
             }
 
-            if dyn_msg.has_field_by_name("type_url") && dyn_msg.has_field_by_name("value") && any_flag {
+            if dyn_msg.has_field_by_name("type_url")
+                && dyn_msg.has_field_by_name("value")
+                && any_flag
+            {
                 // The message is of type `Any`
                 let (type_url, payload) = extract_any_info(dyn_msg);
 
@@ -364,6 +417,12 @@ pub fn from_protobuf_value(
                     ))
                     })?;
 
+                let f = msg_desc
+                    .clone()
+                    .fields()
+                    .map(|f| f.full_name().to_string())
+                    .collect::<Vec<String>>();
+
                 // Decode the payload based on the `msg_desc`
                 let decoded_value = DynamicMessage::decode(msg_desc, payload.as_ref()).unwrap();
                 let decoded_value = from_protobuf_value(
@@ -379,7 +438,9 @@ pub fn from_protobuf_value(
                     panic!("Expect ScalarImpl::Struct");
                 };
 
-                ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!({"value": parse_fields(v.fields())})))
+                ScalarImpl::Jsonb(JsonbVal::from(
+                    serde_json::json!({"value": recursive_parse_json(v.fields(), Some(f))}),
+                ))
             } else {
                 let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
                 // fields is a btree map in descriptor

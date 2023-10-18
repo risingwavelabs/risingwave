@@ -98,7 +98,7 @@ ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1", features = ["alloc", "raw_value"] }
+serde_json = { version = "1", features = ["alloc", "preserve_order", "raw_value"] }
 serde_with = { version = "3", features = ["json"] }
 sha1 = { version = "0.10" }
 sha2 = { version = "0.10" }
@@ -183,7 +183,7 @@ regex-automata = { version = "0.3", default-features = false, features = ["dfa-o
 regex-syntax = { version = "0.7" }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1", features = ["alloc", "raw_value"] }
+serde_json = { version = "1", features = ["alloc", "preserve_order", "raw_value"] }
 sha1 = { version = "0.10" }
 sha2 = { version = "0.10" }
 signature = { version = "2", default-features = false, features = ["digest", "rand_core", "std"] }
