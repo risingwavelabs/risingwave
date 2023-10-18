@@ -72,6 +72,12 @@ fn test_func_sig_map() {
     // handle them specially without relying on FuncSigMap.
     let expected = expect_test::expect![[r#"
         {
+            Greatest: [
+                "greatest() -> bytea/varchar/timestamptz/timestamp/interval/time/date/int256/serial/float32/float64/decimal/int16/int32/int64/boolean",
+            ],
+            Least: [
+                "least() -> bytea/varchar/timestamptz/timestamp/interval/time/date/int256/serial/float32/float64/decimal/int16/int32/int64/boolean",
+            ],
             Cast: [
                 "cast(boolean) -> int32/varchar",
                 "cast(int16) -> int256/decimal/float64/float32/int64/int32/varchar",
@@ -102,6 +108,6 @@ fn test_func_sig_map() {
                 "array_sum(list) -> interval/decimal/float64/float32/int64",
             ],
         }
-        "#]];
+    "#]];
     expected.assert_debug_eq(&duplicated);
 }
