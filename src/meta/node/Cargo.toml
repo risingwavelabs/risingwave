@@ -15,51 +15,21 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-arc-swap = "1"
-assert_matches = "1"
-async-trait = "0.1"
-aws-config = { workspace = true }
-aws-sdk-ec2 = { workspace = true }
-base64-url = { version = "2.0.0" }
-bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
-crepe = "0.1"
-easy-ext = "1"
 either = "1"
-enum-as-inner = "0.6"
 etcd-client = { workspace = true }
-fail = "0.5"
-function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hex = "0.4"
-hyper = "0.14"
 itertools = "0.11"
-memcomparable = { version = "0.2" }
-mime_guess = "2"
 model_migration = { path = "../src/model_v2/migration" }
-num-integer = "0.1"
-num-traits = "0.2"
-parking_lot = { version = "0.12", features = ["arc_lock"] }
-parse-display = "0.8"
-prometheus = "0.13"
 prometheus-http-query = "0.7"
-prost = { workspace = true }
-rand = "0.8"
 regex = "1"
-reqwest = "0.11"
-risingwave_backup = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
 risingwave_common_service = { workspace = true }
-risingwave_connector = { workspace = true }
-risingwave_hummock_sdk = { workspace = true }
 risingwave_meta = { workspace = true }
 risingwave_meta_service = { workspace = true }
-risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-risingwave_sqlparser = { workspace = true }
-scopeguard = "1.2.0"
 sea-orm = { version = "0.12.0", features = [
     "sqlx-mysql",
     "sqlx-postgres",
@@ -67,17 +37,6 @@ sea-orm = { version = "0.12.0", features = [
     "runtime-tokio-native-tls",
     "macros",
 ] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sqlx = { version = "0.7", features = [
-    "runtime-tokio",
-    "postgres",
-    "mysql",
-    "sqlite",
-    "chrono",
-] }
-sync-point = { path = "../../utils/sync-point" }
-thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -86,13 +45,8 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tokio-retry = "0.3"
-tokio-stream = { version = "0.1", features = ["net"] }
 tonic = { workspace = true }
-tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
-url = "2"
-uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 axum = "0.6"
@@ -106,10 +60,6 @@ rand = "0.8"
 risingwave_test_runner = { workspace = true }
 static_assertions = "1"
 tempfile = "3"
-
-[features]
-test = []
-failpoints = ["fail/failpoints"]
 
 [lints]
 workspace = true
