@@ -102,10 +102,10 @@ impl Task for ComputeNodeService {
             cmd.env("MALLOC_CONF", conf); // unprefixed for linux
         }
 
-        if crate::util::is_env_set("CONNECTOR_LIBS_PATH") {
+        if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
             cmd.env(
                 "CONNECTOR_LIBS_PATH",
-                env::var("CONNECTOR_LIBS_PATH").unwrap(),
+                ".risingwave/bin/connector-node/libs/",
             );
         }
 
