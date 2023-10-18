@@ -60,7 +60,7 @@ pub(super) mod handlers {
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table};
-    use risingwave_pb::common::WorkerNode;
+    use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
     use risingwave_pb::monitor_service::{
         HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
@@ -101,7 +101,6 @@ pub(super) mod handlers {
         Path(ty): Path<i32>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<WorkerNode>>> {
-        use risingwave_pb::common::WorkerType;
         let mut result = srv
             .cluster_manager
             .list_worker_node(
@@ -198,6 +197,39 @@ pub(super) mod handlers {
         Ok(Json(table_fragments))
     }
 
+    async fn dump_await_tree_inner(
+        worker_nodes: impl IntoIterator<Item = &WorkerNode>,
+        compute_clients: &ComputeClientPool,
+    ) -> Result<Json<StackTraceResponse>> {
+        let mut all = Default::default();
+
+        fn merge(a: &mut StackTraceResponse, b: StackTraceResponse) {
+            a.actor_traces.extend(b.actor_traces);
+            a.rpc_traces.extend(b.rpc_traces);
+            a.compaction_task_traces.extend(b.compaction_task_traces);
+        }
+
+        for worker_node in worker_nodes {
+            let client = compute_clients.get(&worker_node).await.map_err(err)?;
+            let result = client.stack_trace().await.map_err(err)?;
+
+            merge(&mut all, result);
+        }
+
+        Ok(all.into())
+    }
+
+    pub async fn dump_await_tree_all(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<StackTraceResponse>> {
+        let worker_nodes = srv
+            .cluster_manager
+            .list_worker_node(WorkerType::ComputeNode, None)
+            .await;
+
+        dump_await_tree_inner(&worker_nodes, &srv.compute_clients).await
+    }
+
     pub async fn dump_await_tree(
         Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
@@ -210,11 +242,7 @@ pub(super) mod handlers {
             .map_err(err)?
             .worker_node;
 
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
-
-        let result = client.stack_trace().await.map_err(err)?;
-
-        Ok(result.into())
+        dump_await_tree_inner(std::iter::once(&worker_node), &srv.compute_clients).await
     }
 
     pub async fn heap_profile(
@@ -325,6 +353,7 @@ impl DashboardService {
                 get(prometheus::list_prometheus_actor_back_pressure),
             )
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
+            .route("/monitor/await_tree/", get(dump_await_tree_all))
             .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))
             .route(
                 "/monitor/list_heap_profile/:worker_id",

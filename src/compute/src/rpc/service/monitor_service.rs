@@ -315,7 +315,7 @@ pub mod grpc_middleware {
             };
 
             Either::Right(async move {
-                let root = registry.lock().await.register(key, req.uri().to_string());
+                let root = registry.lock().await.register(key, req.uri().path());
 
                 root.instrument(inner.call(req)).await
             })
