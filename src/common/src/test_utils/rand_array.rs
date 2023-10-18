@@ -135,7 +135,7 @@ impl RandValue for Int256 {
 
 impl RandValue for JsonbVal {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        JsonbVal::dummy()
+        JsonbVal::null()
     }
 }
 

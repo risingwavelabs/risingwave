@@ -416,7 +416,7 @@ impl DataType {
             DataType::Timestamptz => ScalarImpl::Timestamptz(Timestamptz::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
             DataType::Interval => ScalarImpl::Interval(Interval::MIN),
-            DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::dummy()), // NOT `min` #7981
+            DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::null()), // NOT `min` #7981
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
                 data_types
                     .types()
@@ -1303,7 +1303,7 @@ mod tests {
                     ScalarImpl::Interval(Interval::from_month_day_usec(2, 3, 3333)),
                     DataType::Interval,
                 ),
-                DataTypeName::Jsonb => (ScalarImpl::Jsonb(JsonbVal::dummy()), DataType::Jsonb),
+                DataTypeName::Jsonb => (ScalarImpl::Jsonb(JsonbVal::null()), DataType::Jsonb),
                 DataTypeName::Struct => (
                     ScalarImpl::Struct(StructValue::new(vec![
                         ScalarImpl::Int64(233).into(),

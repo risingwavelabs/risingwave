@@ -17,7 +17,7 @@ use risingwave_pb::data::{PbArray, PbArrayType};
 use super::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
-use crate::types::{DataType, JsonbRef, JsonbVal, Scalar, F32, F64};
+use crate::types::{DataType, JsonbRef, JsonbVal, Scalar};
 
 #[derive(Debug)]
 pub struct JsonbArrayBuilder {
@@ -104,8 +104,7 @@ impl JsonbArray {
         );
         let arr = JsonbArray {
             bitmap: array.get_null_bitmap()?.into(),
-            // SAFETY: the body is gotten from `Value::as_bytes`.
-            data: unsafe { jsonbb::Value::from_bytes(&array.values[0].body) },
+            data: jsonbb::Value::from_bytes(&array.values[0].body),
         };
         Ok(arr.into())
     }
@@ -180,17 +179,5 @@ impl FromIterator<JsonbVal> for JsonbArray {
 impl EstimateSize for JsonbArray {
     fn estimated_heap_size(&self) -> usize {
         self.bitmap.estimated_heap_size() + self.data.capacity()
-    }
-}
-
-impl From<F32> for jsonbb::Value {
-    fn from(v: F32) -> jsonbb::Value {
-        (v.0 as f64).into()
-    }
-}
-
-impl From<F64> for jsonbb::Value {
-    fn from(v: F64) -> jsonbb::Value {
-        v.0.into()
     }
 }

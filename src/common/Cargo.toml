@@ -42,7 +42,6 @@ ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 fs-err = "2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-jsonbb = { path = "../../../jsonbb" }
 hex = "0.4.3"
 http = "0.2"
 humantime = "2.1"
@@ -50,6 +49,7 @@ hyper = "0.14"
 hytra = { workspace = true }
 itertools = "0.11"
 itoa = "1.0"
+jsonbb = { git = "https://github.com/risingwavelabs/jsonbb.git", rev = "45f7b53" }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
