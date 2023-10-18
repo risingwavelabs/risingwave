@@ -12,27 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::derive_partial_eq_without_eq)]
-#![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
-#![feature(type_alias_impl_trait)]
-#![feature(extract_if)]
-#![feature(custom_test_frameworks)]
 #![feature(lint_reasons)]
-#![feature(map_try_insert)]
-#![feature(hash_extract_if)]
-#![feature(btree_extract_if)]
-#![feature(result_option_inspect)]
-#![feature(lazy_cell)]
 #![feature(let_chains)]
-#![feature(error_generic_member_access)]
-#![feature(assert_matches)]
-#![feature(try_blocks)]
-#![cfg_attr(coverage, feature(no_coverage))]
-#![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
-#![feature(is_sorted)]
+#![feature(lazy_cell)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(type_name_of_val)]
+#![cfg_attr(coverage, feature(no_coverage))]
 
 use risingwave_meta::*;
 
