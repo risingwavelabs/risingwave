@@ -31,7 +31,6 @@ pub async fn handle_comment(
         let mut binder = Binder::new_for_ddl(&session);
         match object_type {
             CommentObject::Column => {
-                // TODO: wait to ask: How to bind `t.col`
                 let [.., tab, col] = object_name.0.as_slice() else {
                     return Err(ErrorCode::BindError(format!(
                         "Invalid column: {}",
@@ -47,22 +46,19 @@ pub async fn handle_comment(
 
                 (
                     table.table_id,
-                    column
-                        .as_input_ref()
-                        .map(|input_ref| input_ref.index + 1) // +1 since `_row_id`
-                        .unwrap_or_default(),
+                    column.as_input_ref().map(|input_ref| input_ref.index as _),
                 )
             }
             CommentObject::Table => {
                 let table = binder.bind_table(None, &object_name.real_value(), None)?;
-                (table.table_id, 0)
+                (table.table_id, None)
             }
         }
     };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_comment(table_id, column_index as _, comment)
+        .comment_on(table_id, column_index, comment)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::COMMENT))

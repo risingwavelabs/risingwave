@@ -406,18 +406,18 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
-    pub async fn create_comment(
+    pub async fn comment_on(
         &self,
         table_id: u32,
-        column_index: u32,
+        column_index: Option<u32>,
         comment: Option<String>,
     ) -> Result<CatalogVersion> {
-        let request = CreateCommentRequest {
+        let request = CommentOnRequest {
             table_id,
             column_index,
             comment,
         };
-        let resp = self.inner.create_comment(request).await?;
+        let resp = self.inner.comment_on(request).await?;
         Ok(resp.version)
     }
 
@@ -1715,7 +1715,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
             ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }
             ,{ ddl_client, drop_connection, DropConnectionRequest, DropConnectionResponse }
-            ,{ ddl_client, create_comment, CreateCommentRequest, CreateCommentResponse }
+            ,{ ddl_client, comment_on, CommentOnRequest, CommentOnResponse }
             ,{ ddl_client, get_tables, GetTablesRequest, GetTablesResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }

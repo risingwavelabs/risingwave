@@ -218,7 +218,6 @@ impl CatalogManager {
                 database_id: database.id,
                 name: schema_name.to_string(),
                 owner: database.owner,
-                description: None,
             };
             schemas.insert(schema.id, schema.clone());
             schemas_added.push(schema);
@@ -2194,7 +2193,7 @@ impl CatalogManager {
         Ok(())
     }
 
-    pub async fn create_comment(&self, comment: Comment) -> MetaResult<NotificationVersion> {
+    pub async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         database_core.ensure_table_view_or_source_id(&comment.table_id)?;
@@ -2203,13 +2202,8 @@ impl CatalogManager {
 
         // TODO: dont unwrap
         let mut table = tables.get_mut(comment.table_id).unwrap();
-        let col_idx = comment.column_index;
-        if col_idx > 0 {
-            let column = table
-                .columns
-                .iter_mut()
-                .find(|col| col.column_desc.clone().unwrap().column_id == col_idx as i32)
-                .unwrap();
+        if let Some(col_idx) = comment.column_index {
+            let column = &mut table.columns[col_idx as usize];
             column.column_desc.as_mut().unwrap().description = comment.description;
         } else {
             table.description = comment.description;

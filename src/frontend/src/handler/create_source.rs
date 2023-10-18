@@ -1156,7 +1156,6 @@ pub async fn handle_create_source(
         initialized_at_epoch: None,
         created_at_epoch: None,
         optional_associated_table_id: None,
-        description: None,
         version: INITIAL_SOURCE_VERSION_ID,
     };
 

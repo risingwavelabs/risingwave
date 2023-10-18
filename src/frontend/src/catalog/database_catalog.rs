@@ -28,7 +28,6 @@ pub struct DatabaseCatalog {
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,
     owner: u32,
-    description: Option<String>,
 }
 
 impl DatabaseCatalog {
@@ -66,7 +65,6 @@ impl DatabaseCatalog {
                 database_id: self.id,
                 name: schema.name(),
                 owner: schema.owner(),
-                description: None,
             })
             .collect_vec()
     }
@@ -110,10 +108,6 @@ impl DatabaseCatalog {
     pub fn owner(&self) -> u32 {
         self.owner
     }
-
-    pub fn description(&self) -> Option<&str> {
-        self.description.as_deref()
-    }
 }
 impl From<&PbDatabase> for DatabaseCatalog {
     fn from(db: &PbDatabase) -> Self {
@@ -123,7 +117,6 @@ impl From<&PbDatabase> for DatabaseCatalog {
             schema_by_name: HashMap::new(),
             schema_name_by_id: HashMap::new(),
             owner: db.owner,
-            description: db.description.clone(),
         }
     }
 }

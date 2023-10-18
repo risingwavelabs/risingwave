@@ -181,8 +181,6 @@ message SinkDesc {
   // it is the name of the sink itself.
   string sink_from_name = 12;
   catalog.SinkFormatDesc format_desc = 13;
-
-  optional string description = 14;
 }
 
 enum SinkLogStoreType {

@@ -171,7 +171,6 @@ pub async fn handle_create_function(
         identifier,
         link,
         owner: session.user_id(),
-        description: None,
     };
 
     let catalog_writer = session.catalog_writer()?;

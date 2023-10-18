@@ -183,7 +183,6 @@ impl StreamSink {
             properties: properties.into_inner(),
             sink_type,
             format_desc,
-            description: None,
         };
         Ok((input, sink_desc))
     }

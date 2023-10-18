@@ -103,7 +103,6 @@ pub async fn handle_create_view(
             .collect_vec(),
         sql: format!("{}", query),
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
-        description: None,
     };
 
     let catalog_writer = session.catalog_writer()?;

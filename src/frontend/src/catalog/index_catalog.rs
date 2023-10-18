@@ -63,8 +63,6 @@ pub struct IndexCatalog {
     pub created_at_epoch: Option<Epoch>,
 
     pub initialized_at_epoch: Option<Epoch>,
-
-    pub description: Option<String>,
 }
 
 impl IndexCatalog {
@@ -126,7 +124,6 @@ impl IndexCatalog {
             original_columns,
             created_at_epoch: index_prost.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: index_prost.initialized_at_epoch.map(Epoch::from),
-            description: index_prost.description.clone(),
         }
     }
 
@@ -188,7 +185,6 @@ impl IndexCatalog {
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
             stream_job_status: PbStreamJobStatus::Creating.into(),
-            description: self.description.clone(),
         }
     }
 

@@ -185,7 +185,6 @@ impl From<&BuiltinView> for ViewCatalog {
             sql: val.sql.to_string(),
             owner: DEFAULT_SUPER_USER_ID,
             properties: Default::default(),
-            description: None,
         }
     }
 }

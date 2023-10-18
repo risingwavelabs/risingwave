@@ -100,7 +100,7 @@ pub enum DdlCommand {
     AlterSourceColumn(Source),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
-    CreateComment(Comment),
+    CommentOn(Comment),
 }
 
 #[derive(Clone)]
@@ -258,7 +258,7 @@ impl DdlController {
                     ctrl.drop_connection(connection_id).await
                 }
                 DdlCommand::AlterSourceColumn(source) => ctrl.alter_source_column(source).await,
-                DdlCommand::CreateComment(comment) => ctrl.create_comment(comment).await,
+                DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
             }
         }
         .in_current_span();
@@ -1050,7 +1050,7 @@ impl DdlController {
         }
     }
 
-    async fn create_comment(&self, comment: Comment) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.create_comment(comment).await
+    async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.comment_on(comment).await
     }
 }

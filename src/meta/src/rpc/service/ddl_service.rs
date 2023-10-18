@@ -674,7 +674,6 @@ impl DdlService for DdlServiceImpl {
                     name: req.name,
                     owner: req.owner_id,
                     info: Some(connection::Info::PrivateLinkService(private_link_svc)),
-                    description: None,
                 };
 
                 // save private link info to catalog
@@ -718,22 +717,22 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
-    async fn create_comment(
+    async fn comment_on(
         &self,
-        request: Request<CreateCommentRequest>,
-    ) -> Result<Response<CreateCommentResponse>, Status> {
+        request: Request<CommentOnRequest>,
+    ) -> Result<Response<CommentOnResponse>, Status> {
         let req = request.into_inner();
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreateComment(Comment {
+            .run_command(DdlCommand::CommentOn(Comment {
                 table_id: req.table_id,
                 column_index: req.column_index,
                 description: req.comment,
             }))
             .await?;
 
-        Ok(Response::new(CreateCommentResponse {
+        Ok(Response::new(CommentOnResponse {
             status: None,
             version,
         }))

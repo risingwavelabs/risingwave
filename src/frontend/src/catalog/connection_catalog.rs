@@ -32,7 +32,6 @@ pub struct ConnectionCatalog {
     pub name: String,
     pub info: connection::Info,
     pub owner: UserId,
-    pub description: Option<String>,
 }
 
 impl ConnectionCatalog {
@@ -56,7 +55,6 @@ impl From<&PbConnection> for ConnectionCatalog {
             name: prost.name.clone(),
             info: prost.info.clone().unwrap(),
             owner: prost.owner,
-            description: prost.description.clone(),
         }
     }
 }
