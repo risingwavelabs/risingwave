@@ -1591,6 +1591,7 @@ impl CatalogManager {
         // 2. rename index name.
         index.name = index_name.to_string();
         index_table.name = index_name.to_string();
+        index_table.definition = alter_relation_rename(&index_table.definition, index_name);
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         indexes.insert(index_id, index.clone());
