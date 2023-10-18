@@ -122,9 +122,11 @@ reclaimers = 4
 recover_concurrency = 8
 lfu_window_to_cache_size_ratio = 1
 lfu_tiny_lru_capacity_ratio = 0.01
-rated_random_rate_mb = 0
+insert_rate_limit_mb = 0
 flush_rate_limit_mb = 0
 reclaim_rate_limit_mb = 0
+allocation_bits = 0
+allocation_timeout_ms = 10
 
 [storage.meta_file_cache]
 dir = ""
@@ -137,14 +139,20 @@ reclaimers = 4
 recover_concurrency = 8
 lfu_window_to_cache_size_ratio = 1
 lfu_tiny_lru_capacity_ratio = 0.01
-rated_random_rate_mb = 0
+insert_rate_limit_mb = 0
 flush_rate_limit_mb = 0
 reclaim_rate_limit_mb = 0
+allocation_bits = 0
+allocation_timeout_ms = 10
 
 [storage.cache_refill]
 data_refill_levels = []
 timeout_ms = 6000
 concurrency = 10
+unit = 64
+threshold = 0.5
+recent_filter_layers = 6
+recent_filter_rotate_interval_ms = 10000
 
 [system]
 barrier_interval_ms = 1000

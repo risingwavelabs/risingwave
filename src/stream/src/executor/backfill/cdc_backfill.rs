@@ -48,7 +48,7 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
+pub const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
 
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -227,7 +227,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         #[allow(unused_variables)]
         let mut total_snapshot_processed_rows: u64 = 0;
 
-        let mut last_binlog_offset: Option<CdcOffset>;
+        // Read the current binlog offset as a low watermark
+        let mut last_binlog_offset: Option<CdcOffset> =
+            upstream_table_reader.current_binlog_offset().await?;
 
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
@@ -251,7 +253,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         //
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
         if to_backfill {
-            last_binlog_offset = upstream_table_reader.current_binlog_offset().await?;
             // drive the upstream changelog first to ensure we can receive timely changelog event,
             // otherwise the upstream changelog may be blocked by the snapshot read stream
             let _ = Pin::new(&mut upstream).peek().await;
@@ -349,6 +350,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     break;
                                 }
                                 Message::Chunk(chunk) => {
+                                    // skip empty upstream chunk
+                                    if chunk.cardinality() == 0 {
+                                        continue;
+                                    }
+
                                     let chunk_binlog_offset = get_cdc_chunk_last_offset(
                                         upstream_table_reader.inner().table_reader(),
                                         &chunk,
@@ -442,18 +448,23 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     }
                 }
             }
-        } else {
+        } else if is_snapshot_empty {
+            tracing::info!(
+                upstream_table_id,
+                initial_binlog_offset = ?last_binlog_offset,
+                "upstream snapshot is empty, mark backfill is done and persist current binlog offset");
+
             Self::write_backfill_state(
                 &mut self.source_state_handler,
                 upstream_table_id,
                 &split_id,
                 &mut cdc_split,
-                None,
+                last_binlog_offset,
             )
             .await?;
         }
 
-        tracing::debug!(
+        tracing::info!(
             actor = self.actor_id,
             "CdcBackfill has already finished and forward messages directly to the downstream"
         );
@@ -491,6 +502,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         cdc_split: &mut Option<SplitImpl>,
         last_binlog_offset: Option<CdcOffset>,
     ) -> StreamExecutorResult<()> {
+        assert!(
+            last_binlog_offset.is_some(),
+            "last binlog offset cannot be None"
+        );
+
         if let Some(split_id) = split_id.as_ref() {
             let mut key = split_id.to_string();
             key.push_str(BACKFILL_STATE_KEY_SUFFIX);
@@ -523,6 +539,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 "server".to_string() => server
                             },
                             source_offset,
+                            // upstream heartbeat event would not emit to the cdc backfill executor,
+                            // since we don't parse heartbeat event in the source parser.
+                            is_heartbeat: false,
                         }
                     });
 

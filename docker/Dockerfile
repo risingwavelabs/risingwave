@@ -107,7 +107,7 @@ RUN mvn dependency:go-offline --fail-never
 # Besides, rust-maven-plugin sets --target-dir, so the dependencies are built twice. How to dedup?
 COPY ./ /risingwave
 
-RUN mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true && \
+RUN mvn -B package -Dmaven.test.skip=true -Dno-build-rust && \
   mkdir -p /risingwave/bin/connector-node && \
   tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 

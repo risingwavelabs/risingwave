@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// *** NOTICE: TO BE DEPRECATED *** //
+
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 

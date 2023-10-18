@@ -114,6 +114,27 @@ SELECT * FROM range(0.1::numeric, 2.1::numeric, 0.5::numeric)
 1.1
 1.6
 
+statement error start value cannot be infinity
+SELECT * FROM range('infinity'::numeric,10::numeric);
+
+statement error stop value cannot be infinity
+SELECT * FROM range(0::numeric,'-infinity'::numeric);
+
+statement error stop value cannot be NaN
+SELECT * FROM range(0::numeric,'nan'::numeric);
+
+statement error start value cannot be infinity
+SELECT * FROM range('infinity'::numeric,10::numeric,0::numeric);
+
+statement error stop value cannot be infinity
+SELECT * FROM range(0::numeric,'-infinity'::numeric,0::numeric);
+
+statement error step value cannot be NaN
+SELECT * FROM range(0::numeric,10::numeric,'nan'::numeric);
+
+statement error start value cannot be infinity
+SELECT * FROM range('-infinity'::numeric,'infinity'::numeric,'nan'::numeric);
+
 # test table function with aliases
 query I
 SELECT alias from range(1,2) alias;

@@ -48,7 +48,7 @@ use risingwave_common::metrics::{
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
-use risingwave_rpc_client::{ConnectorClient, MetaClient};
+use risingwave_rpc_client::MetaClient;
 use thiserror::Error;
 pub use tracing;
 
@@ -216,13 +216,13 @@ impl From<SinkCatalog> for SinkParam {
 
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration_metrics: LabelGuardedHistogram,
-    pub connector_sink_rows_received: LabelGuardedIntCounter,
-    pub log_store_first_write_epoch: LabelGuardedIntGauge,
-    pub log_store_latest_write_epoch: LabelGuardedIntGauge,
-    pub log_store_write_rows: LabelGuardedIntCounter,
-    pub log_store_latest_read_epoch: LabelGuardedIntGauge,
-    pub log_store_read_rows: LabelGuardedIntCounter,
+    pub sink_commit_duration_metrics: LabelGuardedHistogram<3>,
+    pub connector_sink_rows_received: LabelGuardedIntCounter<2>,
+    pub log_store_first_write_epoch: LabelGuardedIntGauge<3>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge<3>,
+    pub log_store_write_rows: LabelGuardedIntCounter<3>,
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
+    pub log_store_read_rows: LabelGuardedIntCounter<3>,
 }
 
 impl SinkMetrics {
@@ -272,10 +272,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     async fn validate(&self) -> Result<()>;
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
     #[expect(clippy::unused_async)]
-    async fn new_coordinator(
-        &self,
-        _connector_client: Option<ConnectorClient>,
-    ) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
@@ -376,8 +373,8 @@ pub enum SinkError {
     Kinesis(anyhow::Error),
     #[error("Remote sink error: {0}")]
     Remote(anyhow::Error),
-    #[error("Json parse error: {0}")]
-    JsonParse(String),
+    #[error("Encode error: {0}")]
+    Encode(String),
     #[error("Iceberg error: {0}")]
     Iceberg(anyhow::Error),
     #[error("config error: {0}")]

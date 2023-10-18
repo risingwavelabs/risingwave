@@ -19,6 +19,7 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use parking_lot::RwLock;
+use prometheus::IntGauge;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -89,6 +90,10 @@ pub struct LocalHummockStorage {
     write_limiter: WriteLimiterRef,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+
+    mem_table_size: IntGauge,
+
+    mem_table_item_count: IntGauge,
 }
 
 impl LocalHummockStorage {
@@ -243,11 +248,20 @@ impl LocalStateStore for LocalHummockStorage {
             None => self.mem_table.insert(key, new_val)?,
             Some(old_val) => self.mem_table.update(key, old_val, new_val)?,
         };
+
+        self.mem_table_size
+            .set(self.mem_table.kv_size.size() as i64);
+        self.mem_table_item_count
+            .set(self.mem_table.buffer.len() as i64);
         Ok(())
     }
 
     fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
         self.mem_table.delete(key, old_val)?;
+        self.mem_table_size
+            .set(self.mem_table.kv_size.size() as i64);
+        self.mem_table_item_count
+            .set(self.mem_table.buffer.len() as i64);
         Ok(())
     }
 
@@ -255,6 +269,8 @@ impl LocalStateStore for LocalHummockStorage {
         &mut self,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
     ) -> StorageResult<usize> {
+        self.mem_table_size.set(0);
+        self.mem_table_item_count.set(0);
         debug_assert!(delete_ranges
             .iter()
             .map(|(key, _)| key)
@@ -468,6 +484,14 @@ impl LocalHummockStorage {
         version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
+        let mem_table_size = stats.mem_table_memory_size.with_label_values(&[
+            &option.table_id.to_string(),
+            &instance_guard.instance_id.to_string(),
+        ]);
+        let mem_table_item_count = stats.mem_table_item_count.with_label_values(&[
+            &option.table_id.to_string(),
+            &instance_guard.instance_id.to_string(),
+        ]);
         Self {
             mem_table: MemTable::new(option.is_consistent_op),
             epoch: None,
@@ -483,6 +507,8 @@ impl LocalHummockStorage {
             stats,
             write_limiter,
             version_update_notifier_tx,
+            mem_table_size,
+            mem_table_item_count,
         }
     }
 

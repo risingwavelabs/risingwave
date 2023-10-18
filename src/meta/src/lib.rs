@@ -55,7 +55,9 @@ use std::time::Duration;
 use clap::Parser;
 pub use error::{MetaError, MetaResult};
 use risingwave_common::config::OverrideConfig;
+use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_common_heap_profiling::HeapProfiler;
 pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 
 use crate::manager::MetaOpts;
@@ -191,6 +193,11 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_OBJECT_STORE_READ_TIMEOUT_MS", value_enum)]
     #[override_opts(path = storage.object_store_read_timeout_ms)]
     pub object_store_read_timeout_ms: Option<u64>,
+
+    /// Enable heap profile dump when memory usage is high.
+    #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
+    #[override_opts(path = server.heap_profiling.dir)]
+    pub heap_profiling_dir: Option<String>,
 }
 
 use std::future::Future;
@@ -231,6 +238,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             .map(|endpoint| MetaStoreSqlBackend { endpoint });
 
         validate_config(&config);
+
+        let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
+        let heap_profiler =
+            HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
+        // Run a background heap profiler
+        heap_profiler.start();
 
         let max_heartbeat_interval =
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
