@@ -43,8 +43,8 @@ use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 
 pub struct CompactStatus {
-    pub(crate) compaction_group_id: CompactionGroupId,
-    pub(crate) level_handlers: Vec<LevelHandler>,
+    pub compaction_group_id: CompactionGroupId,
+    pub level_handlers: Vec<LevelHandler>,
 }
 
 impl Debug for CompactStatus {

@@ -27,7 +27,7 @@ use tonic::{Request, Response, Status, Streaming};
 use crate::hummock::compaction::selector::ManualCompactionOption;
 use crate::hummock::{HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
-use crate::rpc::service::RwReceiverStream;
+use crate::RwReceiverStream;
 pub struct HummockServiceImpl {
     hummock_manager: HummockManagerRef,
     vacuum_manager: VacuumManagerRef,
