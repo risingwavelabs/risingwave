@@ -68,8 +68,9 @@ enum Commands {
     /// Commands for Debug
     #[clap(subcommand)]
     Debug(DebugCommands),
-    /// Commands for tracing the compute nodes
-    Trace,
+    /// Dump the await-tree of compute nodes and compactors
+    #[clap(visible_alias("trace"))]
+    AwaitTree,
     // TODO(yuhao): profile other nodes
     /// Commands for profilng the compute nodes
     #[clap(subcommand)]
@@ -658,7 +659,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
             cmd_impl::meta::validate_source(context, props).await?
         }
-        Commands::Trace => cmd_impl::trace::trace(context).await?,
+        Commands::AwaitTree => cmd_impl::await_tree::dump(context).await?,
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {
             cmd_impl::profile::cpu_profile(context, sleep).await?
         }
