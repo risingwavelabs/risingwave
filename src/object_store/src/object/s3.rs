@@ -758,6 +758,12 @@ impl S3ObjectStore {
                 tracing::warn!("Failed to configure life cycle rule for S3 bucket: {:?}. It is recommended to configure it manually to avoid unnecessary storage cost.", bucket);
             }
         }
+        if is_expiration_configured {
+            tracing::info!(
+                "S3 bucket {} has already configured the expiration for the lifecycle.",
+                bucket,
+            );
+        }
         is_expiration_configured
     }
 
