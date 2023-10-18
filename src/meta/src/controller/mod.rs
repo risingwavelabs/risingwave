@@ -21,12 +21,16 @@ use crate::MetaError;
 
 #[allow(dead_code)]
 pub mod catalog;
+pub mod cluster;
 pub mod system_param;
 pub mod utils;
 
 // todo: refine the error transform.
 impl From<sea_orm::DbErr> for MetaError {
     fn from(err: sea_orm::DbErr) -> Self {
+        if let Some(err) = err.sql_err() {
+            return anyhow!(err).into();
+        }
         anyhow!(err).into()
     }
 }

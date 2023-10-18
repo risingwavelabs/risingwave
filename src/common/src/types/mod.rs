@@ -122,8 +122,8 @@ pub enum DataType {
     #[display("date")]
     #[from_str(regex = "(?i)^date$")]
     Date,
-    #[display("varchar")]
-    #[from_str(regex = "(?i)^varchar$")]
+    #[display("character varying")]
+    #[from_str(regex = "(?i)^character varying$|^varchar$")]
     Varchar,
     #[display("time without time zone")]
     #[from_str(regex = "(?i)^time$|^time without time zone$")]
@@ -350,6 +350,14 @@ impl DataType {
 
     pub fn is_scalar(&self) -> bool {
         DataTypeName::from(self).is_scalar()
+    }
+
+    pub fn is_array(&self) -> bool {
+        matches!(self, DataType::List(_))
+    }
+
+    pub fn is_struct(&self) -> bool {
+        matches!(self, DataType::Struct(_))
     }
 
     pub fn is_int(&self) -> bool {
@@ -950,7 +958,21 @@ impl ScalarImpl {
         };
         Ok(res)
     }
+}
 
+impl From<ScalarRefImpl<'_>> for ScalarImpl {
+    fn from(scalar_ref: ScalarRefImpl<'_>) -> Self {
+        scalar_ref.into_scalar_impl()
+    }
+}
+
+impl<'a> From<&'a ScalarImpl> for ScalarRefImpl<'a> {
+    fn from(scalar: &'a ScalarImpl) -> Self {
+        scalar.as_scalar_ref_impl()
+    }
+}
+
+impl ScalarImpl {
     /// A lite version of casting from string to target type. Used by frontend to handle types that have
     /// to be created by casting.
     ///
@@ -1196,7 +1218,10 @@ mod tests {
             vec![DataType::Int32, DataType::Varchar],
             vec!["i".to_string(), "j".to_string()],
         );
-        assert_eq!(format!("{}", d), "struct<i integer,j varchar>".to_string());
+        assert_eq!(
+            format!("{}", d),
+            "struct<i integer,j character varying>".to_string()
+        );
     }
 
     #[test]

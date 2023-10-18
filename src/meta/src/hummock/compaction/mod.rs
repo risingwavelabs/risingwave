@@ -18,7 +18,7 @@ pub mod compaction_config;
 mod overlap_strategy;
 use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_pb::hummock::compact_task::{self, TaskStatus};
+use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 
 mod picker;
 pub mod selector;
@@ -156,6 +156,10 @@ impl CompactStatus {
     }
 
     pub fn is_trivial_move_task(task: &CompactTask) -> bool {
+        if task.task_type() != TaskType::Dynamic && task.task_type() != TaskType::Emergency {
+            return false;
+        }
+
         if task.input_ssts.len() == 1 {
             return task.input_ssts[0].level_idx == 0
                 && can_concat(&task.input_ssts[0].table_infos);

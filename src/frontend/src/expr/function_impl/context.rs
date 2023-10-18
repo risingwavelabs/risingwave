@@ -12,8 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub const MANUALLY_DUMP_SUFFIX: &str = "manual.heap";
-pub const AUTO_DUMP_SUFFIX: &str = "auto.heap";
-pub const COLLAPSED_SUFFIX: &str = "collapsed";
+use std::sync::Arc;
 
-pub mod jeprof;
+use risingwave_common::session_config::SearchPath;
+use risingwave_expr::define_context;
+
+use crate::session::AuthContext;
+
+define_context! {
+    pub(super) CATALOG_READER: crate::catalog::CatalogReader,
+    pub(super) AUTH_CONTEXT: Arc<AuthContext>,
+    pub(super) DB_NAME: String,
+    pub(super) SEARCH_PATH: SearchPath,
+}

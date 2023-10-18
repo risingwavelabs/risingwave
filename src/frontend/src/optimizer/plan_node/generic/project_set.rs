@@ -92,7 +92,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
         let i2o = self.i2o_col_mapping();
         let mut pk = self
             .input
-            .stream_key()
+            .stream_key()?
             .iter()
             .map(|pk_col| i2o.try_map(*pk_col))
             .collect::<Option<Vec<_>>>()

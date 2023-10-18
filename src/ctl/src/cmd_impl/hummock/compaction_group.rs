@@ -61,6 +61,7 @@ pub fn build_compaction_config_vec(
     level0_max_compact_file_number: Option<u64>,
     level0_overlapping_sub_level_compact_level_count: Option<u32>,
     enable_emergency_picker: Option<bool>,
+    tombstone_reclaim_ratio: Option<u32>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -104,6 +105,9 @@ pub fn build_compaction_config_vec(
     }
     if let Some(c) = enable_emergency_picker {
         configs.push(MutableConfig::EnableEmergencyPicker(c))
+    }
+    if let Some(c) = tombstone_reclaim_ratio {
+        configs.push(MutableConfig::TombstoneReclaimRatio(c))
     }
 
     configs
