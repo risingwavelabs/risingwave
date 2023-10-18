@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::StackTraceResponse;
@@ -21,66 +19,62 @@ use risingwave_rpc_client::{CompactorClient, ComputeClientPool};
 
 use crate::CtlContext;
 
+fn merge(a: &mut StackTraceResponse, b: StackTraceResponse) {
+    a.actor_traces.extend(b.actor_traces);
+    a.rpc_traces.extend(b.rpc_traces);
+    a.compaction_task_traces.extend(b.compaction_task_traces);
+}
+
 pub async fn trace(context: &CtlContext) -> anyhow::Result<()> {
+    let mut all = Default::default();
+
     let meta_client = context.meta_client().await?;
 
-    let workers = meta_client.get_cluster_info().await?.worker_nodes;
-    let compute_nodes = workers
-        .into_iter()
-        .filter(|w| w.r#type() == WorkerType::ComputeNode);
-
+    let compute_nodes = meta_client
+        .list_worker_nodes(WorkerType::ComputeNode)
+        .await?;
     let clients = ComputeClientPool::default();
-
-    let mut all_actor_traces = BTreeMap::new();
-    let mut all_rpc_traces = BTreeMap::new();
 
     // FIXME: the compute node may not be accessible directly from risectl, we may let the meta
     // service collect the reports from all compute nodes in the future.
     for cn in compute_nodes {
         let client = clients.get(&cn).await?;
-        let StackTraceResponse {
-            actor_traces,
-            rpc_traces,
-            ..
-        } = client.stack_trace().await?;
-
-        all_actor_traces.extend(actor_traces);
-        all_rpc_traces.extend(rpc_traces.into_iter().map(|(k, v)| {
-            (
-                format!("{} ({})", HostAddr::from(cn.get_host().unwrap()), k),
-                v,
-            )
-        }));
-    }
-
-    if all_actor_traces.is_empty() && all_rpc_traces.is_empty() {
-        println!("No traces found. No actors are running, or `--async-stack-trace` not set?");
-    } else {
-        println!("--- Actor Traces ---");
-        for (key, trace) in all_actor_traces {
-            println!(">> Actor {key}\n{trace}");
-        }
-        println!("--- RPC Traces ---");
-        for (key, trace) in all_rpc_traces {
-            println!(">> RPC {key}\n{trace}");
-        }
+        let response = client.stack_trace().await?;
+        merge(&mut all, response);
     }
 
     let compactor_nodes = meta_client.list_worker_nodes(WorkerType::Compactor).await?;
-    let mut all_compaction_task_traces = BTreeMap::new();
+
     for compactor in compactor_nodes {
         let addr: HostAddr = compactor.get_host().unwrap().into();
         let client = CompactorClient::new(addr).await?;
-        let StackTraceResponse {
-            compaction_task_traces,
-            ..
-        } = client.stack_trace().await?;
-        all_compaction_task_traces.extend(compaction_task_traces);
+        let response = client.stack_trace().await?;
+        merge(&mut all, response);
     }
-    if !all_compaction_task_traces.is_empty() {
-        println!("--- Compactor Traces ---");
-        for (key, trace) in all_compaction_task_traces {
-            println!(">> Compaction Task {key}\n{trace}");
+
+    if all.actor_traces.is_empty()
+        && all.rpc_traces.is_empty()
+        && all.compaction_task_traces.is_empty()
+    {
+        println!("No traces found. No actors are running, or `--async-stack-trace` not set?");
+    } else {
+        if !all.actor_traces.is_empty() {
+            println!("--- Actor Traces ---");
+            for (key, trace) in all.actor_traces {
+                println!(">> Actor {key}\n{trace}");
+            }
+        }
+        if !all.rpc_traces.is_empty() {
+            println!("\n\n--- RPC Traces ---");
+            for (key, trace) in all.rpc_traces {
+                println!(">> RPC {key}\n{trace}");
+            }
+        }
+        if !all.compaction_task_traces.is_empty() {
+            println!("\n\n--- Compactor Traces ---");
+            for (key, trace) in all.compaction_task_traces {
+                println!(">> Compaction Task {key}\n{trace}");
+            }
         }
     }
 

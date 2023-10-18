@@ -313,7 +313,7 @@ pub mod grpc_middleware {
                 let root = registry
                     .lock()
                     .await
-                    .register(id, format!("{}:{}", req.uri().path(), id));
+                    .register(id, req.uri().to_string());
 
                 root.instrument(inner.call(req)).await
             })
