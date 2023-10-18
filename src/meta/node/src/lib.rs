@@ -25,7 +25,7 @@ use risingwave_common::config::OverrideConfig;
 use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
-use risingwave_meta::{MetaStoreBackend, *};
+use risingwave_meta::*;
 use risingwave_meta_service::*;
 pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 use server::{rpc_serve, MetaStoreSqlBackend};

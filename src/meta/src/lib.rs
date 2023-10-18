@@ -50,6 +50,16 @@ pub mod stream;
 pub mod telemetry;
 
 pub use error::{MetaError, MetaResult};
-pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient, MetaStoreBackend};
+pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 
 use crate::manager::MetaOpts;
+
+
+#[derive(Debug)]
+pub enum MetaStoreBackend {
+    Etcd {
+        endpoints: Vec<String>,
+        credentials: Option<(String, String)>,
+    },
+    Mem,
+}

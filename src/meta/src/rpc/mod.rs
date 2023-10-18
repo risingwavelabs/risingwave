@@ -18,15 +18,6 @@ pub mod election;
 pub mod intercept;
 pub mod metrics;
 
-#[derive(Debug)]
-pub enum MetaStoreBackend {
-    Etcd {
-        endpoints: Vec<String>,
-        credentials: Option<(String, String)>,
-    },
-    Mem,
-}
-
 pub type ElectionClientRef = std::sync::Arc<dyn ElectionClient>;
 
 pub use election::etcd::EtcdElectionClient;
