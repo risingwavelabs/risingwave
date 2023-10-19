@@ -370,14 +370,6 @@ impl Catalog {
         Ok(self.get_database_by_name(db_name)?.iter_schemas())
     }
 
-    pub fn iter_schemas_except_rw_catalog(
-        &self,
-        db_name: &str,
-    ) -> CatalogResult<impl Iterator<Item = &SchemaCatalog>> {
-        self.iter_schemas(db_name)
-            .map(|scs| scs.filter(|sc| !sc.is_rw_catalog()))
-    }
-
     pub fn get_all_database_names(&self) -> Vec<String> {
         self.database_by_name.keys().cloned().collect_vec()
     }

@@ -432,10 +432,6 @@ impl SchemaCatalog {
         self.system_table_by_name.values()
     }
 
-    pub fn is_rw_catalog(&self) -> bool {
-        !self.system_table_by_name.is_empty()
-    }
-
     pub fn get_table_by_name(&self, table_name: &str) -> Option<&Arc<TableCatalog>> {
         self.table_by_name.get(table_name)
     }
