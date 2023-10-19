@@ -8,25 +8,28 @@ statement ok
 create view v3 as select sum(v2) as sum_v2 from t3;
 
 statement ok
-comment on column t3.v2 is 'column desc';
+comment on column t3.v2 is 'Lorem ipsum dolor sit amet';
 
 statement ok
-comment on column t3._row_id is '_row_id desc';
+comment on column t3._row_id is 'consectetur adipiscing elit';
 
-query TTT
+query TTTT
 describe t3;
 ----
-v1 integer NULL
-v2 integer column desc
-v3 integer NULL
-primary key _row_id _row_id desc
+v1               integer false  NULL
+v2               integer false  Lorem ipsum dolor sit amet
+v3               integer false  NULL
+_row_id           serial  true  consectetur adipiscing elit
+primary key      _row_id  NULL  consectetur adipiscing elit
+distribution key _row_id  NULL  consectetur adipiscing elit
 
-query TT
+query TTT
 show columns from t3;
 ----
-v1 integer
-v2 integer
-v3 integer
+v1 integer false
+v2 integer false
+v3 integer false
+_row_id serial true
 
 statement ok
 create index idx1 on t3 (v1,v2);
@@ -36,14 +39,19 @@ show indexes from t3;
 ----
 idx1 t3 v1 ASC, v2 ASC v3 v1
 
-query TTT
+statement ok
+comment on column t3.v2 is 'Nemo enim ipsam';
+
+query TTTT
 describe t3;
 ----
-v1 integer NULL
-v2 integer column desc
-v3 integer NULL
-primary key _row_id _row_id desc
-idx1 index(v1 ASC, v2 ASC) include(v3) distributed by(v1) NULL
+v1               integer false  NULL
+v2               integer false  Nemo enim ipsam
+v3               integer false  NULL
+_row_id           serial  true  consectetur adipiscing elit
+primary key      _row_id  NULL  consectetur adipiscing elit
+distribution key _row_id  NULL  consectetur adipiscing elit
+idx1             index(v1 ASC, v2 ASC) include(v3) distributed by(v1) NULL NULL
 
 query TT
 show create index idx1;

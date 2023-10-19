@@ -179,7 +179,7 @@ impl CreatingStreamingJobPermit {
 }
 
 impl DdlController {
-    pub(crate) async fn new(
+    pub async fn new(
         env: MetaSrvEnv,
         catalog_manager: CatalogManagerRef,
         stream_manager: GlobalStreamManagerRef,
@@ -218,7 +218,7 @@ impl DdlController {
     /// has been interrupted during executing, the request will be cancelled by tonic. Since we have
     /// a lot of logic for revert, status management, notification and so on, ensuring consistency
     /// would be a huge hassle and pain if we don't spawn here.
-    pub(crate) async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
+    pub async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
         self.check_barrier_manager_status().await?;
         let ctrl = self.clone();
         let fut = async move {
@@ -265,7 +265,7 @@ impl DdlController {
         tokio::spawn(fut).await.unwrap()
     }
 
-    pub(crate) async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
+    pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
         self.barrier_manager.get_ddl_progress().await
     }
 

@@ -159,26 +159,26 @@ pub struct ReplaceTableContext {
 
 /// `GlobalStreamManager` manages all the streams in the system.
 pub struct GlobalStreamManager {
-    pub(crate) env: MetaSrvEnv,
+    pub env: MetaSrvEnv,
 
     /// Manages definition and status of fragments and actors
     pub(super) fragment_manager: FragmentManagerRef,
 
     /// Broadcasts and collect barriers
-    pub(crate) barrier_scheduler: BarrierScheduler,
+    pub barrier_scheduler: BarrierScheduler,
 
     /// Maintains information of the cluster
-    pub(crate) cluster_manager: ClusterManagerRef,
+    pub cluster_manager: ClusterManagerRef,
 
     /// Maintains streaming sources from external system like kafka
-    pub(crate) source_manager: SourceManagerRef,
+    pub source_manager: SourceManagerRef,
 
     /// Creating streaming job info.
     creating_job_info: CreatingStreamingJobInfoRef,
 
     hummock_manager: HummockManagerRef,
 
-    pub(crate) reschedule_lock: RwLock<()>,
+    pub reschedule_lock: RwLock<()>,
 }
 
 impl GlobalStreamManager {

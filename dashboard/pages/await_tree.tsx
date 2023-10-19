@@ -36,22 +36,32 @@ import { getClusterInfoComputeNode } from "./api/cluster"
 import useFetch from "./api/fetch"
 
 const SIDEBAR_WIDTH = 200
+const ALL_COMPUTE_NODES = ""
 
 export default function AwaitTreeDump() {
   const { response: computeNodes } = useFetch(getClusterInfoComputeNode)
 
-  const [computeNodeId, setComputeNodeId] = useState<number>()
-  const [dump, setDump] = useState<string | undefined>("")
+  const [computeNodeId, setComputeNodeId] = useState<string>()
+  const [dump, setDump] = useState<string>("")
 
   useEffect(() => {
-    if (computeNodes && !computeNodeId && computeNodes.length > 0) {
-      setComputeNodeId(computeNodes[0].id)
+    if (computeNodes && !computeNodeId) {
+      setComputeNodeId(ALL_COMPUTE_NODES)
     }
   }, [computeNodes, computeNodeId])
 
   const dumpTree = async () => {
-    const title = `Await-Tree Dump of Compute Node ${computeNodeId}:`
-    setDump(undefined)
+    if (computeNodeId === undefined) {
+      return
+    }
+
+    let title
+    if (computeNodeId === ALL_COMPUTE_NODES) {
+      title = "Await-Tree Dump of All Compute Nodes:"
+    } else {
+      title = `Await-Tree Dump of Compute Node ${computeNodeId}:`
+    }
+    setDump("Loading...")
 
     let result
 
@@ -92,10 +102,13 @@ export default function AwaitTreeDump() {
             <FormLabel>Compute Nodes</FormLabel>
             <VStack>
               <Select
-                onChange={(event) =>
-                  setComputeNodeId(parseInt(event.target.value))
-                }
+                onChange={(event) => setComputeNodeId(event.target.value)}
               >
+                {computeNodes && (
+                  <option value={ALL_COMPUTE_NODES} key={ALL_COMPUTE_NODES}>
+                    All
+                  </option>
+                )}
                 {computeNodes &&
                   computeNodes.map((n) => (
                     <option value={n.id} key={n.id}>

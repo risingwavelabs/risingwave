@@ -27,7 +27,7 @@ use tonic::{Request, Response, Status, Streaming};
 use crate::hummock::compaction::selector::ManualCompactionOption;
 use crate::hummock::{HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
-use crate::rpc::service::RwReceiverStream;
+use crate::RwReceiverStream;
 pub struct HummockServiceImpl {
     hummock_manager: HummockManagerRef,
     vacuum_manager: VacuumManagerRef,
@@ -593,6 +593,14 @@ impl HummockManagerService for HummockServiceImpl {
             compaction_task_max_heartbeat_interval_secs
         );
         Ok(Response::new(ListHummockMetaConfigResponse { configs }))
+    }
+
+    async fn rise_ctl_rebuild_table_stats(
+        &self,
+        _request: Request<RiseCtlRebuildTableStatsRequest>,
+    ) -> Result<Response<RiseCtlRebuildTableStatsResponse>, Status> {
+        self.hummock_manager.rebuild_table_stats().await?;
+        Ok(Response::new(RiseCtlRebuildTableStatsResponse {}))
     }
 }
 

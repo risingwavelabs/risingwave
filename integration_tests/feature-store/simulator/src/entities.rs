@@ -38,7 +38,7 @@ impl User {
         &'a self,
         client: &'a mut ServerClient<Channel>,
     ) -> Result<ActionHistory, &str> {
-        let changenum: i64 = rand::thread_rng().gen_range(0, 90);
+        let changenum: i64 = rand::thread_rng().gen_range(0..90);
         let (changenum, event_type) = {
             if changenum > 0 && changenum < 30 {
                 (changenum, "mfa+")
@@ -60,7 +60,7 @@ impl User {
 
         Ok(ActionHistory {
             userid: self.userid.clone(),
-            changenum: changenum,
+            changenum,
             event_type: event_type.to_string(),
             timestamp,
         })
@@ -93,5 +93,5 @@ pub fn parse_user_metadata() -> Result<Vec<User>, ()> {
 
     let users = read_users_json(Path::new(&*generator_path).join("users.json")).unwrap();
 
-    return Ok(users);
+    Ok(users)
 }

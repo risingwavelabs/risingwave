@@ -26,7 +26,7 @@ use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, FormatIterator, Row};
 use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnDesc, Field};
+use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, Timestamptz};
@@ -170,11 +170,12 @@ fn to_pg_rows(
 }
 
 /// Convert column descs to rows which conclude name and type
-pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
+pub fn col_descs_to_rows(columns: Vec<ColumnCatalog>) -> Vec<Row> {
     columns
         .iter()
         .flat_map(|col| {
-            col.flatten()
+            col.column_desc
+                .flatten()
                 .into_iter()
                 .map(|c| {
                     let type_name = if let DataType::Struct { .. } = c.data_type {
@@ -185,6 +186,7 @@ pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
                     Row::new(vec![
                         Some(c.name.into()),
                         Some(type_name.into()),
+                        Some(col.is_hidden.to_string().into()),
                         c.description.map(Into::into),
                     ])
                 })

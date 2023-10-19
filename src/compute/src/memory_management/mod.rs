@@ -152,20 +152,42 @@ pub fn storage_memory_config(
             .ceil() as usize)
             >> 20,
     );
-    let data_file_cache_buffer_pool_capacity_mb = storage_config
-        .data_file_cache
-        .buffer_pool_size_mb
-        .unwrap_or(
-            storage_config.data_file_cache.file_capacity_mb
-                * storage_config.data_file_cache.flushers,
-        );
-    let meta_file_cache_buffer_pool_capacity_mb = storage_config
-        .meta_file_cache
-        .buffer_pool_size_mb
-        .unwrap_or(
-            storage_config.meta_file_cache.file_capacity_mb
-                * storage_config.meta_file_cache.flushers,
-        );
+
+    // `foyer` uses a buffer pool to manage dirty buffers.
+    //
+    // buffer size = region size (single file size with fs device)
+    //
+    // writing buffer + flushing buffer + free buffer = buffer pool buffers
+    //
+    // To utilize flushers and allocators, buffers should >= allocators + flushers.
+    //
+    // Adding more buffers can prevent allocators from waiting for buffers to be freed by flushers.
+
+    let data_file_cache_buffer_pool_capacity_mb = if storage_config.data_file_cache.dir.is_empty() {
+        0
+    } else {
+        storage_config
+            .data_file_cache
+            .buffer_pool_size_mb
+            .unwrap_or(
+                storage_config.data_file_cache.file_capacity_mb
+                    * (storage_config.data_file_cache.flushers
+                        + 2 * (1 << storage_config.data_file_cache.allocation_bits)),
+            )
+    };
+    let meta_file_cache_buffer_pool_capacity_mb = if storage_config.meta_file_cache.dir.is_empty() {
+        0
+    } else {
+        storage_config
+            .meta_file_cache
+            .buffer_pool_size_mb
+            .unwrap_or(
+                storage_config.meta_file_cache.file_capacity_mb
+                    * (storage_config.meta_file_cache.flushers
+                        + 2 * (1 << storage_config.meta_file_cache.allocation_bits)),
+            )
+    };
+
     let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
     );
@@ -229,8 +251,19 @@ mod tests {
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
         assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
-        assert_eq!(memory_config.data_file_cache_buffer_pool_capacity_mb, 256);
-        assert_eq!(memory_config.meta_file_cache_buffer_pool_capacity_mb, 256);
+        assert_eq!(memory_config.data_file_cache_buffer_pool_capacity_mb, 0);
+        assert_eq!(memory_config.meta_file_cache_buffer_pool_capacity_mb, 0);
+        assert_eq!(memory_config.compactor_memory_limit_mb, 819);
+
+        storage_config.data_file_cache.dir = "data".to_string();
+        storage_config.meta_file_cache.dir = "meta".to_string();
+        let memory_config =
+            storage_memory_config(total_non_reserved_memory_bytes, true, &storage_config);
+        assert_eq!(memory_config.block_cache_capacity_mb, 737);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 860);
+        assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
+        assert_eq!(memory_config.data_file_cache_buffer_pool_capacity_mb, 384);
+        assert_eq!(memory_config.meta_file_cache_buffer_pool_capacity_mb, 384);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
         storage_config.block_cache_capacity_mb = Some(512);
