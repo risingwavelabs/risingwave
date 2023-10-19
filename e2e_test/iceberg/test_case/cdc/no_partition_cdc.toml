@@ -1,0 +1,25 @@
+init_sqls = []
+
+slt = ''
+
+verify_schema = ['int','string','string']
+
+verify_sql = 'SELECT * FROM demo_db.demo_table ORDER BY id ASC'
+
+verify_data = """
+101,101,101
+102,102,102
+103,103,103
+104,104,104
+105,105,105
+106,106,106
+107,107,107
+108,108,108
+109,109,109
+110,110,110
+111,111,111
+112,112,112
+113,113,113
+"""
+
+drop_sqls = []
