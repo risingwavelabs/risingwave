@@ -17,17 +17,21 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use bytes::Bytes;
 use itertools::Itertools;
+use mysql_async::prelude::Queryable;
+use mysql_async::Opts;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde::Deserialize;
+use serde_derive::Serialize;
 use serde_json::Value;
 use serde_with::serde_as;
 
 use super::doris_starrocks_connector::{
-    HeaderBuilder, InserterBuilder, StarrocksInsert, StarrocksMysqlQuery, STARROCKS_DELETE_SIGN,
+    HeaderBuilder, InserterInner, InserterInnerBuilder, DORIS_SUCCESS_STATUS, STARROCKS_DELETE_SIGN,
 };
 use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
 use super::writer::LogSinkerOf;
@@ -37,6 +41,9 @@ use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
 pub const STARROCKS_SINK: &str = "starrocks";
+const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
+const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
+const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct StarrocksConfig {
@@ -196,7 +203,7 @@ impl Sink for StarrocksSink {
                 "Primary key not defined for upsert starrocks sink (please define in `primary_key` field)")));
         }
         // check reachability
-        let mut client = StarrocksMysqlQuery::new(
+        let mut client = StarrocksSchemaClient::new(
             self.config.common.host.clone(),
             self.config.common.mysql_port.clone(),
             self.config.common.table.clone(),
@@ -233,9 +240,9 @@ pub struct StarrocksSinkWriter {
     pub config: StarrocksConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
-    builder: InserterBuilder,
+    inserter_innet_builder: InserterInnerBuilder,
     is_append_only: bool,
-    insert: Option<StarrocksInsert>,
+    client: Option<StarrocksClient>,
     row_encoder: JsonEncoder,
 }
 
@@ -262,7 +269,7 @@ impl StarrocksSinkWriter {
         is_append_only: bool,
     ) -> Result<Self> {
         let mut decimal_map = HashMap::default();
-        let starrocks_columns = StarrocksMysqlQuery::new(
+        let starrocks_columns = StarrocksSchemaClient::new(
             config.common.host.clone(),
             config.common.mysql_port.clone(),
             config.common.table.clone(),
@@ -312,7 +319,7 @@ impl StarrocksSinkWriter {
             builder.build()
         };
 
-        let starrocks_insert_builder = InserterBuilder::new(
+        let starrocks_insert_builder = InserterInnerBuilder::new(
             format!("http://{}:{}", config.common.host, config.common.http_port),
             config.common.database.clone(),
             config.common.table.clone(),
@@ -322,9 +329,9 @@ impl StarrocksSinkWriter {
             config,
             schema: schema.clone(),
             pk_indices,
-            builder: starrocks_insert_builder,
+            inserter_innet_builder: starrocks_insert_builder,
             is_append_only,
-            insert: None,
+            client: None,
             row_encoder: JsonEncoder::new_with_doris(
                 schema,
                 None,
@@ -340,7 +347,7 @@ impl StarrocksSinkWriter {
                 continue;
             }
             let row_json_string = Value::Object(self.row_encoder.encode(row)?).to_string();
-            self.insert
+            self.client
                 .as_mut()
                 .ok_or_else(|| {
                     SinkError::Starrocks("Can't find starrocks sink insert".to_string())
@@ -363,7 +370,7 @@ impl StarrocksSinkWriter {
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
                         SinkError::Starrocks(format!("Json derialize error {:?}", e))
                     })?;
-                    self.insert
+                    self.client
                         .as_mut()
                         .ok_or_else(|| {
                             SinkError::Starrocks("Can't find starrocks sink insert".to_string())
@@ -380,7 +387,7 @@ impl StarrocksSinkWriter {
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
                         SinkError::Starrocks(format!("Json derialize error {:?}", e))
                     })?;
-                    self.insert
+                    self.client
                         .as_mut()
                         .ok_or_else(|| {
                             SinkError::Starrocks("Can't find starrocks sink insert".to_string())
@@ -398,7 +405,7 @@ impl StarrocksSinkWriter {
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
                         SinkError::Starrocks(format!("Json derialize error {:?}", e))
                     })?;
-                    self.insert
+                    self.client
                         .as_mut()
                         .ok_or_else(|| {
                             SinkError::Starrocks("Can't find starrocks sink insert".to_string())
@@ -415,8 +422,10 @@ impl StarrocksSinkWriter {
 #[async_trait]
 impl SinkWriter for StarrocksSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.insert.is_none() {
-            self.insert = Some(self.builder.build_starrocks().await?);
+        if self.client.is_none() {
+            self.client = Some(StarrocksClient::new(
+                self.inserter_innet_builder.build().await?,
+            ));
         }
         if self.is_append_only {
             self.append_only(chunk).await
@@ -434,17 +443,149 @@ impl SinkWriter for StarrocksSinkWriter {
     }
 
     async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        if self.insert.is_some() {
-            let insert = self
-                .insert
+        if self.client.is_some() {
+            let client = self
+                .client
                 .take()
                 .ok_or_else(|| SinkError::Starrocks("Can't find starrocks inserter".to_string()))?;
-            insert.finish().await?;
+            client.finish().await?;
         }
         Ok(())
     }
 
     async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
+    }
+}
+
+pub struct StarrocksSchemaClient {
+    table: String,
+    db: String,
+    conn: mysql_async::Conn,
+}
+
+impl StarrocksSchemaClient {
+    pub async fn new(
+        host: String,
+        port: String,
+        table: String,
+        db: String,
+        user: String,
+        password: String,
+    ) -> Result<Self> {
+        let conn_uri = format!(
+            "mysql://{}:{}@{}:{}/{}?prefer_socket={}&max_allowed_packet={}&wait_timeout={}",
+            user,
+            password,
+            host,
+            port,
+            db,
+            STARROCK_MYSQL_PREFER_SOCKET,
+            STARROCK_MYSQL_MAX_ALLOWED_PACKET,
+            STARROCK_MYSQL_WAIT_TIMEOUT
+        );
+        let pool = mysql_async::Pool::new(
+            Opts::from_url(&conn_uri).map_err(|err| SinkError::Http(err.into()))?,
+        );
+        let conn = pool
+            .get_conn()
+            .await
+            .map_err(|err| SinkError::Http(err.into()))?;
+
+        Ok(Self { table, db, conn })
+    }
+
+    pub async fn get_columns_from_starrocks(&mut self) -> Result<HashMap<String, String>> {
+        let query = format!("select column_name, column_type from information_schema.columns where table_name = {:?} and table_schema = {:?};",self.table,self.db);
+        let mut query_map: HashMap<String, String> = HashMap::default();
+        self.conn
+            .query_map(query, |(column_name, column_type)| {
+                query_map.insert(column_name, column_type)
+            })
+            .await
+            .map_err(|err| SinkError::Http(err.into()))?;
+        Ok(query_map)
+    }
+
+    pub async fn get_pk_from_starrocks(&mut self) -> Result<(String, String)> {
+        let query = format!("select table_model, primary_key from information_schema.tables_config where table_name = {:?} and table_schema = {:?};",self.table,self.db);
+        let table_mode_pk: (String, String) = self
+            .conn
+            .query_map(query, |(table_model, primary_key)| {
+                (table_model, primary_key)
+            })
+            .await
+            .map_err(|err| SinkError::Http(err.into()))?
+            .get(0)
+            .ok_or_else(|| {
+                SinkError::Starrocks(format!(
+                    "Can't find schema with table {:?} and database {:?}",
+                    self.table, self.db
+                ))
+            })?
+            .clone();
+        Ok(table_mode_pk)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StarrocksInsertResultResponse {
+    #[serde(rename = "TxnId")]
+    txn_id: i64,
+    #[serde(rename = "Label")]
+    label: String,
+    #[serde(rename = "Status")]
+    status: String,
+    #[serde(rename = "Message")]
+    message: String,
+    #[serde(rename = "NumberTotalRows")]
+    number_total_rows: i64,
+    #[serde(rename = "NumberLoadedRows")]
+    number_loaded_rows: i64,
+    #[serde(rename = "NumberFilteredRows")]
+    number_filtered_rows: i32,
+    #[serde(rename = "NumberUnselectedRows")]
+    number_unselected_rows: i32,
+    #[serde(rename = "LoadBytes")]
+    load_bytes: i64,
+    #[serde(rename = "LoadTimeMs")]
+    load_time_ms: i32,
+    #[serde(rename = "BeginTxnTimeMs")]
+    begin_txn_time_ms: i32,
+    #[serde(rename = "ReadDataTimeMs")]
+    read_data_time_ms: i32,
+    #[serde(rename = "WriteDataTimeMs")]
+    write_data_time_ms: i32,
+    #[serde(rename = "CommitAndPublishTimeMs")]
+    commit_and_publish_time_ms: i32,
+    #[serde(rename = "StreamLoadPlanTimeMs")]
+    stream_load_plan_time_ms: Option<i32>,
+}
+
+pub struct StarrocksClient {
+    insert: InserterInner,
+}
+impl StarrocksClient {
+    pub fn new(insert: InserterInner) -> Self {
+        Self { insert }
+    }
+
+    pub async fn write(&mut self, data: Bytes) -> Result<()> {
+        self.insert.write(data).await?;
+        Ok(())
+    }
+
+    pub async fn finish(self) -> Result<StarrocksInsertResultResponse> {
+        let raw = self.insert.finish().await?;
+        let res: StarrocksInsertResultResponse =
+            serde_json::from_slice(&raw).map_err(|err| SinkError::Http(err.into()))?;
+
+        if !DORIS_SUCCESS_STATUS.contains(&res.status.as_str()) {
+            return Err(SinkError::Http(anyhow::anyhow!(
+                "Insert error: {:?}",
+                res.message,
+            )));
+        };
+        Ok(res)
     }
 }
