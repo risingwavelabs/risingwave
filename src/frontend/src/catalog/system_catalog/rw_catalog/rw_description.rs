@@ -57,7 +57,7 @@ impl SysCatalogReaderImpl {
 
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas_except_rw_catalog(&self.auth_context.database)?;
-        let rw_catalog = reader.get_schema_by_name(&self.auth_context.database, "rw_catalog")?;
+        let rw_catalog = reader.get_schema_by_name(&self.auth_context.database, RW_CATALOG_SCHEMA_NAME)?;
 
         Ok(schemas
             .flat_map(|schema| {
