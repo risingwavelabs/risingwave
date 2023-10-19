@@ -26,6 +26,9 @@ COMMON_DIR=$BACKGROUND_DDL_DIR/common
 CLUSTER_PROFILE='ci-1cn-1fe-with-recovery'
 export RUST_LOG="risingwave_meta=trace"
 
+export SLT_DB="dev"
+export SLT_PORT="4566"
+
 run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
 }
@@ -122,8 +125,8 @@ test_background_ddl_recovery() {
   cargo make ci-start $CLUSTER_PROFILE
 
   # Test before recovery
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
+  sqllogictest "$COMMON_DIR/create_table.slt"
+  sqllogictest "$COMMON_DIR/create_bg_mv.slt"
   sleep 1
   OLD_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
 
@@ -131,7 +134,7 @@ test_background_ddl_recovery() {
   restart_cluster
 
   # Test after recovery
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+  sqllogictest "$COMMON_DIR/validate_one_job.slt"
 
   # Recover the mview progress
   sleep 5
@@ -148,16 +151,16 @@ test_background_ddl_recovery() {
   sleep 60
 
   # Test after backfill finished
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+  sqllogictest "$COMMON_DIR/validate_backfilled_mv.slt"
 
   # After cluster restart(s), backfilled mv should still be present.
   restart_cluster
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+  sqllogictest "$COMMON_DIR/validate_backfilled_mv.slt"
   restart_cluster
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+  sqllogictest "$COMMON_DIR/validate_backfilled_mv.slt"
 
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_mv.slt"
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
+  sqllogictest "$COMMON_DIR/drop_mv.slt"
+  sqllogictest "$COMMON_DIR/drop_table.slt"
 
   kill_cluster
 }
@@ -167,15 +170,15 @@ test_background_ddl_cancel() {
   cargo make ci-start $CLUSTER_PROFILE
 
   # Test before recovery
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
+  sqllogictest "$COMMON_DIR/create_table.slt"
+  sqllogictest "$COMMON_DIR/create_bg_mv.slt"
   sleep 1
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+  sqllogictest "$COMMON_DIR/validate_one_job.slt"
 
   cancel_stream_jobs
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
+  sqllogictest "$COMMON_DIR/validate_no_jobs.slt"
 
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
+  sqllogictest "$COMMON_DIR/create_bg_mv.slt"
 
   # Restart
   restart_cluster
@@ -183,25 +186,25 @@ test_background_ddl_cancel() {
   # Recover
   sleep 3
 
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+  sqllogictest "$COMMON_DIR/validate_one_job.slt"
 
   cancel_stream_jobs
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
+  sqllogictest "$COMMON_DIR/validate_no_jobs.slt"
 
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
+  sqllogictest "$COMMON_DIR/create_bg_mv.slt"
   sleep 1
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+  sqllogictest "$COMMON_DIR/validate_one_job.slt"
   cancel_stream_jobs
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
+  sqllogictest "$COMMON_DIR/validate_no_jobs.slt"
 
   # After cancel should be able to create MV
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
+  sqllogictest "$COMMON_DIR/create_bg_mv.slt"
   sleep 1
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+  sqllogictest "$COMMON_DIR/validate_one_job.slt"
   cancel_stream_jobs
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
+  sqllogictest "$COMMON_DIR/validate_no_jobs.slt"
 
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
+  sqllogictest "$COMMON_DIR/drop_table.slt"
 
   kill_cluster
 }
@@ -212,17 +215,17 @@ test_foreground_ddl_cancel() {
   cargo make ci-start $CLUSTER_PROFILE
 
   # Test before recovery
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
+  sqllogictest "$COMMON_DIR/create_table.slt"
   run_sql "CREATE MATERIALIZED VIEW m1 as select * FROM t;" &
   sleep 1
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+  sqllogictest "$COMMON_DIR/validate_one_job.slt"
 
   cancel_stream_jobs
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
+  sqllogictest "$COMMON_DIR/validate_no_jobs.slt"
 
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_fg_mv.slt"
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_mv.slt"
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
+  sqllogictest "$COMMON_DIR/create_fg_mv.slt"
+  sqllogictest "$COMMON_DIR/drop_mv.slt"
+  sqllogictest "$COMMON_DIR/drop_table.slt"
 
   kill_cluster
 }
@@ -233,10 +236,10 @@ test_foreground_ddl_no_recover() {
   cargo make ci-start $CLUSTER_PROFILE
 
   # Test before recovery
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
+  sqllogictest "$COMMON_DIR/create_table.slt"
   run_sql "CREATE MATERIALIZED VIEW m1 as select * FROM t;" &
   sleep 3
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+  sqllogictest "$COMMON_DIR/validate_one_job.slt"
 
 
   # Restart
@@ -246,10 +249,10 @@ test_foreground_ddl_no_recover() {
   sleep 5
 
   # Test after recovery
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
+  sqllogictest "$COMMON_DIR/validate_no_jobs.slt"
   sleep 30
 
-  sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
+  sqllogictest "$COMMON_DIR/drop_table.slt"
 
   kill_cluster
 }
@@ -258,19 +261,19 @@ test_foreground_index_cancel() {
    echo "--- e2e, $CLUSTER_PROFILE, test_foreground_index_cancel"
    cargo make ci-start $CLUSTER_PROFILE
 
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
+   sqllogictest "$COMMON_DIR/create_table.slt"
 
    # Test cancel
    run_sql "CREATE INDEX i ON t (v1);" &
    sleep 3
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+   sqllogictest "$COMMON_DIR/validate_one_job.slt"
    cancel_stream_jobs
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
+   sqllogictest "$COMMON_DIR/validate_no_jobs.slt"
 
    # Test index over recovery
    run_sql "CREATE INDEX i ON t (v1);" &
    sleep 3
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+   sqllogictest "$COMMON_DIR/validate_one_job.slt"
 
 
    # Restart
@@ -280,11 +283,11 @@ test_foreground_index_cancel() {
    sleep 5
 
    # Test after recovery
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_index.slt"
+   sqllogictest "$COMMON_DIR/validate_no_jobs.slt"
+   sqllogictest "$COMMON_DIR/create_index.slt"
 
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_index.slt"
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
+   sqllogictest "$COMMON_DIR/drop_index.slt"
+   sqllogictest "$COMMON_DIR/drop_table.slt"
 
    kill_cluster
 }
@@ -293,19 +296,19 @@ test_foreground_sink_cancel() {
    echo "--- e2e, $CLUSTER_PROFILE, test_foreground_sink_ddl_cancel"
    cargo make ci-start $CLUSTER_PROFILE
 
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
+   sqllogictest "$COMMON_DIR/create_table.slt"
 
    # Test cancel
    run_sql "CREATE SINK i FROM t WITH (connector='blackhole');" &
    sleep 3
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+   sqllogictest "$COMMON_DIR/validate_one_job.slt"
    cancel_stream_jobs
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
+   sqllogictest "$COMMON_DIR/validate_no_jobs.slt"
 
    # Test sink over recovery
    run_sql "CREATE SINK i FROM t WITH (connector='blackhole');" &
    sleep 3
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+   sqllogictest "$COMMON_DIR/validate_one_job.slt"
 
 
    # Restart
@@ -315,11 +318,11 @@ test_foreground_sink_cancel() {
    sleep 5
 
    # Test after recovery
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_no_jobs.slt"
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_sink.slt"
+   sqllogictest "$COMMON_DIR/validate_no_jobs.slt"
+   sqllogictest "$COMMON_DIR/create_sink.slt"
 
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_sink.slt"
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
+   sqllogictest "$COMMON_DIR/drop_sink.slt"
+   sqllogictest "$COMMON_DIR/drop_table.slt"
 
    kill_cluster
 }
@@ -362,8 +365,8 @@ test_backfill_restart_cn_recovery() {
    cargo make ci-start $CLUSTER_PROFILE
 
    # Test before recovery
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_table.slt"
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/create_bg_mv.slt"
+   sqllogictest "$COMMON_DIR/create_table.slt"
+   sqllogictest "$COMMON_DIR/create_bg_mv.slt"
    sleep 1
    OLD_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
 
@@ -374,7 +377,7 @@ test_backfill_restart_cn_recovery() {
    sleep 3
 
    # Test after recovery
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
+   sqllogictest "$COMMON_DIR/validate_one_job.slt"
 
    # Recover the mview progress
    sleep 5
@@ -411,16 +414,16 @@ test_backfill_restart_cn_recovery() {
    sleep 60
 
    # Test after backfill finished
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+   sqllogictest "$COMMON_DIR/validate_backfilled_mv.slt"
 
    # After cluster restart(s), backfilled mv should still be present.
    restart_cluster
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+   sqllogictest "$COMMON_DIR/validate_backfilled_mv.slt"
    restart_cluster
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_backfilled_mv.slt"
+   sqllogictest "$COMMON_DIR/validate_backfilled_mv.slt"
 
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_mv.slt"
-   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/drop_table.slt"
+   sqllogictest "$COMMON_DIR/drop_mv.slt"
+   sqllogictest "$COMMON_DIR/drop_table.slt"
 
    kill_cluster
 }
