@@ -34,7 +34,6 @@ aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
 aws-types = { workspace = true }
 base64 = "0.21"
-bincode = "1"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = [
@@ -65,7 +64,7 @@ icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
 itertools = "0.11"
 jni = { version = "0.21.1", features = ["invocation"] }
-jsonschema-transpiler = { git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
+jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 maplit = "1.0.2"
 moka = { version = "0.12", features = ["future"] }
 mysql_async = { version = "0.32", default-features = false, features = [
@@ -75,9 +74,7 @@ mysql_common = { version = "0.30", default-features = false, features = [
     "chrono",
 ] }
 nexmark = { version = "0.2", features = ["serde"] }
-nkeys = "0.3.2"
 num-bigint = "0.4"
-opendal = "0.39"
 parking_lot = "0.12"
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
@@ -109,7 +106,7 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
-simd-json = "0.11.1"
+simd-json = "0.12.0"
 strum = "0.25"
 strum_macros = "0.25"
 tempfile = "3"
@@ -127,7 +124,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
-tonic = { workspace = true }
 tonic_0_9 = { package = "tonic", version = "0.9" }
 tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }

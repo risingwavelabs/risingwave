@@ -5,6 +5,7 @@ set -euo pipefail
 
 ./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-append-only --create > /dev/null 2>&1
 ./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert --create > /dev/null 2>&1
+./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert-schema --create > /dev/null 2>&1
 ./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-debezium --create > /dev/null 2>&1
 
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/create_sink.slt'
@@ -25,6 +26,15 @@ diff ./e2e_test/sink/kafka/upsert1.result \
 <((./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert --from-beginning --property print.key=true --max-messages 10 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
   echo "The output for upsert sink is not as expected."
+  exit 1
+fi
+
+# test upsert kafka sink with schema
+echo "testing upsert kafka sink with schema"
+diff ./e2e_test/sink/kafka/upsert_schema1.result \
+<((./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert-schema --from-beginning --property print.key=true --max-messages 10 | sort) 2> /dev/null)
+if [ $? -ne 0 ]; then
+  echo "The output for upsert sink with schema is not as expected."
   exit 1
 fi
 
@@ -62,6 +72,15 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
+# test upsert kafka sink with schema after update
+echo "testing upsert kafka sink with schema after updating data"
+diff ./e2e_test/sink/kafka/upsert_schema2.result \
+<((./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert-schema --from-beginning --property print.key=true --max-messages 11 | sort) 2> /dev/null)
+if [ $? -ne 0 ]; then
+  echo "The output for upsert sink with schema is not as expected."
+  exit 1
+fi
+
 # test debezium kafka sink after update
 echo "testing debezium kafka sink after updating data"
 (./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-debezium --property print.key=true --from-beginning --max-messages 11  | sort) > ./e2e_test/sink/kafka/debezium2.tmp.result 2> /dev/null
@@ -84,6 +103,15 @@ diff ./e2e_test/sink/kafka/upsert3.result \
 <((./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert --from-beginning --property print.key=true --max-messages 12 | sort) 2> /dev/null)
 if [ $? -ne 0 ]; then
   echo "The output for upsert sink after update is not as expected."
+  exit 1
+fi
+
+# test upsert kafka sink with schema after delete
+echo "testing upsert kafka sink with schema after deleting data"
+diff ./e2e_test/sink/kafka/upsert_schema3.result \
+<((./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert-schema --from-beginning --property print.key=true --max-messages 12 | sort) 2> /dev/null)
+if [ $? -ne 0 ]; then
+  echo "The output for upsert sink with schema is not as expected."
   exit 1
 fi
 

@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
-use prometheus::{Histogram, HistogramVec};
+use prometheus::core::{MetricVec, MetricVecBuilder};
+use prometheus::{HistogramVec, IntCounterVec};
 
 use crate::config::MetricLevel;
+use crate::metrics::{
+    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedMetric, LabelGuardedMetricVec,
+};
 
 /// For all `Relabeled*Vec` below,
 /// - when `metric_level` <= `relabel_threshold`, they behaves exactly the same as their inner
@@ -28,10 +31,10 @@ use crate::config::MetricLevel;
 /// than specializing them one by one. However, that's undoable because prometheus crate doesn't
 /// export `MetricVecBuilder` implementation like `HistogramVecBuilder`.
 #[derive(Clone, Debug)]
-pub struct RelabeledHistogramVec {
+pub struct RelabeledMetricVec<M> {
     relabel_threshold: MetricLevel,
     metric_level: MetricLevel,
-    metric: HistogramVec,
+    metric: M,
 
     /// The first `relabel_num` labels will be relabeled to empty string
     ///
@@ -41,10 +44,10 @@ pub struct RelabeledHistogramVec {
     relabel_num: usize,
 }
 
-impl RelabeledHistogramVec {
+impl<M> RelabeledMetricVec<M> {
     pub fn with_metric_level(
         metric_level: MetricLevel,
-        metric: HistogramVec,
+        metric: M,
         relabel_threshold: MetricLevel,
     ) -> Self {
         Self {
@@ -57,7 +60,7 @@ impl RelabeledHistogramVec {
 
     pub fn with_metric_level_relabel_n(
         metric_level: MetricLevel,
-        metric: HistogramVec,
+        metric: M,
         relabel_threshold: MetricLevel,
         relabel_num: usize,
     ) -> Self {
@@ -68,8 +71,10 @@ impl RelabeledHistogramVec {
             relabel_num,
         }
     }
+}
 
-    pub fn with_label_values(&self, vals: &[&str]) -> Histogram {
+impl<T: MetricVecBuilder> RelabeledMetricVec<MetricVec<T>> {
+    pub fn with_label_values(&self, vals: &[&str]) -> T::M {
         if self.metric_level > self.relabel_threshold {
             // relabel first n labels to empty string
             let mut relabeled_vals = vals.to_vec();
@@ -82,46 +87,11 @@ impl RelabeledHistogramVec {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct RelabeledCounterVec {
-    relabel_threshold: MetricLevel,
-    metric_level: MetricLevel,
-    metric: GenericCounterVec<AtomicU64>,
-    relabel_num: usize,
-}
-
-impl RelabeledCounterVec {
-    pub fn with_metric_level(
-        metric_level: MetricLevel,
-        metric: GenericCounterVec<AtomicU64>,
-        relabel_threshold: MetricLevel,
-    ) -> Self {
-        Self {
-            relabel_threshold,
-            metric_level,
-            metric,
-            relabel_num: usize::MAX,
-        }
-    }
-
-    pub fn with_metric_level_relabel_n(
-        metric_level: MetricLevel,
-        metric: GenericCounterVec<AtomicU64>,
-        relabel_threshold: MetricLevel,
-        relabel_num: usize,
-    ) -> Self {
-        Self {
-            relabel_threshold,
-            metric_level,
-            metric,
-            relabel_num,
-        }
-    }
-
-    pub fn with_label_values(&self, vals: &[&str]) -> GenericCounter<AtomicU64> {
+impl<T: MetricVecBuilder, const N: usize> RelabeledMetricVec<LabelGuardedMetricVec<T, N>> {
+    pub fn with_label_values(&self, vals: &[&str; N]) -> LabelGuardedMetric<T, N> {
         if self.metric_level > self.relabel_threshold {
             // relabel first n labels to empty string
-            let mut relabeled_vals = vals.to_vec();
+            let mut relabeled_vals = *vals;
             for label in relabeled_vals.iter_mut().take(self.relabel_num) {
                 *label = "";
             }
@@ -130,3 +100,11 @@ impl RelabeledCounterVec {
         self.metric.with_label_values(vals)
     }
 }
+
+pub type RelabeledCounterVec = RelabeledMetricVec<IntCounterVec>;
+pub type RelabeledHistogramVec = RelabeledMetricVec<HistogramVec>;
+
+pub type RelabeledGuardedHistogramVec<const N: usize> =
+    RelabeledMetricVec<LabelGuardedHistogramVec<N>>;
+pub type RelabeledGuardedIntCounterVec<const N: usize> =
+    RelabeledMetricVec<LabelGuardedIntCounterVec<N>>;

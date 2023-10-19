@@ -27,6 +27,7 @@ use risingwave_common::catalog::Schema;
 pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
+use super::encoder::KafkaConnectParams;
 use crate::sink::encoder::{JsonEncoder, ProtoEncoder, TimestampHandlingMode};
 
 /// Transforms a `StreamChunk` into a sequence of key-value pairs according a specific format,
@@ -131,12 +132,31 @@ impl SinkFormatterImpl {
                     return err_unsupported();
                 }
 
-                let key_encoder = JsonEncoder::new(
+                let mut key_encoder = JsonEncoder::new(
                     schema.clone(),
                     Some(pk_indices),
                     TimestampHandlingMode::Milli,
                 );
-                let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+                let mut val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+
+                if let Some(s) = format_desc.options.get("schemas.enable") {
+                    match s.to_lowercase().parse::<bool>() {
+                        Ok(true) => {
+                            let kafka_connect = KafkaConnectParams {
+                                schema_name: format!("{}.{}", db_name, sink_from_name),
+                            };
+                            key_encoder = key_encoder.with_kafka_connect(kafka_connect.clone());
+                            val_encoder = val_encoder.with_kafka_connect(kafka_connect);
+                        }
+                        Ok(false) => {}
+                        _ => {
+                            return Err(SinkError::Config(anyhow!(
+                                "schemas.enable is expected to be `true` or `false`, got {}",
+                                s
+                            )));
+                        }
+                    }
+                };
 
                 // Initialize the upsert_stream
                 let formatter = UpsertFormatter::new(key_encoder, val_encoder);

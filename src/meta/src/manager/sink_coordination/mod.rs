@@ -16,19 +16,19 @@ mod coordinator_worker;
 mod manager;
 
 use futures::stream::BoxStream;
-pub(crate) use manager::SinkCoordinatorManager;
+pub use manager::SinkCoordinatorManager;
 use risingwave_common::buffer::Bitmap;
 use risingwave_connector::sink::SinkParam;
 use risingwave_pb::connector_service::{CoordinateRequest, CoordinateResponse};
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 
-pub(crate) type SinkWriterRequestStream = BoxStream<'static, Result<CoordinateRequest, Status>>;
-pub(crate) type SinkCoordinatorResponseSender = Sender<Result<CoordinateResponse, Status>>;
+pub type SinkWriterRequestStream = BoxStream<'static, Result<CoordinateRequest, Status>>;
+pub type SinkCoordinatorResponseSender = Sender<Result<CoordinateResponse, Status>>;
 
-pub(crate) struct NewSinkWriterRequest {
-    pub(crate) request_stream: SinkWriterRequestStream,
-    pub(crate) response_tx: SinkCoordinatorResponseSender,
-    pub(crate) param: SinkParam,
-    pub(crate) vnode_bitmap: Bitmap,
+pub struct NewSinkWriterRequest {
+    pub request_stream: SinkWriterRequestStream,
+    pub response_tx: SinkCoordinatorResponseSender,
+    pub param: SinkParam,
+    pub vnode_bitmap: Bitmap,
 }
