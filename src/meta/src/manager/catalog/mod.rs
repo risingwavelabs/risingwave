@@ -2201,11 +2201,28 @@ impl CatalogManager {
 
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
 
-        // TODO: dont unwrap
-        let mut table = tables.get_mut(comment.table_id).unwrap();
+        let mut table = tables
+            .get_mut(comment.table_id)
+            .ok_or_else(|| anyhow!("table id {} not found", comment.table_id))?;
         if let Some(col_idx) = comment.column_index {
-            let column = &mut table.columns[col_idx as usize];
-            column.column_desc.as_mut().unwrap().description = comment.description;
+            let column = table.columns.get_mut(col_idx as usize).ok_or_else(|| {
+                anyhow!(
+                    "column index {} for table id {} not found",
+                    col_idx,
+                    comment.table_id
+                )
+            })?;
+            column
+                .column_desc
+                .as_mut()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "column_desc at index {} for table id {} not found",
+                        col_idx,
+                        comment.table_id
+                    )
+                })?
+                .description = comment.description;
         } else {
             table.description = comment.description;
         }
