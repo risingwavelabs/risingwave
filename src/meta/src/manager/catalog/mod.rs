@@ -2212,17 +2212,14 @@ impl CatalogManager {
                     comment.table_id
                 )
             })?;
-            column
-                .column_desc
-                .as_mut()
-                .ok_or_else(|| {
-                    anyhow!(
-                        "column_desc at index {} for table id {} not found",
-                        col_idx,
-                        comment.table_id
-                    )
-                })?
-                .description = comment.description;
+            let column_desc = column.column_desc.as_mut().ok_or_else(|| {
+                anyhow!(
+                    "column desc at index {} for table id {} not found",
+                    col_idx,
+                    comment.table_id
+                )
+            })?;
+            column_desc.description = comment.description;
         } else {
             table.description = comment.description;
         }

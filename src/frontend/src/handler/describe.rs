@@ -157,10 +157,11 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                     .into(),
                 )
             },
-            None, // Is Hidden
-            None, /* Description
-                   * TODO: index description
-                   * index.description.map(Into::into), */
+            // Is Hidden
+            None,
+            // Description
+            // TODO: index description
+            None,
         ])
     }));
 

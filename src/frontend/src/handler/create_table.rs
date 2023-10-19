@@ -187,8 +187,8 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 name: name.real_value(),
                 field_descs,
                 type_name: "".to_string(),
-                description: None,
                 generated_or_default_column: None,
+                description: None,
             },
             is_hidden: false,
         });

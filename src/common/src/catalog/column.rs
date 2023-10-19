@@ -130,8 +130,8 @@ impl ColumnDesc {
                 .map(|f| f.to_protobuf())
                 .collect_vec(),
             type_name: self.type_name.clone(),
-            description: self.description.clone(),
             generated_or_default_column: self.generated_or_default_column.clone(),
+            description: self.description.clone(),
         }
     }
 
