@@ -782,7 +782,7 @@ impl CatalogManager {
                 table.get_table_type().unwrap(),
             );
             // 1. Incomplete Foreground jobs
-            if table.create_type == CreateType::Foreground as i32
+            if table.create_type == CreateType::Foreground as i32 && table.table_type != TableType::Internal as i32
             // || table.create_type == CreateType::Unspecified as i32
             {
                 tracing::debug!("cleaning table_id for foreground: {:#?}", table.id);
