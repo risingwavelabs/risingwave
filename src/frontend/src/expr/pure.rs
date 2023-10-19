@@ -14,9 +14,10 @@
 
 use risingwave_pb::expr::expr_node;
 
+use super::expr_visitor::default_visit_function_call;
 use super::{ExprImpl, ExprVisitor};
 use crate::expr::FunctionCall;
-pub(crate) struct ImpureAnalyzer {}
+pub(crate) struct ImpureAnalyzer;
 
 impl ExprVisitor for ImpureAnalyzer {
     type Result = bool;
@@ -205,13 +206,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Least =>
             // expression output is deterministic(same result for the same input)
             {
-                let x = func_call
-                    .inputs()
-                    .iter()
-                    .map(|expr| self.visit_expr(expr))
-                    .reduce(Self::merge)
-                    .unwrap_or_default();
-                x
+                default_visit_function_call(self, func_call)
             }
             // expression output is not deterministic
             expr_node::Type::Vnode
@@ -230,12 +225,12 @@ pub fn is_pure(expr: &ExprImpl) -> bool {
 }
 
 pub fn is_impure(expr: &ExprImpl) -> bool {
-    let mut a = ImpureAnalyzer {};
+    let mut a = ImpureAnalyzer;
     a.visit_expr(expr)
 }
 
 pub fn is_impure_func_call(func_call: &FunctionCall) -> bool {
-    let mut a = ImpureAnalyzer {};
+    let mut a = ImpureAnalyzer;
     a.visit_function_call(func_call)
 }
 

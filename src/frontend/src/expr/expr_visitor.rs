@@ -25,7 +25,7 @@ use super::{
 ///
 /// Note: The default implementation for `visit_subquery` is a no-op, i.e., expressions inside
 /// subqueries are not traversed.
-pub trait ExprVisitor {
+pub trait ExprVisitor: Sized {
     type Result: Default;
 
     /// This merge function is used to reduce results of expr inputs.
@@ -50,12 +50,7 @@ pub trait ExprVisitor {
         }
     }
     fn visit_function_call(&mut self, func_call: &FunctionCall) -> Self::Result {
-        func_call
-            .inputs()
-            .iter()
-            .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
-            .unwrap_or_default()
+        default_visit_function_call(self, func_call)
     }
     fn visit_function_call_with_lambda(
         &mut self,
@@ -116,4 +111,22 @@ pub trait ExprVisitor {
     fn visit_now(&mut self, _: &Now) -> Self::Result {
         Self::Result::default()
     }
+}
+
+/// The default implementation of [`ExprVisitor::visit_function_call`].
+//
+/// Provide this function as an alternative to the feature [calling_default_trait_methods][calling_default_trait_methods].
+/// When the override implementation wants to call the default implementation, this method can be used.
+///
+/// [calling_default_trait_methods]: https://github.com/rust-lang/rfcs/pull/3329
+pub fn default_visit_function_call<V: ExprVisitor>(
+    visitor: &mut V,
+    func_call: &FunctionCall,
+) -> V::Result {
+    func_call
+        .inputs()
+        .iter()
+        .map(|expr| visitor.visit_expr(expr))
+        .reduce(V::merge)
+        .unwrap_or_default()
 }

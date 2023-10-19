@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use crate::expr::expr_visitor::default_visit_function_call;
 use crate::expr::{ExprImpl, ExprType, ExprVisitor, FunctionCall};
 
 /// `ExprCounter` is used by `CseRewriter`.
@@ -85,11 +86,6 @@ impl ExprVisitor for CseExprCounter {
             _ => {}
         };
 
-        func_call
-            .inputs()
-            .iter()
-            .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
-            .unwrap_or_default()
+        default_visit_function_call(self, func_call)
     }
 }

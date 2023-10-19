@@ -34,6 +34,7 @@ mod now;
 mod parameter;
 mod pure;
 mod subquery;
+mod sys_func;
 mod table_function;
 mod user_defined_function;
 mod window_function;
@@ -43,7 +44,7 @@ pub use order_by_expr::{OrderBy, OrderByExpr};
 
 mod expr_mutator;
 mod expr_rewriter;
-mod expr_visitor;
+pub mod expr_visitor;
 pub mod function_impl;
 mod session_timezone;
 mod type_inference;
