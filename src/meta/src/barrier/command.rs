@@ -673,6 +673,13 @@ impl CommandContext {
 
                 // NOTE(kwannoel): At this point, meta has already registered the table ids.
                 // We should unregister them.
+                // This is required for background ddl, for foreground ddl this is a no-op.
+                // Foreground ddl is handled entirely by stream manager, so it will unregister
+                // the table ids on failure.
+                // On the other hand background ddl could be handled by barrier manager.
+                // It won't clean the tables on failure,
+                // since the failure could be recoverable.
+                // As such it needs to be handled here.
                 let table_id = table_fragments.table_id().table_id;
                 let mut table_ids = table_fragments.internal_table_ids();
                 table_ids.push(table_id);
@@ -682,6 +689,7 @@ impl CommandContext {
 
                 // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
                 // We need to cleanup the table state. So we can do it here.
+                // The logic is the same as above, for hummock_manager.unregister_table_ids.
                 if let Err(e) = self
                     .catalog_manager
                     .cancel_create_table_procedure(
@@ -704,6 +712,9 @@ impl CommandContext {
                     self.catalog_manager.assert_tables_deleted(table_ids).await;
                 }
 
+                // We need to drop table fragments here,
+                // since this is not done in stream manager (foreground ddl)
+                // OR barrier manager (background ddl)
                 self.fragment_manager
                     .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
                         table_fragments.table_id(),
