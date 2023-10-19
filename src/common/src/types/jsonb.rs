@@ -61,7 +61,7 @@ impl<'a> ScalarRef<'a> for JsonbRef<'a> {
     type ScalarType = JsonbVal;
 
     fn to_owned_scalar(&self) -> Self::ScalarType {
-        JsonbVal(self.0.clone().into())
+        JsonbVal(self.0.into())
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -114,8 +114,7 @@ impl std::str::FromStr for JsonbVal {
     type Err = <Value as std::str::FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let v: Value = s.parse()?;
-        Ok(Self(v.into()))
+        Ok(Self(s.parse()?))
     }
 }
 
@@ -139,10 +138,10 @@ impl JsonbVal {
     pub fn memcmp_deserialize(
         deserializer: &mut memcomparable::Deserializer<impl bytes::Buf>,
     ) -> memcomparable::Result<Self> {
-        let v: Value = <String as serde::Deserialize>::deserialize(deserializer)?
+        let v = <String as serde::Deserialize>::deserialize(deserializer)?
             .parse()
             .map_err(|_| memcomparable::Error::Message("invalid json".into()))?;
-        Ok(Self(v.into()))
+        Ok(Self(v))
     }
 
     /// Deserialize from a pgwire "BINARY" encoding.
@@ -172,17 +171,20 @@ impl JsonbVal {
     /// # Panics
     ///
     /// Panics if this is not a json object.
-    pub fn object_insert(&mut self, k: &str, v: Self) {
+    pub fn object_insert(&mut self, key: &str, value: Self) {
         // TODO(runji): using `Builder` to rebuild a value is inefficient
         //              we may support `Value::object_insert` in the future
         let mut builder = jsonbb::Builder::<Vec<u8>>::with_capacity(self.0.capacity());
         builder.begin_object();
         for (k, v) in self.0.as_object().unwrap().iter() {
+            if k == key {
+                continue;
+            }
             builder.add_string(k);
             builder.add_value(v);
         }
-        builder.add_string(k);
-        builder.add_value(v.0.as_ref());
+        builder.add_string(key);
+        builder.add_value(value.0.as_ref());
         builder.end_object();
         self.0 = builder.finish();
     }
