@@ -20,8 +20,8 @@ v1               integer false  NULL
 v2               integer false  Lorem ipsum dolor sit amet
 v3               integer false  NULL
 _row_id           serial  true  consectetur adipiscing elit
-primary key      _row_id  NULL  consectetur adipiscing elit
-distribution key _row_id  NULL  consectetur adipiscing elit
+primary key      _row_id  NULL  NULL
+distribution key _row_id  NULL  NULL
 
 query TTT
 show columns from t3;
@@ -49,8 +49,8 @@ v1               integer false  NULL
 v2               integer false  Nemo enim ipsam
 v3               integer false  NULL
 _row_id           serial  true  consectetur adipiscing elit
-primary key      _row_id  NULL  consectetur adipiscing elit
-distribution key _row_id  NULL  consectetur adipiscing elit
+primary key      _row_id  NULL  NULL
+distribution key _row_id  NULL  NULL
 idx1             index(v1 ASC, v2 ASC) include(v3) distributed by(v1) NULL NULL
 
 query TT

@@ -100,7 +100,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
     // Convert all column descs to rows
     let mut rows = col_descs_to_rows(columns);
 
-    fn fmt_col<T, C>(columns: &[ColumnDesc], cb: C) -> String
+    fn fmt_col_project<T, C>(columns: &[ColumnDesc], cb: C) -> String
     where
         T: Display + ?Sized,
         C: FnMut(&ColumnDesc) -> &T,
@@ -113,39 +113,21 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
 
     // Convert primary key to rows
     if !pk_columns.is_empty() {
-        let names = fmt_col(&pk_columns, |x| &x.name);
-        let descs = fmt_col(&pk_columns, |x| {
-            x.description.as_deref().unwrap_or_default()
-        });
-
         rows.push(Row::new(vec![
             Some("primary key".into()),
-            Some(names.into()),
+            Some(fmt_col_project(&pk_columns, |x| &x.name).into()),
             None, // Is Hidden
-            if descs.is_empty() {
-                None
-            } else {
-                Some(descs.into())
-            },
+            None, // Description
         ]));
     }
 
     // Convert distribution keys to rows
     if !dist_columns.is_empty() {
-        let names = fmt_col(&dist_columns, |x| &x.name);
-        let descs = fmt_col(&dist_columns, |x| {
-            x.description.as_deref().unwrap_or_default()
-        });
-
         rows.push(Row::new(vec![
             Some("distribution key".into()),
-            Some(names.into()),
+            Some(fmt_col_project(&dist_columns, |x| &x.name).into()),
             None, // Is Hidden
-            if descs.is_empty() {
-                None
-            } else {
-                Some(descs.into())
-            },
+            None, // Description
         ]));
     }
 
