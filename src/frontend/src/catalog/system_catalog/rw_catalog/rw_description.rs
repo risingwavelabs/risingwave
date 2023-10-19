@@ -38,19 +38,11 @@ pub const RW_DESCRIPTION: BuiltinTable = BuiltinTable {
 
 impl SysCatalogReaderImpl {
     pub fn read_rw_description(&self) -> Result<Vec<OwnedRow>> {
-        let build_row = |table_id, catalog_id, description| {
+        let build_row = |table_id, catalog_id, index: Option<i32>, description| {
             OwnedRow::new(vec![
                 Some(ScalarImpl::Int32(table_id)),
                 Some(ScalarImpl::Int32(catalog_id)),
-                None,
-                Some(ScalarImpl::Utf8(description)),
-            ])
-        };
-        let build_row_with_sub = |table_id, catalog_id, index, description| {
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int32(table_id)),
-                Some(ScalarImpl::Int32(catalog_id)),
-                Some(ScalarImpl::Int32(index)),
+                index.map(ScalarImpl::Int32),
                 Some(ScalarImpl::Utf8(description)),
             ])
         };
@@ -62,25 +54,25 @@ impl SysCatalogReaderImpl {
             .iter_schemas(&self.auth_context.database)?
             .filter(|schema| schema.id() != rw_catalog.id());
 
+        let rw_tables_id: i32 = rw_catalog
+            .get_system_table_by_name("rw_tables")
+            .map(|st| st.id.table_id)
+            .unwrap_or_default() as _;
+
         Ok(schemas
             .flat_map(|schema| {
                 schema.iter_table().flat_map(|table| {
                     iter::once(build_row(
                         table.id.table_id as _,
-                        rw_catalog
-                            .get_system_table_by_name("rw_tables")
-                            .map(|st| st.id.table_id)
-                            .unwrap_or_default() as _,
+                        rw_tables_id,
+                        None,
                         table.description.as_deref().unwrap_or_default().into(),
                     ))
                     .chain(table.columns.iter().map(|col| {
-                        build_row_with_sub(
+                        build_row(
                             table.id.table_id as _,
-                            rw_catalog
-                                .get_system_table_by_name("rw_tables")
-                                .map(|st| st.id.table_id)
-                                .unwrap_or_default() as _,
-                            col.column_id().get_id() as _,
+                            rw_tables_id,
+                            Some(col.column_id().get_id() as _),
                             col.column_desc
                                 .description
                                 .as_deref()
