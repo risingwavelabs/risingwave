@@ -381,7 +381,7 @@ pub mod test_utils {
         Binder::new_with_param_types(&SessionImpl::mock(), param_types)
     }
 
-    /// An util function to create a [`ExprImpl`] from a literal SQL string quickly.
+    /// An util function to create an [`ExprImpl`] from a literal SQL string quickly.
     pub fn must_parse_and_bind_expr(s: &str) -> ExprImpl {
         let tokens = Tokenizer::new(s).tokenize_with_location().unwrap();
         let mut parser = Parser::new(tokens);
