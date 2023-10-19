@@ -25,8 +25,11 @@ pub const RW_DESCRIPTION: BuiltinTable = BuiltinTable {
     name: "rw_description",
     schema: RW_CATALOG_SCHEMA_NAME,
     columns: &[
+        // table_id, view_id, function_id, etc.
         (DataType::Int32, "objoid"),
+        // rw_tables, rw_views, rw_functions, etc.
         (DataType::Int32, "classoid"),
+        // If it is not None, it means column number. In this case, objoid should be table_id.
         (DataType::Int32, "objsubid"),
         (DataType::Varchar, "description"),
     ],

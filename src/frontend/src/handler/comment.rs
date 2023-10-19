@@ -29,6 +29,7 @@ pub async fn handle_comment(
 
     let (table_id, column_index) = {
         let mut binder = Binder::new_for_ddl(&session);
+        // only `Column` and `Table` object are now supported
         match object_type {
             CommentObject::Column => {
                 let [.., tab, col] = object_name.0.as_slice() else {
