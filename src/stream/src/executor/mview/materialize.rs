@@ -169,6 +169,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             match generate_output(fixed_changes, data_types.clone())? {
                                 Some(output_chunk) => {
                                     self.state_table.write_chunk(output_chunk.clone());
+                                    self.state_table.try_flush().await?;
                                     Message::Chunk(output_chunk)
                                 }
                                 None => continue,
@@ -177,6 +178,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                         ConflictBehavior::NoCheck => {
                             self.state_table.write_chunk(chunk.clone());
+                            self.state_table.try_flush().await?;
                             Message::Chunk(chunk)
                         }
                     }
