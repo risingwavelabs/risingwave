@@ -61,7 +61,8 @@ message StreamSourceInfo {
   SchemaRegistryNameStrategy name_strategy = 10;
   optional string key_message_name = 11;
   plan_common.StorageTableDesc upstream_table = 12;
-  bool cdc_source = 13;
+  // whether the stream source is a cdc source streaming job
+  bool cdc_source_job = 13;
 }
 
 message Source {

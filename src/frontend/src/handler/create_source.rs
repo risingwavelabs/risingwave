@@ -430,7 +430,7 @@ pub(crate) async fn try_bind_columns_from_source(
                     format: FormatType::Plain as i32,
                     row_encode: EncodeType::Json as i32,
                     use_schema_registry,
-                    cdc_source: create_cdc_source_job,
+                    cdc_source_job: create_cdc_source_job,
                     ..Default::default()
                 },
             )

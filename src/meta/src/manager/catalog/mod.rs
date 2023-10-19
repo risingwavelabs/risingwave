@@ -1084,7 +1084,7 @@ impl CatalogManager {
                     }
 
                     // add cdc source id
-                    if let Some(info) = source.info && info.cdc_source {
+                    if let Some(info) = source.info && info.cdc_source_job {
                         all_cdc_source_ids.insert(source.id);
                     }
 
