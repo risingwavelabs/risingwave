@@ -135,17 +135,16 @@ impl CompactionTaskValidationRule for IntraCompactionTaskValidationRule {
             return true;
         }
 
+        let intra_sub_level_compact_level_count =
+            self.config.level0_sub_level_compact_level_count as usize;
         if input.vnode_partition_count > 0
             && input.select_input_size > self.config.sub_level_max_compaction_bytes
-            && input.input_levels.len() > self.config.level0_sub_level_compact_level_count as usize
+            && input.input_levels.len() > intra_sub_level_compact_level_count
         {
             return true;
         }
 
-        let intra_sub_level_compact_level_count =
-            self.config.level0_sub_level_compact_level_count as usize;
-
-        if input.input_levels.len() < intra_sub_level_compact_level_count {
+        if input.input_levels.len() <= intra_sub_level_compact_level_count {
             stats.skip_by_count_limit += 1;
             return false;
         }

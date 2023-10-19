@@ -113,6 +113,7 @@ impl IntraCompactionPicker {
                 self.config.sub_level_max_compaction_bytes
                     * (self.config.level0_sub_level_compact_level_count as u64),
             );
+            let max_level_count = self.config.level0_sub_level_compact_level_count as usize;
 
             let mut select_input_size = 0;
 
@@ -122,6 +123,13 @@ impl IntraCompactionPicker {
                 if next_level.level_type() != LevelType::Nonoverlapping
                     || select_input_size > max_compaction_bytes
                     || level_handler.is_level_pending_compact(next_level)
+                {
+                    break;
+                }
+
+                if select_input_size > self.config.sub_level_max_compaction_bytes
+                    && next_level.vnode_partition_count == partition_count
+                    && select_level_inputs.len() > max_level_count
                 {
                     break;
                 }
