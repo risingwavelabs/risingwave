@@ -23,8 +23,8 @@ use crate::model::{MetadataModel, MetadataModelResult};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompactionGroup {
-    pub(crate) group_id: CompactionGroupId,
-    pub(crate) compaction_config: Arc<CompactionConfig>,
+    pub group_id: CompactionGroupId,
+    pub compaction_config: Arc<CompactionConfig>,
 }
 
 impl CompactionGroup {

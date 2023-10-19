@@ -37,7 +37,7 @@ impl From<sea_orm::DbErr> for MetaError {
 
 #[derive(Clone)]
 pub struct SqlMetaStore {
-    pub(crate) conn: DatabaseConnection,
+    pub conn: DatabaseConnection,
 }
 
 impl SqlMetaStore {

@@ -169,7 +169,7 @@ pub struct GlobalBarrierManager {
 
     cluster_manager: ClusterManagerRef,
 
-    pub(crate) catalog_manager: CatalogManagerRef,
+    pub catalog_manager: CatalogManagerRef,
 
     fragment_manager: FragmentManagerRef,
 
@@ -181,7 +181,7 @@ pub struct GlobalBarrierManager {
 
     metrics: Arc<MetaMetrics>,
 
-    pub(crate) env: MetaSrvEnv,
+    pub env: MetaSrvEnv,
 
     tracker: Mutex<CreateMviewProgressTracker>,
 }

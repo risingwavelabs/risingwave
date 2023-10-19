@@ -49,22 +49,22 @@ pub struct TableFragments {
     state: State,
 
     /// The table fragments.
-    pub(crate) fragments: BTreeMap<FragmentId, Fragment>,
+    pub fragments: BTreeMap<FragmentId, Fragment>,
 
     /// The status of actors
-    pub(crate) actor_status: BTreeMap<ActorId, ActorStatus>,
+    pub actor_status: BTreeMap<ActorId, ActorStatus>,
 
     /// The splits of actors
-    pub(crate) actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     /// The environment associated with this stream plan and its fragments
-    pub(crate) env: StreamEnvironment,
+    pub env: StreamEnvironment,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct StreamEnvironment {
     /// The timezone used to interpret timestamps and dates for conversion
-    pub(crate) timezone: Option<String>,
+    pub timezone: Option<String>,
 }
 
 impl StreamEnvironment {

@@ -406,6 +406,7 @@ condition = { env_set = [
   "ENABLE_BUILD_DASHBOARD",
 ], files_modified = { input = [
   "./dashboard/**/*.js",
+  "./dashboard/**/*.ts*",
   "./dashboard/package.json",
   "./dashboard/next.config.js",
 ], output = [
