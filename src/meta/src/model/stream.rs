@@ -367,7 +367,8 @@ impl TableFragments {
         }
     }
 
-    /// Returns dependent table ids.
+    /// Returns a mapping of dependent table ids of the `TableFragments`
+    /// to their corresponding count.
     pub fn dependent_table_ids(&self) -> HashMap<TableId, usize> {
         let mut table_ids = HashMap::new();
         self.fragments.values().for_each(|fragment| {
