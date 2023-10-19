@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use base64::engine::general_purpose;
 use base64::Engine as _;
@@ -26,7 +27,10 @@ use risingwave_common::types::{DataType, DatumRef, Decimal, ScalarRefImpl, ToTex
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{json, Map, Value};
 
-use super::{CustomJsonType, KafkaConnectParams, Result, RowEncoder, SerTo, TimestampHandlingMode};
+use super::{
+    CustomJsonType, KafkaConnectParams, KafkaConnectParamsRef, Result, RowEncoder, SerTo,
+    TimestampHandlingMode,
+};
 use crate::sink::SinkError;
 
 pub struct JsonEncoder {
@@ -34,7 +38,7 @@ pub struct JsonEncoder {
     col_indices: Option<Vec<usize>>,
     timestamp_handling_mode: TimestampHandlingMode,
     custom_json_type: CustomJsonType,
-    kafka_connect: Option<KafkaConnectParams>,
+    kafka_connect: Option<KafkaConnectParamsRef>,
 }
 
 impl JsonEncoder {
@@ -69,7 +73,7 @@ impl JsonEncoder {
 
     pub fn with_kafka_connect(self, kafka_connect: KafkaConnectParams) -> Self {
         Self {
-            kafka_connect: Some(kafka_connect),
+            kafka_connect: Some(Arc::new(kafka_connect)),
             ..self
         }
     }
@@ -130,7 +134,7 @@ impl SerTo<String> for Value {
     }
 }
 
-pub fn datum_to_json_object(
+fn datum_to_json_object(
     field: &Field,
     datum: DatumRef<'_>,
     timestamp_handling_mode: TimestampHandlingMode,
@@ -298,7 +302,7 @@ fn json_converter_with_schema<'a>(
                 mapping.insert("field".to_string(), json!(field.name));
                 mapping
             }).collect_vec(),
-            "optional": "false",
+            "optional": false,
             "name": name,
         }),
     );
@@ -334,7 +338,7 @@ pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
 fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
     let mut mapping = Map::with_capacity(4); // type + optional + fields/items + field
     mapping.insert("type".to_string(), json!(schema_type_mapping(rw_type)));
-    mapping.insert("optional".to_string(), json!("true"));
+    mapping.insert("optional".to_string(), json!(true));
     match rw_type {
         DataType::Struct(struct_type) => {
             let sub_fields = struct_type
@@ -354,11 +358,6 @@ fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
     }
 
     mapping
-}
-
-// reference: https://github.com/apache/kafka/blob/80982c4ae3fe6be127b48ec09caff11ab5f87c69/connect/json/src/main/java/org/apache/kafka/connect/json/JsonConverter.java#L356
-fn field_as_json_schema(field: &Field) -> Value {
-    Value::Object(type_as_json_schema(&field.data_type))
 }
 
 #[cfg(test)]
@@ -670,7 +669,7 @@ mod tests {
         let schema = json_converter_with_schema(json!({}), "test".to_owned(), fields.iter())
             ["schema"]
             .to_string();
-        let ans = r#"{"fields":[{"field":"v1","optional":"true","type":"boolean"},{"field":"v2","optional":"true","type":"int16"},{"field":"v3","optional":"true","type":"int32"},{"field":"v4","optional":"true","type":"float"},{"field":"v5","optional":"true","type":"string"},{"field":"v6","optional":"true","type":"int32"},{"field":"v7","optional":"true","type":"string"},{"field":"v8","optional":"true","type":"int64"},{"field":"v9","optional":"true","type":"string"},{"field":"v10","fields":[{"field":"a","optional":"true","type":"int64"},{"field":"b","optional":"true","type":"string"},{"field":"c","fields":[{"field":"aa","optional":"true","type":"int64"},{"field":"bb","optional":"true","type":"double"}],"optional":"true","type":"struct"}],"optional":"true","type":"struct"},{"field":"v11","items":{"items":{"fields":[{"field":"aa","optional":"true","type":"int64"},{"field":"bb","optional":"true","type":"double"}],"optional":"true","type":"struct"},"optional":"true","type":"array"},"optional":"true","type":"array"},{"field":"12","optional":"true","type":"string"},{"field":"13","optional":"true","type":"int32"},{"field":"14","optional":"true","type":"string"}],"name":"test","optional":"false","type":"struct"}"#;
+        let ans = r#"{"fields":[{"field":"v1","optional":true,"type":"boolean"},{"field":"v2","optional":true,"type":"int16"},{"field":"v3","optional":true,"type":"int32"},{"field":"v4","optional":true,"type":"float"},{"field":"v5","optional":true,"type":"string"},{"field":"v6","optional":true,"type":"int32"},{"field":"v7","optional":true,"type":"string"},{"field":"v8","optional":true,"type":"int64"},{"field":"v9","optional":true,"type":"string"},{"field":"v10","fields":[{"field":"a","optional":true,"type":"int64"},{"field":"b","optional":true,"type":"string"},{"field":"c","fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"}],"optional":true,"type":"struct"},{"field":"v11","items":{"items":{"fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"},"optional":true,"type":"array"},"optional":true,"type":"array"},{"field":"12","optional":true,"type":"string"},{"field":"13","optional":true,"type":"int32"},{"field":"14","optional":true,"type":"string"}],"name":"test","optional":false,"type":"struct"}"#;
         assert_eq!(schema, ans);
     }
 }

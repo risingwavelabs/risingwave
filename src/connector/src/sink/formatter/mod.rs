@@ -18,7 +18,7 @@ use risingwave_common::array::StreamChunk;
 use crate::sink::{Result, SinkError};
 
 mod append_only;
-pub mod debezium_json;
+mod debezium_json;
 mod upsert;
 
 pub use append_only::AppendOnlyFormatter;
