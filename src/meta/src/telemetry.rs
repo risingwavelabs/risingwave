@@ -35,7 +35,7 @@ struct NodeCount {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct MetaTelemetryReport {
+pub struct MetaTelemetryReport {
     #[serde(flatten)]
     base: TelemetryReportBase,
     node_count: NodeCount,
@@ -45,12 +45,12 @@ pub(crate) struct MetaTelemetryReport {
 
 impl TelemetryReport for MetaTelemetryReport {}
 
-pub(crate) struct MetaTelemetryInfoFetcher {
+pub struct MetaTelemetryInfoFetcher {
     tracking_id: ClusterId,
 }
 
 impl MetaTelemetryInfoFetcher {
-    pub(crate) fn new(tracking_id: ClusterId) -> Self {
+    pub fn new(tracking_id: ClusterId) -> Self {
         Self { tracking_id }
     }
 }
@@ -63,13 +63,13 @@ impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
 }
 
 #[derive(Clone)]
-pub(crate) struct MetaReportCreator {
+pub struct MetaReportCreator {
     cluster_mgr: Arc<ClusterManager>,
     meta_backend: MetaBackend,
 }
 
 impl MetaReportCreator {
-    pub(crate) fn new(cluster_mgr: Arc<ClusterManager>, meta_backend: MetaBackend) -> Self {
+    pub fn new(cluster_mgr: Arc<ClusterManager>, meta_backend: MetaBackend) -> Self {
         Self {
             cluster_mgr,
             meta_backend,
@@ -79,6 +79,7 @@ impl MetaReportCreator {
 
 #[async_trait::async_trait]
 impl TelemetryReportCreator for MetaReportCreator {
+    #[expect(refining_impl_trait)]
     async fn create_report(
         &self,
         tracking_id: String,

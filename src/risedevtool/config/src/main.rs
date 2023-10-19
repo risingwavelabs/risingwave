@@ -396,12 +396,6 @@ fn main() -> Result<()> {
         )?;
         if chosen.contains(&component) {
             writeln!(file, "{}=true", component.env())?;
-            if component == Components::BuildConnectorNode {
-                writeln!(
-                    file,
-                    "CONNECTOR_LIBS_PATH=.risingwave/bin/connector-node/libs/"
-                )?;
-            }
         } else {
             writeln!(file, "# {}=true", component.env())?;
         }
