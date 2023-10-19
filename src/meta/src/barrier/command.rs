@@ -217,7 +217,7 @@ impl Command {
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
 pub struct CommandContext {
-    fragment_manager: FragmentManagerRef,
+    pub fragment_manager: FragmentManagerRef,
     catalog_manager: CatalogManagerRef,
     hummock_manager: HummockManagerRef,
 
@@ -827,26 +827,6 @@ impl CommandContext {
                     )
                     .await?;
             }
-        }
-
-        Ok(())
-    }
-
-    /// Do some stuffs before the barrier is `finish`ed. Only used for `CreateStreamingJob`.
-    pub async fn pre_finish(&self) -> MetaResult<()> {
-        #[allow(clippy::single_match)]
-        match &self.command {
-            Command::CreateStreamingJob {
-                table_fragments, ..
-            } => {
-                // Update the state of the table fragments from `Creating` to `Created`, so that the
-                // fragments can be scaled.
-                self.fragment_manager
-                    .mark_table_fragments_created(table_fragments.table_id())
-                    .await?;
-            }
-
-            _ => {}
         }
 
         Ok(())

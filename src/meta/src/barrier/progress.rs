@@ -26,9 +26,12 @@ use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgres
 use super::command::CommandContext;
 use super::notifier::Notifier;
 use crate::barrier::{
-    Command, TableActorMap, TableDefinitionMap, TableNotifierMap, TableUpstreamMvCountMap,
+    Command, TableActorMap, TableDefinitionMap, TableFragmentMap, TableNotifierMap,
+    TableUpstreamMvCountMap,
 };
-use crate::model::ActorId;
+use crate::manager::{FragmentManager, FragmentManagerRef};
+use crate::model::{ActorId, TableFragments};
+use crate::MetaResult;
 
 type ConsumedRows = u64;
 
@@ -137,9 +140,72 @@ impl Progress {
     }
 }
 
-pub enum StreamJobOrigin {
-    TrackingCommand(TrackingCommand),
-    RecoveredStreamJob(Notifier),
+pub enum TrackingJob {
+    Recovered(RecoveredTrackingJob),
+    New(TrackingCommand),
+}
+
+impl TrackingJob {
+    fn fragment_manager(&self) -> &FragmentManager {
+        match self {
+            TrackingJob::New(command) => command.context.fragment_manager.as_ref(),
+            TrackingJob::Recovered(recovered) => recovered.fragment_manager.as_ref(),
+        }
+    }
+
+    pub(crate) fn is_barrier(&self) -> bool {
+        match self {
+            TrackingJob::Recovered(_) => true,
+            TrackingJob::New(command) => command.context.kind.is_barrier(),
+        }
+    }
+
+    pub(crate) async fn pre_finish(&self) -> MetaResult<()> {
+        let table_fragments = match &self {
+            TrackingJob::New(command) => match &command.context.command {
+                Command::CreateStreamingJob {
+                    table_fragments, ..
+                } => Some(table_fragments),
+                _ => None,
+            },
+            TrackingJob::Recovered(recovered) => Some(&recovered.fragments),
+        };
+        // Update the state of the table fragments from `Creating` to `Created`, so that the
+        // fragments can be scaled.
+        if let Some(table_fragments) = table_fragments {
+            self.fragment_manager()
+                .mark_table_fragments_created(table_fragments.table_id())
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn notify_finished(self) {
+        match self {
+            TrackingJob::New(command) => {
+                command
+                    .notifiers
+                    .into_iter()
+                    .for_each(Notifier::notify_finished);
+            }
+            TrackingJob::Recovered(recovered) => {
+                recovered.finished.notify_finished();
+            }
+        }
+    }
+
+    pub(crate) fn table_to_create(&self) -> Option<TableId> {
+        match self {
+            TrackingJob::New(command) => command.context.table_to_create(),
+            TrackingJob::Recovered(recovered) => Some(recovered.fragments.table_id()),
+        }
+    }
+}
+
+pub struct RecoveredTrackingJob {
+    pub fragments: TableFragments,
+    pub finished: Notifier,
+    pub fragment_manager: FragmentManagerRef,
 }
 
 /// The command tracking by the [`CreateMviewProgressTracker`].
@@ -158,11 +224,10 @@ pub(super) struct TrackingCommand {
 /// 1. We identify a `StreamJob` by its `TableId` of its `Materialized` table.
 /// 2. For each stream job, there are several actors which run its tasks.
 /// 3. With `progress_map` we can use the ID of the `StreamJob` to view its progress.
-///    `StreamJobOrigin` just indicates whether it was
 /// 4. With `actor_map` we can use an actor's `ActorId` to find the ID of the `StreamJob`.
 pub(super) struct CreateMviewProgressTracker {
     /// Progress of the create-mview DDL indicated by the TableId.
-    progress_map: HashMap<TableId, (Progress, StreamJobOrigin)>,
+    progress_map: HashMap<TableId, (Progress, TrackingJob)>,
 
     /// Find the epoch of the create-mview DDL by the actor containing the chain node.
     actor_map: HashMap<ActorId, TableId>,
@@ -182,6 +247,8 @@ impl CreateMviewProgressTracker {
         mut definitions: TableDefinitionMap,
         version_stats: HummockVersionStats,
         mut finished_notifiers: TableNotifierMap,
+        mut table_fragment_map: TableFragmentMap,
+        fragment_manager: FragmentManagerRef,
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
@@ -213,10 +280,12 @@ impl CreateMviewProgressTracker {
                 consumed_rows: 0, // Fill only after first barrier pass
                 definition,
             };
-            let origin = StreamJobOrigin::RecoveredStreamJob(
-                finished_notifiers.remove(&creating_table_id).unwrap(),
-            );
-            progress_map.insert(creating_table_id, (progress, origin));
+            let tracking_job = TrackingJob::Recovered(RecoveredTrackingJob {
+                fragments: table_fragment_map.remove(&creating_table_id).unwrap(),
+                finished: finished_notifiers.remove(&creating_table_id).unwrap(),
+                fragment_manager: fragment_manager.clone(),
+            });
+            progress_map.insert(creating_table_id, (progress, tracking_job));
         }
         Self {
             progress_map,
@@ -248,7 +317,7 @@ impl CreateMviewProgressTracker {
     pub fn find_cancelled_command(
         &mut self,
         actors_to_cancel: HashSet<ActorId>,
-    ) -> Option<TrackingCommand> {
+    ) -> Option<TrackingJob> {
         let epochs = actors_to_cancel
             .into_iter()
             .map(|actor_id| self.actor_map.get(&actor_id))
@@ -257,10 +326,7 @@ impl CreateMviewProgressTracker {
         // If the target command found in progress map, return and remove it. Note that the command
         // should have finished if not found.
         if let Some(Some(epoch)) = epochs.first() {
-            match self.progress_map.remove(epoch).unwrap().1 {
-                StreamJobOrigin::TrackingCommand(t) => Some(t),
-                _ => None,
-            }
+            Some(self.progress_map.remove(epoch).unwrap().1)
         } else {
             None
         }
@@ -273,11 +339,11 @@ impl CreateMviewProgressTracker {
         &mut self,
         command: TrackingCommand,
         version_stats: &HummockVersionStats,
-    ) -> Option<TrackingCommand> {
+    ) -> Option<TrackingJob> {
         let actors = command.context.actors_to_track();
         if actors.is_empty() {
             // The command can be finished immediately.
-            return Some(command);
+            return Some(TrackingJob::New(command));
         }
 
         let (creating_mv_id, upstream_mv_count, upstream_total_key_count, definition) =
@@ -331,10 +397,9 @@ impl CreateMviewProgressTracker {
             upstream_total_key_count,
             definition,
         );
-        let old = self.progress_map.insert(
-            creating_mv_id,
-            (progress, StreamJobOrigin::TrackingCommand(command)),
-        );
+        let old = self
+            .progress_map
+            .insert(creating_mv_id, (progress, TrackingJob::New(command)));
         assert!(old.is_none());
         None
     }
@@ -346,7 +411,7 @@ impl CreateMviewProgressTracker {
         &mut self,
         progress: &CreateMviewProgress,
         version_stats: &HummockVersionStats,
-    ) -> Option<TrackingCommand> {
+    ) -> Option<TrackingJob> {
         let actor = progress.chain_actor_id;
         let Some(table_id) = self.actor_map.get(&actor).copied() else {
             // On restart, backfill will ALWAYS notify CreateMviewProgressTracker,
@@ -397,26 +462,7 @@ impl CreateMviewProgressTracker {
                     for actor in o.get().0.actors() {
                         self.actor_map.remove(&actor);
                     }
-                    match o.remove().1 {
-                        StreamJobOrigin::TrackingCommand(t) => Some(t),
-                        StreamJobOrigin::RecoveredStreamJob(Notifier {
-                            finished: Some(sender),
-                            ..
-                        }) => {
-                            if let Err(e) = sender.send(()) {
-                                tracing::error!(
-                                    "Failed to noify BarrierManager for recovered stream job, error: {e:#?}"
-                                );
-                            }
-                            None
-                        }
-                        _ => {
-                            tracing::error!(
-                                "Finished stream job must either have a tracking command or a corresponding channel."
-                            );
-                            None
-                        }
-                    }
+                    Some(o.remove().1)
                 } else {
                     None
                 }

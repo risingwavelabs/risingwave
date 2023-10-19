@@ -304,6 +304,23 @@ impl FragmentManager {
         Ok(table_fragments)
     }
 
+    pub async fn get_table_id_table_fragment_map(
+        &self,
+        table_ids: &[TableId],
+    ) -> MetaResult<HashMap<TableId, TableFragments>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut id_to_fragment = HashMap::new();
+        for table_id in table_ids {
+            let table_fragment = if let Some(table_fragment) = map.get(table_id) {
+                table_fragment.clone()
+            } else {
+                return Err(MetaError::fragment_not_found(table_id.table_id));
+            };
+            id_to_fragment.insert(*table_id, table_fragment);
+        }
+        Ok(id_to_fragment)
+    }
+
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
     /// state is `ActorState::Inactive` and the table fragments' state is `State::Initial`.
     pub async fn start_create_table_fragments(

@@ -51,7 +51,7 @@ use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
 use self::progress::TrackingCommand;
 use crate::barrier::notifier::BarrierInfo;
-use crate::barrier::progress::CreateMviewProgressTracker;
+use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -59,7 +59,7 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
     WorkerId,
 };
-use crate::model::{ActorId, BarrierManagerState};
+use crate::model::{ActorId, BarrierManagerState, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -100,12 +100,10 @@ impl<T> From<TableMap<T>> for HashMap<TableId, T> {
 }
 
 pub(crate) type TableActorMap = TableMap<Vec<ActorId>>;
-
 pub(crate) type TableUpstreamMvCountMap = TableMap<HashMap<TableId, usize>>;
-
 pub(crate) type TableDefinitionMap = TableMap<String>;
-
 pub(crate) type TableNotifierMap = TableMap<Notifier>;
+pub(crate) type TableFragmentMap = TableMap<TableFragments>;
 
 /// Status of barrier manager.
 enum BarrierManagerStatus {
@@ -209,7 +207,7 @@ struct CheckpointControl {
     metrics: Arc<MetaMetrics>,
 
     /// Get notified when we finished Create MV and collect a barrier(checkpoint = true)
-    finished_commands: Vec<TrackingCommand>,
+    finished_commands: Vec<TrackingJob>,
 }
 
 impl CheckpointControl {
@@ -226,8 +224,8 @@ impl CheckpointControl {
     }
 
     /// Stash a command to finish later.
-    fn stash_command_to_finish(&mut self, finished_command: TrackingCommand) {
-        self.finished_commands.push(finished_command);
+    fn stash_command_to_finish(&mut self, finished_job: TrackingJob) {
+        self.finished_commands.push(finished_job);
     }
 
     /// Finish stashed commands. If the current barrier is not a `checkpoint`, we will not finish
@@ -237,31 +235,32 @@ impl CheckpointControl {
     async fn finish_commands(&mut self, checkpoint: bool) -> MetaResult<bool> {
         for command in self
             .finished_commands
-            .extract_if(|c| checkpoint || c.context.kind.is_barrier())
+            .extract_if(|c| checkpoint || c.is_barrier())
         {
             // The command is ready to finish. We can now call `pre_finish`.
-            command.context.pre_finish().await?;
-            command
-                .notifiers
-                .into_iter()
-                .for_each(Notifier::notify_finished);
+            command.pre_finish().await?;
+            command.notify_finished();
         }
 
         Ok(!self.finished_commands.is_empty())
     }
 
-    fn cancel_command(&mut self, cancelled_command: TrackingCommand) {
-        if let Some(index) = self.command_ctx_queue.iter().position(|x| {
-            x.command_ctx.prev_epoch.value() == cancelled_command.context.prev_epoch.value()
-        }) {
-            self.command_ctx_queue.remove(index);
-            self.remove_changes(cancelled_command.context.command.changes());
+    fn cancel_command(&mut self, cancelled_job: TrackingJob) {
+        if let TrackingJob::New(cancelled_command) = cancelled_job {
+            if let Some(index) = self.command_ctx_queue.iter().position(|x| {
+                x.command_ctx.prev_epoch.value() == cancelled_command.context.prev_epoch.value()
+            }) {
+                self.command_ctx_queue.remove(index);
+                self.remove_changes(cancelled_command.context.command.changes());
+            }
+        } else {
+            // Recovered jobs do not need to be cancelled
         }
     }
 
     fn cancel_stashed_command(&mut self, id: TableId) {
         self.finished_commands
-            .retain(|x| x.context.table_to_create() != Some(id));
+            .retain(|x| x.table_to_create() != Some(id));
     }
 
     /// Before resolving the actors to be sent or collected, we should first record the newly
@@ -985,6 +984,10 @@ impl GlobalBarrierManager {
             .fragment_manager
             .get_table_id_actor_mapping(&creating_table_ids)
             .await;
+        let table_fragment_map = self
+            .fragment_manager
+            .get_table_id_table_fragment_map(&creating_table_ids)
+            .await?;
         let upstream_mv_counts = self
             .fragment_manager
             .get_upstream_relation_counts(&creating_table_ids)
@@ -1003,6 +1006,8 @@ impl GlobalBarrierManager {
                 definitions.into(),
                 version_stats,
                 senders.into(),
+                table_fragment_map.into(),
+                self.fragment_manager.clone(),
             );
         }
         for (table, internal_tables, finished) in receivers {
