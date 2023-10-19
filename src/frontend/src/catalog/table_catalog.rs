@@ -150,6 +150,7 @@ pub struct TableCatalog {
     /// Indicate whether to use watermark cache for state table.
     pub cleaned_by_watermark: bool,
 
+    /// description of table, set by `comment on`.
     pub description: Option<String>,
 }
 

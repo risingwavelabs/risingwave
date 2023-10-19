@@ -280,6 +280,7 @@ message Table {
 
   CreateType create_type = 32;
 
+  // This field is used to store the description set by the `comment on` clause.
   optional string description = 33;
 
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.

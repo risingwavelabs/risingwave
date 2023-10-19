@@ -58,6 +58,7 @@ pub struct SystemTableCatalog {
     // owner of table, should always be default super user, keep it for compatibility.
     pub owner: u32,
 
+    /// description of table, set by `comment on`.
     pub description: Option<String>,
 }
 

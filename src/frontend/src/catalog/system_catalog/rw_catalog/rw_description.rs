@@ -29,7 +29,7 @@ pub const RW_DESCRIPTION: BuiltinTable = BuiltinTable {
         (DataType::Int32, "objoid"),
         // rw_tables, rw_views, rw_functions, etc.
         (DataType::Int32, "classoid"),
-        // If it is not None, it means column number. In this case, objoid should be table_id.
+        // If `objoid` is `table_id`, then non-null `objsubid` is column number.
         (DataType::Int32, "objsubid"),
         (DataType::Varchar, "description"),
     ],
@@ -57,7 +57,8 @@ impl SysCatalogReaderImpl {
 
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas_except_rw_catalog(&self.auth_context.database)?;
-        let rw_catalog = reader.get_schema_by_name(&self.auth_context.database, RW_CATALOG_SCHEMA_NAME)?;
+        let rw_catalog =
+            reader.get_schema_by_name(&self.auth_context.database, RW_CATALOG_SCHEMA_NAME)?;
 
         Ok(schemas
             .flat_map(|schema| {
@@ -70,28 +71,21 @@ impl SysCatalogReaderImpl {
                             .unwrap_or_default() as _,
                         table.description.as_deref().unwrap_or_default().into(),
                     ))
-                    .chain(
-                        table
-                            .columns
-                            .iter()
-                            // .filter(|col| !col.is_hidden())
-                            .map(|col| {
-                                build_row_with_sub(
-                                    table.id.table_id as _,
-                                    rw_catalog
-                                        .get_system_table_by_name("rw_tables")
-                                        .map(|st| st.id.table_id)
-                                        .unwrap_or_default()
-                                        as _,
-                                    col.column_id().get_id() as _,
-                                    col.column_desc
-                                        .description
-                                        .as_deref()
-                                        .unwrap_or_default()
-                                        .into(),
-                                )
-                            }),
-                    )
+                    .chain(table.columns.iter().map(|col| {
+                        build_row_with_sub(
+                            table.id.table_id as _,
+                            rw_catalog
+                                .get_system_table_by_name("rw_tables")
+                                .map(|st| st.id.table_id)
+                                .unwrap_or_default() as _,
+                            col.column_id().get_id() as _,
+                            col.column_desc
+                                .description
+                                .as_deref()
+                                .unwrap_or_default()
+                                .into(),
+                        )
+                    }))
                 })
             })
             .collect())

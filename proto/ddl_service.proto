@@ -353,6 +353,6 @@ service DdlService {
   rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);
   rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
   rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
-  rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
   rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
+  rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
 }

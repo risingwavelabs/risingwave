@@ -38,6 +38,7 @@ message ColumnDesc {
     DefaultColumnDesc default_column = 7;
   }
 
+  // This field is used to store the description set by the `comment on` clause.
   optional string description = 8;
 }
 
