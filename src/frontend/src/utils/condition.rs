@@ -844,7 +844,7 @@ impl Condition {
         .simplify()
     }
 
-    pub fn visit_expr<R: Default, V: ExprVisitor<R> + ?Sized>(&self, visitor: &mut V) -> R {
+    pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) -> V::Result {
         self.conjunctions
             .iter()
             .map(|expr| visitor.visit_expr(expr))
