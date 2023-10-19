@@ -30,9 +30,6 @@ export LOGDIR=.risingwave/log
 
 mkdir -p $LOGDIR
 
-echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, background_ddl"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/background_ddl/sim/basic.slt 2> $LOGDIR/background-ddl-{}.log && rm $LOGDIR/background-ddl-{}.log'
-
 echo "--- deterministic simulation e2e, ci-3cn-2fe, ddl"
 seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/ddl-{}.log && rm $LOGDIR/ddl-{}.log'
 

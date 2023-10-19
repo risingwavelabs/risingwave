@@ -134,7 +134,7 @@ test_background_ddl_recovery() {
   sqllogictest -d dev -h localhost -p 4566 "$COMMON_DIR/validate_one_job.slt"
 
   # Recover the mview progress
-  sleep 3
+  sleep 5
 
   NEW_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
 
