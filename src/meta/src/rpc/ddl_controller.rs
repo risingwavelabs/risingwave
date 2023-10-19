@@ -414,9 +414,9 @@ impl DdlController {
         create_type: CreateType,
     ) -> MetaResult<NotificationVersion> {
         tracing::debug!(
+            id = stream_job.id(),
             definition = stream_job.definition(),
-            "starting stream job {}",
-            stream_job.id(),
+            "starting stream job",
         );
         let _permit = self
             .creating_streaming_job_permits
@@ -428,7 +428,7 @@ impl DdlController {
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
-        tracing::debug!("preparing stream job {}", stream_job.id());
+        tracing::debug!(id = stream_job.id(), "preparing stream job");
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
@@ -438,7 +438,7 @@ impl DdlController {
 
         let mut internal_tables = vec![];
         let result = try {
-            tracing::debug!("building stream job {}", stream_job.id());
+            tracing::debug!(id = stream_job.id(), "building stream job");
             let (ctx, table_fragments) = self
                 .build_stream_job(env, &stream_job, fragment_graph)
                 .await?;
@@ -486,10 +486,10 @@ impl DdlController {
                         .await;
                     match result {
                         Err(e) => {
-                            tracing::error!(stream_job_id, error = ?e, "finish stream job failed")
+                            tracing::error!(id=stream_job_id, error = ?e, "finish stream job failed")
                         }
                         Ok(_) => {
-                            tracing::info!(stream_job_id, "finish stream job succeeded")
+                            tracing::info!(id = stream_job_id, "finish stream job succeeded")
                         }
                     }
                 };
@@ -508,7 +508,7 @@ impl DdlController {
         internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
         let job_id = stream_job.id();
-        tracing::debug!("creating stream job {}", job_id);
+        tracing::debug!(id = job_id, "creating stream job");
         let result = self
             .stream_manager
             .create_streaming_job(table_fragments, ctx)
@@ -518,7 +518,7 @@ impl DdlController {
                 // NOTE: This assumes that we will trigger recovery,
                 // and recover stream job progress.
                 CreateType::Background => {
-                    tracing::error!(stream_job_id = stream_job.id(), error = ?e, "finish stream job failed")
+                    tracing::error!(id = stream_job.id(), error = ?e, "finish stream job failed")
                 }
                 _ => {
                     self.cancel_stream_job(&stream_job, internal_tables).await?;
@@ -526,9 +526,9 @@ impl DdlController {
             }
             return Err(e);
         };
-        tracing::debug!("finishing stream job {}", job_id);
+        tracing::debug!(id = job_id, "finishing stream job");
         let version = self.finish_stream_job(stream_job, internal_tables).await?;
-        tracing::debug!("finished stream job {}", job_id);
+        tracing::debug!(id = job_id, "finished stream job");
         Ok(version)
     }
 
