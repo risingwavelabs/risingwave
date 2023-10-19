@@ -111,6 +111,7 @@ compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
 enable_fast_compaction = true
 
+
 [storage.data_file_cache]
 dir = ""
 capacity_mb = 1024
