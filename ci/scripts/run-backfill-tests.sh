@@ -56,7 +56,8 @@ rename_logs_with_prefix() {
 }
 
 kill_cluster() {
-  cargo make ci-kill
+  cargo make kill
+  cargo make wait-processes-exit
 }
 
 restart_cluster() {
@@ -427,15 +428,15 @@ test_backfill_restart_cn_recovery() {
 
 main() {
   set -euo pipefail
-#  test_snapshot_and_upstream_read
-#  test_backfill_tombstone
+  test_snapshot_and_upstream_read
+  test_backfill_tombstone
   test_background_ddl_recovery
-#  test_background_ddl_cancel
-#  test_foreground_ddl_no_recover
-#  test_foreground_ddl_cancel
-#  test_foreground_index_cancel
-#  test_foreground_sink_cancel
-#  test_backfill_restart_cn_recovery
+  test_background_ddl_cancel
+  test_foreground_ddl_no_recover
+  test_foreground_ddl_cancel
+  test_foreground_index_cancel
+  test_foreground_sink_cancel
+  test_backfill_restart_cn_recovery
 }
 
 main
