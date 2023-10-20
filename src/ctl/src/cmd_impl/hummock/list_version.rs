@@ -148,3 +148,9 @@ pub async fn list_pinned_snapshots(context: &CtlContext) -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+pub async fn rebuild_table_stats(context: &CtlContext) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    meta_client.risectl_rebuild_table_stats().await?;
+    Ok(())
+}

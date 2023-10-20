@@ -18,7 +18,6 @@
 )]
 #![feature(extract_if)]
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]

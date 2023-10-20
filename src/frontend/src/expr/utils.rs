@@ -353,7 +353,9 @@ pub struct CollectInputRef {
     input_bits: FixedBitSet,
 }
 
-impl ExprVisitor<()> for CollectInputRef {
+impl ExprVisitor for CollectInputRef {
+    type Result = ();
+
     fn merge(_: (), _: ()) {}
 
     fn visit_input_ref(&mut self, expr: &InputRef) {
@@ -408,7 +410,9 @@ pub fn collect_input_refs<'a>(
 #[derive(Clone, Default)]
 pub struct CountNow {}
 
-impl ExprVisitor<usize> for CountNow {
+impl ExprVisitor for CountNow {
+    type Result = usize;
+
     fn merge(a: usize, b: usize) -> usize {
         a + b
     }

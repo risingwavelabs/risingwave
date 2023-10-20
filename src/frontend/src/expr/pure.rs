@@ -18,7 +18,9 @@ use super::{ExprImpl, ExprVisitor};
 use crate::expr::FunctionCall;
 pub(crate) struct ImpureAnalyzer {}
 
-impl ExprVisitor<bool> for ImpureAnalyzer {
+impl ExprVisitor for ImpureAnalyzer {
+    type Result = bool;
+
     fn merge(a: bool, b: bool) -> bool {
         // the expr will be impure if any of its input is impure
         a || b

@@ -1,6 +1,6 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use clap::{App, Arg, ArgMatches};
+use clap::{Arg, ArgMatches, Command};
 
 use crate::feature_store::FeatureStoreServer;
 use crate::kafka::KafkaSink;
@@ -17,14 +17,14 @@ async fn main() {
     println!("Reading args");
     let args = get_args();
     let kafka_sink = KafkaSink::new(
-        args.value_of("brokers")
+        args.get_one::<String>("brokers")
             .expect("failed to decode brokers")
             .to_string(),
-        args.value_of("output-topic")
+        args.get_one::<String>("output-topic")
             .expect("failed to decode output_topics")
             .to_string(),
     );
-    println!("Testing Kafka payload,args{:?}",args);
+    println!("Testing Kafka payload,args{:?}", args);
     tokio::spawn(KafkaSink::mock_consume());
     kafka_sink
         .send("0".to_string(), "{init: true}".to_string())
@@ -41,23 +41,23 @@ async fn main() {
         .unwrap()
 }
 
-fn get_args<'a>() -> ArgMatches<'a> {
-    App::new("feature-store")
+fn get_args() -> ArgMatches {
+    Command::new("feature-store")
         .about("Feature store")
         .arg(
-            Arg::with_name("brokers")
-                .short("b")
+            Arg::new("brokers")
+                .short('b')
                 .long("brokers")
                 .help("Kafka broker list")
-                .takes_value(true)
+                .num_args(1)
                 .default_value("kafka:9092"),
         )
         .arg(
-            Arg::with_name("output-topic")
+            Arg::new("output-topic")
                 .long("output-topics")
                 .help("Output topics names")
                 .default_value("taxi")
-                .takes_value(true),
+                .num_args(1),
         )
         .get_matches()
 }

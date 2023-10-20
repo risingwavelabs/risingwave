@@ -14,14 +14,16 @@
 
 use sea_orm::entity::prelude::*;
 
+use crate::model_v2::{ObjectId, UserId};
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "user_privilege")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
-    pub user_id: i32,
-    pub oid: i32,
-    pub granted_by: i32,
+    pub user_id: UserId,
+    pub oid: ObjectId,
+    pub granted_by: UserId,
     pub actions: String,
     pub with_grant_option: bool,
 }

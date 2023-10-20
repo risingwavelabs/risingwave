@@ -4,7 +4,6 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use futures::future::join_all;
-use rand;
 use rand::Rng;
 use tokio::sync::Mutex;
 use tonic::transport::Channel;
@@ -14,8 +13,7 @@ use crate::server_pb::StartTrainingRequest;
 use crate::{entities, entities_taxi};
 
 fn get_delay_mills(delay_val: f64) -> u64 {
-    let turbulence =
-        rand::thread_rng().gen_range((delay_val * 0.6) as f64, (delay_val * 1.1) as f64) as f64;
+    let turbulence = rand::thread_rng().gen_range((delay_val * 0.6)..(delay_val * 1.1));
     (turbulence * 10000.0) as u64
 }
 
@@ -33,7 +31,7 @@ pub async fn main_loop(simulator_type: String) {
     }
 }
 
-async fn mock_taxi(client: Arc<Mutex<ServerClient<Channel>>>) -> () {
+async fn mock_taxi(client: Arc<Mutex<ServerClient<Channel>>>) {
     let (offline_features, online_features) = entities_taxi::parse_taxi_metadata();
     println!("Write training data len is {:?}", offline_features.len());
     let mut threads = vec![];
@@ -87,7 +85,7 @@ async fn mock_taxi(client: Arc<Mutex<ServerClient<Channel>>>) -> () {
 }
 
 #[allow(dead_code)]
-async fn mock_user_mfa(client: Arc<Mutex<ServerClient<Channel>>>) -> () {
+async fn mock_user_mfa(client: Arc<Mutex<ServerClient<Channel>>>) {
     let users = entities::parse_user_metadata().unwrap();
     let mut threads = vec![];
     for user in users {
