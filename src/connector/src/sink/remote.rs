@@ -380,11 +380,7 @@ impl<SM, R: RemoteSinkTrait> RemoteSinkWriterInner<SM, R> {
         };
 
         std::thread::spawn(move || {
-            let mut env = JVM
-                .get_or_init()
-                .unwrap()
-                .attach_current_thread()
-                .unwrap();
+            let mut env = JVM.get_or_init().unwrap().attach_current_thread().unwrap();
 
             let result = env.call_static_method(
                 "com/risingwave/connector/JniSinkWriterHandler",
@@ -629,11 +625,7 @@ impl<R: RemoteSinkTrait> RemoteCoordinator<R> {
         };
 
         std::thread::spawn(move || {
-            let mut env = JVM
-                .get_or_init()
-                .unwrap()
-                .attach_current_thread()
-                .unwrap();
+            let mut env = JVM.get_or_init().unwrap().attach_current_thread().unwrap();
 
             let result = env.call_static_method(
                 "com/risingwave/connector/JniSinkCoordinatorHandler",

@@ -155,37 +155,42 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
     Ok(())
 }
 
+/// Load JVM memory statistics from the runtime. If JVM is not initialized or fail to initialize, return zero.
 pub fn load_jvm_memory_stats() -> (usize, usize) {
     if let Some(jvm) = JVM.get() {
-        let mut env = jvm.as_ref().unwrap().attach_current_thread().unwrap();
+        match jvm {
+            Ok(jvm) => {
+                let mut env = jvm.attach_current_thread().unwrap();
+                let runtime_instance = env
+                    .call_static_method(
+                        "java/lang/Runtime",
+                        "getRuntime",
+                        "()Ljava/lang/Runtime;",
+                        &[],
+                    )
+                    .unwrap();
 
-        let runtime_instance = env
-            .call_static_method(
-                "java/lang/Runtime",
-                "getRuntime",
-                "()Ljava/lang/Runtime;",
-                &[],
-            )
-            .unwrap();
+                let runtime_instance = match runtime_instance {
+                    JValueOwned::Object(o) => o,
+                    _ => unreachable!(),
+                };
 
-        let runtime_instance = match runtime_instance {
-            JValueOwned::Object(o) => o,
-            _ => unreachable!(),
-        };
+                let total_memory = env
+                    .call_method(runtime_instance.as_ref(), "totalMemory", "()J", &[])
+                    .unwrap()
+                    .j()
+                    .unwrap();
 
-        let total_memory = env
-            .call_method(runtime_instance.as_ref(), "totalMemory", "()J", &[])
-            .unwrap()
-            .j()
-            .unwrap();
+                let free_memory = env
+                    .call_method(runtime_instance, "freeMemory", "()J", &[])
+                    .unwrap()
+                    .j()
+                    .unwrap();
 
-        let free_memory = env
-            .call_method(runtime_instance, "freeMemory", "()J", &[])
-            .unwrap()
-            .j()
-            .unwrap();
-
-        (total_memory as usize, (total_memory - free_memory) as usize)
+                (total_memory as usize, (total_memory - free_memory) as usize)
+            }
+            Err(_) => (0, 0),
+        }
     } else {
         (0, 0)
     }
