@@ -341,7 +341,9 @@ impl<'a> OverWindowProjectBuilder<'a> {
     }
 }
 
-impl<'a> ExprVisitor<()> for OverWindowProjectBuilder<'a> {
+impl<'a> ExprVisitor for OverWindowProjectBuilder<'a> {
+    type Result = ();
+
     fn merge(_a: (), _b: ()) {}
 
     fn visit_window_function(&mut self, window_function: &WindowFunction) {

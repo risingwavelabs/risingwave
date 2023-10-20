@@ -4598,9 +4598,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic-build"
-version = "0.4.1+0.10.0"
+version = "0.4.2+0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3434b3d59001abcce56b9170fbd7982377858d8b931e8472056bf0c894ab257"
+checksum = "4a2ad2776ba20221ccbe4e136e2fa0f7ab90eebd608373177f3e74a198a288ec"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -6219,7 +6219,7 @@ dependencies = [
  "byteorder",
  "hex",
  "lazy_static",
- "rustix 0.36.15",
+ "rustix 0.36.16",
 ]
 
 [[package]]
@@ -6232,7 +6232,7 @@ dependencies = [
  "byteorder",
  "hex",
  "lazy_static",
- "rustix 0.36.15",
+ "rustix 0.36.16",
 ]
 
 [[package]]
@@ -6362,7 +6362,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.37",
- "workspace-hack",
 ]
 
 [[package]]
@@ -7137,7 +7136,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
- "workspace-hack",
 ]
 
 [[package]]
@@ -8300,9 +8298,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.36.15"
+version = "0.36.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c37f1bd5ef1b5422177b7646cba67430579cfe2ace80f284fee876bca52ad941"
+checksum = "6da3636faa25820d8648e0e31c5d519bbb01f72fdf57131f0f5f7da5fed36eab"
 dependencies = [
  "bitflags 1.3.2",
  "errno",
@@ -10491,9 +10489,9 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "uuid"
-version = "1.4.1"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79daa5ed5740825c40b389c5e50312b9c86df53fccd33f281df655642b43869d"
+checksum = "88ad59a7560b41a70d191093a945f0b87bc1deeda46fb237479708a1d6b6cdfc"
 dependencies = [
  "getrandom",
  "rand",
