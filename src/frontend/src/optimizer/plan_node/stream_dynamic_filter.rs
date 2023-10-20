@@ -17,7 +17,8 @@ pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
-use super::generic::DynamicFilter;
+use super::generic::{DynamicFilter, GenericPlanRef};
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, column_names_pretty, watermark_pretty, Distill};
 use super::{generic, ExprRewritable};
 use crate::expr::{Expr, ExprImpl};
@@ -78,11 +79,11 @@ impl StreamDynamicFilter {
 
 impl Distill for StreamDynamicFilter {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let pred = self.core.pretty_field();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
         vec.push(("predicate", pred));
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+        if let Some(ow) = watermark_pretty(&self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
         vec.push(("output", column_names_pretty(self.schema())));

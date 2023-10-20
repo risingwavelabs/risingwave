@@ -273,7 +273,7 @@ impl LogicalScan {
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.indexes().to_vec(),
-            self.base.ctx.clone(),
+            self.base.ctx().clone(),
             predicate,
             self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
@@ -288,7 +288,7 @@ impl LogicalScan {
             output_col_idx,
             self.core.table_desc.clone(),
             self.indexes().to_vec(),
-            self.base.ctx.clone(),
+            self.base.ctx().clone(),
             self.predicate().clone(),
             self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
@@ -309,7 +309,7 @@ impl_plan_tree_node_for_leaf! {LogicalScan}
 
 impl Distill for LogicalScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(5);
         vec.push(("table", Pretty::from(self.table_name().to_owned())));
         let key_is_columns =
@@ -440,7 +440,7 @@ impl LogicalScan {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.core.table_desc.clone(),
                 self.base
-                    .ctx
+                    .ctx()
                     .session_ctx()
                     .config()
                     .get_max_split_range_gap(),

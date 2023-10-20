@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 
 use super::{stream, EqJoinPredicate};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 
 pub mod dynamic_filter;
 pub use dynamic_filter::*;
@@ -89,6 +89,10 @@ pub trait GenericPlanRef: Eq + Hash {
     fn stream_key(&self) -> Option<&[usize]>;
     fn functional_dependency(&self) -> &FunctionalDependencySet;
     fn ctx(&self) -> OptimizerContextRef;
+}
+
+pub trait PhysicalPlanRef: GenericPlanRef {
+    fn distribution(&self) -> &Distribution;
 }
 
 pub trait GenericPlanNode {

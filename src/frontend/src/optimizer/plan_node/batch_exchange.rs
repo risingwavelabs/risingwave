@@ -18,8 +18,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
 use super::batch::BatchPlanRef;
-use super::generic::GenericPlanRef;
-use super::stream::StreamPlanRef;
+use super::generic::{GenericPlanRef, PhysicalPlanRef};
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;

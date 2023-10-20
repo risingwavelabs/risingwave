@@ -462,7 +462,8 @@ mod tests {
         // 3 --> 1, 2
         values
             .base
-            .functional_dependency_mut().add_functional_dependency_by_column_indices(&[3], &[1, 2]);
+            .functional_dependency_mut()
+            .add_functional_dependency_by_column_indices(&[3], &[1, 2]);
         // v1 = 0 AND v2 = v3
         let predicate = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(

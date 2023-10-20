@@ -46,7 +46,7 @@ use serde::Serialize;
 use smallvec::SmallVec;
 
 use self::batch::BatchPlanRef;
-use self::generic::GenericPlanRef;
+use self::generic::{GenericPlanRef, PhysicalPlanRef};
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
@@ -419,26 +419,6 @@ impl PlanTreeNode for PlanRef {
     }
 }
 
-impl StreamPlanRef for PlanRef {
-    fn distribution(&self) -> &Distribution {
-        &self.plan_base().distribution()
-    }
-
-    fn append_only(&self) -> bool {
-        self.plan_base().append_only()
-    }
-
-    fn emit_on_window_close(&self) -> bool {
-        self.plan_base().emit_on_window_close()
-    }
-}
-
-impl BatchPlanRef for PlanRef {
-    fn order(&self) -> &Order {
-        &self.plan_base().order()
-    }
-}
-
 impl GenericPlanRef for PlanRef {
     fn schema(&self) -> &Schema {
         &self.plan_base().schema()
@@ -454,6 +434,32 @@ impl GenericPlanRef for PlanRef {
 
     fn functional_dependency(&self) -> &FunctionalDependencySet {
         self.plan_base().functional_dependency()
+    }
+}
+
+impl PhysicalPlanRef for PlanRef {
+    fn distribution(&self) -> &Distribution {
+        &self.plan_base().distribution()
+    }
+}
+
+impl StreamPlanRef for PlanRef {
+    fn append_only(&self) -> bool {
+        self.plan_base().append_only()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.plan_base().emit_on_window_close()
+    }
+
+    fn watermark_columns(&self) -> &FixedBitSet {
+        &self.plan_base().watermark_columns()
+    }
+}
+
+impl BatchPlanRef for PlanRef {
+    fn order(&self) -> &Order {
+        &self.plan_base().order()
     }
 }
 
@@ -516,7 +522,7 @@ impl dyn PlanNode {
     }
 
     pub fn ctx(&self) -> OptimizerContextRef {
-        self.plan_base().ctx.clone()
+        self.plan_base().ctx().clone()
     }
 
     pub fn schema(&self) -> &Schema {
@@ -548,7 +554,7 @@ impl dyn PlanNode {
     }
 
     pub fn watermark_columns(&self) -> &FixedBitSet {
-        &self.plan_base().watermark_columns
+        &self.plan_base().watermark_columns()
     }
 
     /// Serialize the plan node and its children to a stream plan proto.

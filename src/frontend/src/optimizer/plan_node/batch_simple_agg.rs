@@ -16,7 +16,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
-use super::generic::{self, PlanAggCall};
+use super::generic::{self, GenericPlanRef, PlanAggCall};
 use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::ExprRewriter;
@@ -41,8 +41,11 @@ impl BatchSimpleAgg {
     }
 
     fn two_phase_agg_enabled(&self) -> bool {
-        let session_ctx = self.base.ctx.session_ctx();
-        session_ctx.config().get_enable_two_phase_agg()
+        self.base
+            .ctx()
+            .session_ctx()
+            .config()
+            .get_enable_two_phase_agg()
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {

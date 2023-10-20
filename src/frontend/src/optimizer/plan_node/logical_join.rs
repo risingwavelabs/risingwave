@@ -55,7 +55,7 @@ pub struct LogicalJoin {
 
 impl Distill for LogicalJoin {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
         vec.push(("type", Pretty::debug(&self.join_type())));
 
@@ -1296,7 +1296,8 @@ impl ToBatch for LogicalJoin {
         logical_join.left = logical_join.left.to_batch()?;
         logical_join.right = logical_join.right.to_batch()?;
 
-        let config = self.base.ctx.session_ctx().config();
+        let ctx = self.base.ctx();
+        let config = ctx.session_ctx().config();
 
         if predicate.has_eq() {
             if !predicate.eq_keys_are_type_aligned() {
@@ -2000,7 +2001,8 @@ mod tests {
             // 0 --> 1
             values
                 .base
-                .functional_dependency_mut().add_functional_dependency_by_column_indices(&[0], &[1]);
+                .functional_dependency_mut()
+                .add_functional_dependency_by_column_indices(&[0], &[1]);
             values
         };
         let right = {
@@ -2013,7 +2015,8 @@ mod tests {
             // 0 --> 1, 2
             values
                 .base
-                .functional_dependency_mut().add_functional_dependency_by_column_indices(&[0], &[1, 2]);
+                .functional_dependency_mut()
+                .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
             values
         };
         // l0 = 0 AND l1 = r1

@@ -24,6 +24,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
@@ -273,8 +274,8 @@ impl Distill for StreamMaterialize {
 
         vec.push(("pk_conflict", Pretty::from(pk_conflict_behavior)));
 
-        let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
+        let watermark_columns = &self.base.watermark_columns();
+        if self.base.watermark_columns().count_ones(..) > 0 {
             let watermark_column_names = watermark_columns
                 .ones()
                 .map(|i| table.columns()[i].name_with_hidden().to_string())

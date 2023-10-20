@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::generic::GenericPlanRef;
-use crate::optimizer::property::Distribution;
+use fixedbitset::FixedBitSet;
 
-/// A subtrait of [`GenericPlanRef`] for stream plans.
+use super::generic::PhysicalPlanRef;
+
+/// A subtrait of [`PhysicalPlanRef`] for stream plans.
 ///
 /// Due to the lack of refactoring, all plan nodes currently implement this trait
 /// through [`super::PlanBase`]. One may still use this trait as a bound for
-/// expecting a stream plan, in contrast to [`GenericPlanRef`].
-pub trait StreamPlanRef: GenericPlanRef {
-    fn distribution(&self) -> &Distribution;
+/// expecting a stream plan, in contrast to [`GenericPlanRef`] or
+/// [`PhysicalPlanRef`].
+///
+/// [`GenericPlanRef`]: super::generic::GenericPlanRef
+pub trait StreamPlanRef: PhysicalPlanRef {
     fn append_only(&self) -> bool;
     fn emit_on_window_close(&self) -> bool;
+    fn watermark_columns(&self) -> &FixedBitSet;
 }

@@ -21,6 +21,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::generic::{GenericPlanNode, PlanWindowFunction};
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -122,7 +123,7 @@ impl StreamNode for StreamOverWindow {
             .to_internal_table_prost();
         let cache_policy = self
             .base
-            .ctx
+            .ctx()
             .session_ctx()
             .config()
             .get_streaming_over_window_cache_policy();

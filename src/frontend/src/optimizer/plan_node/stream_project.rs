@@ -17,6 +17,7 @@ use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectNode;
 
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter, WatermarkDerivation};
@@ -41,7 +42,7 @@ impl Distill for StreamProject {
         let schema = self.schema();
         let mut vec = self.logical.fields_pretty(schema);
         if let Some(display_output_watermarks) =
-            watermark_pretty(&self.base.watermark_columns, schema)
+            watermark_pretty(&self.base.watermark_columns(), schema)
         {
             vec.push(("output_watermarks", display_output_watermarks));
         }

@@ -25,15 +25,21 @@ use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
 
 /// the common fields of all nodes, please make a field named `base` in
 /// every planNode and correctly value it when construct the planNode.
+///
+/// All fields are intentionally made private and immutable, as they should
+/// normally be the same as the given [`GenericPlanNode`] when constructing.
+///
+/// - To access them, use traits including [`GenericPlanRef`],
+///   [`PhysicalPlanRef`], [`StreamPlanRef`] and [`BatchPlanRef`].
+/// - To mutate them, use methods like `new_*` or `clone_with_*`.
 #[derive(Clone, Debug, Educe)]
 #[educe(PartialEq, Eq, Hash)]
-// #[readonly::make]
 pub struct PlanBase {
     // -- common fields --
     #[educe(PartialEq(ignore), Hash(ignore))]
     id: PlanNodeId,
     #[educe(PartialEq(ignore), Hash(ignore))]
-    pub ctx: OptimizerContextRef,
+    ctx: OptimizerContextRef,
 
     schema: Schema,
     /// the pk indices of the PlanNode's output, a empty stream key vec means there is no stream key
@@ -56,7 +62,14 @@ pub struct PlanBase {
     emit_on_window_close: bool,
     /// The watermark column indices of the PlanNode's output. There could be watermark output from
     /// this stream operator.
-    pub watermark_columns: FixedBitSet,
+    watermark_columns: FixedBitSet,
+}
+
+impl PlanBase {
+    /// The unique id of the PlanNode in this optimizer context.
+    pub fn id(&self) -> PlanNodeId {
+        self.id
+    }
 }
 
 impl generic::GenericPlanRef for PlanBase {
@@ -77,11 +90,13 @@ impl generic::GenericPlanRef for PlanBase {
     }
 }
 
-impl stream::StreamPlanRef for PlanBase {
+impl generic::PhysicalPlanRef for PlanBase {
     fn distribution(&self) -> &Distribution {
         &self.dist
     }
+}
 
+impl stream::StreamPlanRef for PlanBase {
     fn append_only(&self) -> bool {
         self.append_only
     }
@@ -89,22 +104,15 @@ impl stream::StreamPlanRef for PlanBase {
     fn emit_on_window_close(&self) -> bool {
         self.emit_on_window_close
     }
+
+    fn watermark_columns(&self) -> &FixedBitSet {
+        &self.watermark_columns
+    }
 }
 
 impl batch::BatchPlanRef for PlanBase {
     fn order(&self) -> &Order {
         &self.order
-    }
-}
-
-impl PlanBase {
-    #[cfg(test)]
-    pub fn functional_dependency_mut(&mut self) -> &mut FunctionalDependencySet {
-        &mut self.functional_dependency
-    }
-
-    pub fn id(&self) -> PlanNodeId {
-        self.id
     }
 }
 
@@ -220,7 +228,7 @@ impl PlanBase {
 
     pub fn clone_with_new_plan_id(&self) -> Self {
         let mut new = self.clone();
-        new.id = self.ctx.next_plan_node_id();
+        new.id = self.ctx().next_plan_node_id();
         new
     }
 
@@ -228,6 +236,14 @@ impl PlanBase {
         let mut new = self.clone();
         new.dist = dist;
         new
+    }
+}
+
+// Mutators for testing only.
+#[cfg(test)]
+impl PlanBase {
+    pub fn functional_dependency_mut(&mut self) -> &mut FunctionalDependencySet {
+        &mut self.functional_dependency
     }
 }
 

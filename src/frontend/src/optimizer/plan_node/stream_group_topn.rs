@@ -17,6 +17,7 @@ use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
+use super::stream::StreamPlanRef;
 use super::utils::{plan_node_name, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
@@ -135,7 +136,7 @@ impl Distill for StreamGroupTopN {
             { "append_only", self.input().append_only() },
         );
         let mut node = self.logical.distill_with_name(name);
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+        if let Some(ow) = watermark_pretty(&self.base.watermark_columns(), self.schema()) {
             node.fields.push(("output_watermarks".into(), ow));
         }
         node

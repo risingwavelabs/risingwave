@@ -195,7 +195,7 @@ impl_plan_tree_node_for_leaf! { StreamTableScan }
 
 impl Distill for StreamTableScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(4);
         vec.push(("table", Pretty::from(self.logical.table_name.clone())));
         vec.push(("columns", self.logical.columns_pretty(verbose)));

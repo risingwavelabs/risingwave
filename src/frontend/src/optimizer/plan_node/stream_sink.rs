@@ -410,7 +410,7 @@ impl StreamNode for StreamSink {
         PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
-            log_store_type: match self.base.ctx.session_ctx().config().get_sink_decouple() {
+            log_store_type: match self.base.ctx().session_ctx().config().get_sink_decouple() {
                 SinkDecouple::Default => {
                     let enable_sink_decouple =
                         match_sink_name_str!(
