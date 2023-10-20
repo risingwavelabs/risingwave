@@ -62,10 +62,7 @@ use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServ
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
-use sea_orm::{
-    ConnectionTrait, DatabaseConnection, DbBackend, SqlxMySqlPoolConnection,
-    SqlxPostgresPoolConnection, SqlxSqlitePoolConnection,
-};
+use sea_orm::{ConnectionTrait, DbBackend};
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
@@ -132,13 +129,13 @@ pub async fn rpc_serve(
         let id = address_info.advertise_addr.clone();
         let conn = sql_store.conn.clone();
         let election_client: ElectionClientRef = match conn.get_database_backend() {
-            DbBackend::Sqlite => Arc::new(SqlBackendElectionClient::new(
-                id,
-                SqliteDriver::from_conn(conn),
-            )),
-            _ => {
-                todo!()
+            DbBackend::Sqlite => {
+                Arc::new(SqlBackendElectionClient::new(id, SqliteDriver::new(conn)))
             }
+            DbBackend::Postgres => {
+                Arc::new(SqlBackendElectionClient::new(id, PostgresDriver::new(conn)))
+            }
+            DbBackend::MySql => Arc::new(SqlBackendElectionClient::new(id, MySqlDriver::new(conn))),
         };
 
         Some(election_client)
