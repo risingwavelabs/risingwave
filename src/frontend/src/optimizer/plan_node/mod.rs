@@ -567,6 +567,7 @@ impl dyn PlanNode {
         self.plan_base().order()
     }
 
+    // TODO: avoid no manual delegation
     pub fn distribution(&self) -> &Distribution {
         self.plan_base().distribution()
     }
