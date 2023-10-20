@@ -144,13 +144,12 @@ impl CompactStatus {
             existing_table_ids: vec![],
             compression_algorithm,
             target_file_size: ret.target_file_size,
-            compaction_filter_mask: 0,
             table_options: HashMap::default(),
-            current_epoch_time: 0,
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,
             split_by_state_table: group.compaction_config.split_by_state_table,
             split_weight_by_vnode: group.compaction_config.split_weight_by_vnode,
+            ..Default::default()
         };
         Some(compact_task)
     }

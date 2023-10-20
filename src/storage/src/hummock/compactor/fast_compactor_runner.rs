@@ -307,9 +307,9 @@ impl CompactorRunner {
             stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
             task_type: task.task_type(),
             is_target_l0_or_lbase: task.target_level == 0 || task.target_level == task.base_level,
-            split_by_table: task.split_by_state_table,
             split_weight_by_vnode: task.split_weight_by_vnode,
             use_block_based_filter: true,
+            split_state_tables: HashSet::from_iter(task.cut_table_ids),
         };
         let factory = StreamingSstableWriterFactory::new(context.sstable_store.clone());
         let builder_factory = RemoteBuilderFactory::<_, BlockedXor16FilterBuilder> {
@@ -327,7 +327,7 @@ impl CompactorRunner {
             context.compactor_metrics.clone(),
             Some(task_progress.clone()),
             task_config.is_target_l0_or_lbase,
-            task_config.split_by_table,
+            task_config.split_state_tables.clone(),
             task_config.split_weight_by_vnode,
         );
         assert_eq!(task.input_ssts.len(), 2);

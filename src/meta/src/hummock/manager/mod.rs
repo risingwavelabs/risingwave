@@ -853,7 +853,7 @@ impl HummockManager {
                 return Ok(None);
             }
         };
-        let (current_version, watermark) = {
+        let (current_version, watermark, mut split_table_ids) = {
             let versioning_guard = read_lock!(self, versioning).await;
             let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
             let watermark = versioning_guard
@@ -861,8 +861,20 @@ impl HummockManager {
                 .values()
                 .map(|v| v.minimal_pinned_snapshot)
                 .fold(max_committed_epoch, std::cmp::min);
-
-            (versioning_guard.current_version.clone(), watermark)
+            let split_table_ids = versioning_guard
+                .version_stats
+                .table_stats
+                .iter()
+                .filter(|(_table_id, stats)| {
+                    stats.total_value_size as u64 > self.env.opts.cut_table_size_limit
+                })
+                .map(|(k, _v)| *k)
+                .collect_vec();
+            (
+                versioning_guard.current_version.clone(),
+                watermark,
+                split_table_ids,
+            )
         };
         if current_version.levels.get(&compaction_group_id).is_none() {
             // compaction group has been deleted.
@@ -904,6 +916,7 @@ impl HummockManager {
             .unwrap()
             .member_table_ids
             .clone();
+        split_table_ids.retain(|table_id| compact_task.existing_table_ids.contains(table_id));
         let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
         let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
 
@@ -964,6 +977,7 @@ impl HummockManager {
             compact_task.current_epoch_time = Epoch::now().0;
             compact_task.compaction_filter_mask =
                 group_config.compaction_config.compaction_filter_mask;
+            compact_task.cut_table_ids = split_table_ids;
 
             let mut compact_task_assignment =
                 BTreeMapTransaction::new(&mut compaction.compact_task_assignment);

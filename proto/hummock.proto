@@ -310,6 +310,7 @@ message CompactTask {
   bool split_by_state_table = 21;
   // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
   uint32 split_weight_by_vnode = 22;
+  repeated uint32 cut_table_ids = 23;
 }
 
 message LevelHandler {
@@ -739,6 +740,7 @@ message CompactionConfig {
   uint32 compaction_filter_mask = 11;
   uint32 max_sub_compaction = 12;
   uint64 max_space_reclaim_bytes = 13;
+  // unused parameter
   bool split_by_state_table = 14;
   // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
   uint32 split_weight_by_vnode = 6;

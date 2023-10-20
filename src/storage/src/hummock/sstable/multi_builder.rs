@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
@@ -71,7 +72,7 @@ where
 
     last_table_id: u32,
     is_target_level_l0_or_lbase: bool,
-    split_by_table: bool,
+    split_tables: HashSet<u32>,
     split_weight_by_vnode: u32,
     /// When vnode of the coming key is greater than `largest_vnode_in_current_partition`, we will
     /// switch SST.
@@ -90,15 +91,11 @@ where
         compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
         is_target_level_l0_or_lbase: bool,
-        mut split_by_table: bool,
+        split_tables: HashSet<u32>,
         mut split_weight_by_vnode: u32,
     ) -> Self {
         if !is_target_level_l0_or_lbase {
             split_weight_by_vnode = 0;
-        }
-
-        if split_weight_by_vnode > 0 {
-            split_by_table = true;
         }
 
         Self {
@@ -109,7 +106,7 @@ where
             task_progress,
             last_table_id: 0,
             is_target_level_l0_or_lbase,
-            split_by_table,
+            split_tables,
             split_weight_by_vnode,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
             last_vnode: 0,
@@ -125,7 +122,7 @@ where
             task_progress: None,
             last_table_id: 0,
             is_target_level_l0_or_lbase: false,
-            split_by_table: false,
+            split_tables: HashSet::default(),
             split_weight_by_vnode: 0,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
             last_vnode: 0,
@@ -255,10 +252,14 @@ where
     pub fn check_table_and_vnode_change(&mut self, user_key: &UserKey<&[u8]>) -> (bool, bool) {
         let mut switch_builder = false;
         let mut vnode_changed = false;
-        if self.split_by_table && user_key.table_id.table_id != self.last_table_id {
+        if !self.split_tables.is_empty() && user_key.table_id.table_id != self.last_table_id {
             // table_id change
             self.last_table_id = user_key.table_id.table_id;
-            switch_builder = true;
+            if self.split_tables.contains(&user_key.table_id.table_id)
+                || self.split_tables.contains(&self.last_table_id)
+            {
+                switch_builder = true;
+            }
             self.last_vnode = 0;
             vnode_changed = true;
             if self.split_weight_by_vnode > 1 {
@@ -593,7 +594,7 @@ mod tests {
             Arc::new(CompactorMetrics::unused()),
             None,
             false,
-            false,
+            HashSet::default(),
             0,
         );
         let full_key = FullKey::for_test(
@@ -680,7 +681,7 @@ mod tests {
             Arc::new(CompactorMetrics::unused()),
             None,
             false,
-            false,
+            HashSet::default(),
             0,
         );
         assert_eq!(del_iter.earliest_epoch(), HummockEpoch::MAX);
@@ -717,7 +718,7 @@ mod tests {
             Arc::new(CompactorMetrics::unused()),
             None,
             false,
-            false,
+            HashSet::default(),
             0,
         );
         builder
