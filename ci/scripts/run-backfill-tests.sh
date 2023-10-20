@@ -24,7 +24,7 @@ BACKGROUND_DDL_DIR=$TEST_DIR/background_ddl
 COMMON_DIR=$BACKGROUND_DDL_DIR/common
 
 CLUSTER_PROFILE='ci-1cn-1fe-with-recovery'
-export RUST_LOG="risingwave_meta=trace"
+export RUST_LOG="risingwave_meta=debug"
 
 export SLT_DB="dev"
 export SLT_PORT="4566"
