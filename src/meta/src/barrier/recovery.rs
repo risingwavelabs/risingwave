@@ -141,7 +141,7 @@ impl GlobalBarrierManager {
 
         // Mview progress needs to be recovered.
         tracing::info!("recovering mview progress");
-        self.recover_mview_progress().await?;
+        self.recover_mview_progress().await.expect("recover mview progress should not fail");
         tracing::info!("recovered mview progress");
 
         // We take retry into consideration because this is the latency user sees for a cluster to
@@ -151,7 +151,6 @@ impl GlobalBarrierManager {
         let state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<_> = try {
-
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     let mut info = self.resolve_actor_info_for_recovery().await;
