@@ -639,7 +639,6 @@ pub use merge_eq_nodes::*;
 pub mod batch;
 pub mod generic;
 pub mod stream;
-pub mod stream_derive;
 
 pub use generic::{PlanAggCall, PlanAggCallDisplay};
 
