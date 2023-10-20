@@ -18,6 +18,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
 
+use jni::objects::JValueOwned;
 use jni::strings::JNIString;
 use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
 use risingwave_common::error::{ErrorCode, RwError};
@@ -76,6 +77,7 @@ pub static JVM: LazyLock<Result<JavaVM, RwError>> = LazyLock::new(|| {
         .option("-ea")
         .option("-Dis_embedded_connector=true")
         .option(format!("-Djava.class.path={}", class_vec.join(":")))
+        .option("-Xms16m")
         .option(format!("-Xmx{}", jvm_heap_size));
 
     tracing::info!("JVM args: {:?}", args_builder);
@@ -133,4 +135,36 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
 
     tracing::info!("register native methods for jvm successfully");
     Ok(())
+}
+
+pub fn load_jvm_memory_stats() -> (usize, usize) {
+    let mut env = JVM.as_ref().unwrap().attach_current_thread().unwrap();
+
+    let runtime_instance = env
+        .call_static_method(
+            "java/lang/Runtime",
+            "getRuntime",
+            "()Ljava/lang/Runtime;",
+            &[],
+        )
+        .unwrap();
+
+    let runtime_instance = match runtime_instance {
+        JValueOwned::Object(o) => o,
+        _ => unreachable!(),
+    };
+
+    let total_memory = env
+        .call_method(runtime_instance.as_ref(), "totalMemory", "()J", &[])
+        .unwrap()
+        .j()
+        .unwrap();
+
+    let free_memory = env
+        .call_method(runtime_instance, "freeMemory", "()J", &[])
+        .unwrap()
+        .j()
+        .unwrap();
+
+    (total_memory as usize, (total_memory - free_memory) as usize)
 }
