@@ -709,6 +709,11 @@ enum DispatcherType {
   // piped into the downstream actor, if there are the same number of actors. If number of actors
   // are not the same, should use hash instead. Should be only used when distribution is the same.
   NO_SHUFFLE = 4;
+
+  // Dispatch by table name from upstream DB, used in CDC scenario which should has only one downstream actor.
+  // From the optimizer's point of view, it can be treated as a specialized version of HASH distribution
+  // that the hash key is the upstream table name.
+  CDC_TABLENAME = 5;
 }
 
 // The property of an edge in the fragment graph.

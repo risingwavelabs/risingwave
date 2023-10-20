@@ -453,6 +453,7 @@ pub fn to_stream_prost_body(
         Node::IndexScan(_) => todo!(),
         // ^ need standalone implementations
         Node::Exchange(_) => PbNodeBody::Exchange(ExchangeNode {
+            // TODO: check this part
             strategy: Some(DispatchStrategy {
                 r#type: match &base.dist {
                     Distribution::HashShard(_) => DispatcherType::Hash,

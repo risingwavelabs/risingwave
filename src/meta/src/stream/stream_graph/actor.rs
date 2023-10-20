@@ -180,13 +180,6 @@ impl ActorBuilder {
                 let upstream_actor_id = upstreams.actors.as_global_ids();
                 assert_eq!(upstream_actor_id.len(), 1);
 
-                // let cdc_upstream =
-                //     if let Some(NodeBody::Merge(merge_node)) = merge_node.node_body.as_ref() {
-                //         merge_node.cdc_upstream
-                //     } else {
-                //         false
-                //     };
-
                 let chain_input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
@@ -194,7 +187,7 @@ impl ActorBuilder {
                             upstream_actor_id,
                             upstream_fragment_id: upstreams.fragment_id.as_global_id(),
                             upstream_dispatcher_type: if cdc_backfill {
-                                DispatcherType::Hash as _
+                                DispatcherType::CdcTablename as _
                             } else {
                                 DispatcherType::NoShuffle as _
                             },
@@ -389,6 +382,26 @@ impl ActorGraphBuildStateInner {
         }
     }
 
+    /// Create a new dispatcher for cdc event dispatch.
+    fn new_cdc_dispatcher(
+        strategy: &DispatchStrategy,
+        downstream_fragment_id: GlobalFragmentId,
+        downstream_actors: &[GlobalActorId],
+    ) -> Dispatcher {
+        // dist key is the index to `_rw_table_name` column
+        assert_eq!(strategy.dist_key_indices.len(), 1);
+
+        Dispatcher {
+            r#type: strategy.r#type,
+            dist_key_indices: strategy.dist_key_indices.clone(),
+            output_indices: strategy.output_indices.clone(),
+            hash_mapping: None,
+            dispatcher_id: downstream_fragment_id.as_global_id() as u64,
+            downstream_actor_id: downstream_actors.as_global_ids(),
+            downstream_table_name: strategy.downstream_table_name.clone(),
+        }
+    }
+
     /// Add the new dispatcher for an actor.
     ///
     /// - If the actor is to be built, the dispatcher will be added to the actor builder.
@@ -486,7 +499,10 @@ impl ActorGraphBuildStateInner {
             }
 
             // Otherwise, make m * n links between the actors.
-            DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
+            DispatcherType::Hash
+            | DispatcherType::Broadcast
+            | DispatcherType::Simple
+            | DispatcherType::CdcTablename => {
                 // Add dispatchers for the upstream actors.
                 let dispatcher = if let DispatcherType::Hash = dt {
                     // Transform the `ParallelUnitMapping` from the downstream distribution to the
@@ -507,6 +523,12 @@ impl ActorGraphBuildStateInner {
                         downstream.fragment_id,
                         downstream.actor_ids,
                         actor_mapping,
+                    )
+                } else if let DispatcherType::CdcTablename = dt {
+                    Self::new_cdc_dispatcher(
+                        &edge.dispatch_strategy,
+                        downstream.fragment_id,
+                        downstream.actor_ids,
                     )
                 } else {
                     Self::new_normal_dispatcher(

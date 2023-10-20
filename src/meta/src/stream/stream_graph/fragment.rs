@@ -580,14 +580,20 @@ impl CompleteStreamFragmentGraph {
                                     .expect("table name column not found")
                             };
 
-                            tracing::debug!(target: "cdc_table", ?full_table_name, ?source_job_id, ?rw_table_name_index, ?output_columns, "chain with upstream source fragment");
+                            tracing::debug!(
+                                ?full_table_name,
+                                ?source_job_id,
+                                ?rw_table_name_index,
+                                ?output_columns,
+                                "chain with upstream source fragment"
+                            );
                             let edge = StreamFragmentEdge {
                                 id: EdgeId::UpstreamExternal {
                                     upstream_table_id,
                                     downstream_fragment_id: id,
                                 },
                                 dispatch_strategy: DispatchStrategy {
-                                    r#type: DispatcherType::Hash as _, /* there may have multiple downstream table jobs, so we use `Hash` here */
+                                    r#type: DispatcherType::CdcTablename as _, /* there may have multiple downstream table jobs, so we use `Hash` here */
                                     dist_key_indices: vec![rw_table_name_index as _], /* index to `_rw_table_name` column */
                                     output_indices: (0..CDC_SOURCE_COLUMN_NUM as _).collect_vec(), /* require all columns from the cdc source */
                                     downstream_table_name: full_table_name,
