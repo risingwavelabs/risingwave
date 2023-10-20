@@ -1076,8 +1076,7 @@ impl GlobalBarrierManager {
             );
 
             // No need to clean dirty tables for barrier recovery,
-            // because clean dirty tables also cleans up foreground table.
-            // We just need to cleanup dirty tables on bootstrap recovery.
+            // The foreground stream job should cleanup their own tables.
             *state = self
                 .recovery(prev_epoch, None, false)
                 .instrument(span)
