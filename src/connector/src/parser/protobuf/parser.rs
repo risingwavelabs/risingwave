@@ -23,8 +23,8 @@ use prost_reflect::{
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, Datum, Decimal, JsonbVal, ScalarImpl, F32, F64};
+use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::plan_common::ColumnDesc;
 
 use super::schema_resolver::*;
@@ -260,94 +260,119 @@ fn extract_any_info(dyn_msg: &DynamicMessage) -> (String, Value) {
     (type_url, payload)
 }
 
-/// TODO: Resolve the potential naming conflict in the map
-/// i.e., If the two anonymous type shares the same key (e.g., "Int32"),
-/// the latter will overwrite the former one in `serde_json::Map`.
-/// Possible solution, maintaining a global id map, for the same types
-/// In the same level of fields, add the unique id at the tail of the name.
-/// e.g., "Int32.1" & "Int32.2" in the above example
-fn recursive_parse_json(fields: &[Datum], full_name_vec: Option<Vec<String>>) -> serde_json::Value {
-    println!("fields length: {}", fields.len());
-    let mut ret: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
-
-    for i in 0..fields.len() {
-        let mut key = if full_name_vec.is_some() {
-            full_name_vec.as_ref().unwrap()[i].to_string()
-        } else {
-            "".to_string()
-        };
-
-        match fields[i].clone() {
-            Some(ScalarImpl::Int16(v)) => {
-                if key.is_empty() {
-                    key = "Int16".to_string();
-                }
-                ret.insert(key, serde_json::Value::Number(serde_json::Number::from(v)));
+fn protobuf_value_to_json(
+    mut msg: DynamicMessage,
+    msg_desc: &MessageDescriptor,
+    desc_pool: &Arc<DescriptorPool>,
+) -> Result<serde_json::Value> {
+    for (field_desc, value) in msg.take_fields() {
+        match field_desc.kind() {
+            Kind::Bool => {
+                let Value::Bool(v) = value else {
+                    bail!(
+                        "Expect Value::Bool for field {} but got kind {:?}",
+                        field_desc.full_name(),
+                        field_desc.kind()
+                    );
+                };
+                serde_json::Value::Bool(v)
             }
-            Some(ScalarImpl::Int32(v)) => {
-                if key.is_empty() {
-                    key = "Int32".to_string();
-                }
-                ret.insert(key, serde_json::Value::Number(serde_json::Number::from(v)));
+            Kind::Int32
+            | Kind::Int64
+            | Kind::Sint32
+            | Kind::Sint64
+            | Kind::Fixed32
+            | Kind::Fixed64
+            | Kind::Sfixed32
+            | Kind::Sfixed64 => match value {
+                Value::I32(v) => serde_json::Value::Number(serde_json::Number::from(v)),
+                Value::I64(v) => serde_json::Value::Number(serde_json::Number::from(v)),
+                Value::U32(v) => serde_json::Value::Number(serde_json::Number::from(v)),
+                Value::U64(v) => serde_json::Value::Number(serde_json::Number::from(v)),
+                _ => Err(RwError::from(ProtocolError(format!(
+                    "Expect integer value, but got {:?}, value {}",
+                    field_desc.kind(),
+                    v
+                )))),
+            },
+            Kind::Float | Kind::Double => match value {
+                Value::F32(v) => serde_json::Value::Number(serde_json::Number::from(v)),
+                Value::F64(v) => serde_json::Value::Number(serde_json::Number::from(v)),
+                _ => Err(RwError::from(ProtocolError(format!(
+                    "Expect float value, but got {:?}, value {}",
+                    field_desc.kind(),
+                    v
+                )))),
+            },
+            Kind::String => {
+                let Value::String(v) = value;
+                serde_json::Value::String(v)
             }
-            Some(ScalarImpl::Int64(v)) => {
-                if key.is_empty() {
-                    key = "Int64".to_string();
-                }
-                ret.insert(key, serde_json::Value::Number(serde_json::Number::from(v)));
+            Kind::Enum(enum_desc) => {
+                let Value::EnumNumber(v) = value else {
+                    bail!(
+                        "Expect Value::EnumNumber for field {} but got kind {:?}",
+                        field_desc.full_name(),
+                        field_desc.kind()
+                    );
+                };
+                let enum_symbol = enum_desc.get_value(v).ok_or_else(|| {
+                    let err_msg = format!(
+                        "protobuf parse error.unknown enum index {} of enum {:?}",
+                        v, enum_desc
+                    );
+                    RwError::from(ProtocolError(err_msg))
+                })?;
+                serde_json::Value::String(enum_symbol.name().to_string())
             }
-            Some(ScalarImpl::Bool(v)) => {
-                if key.is_empty() {
-                    key = "Bool".to_string();
+            Kind::Message(m) => {
+                let mut fields = Vec::with_capacity(m.fields().len());
+                for field_desc in m.fields() {
+                    let value = msg.get_field(&field_desc);
+                    fields.push(protobuf_value_to_json(value, &field_desc, desc_pool)?);
                 }
-                ret.insert(key, serde_json::Value::Bool(v));
+                serde_json::Value::Object(fields)
             }
-            Some(ScalarImpl::Bytea(v)) => {
-                if key.is_empty() {
-                    key = "Bytea".to_string();
-                }
-                let s = String::from_utf8(v.to_vec()).unwrap();
-                ret.insert(key, serde_json::Value::String(s));
-            }
-            Some(ScalarImpl::Float32(v)) => {
-                if key.is_empty() {
-                    key = "Int16".to_string();
-                }
-                ret.insert(
-                    key,
-                    serde_json::Value::Number(
-                        serde_json::Number::from_f64(v.into_inner() as f64).unwrap(),
-                    ),
-                );
-            }
-            Some(ScalarImpl::Float64(v)) => {
-                if key.is_empty() {
-                    key = "Float64".to_string();
-                }
-                ret.insert(
-                    key,
-                    serde_json::Value::Number(
-                        serde_json::Number::from_f64(v.into_inner()).unwrap(),
-                    ),
-                );
-            }
-            Some(ScalarImpl::Utf8(v)) => {
-                if key.is_empty() {
-                    key = "Utf8".to_string();
-                }
-                ret.insert(key, serde_json::Value::String(v.to_string()));
-            }
-            Some(ScalarImpl::Struct(v)) => {
-                if key.is_empty() {
-                    key = "Struct".to_string();
-                }
-                ret.insert(key, recursive_parse_json(v.fields(), None));
-            }
-            _ => panic!("Not yet support ScalarImpl type"),
         }
     }
 
-    serde_json::Value::Object(ret)
+    Ok()
+}
+
+fn handle_any_type(
+    desc_pool: &Arc<DescriptorPool>,
+    msg: &DynamicMessage,
+) -> Result<serde_json::Value> {
+    let (type_url, payload) = extract_any_info(msg);
+
+    let payload_bytes = match payload {
+        Value::Bytes(v) => v,
+        _ => {
+            return Err(RwError::from(ProtocolError(format!(
+                "Expect payload to be bytes, but got {:?}",
+                payload
+            ))))
+        }
+    };
+
+    let inner_desc = desc_pool.get_message_by_name(&type_url).ok_or_else(|| {
+        ProtocolError(format!(
+            "Cannot find message {} in from_protobuf_value.\nDescriptor pool is {:#?}",
+            type_url, descriptor_pool
+        ))
+    })?;
+
+    let decoded_value = DynamicMessage::decode(inner_desc.clone(), payload_bytes.as_ref())
+        .map_err(|e| {
+            ProtocolError(format!(
+                "Cannot decode payload with type_url {}. Error: {}",
+                type_url, e
+            ))
+        })?;
+
+    // protobuf_value_to_json(decoded_value, &inner_desc, desc_pool);
+
+    Ok(serde_json::Value::Null)
 }
 
 pub fn from_protobuf_value(
@@ -381,16 +406,8 @@ pub fn from_protobuf_value(
             ScalarImpl::Utf8(enum_symbol.name().into())
         }
         Value::Message(dyn_msg) => {
-            let any_flag;
-            if let Some(&DataType::Jsonb) = type_expected {
-                any_flag = true;
-            } else {
-                any_flag = false;
-            }
-
-            if dyn_msg.has_field_by_name("type_url")
-                && dyn_msg.has_field_by_name("value")
-                && any_flag
+            if matches!(type_expected, Some(&DataType::Jsonb))
+                && field_desc.full_name() == "google.protobuf.Any"
             {
                 // The message is of type `Any`
                 let (type_url, payload) = extract_any_info(dyn_msg);
