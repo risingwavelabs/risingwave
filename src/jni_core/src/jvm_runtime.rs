@@ -24,6 +24,9 @@ use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 
+/// Use 10% of compute total memory by default. Compute node uses 0.7 * system memory by default.
+const DEFAULT_MEMORY_PROPORTION: f64 = 0.07;
+
 pub static JVM: JavaVmWrapper = JavaVmWrapper::new();
 
 pub struct JavaVmWrapper(OnceLock<Result<JavaVM, RwError>>);
@@ -82,9 +85,10 @@ impl JavaVmWrapper {
         let jvm_heap_size = if let Ok(heap_size) = std::env::var("JVM_HEAP_SIZE") {
             heap_size
         } else {
-            // Use 10% of total memory by default
-            // TODO: should use compute-node's total_memory_bytes
-            format!("{}", system_memory_available_bytes() / 10)
+            format!(
+                "{}",
+                (system_memory_available_bytes() as f64 * DEFAULT_MEMORY_PROPORTION) as usize
+            )
         };
 
         // Build the VM properties
