@@ -20,9 +20,7 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::config::ServerConfig;
-use risingwave_common::heap_profiling::{
-    self, AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX,
-};
+use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, HeapProfilingRequest, HeapProfilingResponse,
@@ -219,7 +217,11 @@ impl MonitorService for MonitorServiceImpl {
 
         // run jeprof if the target was not analyzed before
         if !collapsed_path.exists() {
-            heap_profiling::jeprof::run(dumped_path_str, collapsed_path_str.clone()).await?;
+            risingwave_common_heap_profiling::jeprof::run(
+                dumped_path_str,
+                collapsed_path_str.clone(),
+            )
+            .await?;
         }
 
         let file = fs::read(Path::new(&collapsed_path_str))?;
@@ -242,7 +244,7 @@ pub mod grpc_middleware {
     use tower::{Layer, Service};
 
     /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
-    pub type AwaitTreeRegistryRef = Arc<Mutex<await_tree::Registry<u64>>>;
+    pub type AwaitTreeRegistryRef = Arc<Mutex<await_tree::Registry<String>>>;
 
     #[derive(Clone)]
     pub struct AwaitTreeMiddlewareLayer {
@@ -306,12 +308,14 @@ pub mod grpc_middleware {
             let mut inner = std::mem::replace(&mut self.inner, clone);
 
             let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+            let key = if let Some(authority) = req.uri().authority() {
+                format!("{authority} - {id}")
+            } else {
+                format!("?? - {id}")
+            };
 
             Either::Right(async move {
-                let root = registry
-                    .lock()
-                    .await
-                    .register(id, format!("{}:{}", req.uri().path(), id));
+                let root = registry.lock().await.register(key, req.uri().path());
 
                 root.instrument(inner.call(req)).await
             })

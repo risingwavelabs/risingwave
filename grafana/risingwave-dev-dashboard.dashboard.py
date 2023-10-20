@@ -3220,6 +3220,26 @@ def section_memory_manager(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_memory(
+                    "The allocated memory of jvm",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jvm_allocated_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The active memory of jvm",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jvm_active_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
                 panels.timeseries_ms(
                     "LRU manager diff between current watermark and evicted watermark time (ms) for actors",
                     "",

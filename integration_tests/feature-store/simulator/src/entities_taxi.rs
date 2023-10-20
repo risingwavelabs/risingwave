@@ -101,7 +101,7 @@ impl TaxiFeature {
                 mta_tax: self.mta_tax,
                 tip_amount: self.tip_amount,
                 tolls_amount: self.tolls_amount,
-                ehail_fee: self.ehail_fee.unwrap_or_else(|| 0.0),
+                ehail_fee: self.ehail_fee.unwrap_or(0.0),
                 improvement_surcharge: self.improvement_surcharge,
                 total_amount: self.total_amount,
                 payment_type: self.payment_type,

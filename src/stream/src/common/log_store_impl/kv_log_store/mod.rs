@@ -47,8 +47,8 @@ type ReaderTruncationOffsetType = (u64, Option<SeqIdType>);
 
 #[derive(Clone)]
 pub(crate) struct KvLogStoreReadMetrics {
-    pub storage_read_count: LabelGuardedIntCounter,
-    pub storage_read_size: LabelGuardedIntCounter,
+    pub storage_read_count: LabelGuardedIntCounter<4>,
+    pub storage_read_size: LabelGuardedIntCounter<4>,
 }
 
 impl KvLogStoreReadMetrics {
@@ -63,8 +63,8 @@ impl KvLogStoreReadMetrics {
 
 #[derive(Clone)]
 pub(crate) struct KvLogStoreMetrics {
-    pub storage_write_count: LabelGuardedIntCounter,
-    pub storage_write_size: LabelGuardedIntCounter,
+    pub storage_write_count: LabelGuardedIntCounter<3>,
+    pub storage_write_size: LabelGuardedIntCounter<3>,
     pub persistent_log_read_metrics: KvLogStoreReadMetrics,
     pub flushed_buffer_read_metrics: KvLogStoreReadMetrics,
 }

@@ -19,6 +19,12 @@ use tonic::{Request, Response, Status};
 
 pub struct HealthServiceImpl {}
 
+impl Default for HealthServiceImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HealthServiceImpl {
     pub fn new() -> Self {
         Self {}

@@ -17,13 +17,13 @@ use std::fs;
 use std::path::Path;
 
 use parking_lot::Once;
+use risingwave_common::config::HeapProfilingConfig;
 use tikv_jemalloc_ctl::{
     epoch as jemalloc_epoch, opt as jemalloc_opt, prof as jemalloc_prof, stats as jemalloc_stats,
 };
 use tokio::time::{self, Duration};
 
 use super::AUTO_DUMP_SUFFIX;
-use crate::config::HeapProfilingConfig;
 
 pub struct HeapProfiler {
     config: HeapProfilingConfig,

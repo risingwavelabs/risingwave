@@ -25,13 +25,15 @@ use super::{
 ///
 /// Note: The default implementation for `visit_subquery` is a no-op, i.e., expressions inside
 /// subqueries are not traversed.
-pub trait ExprVisitor<R: Default> {
+pub trait ExprVisitor {
+    type Result: Default;
+
     /// This merge function is used to reduce results of expr inputs.
     /// In order to always remind users to implement themselves, we don't provide an default
     /// implementation.
-    fn merge(a: R, b: R) -> R;
+    fn merge(a: Self::Result, b: Self::Result) -> Self::Result;
 
-    fn visit_expr(&mut self, expr: &ExprImpl) -> R {
+    fn visit_expr(&mut self, expr: &ExprImpl) -> Self::Result {
         match expr {
             ExprImpl::InputRef(inner) => self.visit_input_ref(inner),
             ExprImpl::Literal(inner) => self.visit_literal(inner),
@@ -47,7 +49,7 @@ pub trait ExprVisitor<R: Default> {
             ExprImpl::Now(inner) => self.visit_now(inner),
         }
     }
-    fn visit_function_call(&mut self, func_call: &FunctionCall) -> R {
+    fn visit_function_call(&mut self, func_call: &FunctionCall) -> Self::Result {
         func_call
             .inputs()
             .iter()
@@ -55,10 +57,13 @@ pub trait ExprVisitor<R: Default> {
             .reduce(Self::merge)
             .unwrap_or_default()
     }
-    fn visit_function_call_with_lambda(&mut self, func_call: &FunctionCallWithLambda) -> R {
+    fn visit_function_call_with_lambda(
+        &mut self,
+        func_call: &FunctionCallWithLambda,
+    ) -> Self::Result {
         self.visit_function_call(func_call.base())
     }
-    fn visit_agg_call(&mut self, agg_call: &AggCall) -> R {
+    fn visit_agg_call(&mut self, agg_call: &AggCall) -> Self::Result {
         let mut r = agg_call
             .args()
             .iter()
@@ -69,22 +74,22 @@ pub trait ExprVisitor<R: Default> {
         r = Self::merge(r, agg_call.filter().visit_expr(self));
         r
     }
-    fn visit_parameter(&mut self, _: &Parameter) -> R {
-        R::default()
+    fn visit_parameter(&mut self, _: &Parameter) -> Self::Result {
+        Self::Result::default()
     }
-    fn visit_literal(&mut self, _: &Literal) -> R {
-        R::default()
+    fn visit_literal(&mut self, _: &Literal) -> Self::Result {
+        Self::Result::default()
     }
-    fn visit_input_ref(&mut self, _: &InputRef) -> R {
-        R::default()
+    fn visit_input_ref(&mut self, _: &InputRef) -> Self::Result {
+        Self::Result::default()
     }
-    fn visit_subquery(&mut self, _: &Subquery) -> R {
-        R::default()
+    fn visit_subquery(&mut self, _: &Subquery) -> Self::Result {
+        Self::Result::default()
     }
-    fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) -> R {
-        R::default()
+    fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) -> Self::Result {
+        Self::Result::default()
     }
-    fn visit_table_function(&mut self, func_call: &TableFunction) -> R {
+    fn visit_table_function(&mut self, func_call: &TableFunction) -> Self::Result {
         func_call
             .args
             .iter()
@@ -92,7 +97,7 @@ pub trait ExprVisitor<R: Default> {
             .reduce(Self::merge)
             .unwrap_or_default()
     }
-    fn visit_window_function(&mut self, func_call: &WindowFunction) -> R {
+    fn visit_window_function(&mut self, func_call: &WindowFunction) -> Self::Result {
         func_call
             .args
             .iter()
@@ -100,7 +105,7 @@ pub trait ExprVisitor<R: Default> {
             .reduce(Self::merge)
             .unwrap_or_default()
     }
-    fn visit_user_defined_function(&mut self, func_call: &UserDefinedFunction) -> R {
+    fn visit_user_defined_function(&mut self, func_call: &UserDefinedFunction) -> Self::Result {
         func_call
             .args
             .iter()
@@ -108,7 +113,7 @@ pub trait ExprVisitor<R: Default> {
             .reduce(Self::merge)
             .unwrap_or_default()
     }
-    fn visit_now(&mut self, _: &Now) -> R {
-        R::default()
+    fn visit_now(&mut self, _: &Now) -> Self::Result {
+        Self::Result::default()
     }
 }

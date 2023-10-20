@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,6 +26,24 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
+use risingwave_meta::rpc::ElectionClientRef;
+use risingwave_meta_service::backup_service::BackupServiceImpl;
+use risingwave_meta_service::cloud_service::CloudServiceImpl;
+use risingwave_meta_service::cluster_service::ClusterServiceImpl;
+use risingwave_meta_service::ddl_service::DdlServiceImpl;
+use risingwave_meta_service::health_service::HealthServiceImpl;
+use risingwave_meta_service::heartbeat_service::HeartbeatServiceImpl;
+use risingwave_meta_service::hummock_service::HummockServiceImpl;
+use risingwave_meta_service::meta_member_service::MetaMemberServiceImpl;
+use risingwave_meta_service::notification_service::NotificationServiceImpl;
+use risingwave_meta_service::scale_service::ScaleServiceImpl;
+use risingwave_meta_service::serving_service::ServingServiceImpl;
+use risingwave_meta_service::sink_coordination_service::SinkCoordinationServiceImpl;
+use risingwave_meta_service::stream_service::StreamServiceImpl;
+use risingwave_meta_service::system_params_service::SystemParamsServiceImpl;
+use risingwave_meta_service::telemetry_service::TelemetryInfoServiceImpl;
+use risingwave_meta_service::user_service::UserServiceImpl;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::cloud_service::cloud_service_server::CloudServiceServer;
 use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationServiceServer;
@@ -50,12 +67,6 @@ use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
 use tokio::task::JoinHandle;
 
-use super::intercept::MetricsMiddlewareLayer;
-use super::service::health_service::HealthServiceImpl;
-use super::service::notification_service::NotificationServiceImpl;
-use super::service::scale_service::ScaleServiceImpl;
-use super::service::serving_service::ServingServiceImpl;
-use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::controller::system_param::SystemParamsController;
@@ -68,21 +79,9 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election::etcd::EtcdElectionClient;
-use crate::rpc::election::ElectionClient;
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
 };
-use crate::rpc::service::backup_service::BackupServiceImpl;
-use crate::rpc::service::cloud_service::CloudServiceImpl;
-use crate::rpc::service::cluster_service::ClusterServiceImpl;
-use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
-use crate::rpc::service::hummock_service::HummockServiceImpl;
-use crate::rpc::service::meta_member_service::MetaMemberServiceImpl;
-use crate::rpc::service::sink_coordination_service::SinkCoordinationServiceImpl;
-use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
-use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
-use crate::rpc::service::user_service::UserServiceImpl;
 use crate::serving::ServingVnodeMapping;
 use crate::storage::{
     EtcdMetaStore, MemStore, MetaStore, MetaStoreBoxExt, MetaStoreRef,
@@ -91,43 +90,13 @@ use crate::storage::{
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
 use crate::{hummock, serving, MetaError, MetaResult};
-
-#[derive(Debug)]
-pub enum MetaStoreBackend {
-    Etcd {
-        endpoints: Vec<String>,
-        credentials: Option<(String, String)>,
-    },
-    Mem,
-}
-
 #[derive(Debug)]
 pub struct MetaStoreSqlBackend {
     pub(crate) endpoint: String,
 }
 
-#[derive(Clone)]
-pub struct AddressInfo {
-    pub advertise_addr: String,
-    pub listen_addr: SocketAddr,
-    pub prometheus_addr: Option<SocketAddr>,
-    pub dashboard_addr: Option<SocketAddr>,
-    pub ui_path: Option<String>,
-}
-
-impl Default for AddressInfo {
-    fn default() -> Self {
-        Self {
-            advertise_addr: "".to_string(),
-            listen_addr: SocketAddr::V4("127.0.0.1:0000".parse().unwrap()),
-            prometheus_addr: None,
-            dashboard_addr: None,
-            ui_path: None,
-        }
-    }
-}
-
-pub type ElectionClientRef = Arc<dyn ElectionClient>;
+use risingwave_meta::MetaStoreBackend;
+use risingwave_meta_service::AddressInfo;
 
 pub async fn rpc_serve(
     address_info: AddressInfo,
@@ -636,25 +605,19 @@ pub async fn start_service_as_election_leader(
         // compaction_scheduler,
         &env.opts,
     ));
-    sub_tasks.push(
-        start_worker_info_monitor(
-            cluster_manager.clone(),
-            election_client.clone(),
-            Duration::from_secs(env.opts.node_num_monitor_interval_sec),
-            meta_metrics.clone(),
-        )
-        .await,
-    );
-    sub_tasks.push(
-        start_fragment_info_monitor(
-            cluster_manager.clone(),
-            catalog_manager,
-            fragment_manager.clone(),
-            hummock_manager.clone(),
-            meta_metrics.clone(),
-        )
-        .await,
-    );
+    sub_tasks.push(start_worker_info_monitor(
+        cluster_manager.clone(),
+        election_client.clone(),
+        Duration::from_secs(env.opts.node_num_monitor_interval_sec),
+        meta_metrics.clone(),
+    ));
+    sub_tasks.push(start_fragment_info_monitor(
+        cluster_manager.clone(),
+        catalog_manager,
+        fragment_manager.clone(),
+        hummock_manager.clone(),
+        meta_metrics.clone(),
+    ));
     if let Some(system_params_ctl) = system_params_controller {
         sub_tasks.push(SystemParamsController::start_params_notifier(
             system_params_ctl,

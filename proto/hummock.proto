@@ -682,6 +682,10 @@ message ListHummockMetaConfigResponse {
   map<string, string> configs = 1;
 }
 
+message RiseCtlRebuildTableStatsRequest {}
+
+message RiseCtlRebuildTableStatsResponse {}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -707,6 +711,7 @@ service HummockManagerService {
   rpc RiseCtlPauseVersionCheckpoint(RiseCtlPauseVersionCheckpointRequest) returns (RiseCtlPauseVersionCheckpointResponse);
   rpc RiseCtlResumeVersionCheckpoint(RiseCtlResumeVersionCheckpointRequest) returns (RiseCtlResumeVersionCheckpointResponse);
   rpc RiseCtlGetCheckpointVersion(RiseCtlGetCheckpointVersionRequest) returns (RiseCtlGetCheckpointVersionResponse);
+  rpc RiseCtlRebuildTableStats(RiseCtlRebuildTableStatsRequest) returns (RiseCtlRebuildTableStatsResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
